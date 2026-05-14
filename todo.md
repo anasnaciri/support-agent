@@ -96,7 +96,7 @@ Pending (deferred from the thin-scaffold first pass):
 
 **Goal:** the agent can answer "where is my order?"
 
-- [ ] `LLMService` Tag + Live wrapping Vercel AI SDK + OpenRouter (see memory `llm-abstraction`)
+- [~] `LLMService` Tag landed early in Phase 1 (`packages/services/src/llm-service.ts`) so `AgentRuntime` can be developed and tested deterministically against a scripted layer. `LLMServiceScripted(decisions[])` pops one decision per call. `LLMServiceFromFn((req, {callIndex}) => ...)` for branching test logic. The AI SDK + OpenRouter Live layer still lands in Phase 2; Tag interface stays stable. 4 unit tests.
 - [ ] `ShopifyService` Live: `getCustomer`, `getOrder`, `getFulfillment`, `searchByEmail`
 - [ ] `MailboxService` Tag (the tenant's connected mailbox) with `GmailMailboxLive` — covers both reading inbound and sending threaded replies through the same OAuth credential. Microsoft Graph Live deferred to a later phase.
 - [ ] `PlatformMailService` Tag + Live (Resend) — for platform-originated mail only (manager invites, approval-link emails, billing). Never used for customer replies.
