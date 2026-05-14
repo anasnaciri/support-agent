@@ -11,6 +11,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 0 — Foundations:** partial (thin scaffold only — workspace compiles, no infra wired yet)
 - **Phase 1 — Runtime spine:** not started
 - **Phase 2+:** not started
+- **Last checked:** 2026-05-14 — rechecked after `agent-core` type work. `pnpm build` green across all 9 projects; `agent-core` has no forbidden imports and no `any`. Repo is already initialized with commits. Next: finish remaining Phase 0 foundation setup before Phase 1.
 
 ---
 
@@ -23,7 +24,7 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [ ] Audit log writes share the transaction with case state changes (outbox pattern, §4)
 - [ ] Case state machine guards every status transition (§10) — no raw `UPDATE cases SET status = …`
 - [ ] Effect Service / Layer separation: Tags are abstract in `services`; Live impls live in `db` / `providers` / feature packages
-- [ ] `pnpm build` is green
+- [x] `pnpm build` is green
 - [ ] `pnpm test` is green (once tests exist)
 - [ ] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
 - [ ] No secrets in git (`.env*` is gitignored except `.env.example`)
@@ -54,6 +55,7 @@ Done:
 - [x] Stack picks recorded in memory: Drizzle, pg-boss, Vercel AI SDK + OpenRouter, Resend
 - [x] `.gitignore` + `.nvmrc`
 - [x] `AGENT.md` (working agreement) + `CLAUDE.md` (symlink to AGENT.md) + `todo.md` (this file)
+- [x] `git init` + initial commits (`7934265`, `b42ea2c`)
 
 Pending (deferred from the thin-scaffold first pass):
 - [ ] `@effect/schema` set up
@@ -61,13 +63,12 @@ Pending (deferred from the thin-scaffold first pass):
 - [ ] pg-boss installed in `apps/worker` + first connection test
 - [ ] OpenTelemetry wiring with a local Tempo or Jaeger
 - [ ] Auth scaffold: HMAC verification middleware for webhooks (OIDC for dashboard later)
-- [ ] Core types in `agent-core` from §17: `Case`, `Tool`, `AgentConfig`, branded IDs (`TenantId`, `CaseId`, `AgentId`, `ToolName` already started), `Data.TaggedError` errors
+- [x] Core types in `agent-core` from §17: 10 module files (`ids`, `payloads`, `case`, `agent`, `tool`, `approval`, `workflow`, `llm`, `event`, `errors`) re-exported via `index.ts`. All 9 branded IDs, full domain model, `Data.TaggedError` classes + union types. Pure types only — no Service Tags yet.
 - [ ] Empty Live + Test Layer scaffolds for every Service Tag in §6
 - [ ] vitest configured at the root + one smoke test per package
 - [ ] CI workflow (GitHub Actions): install + build + test on PR
 - [ ] `.env.example` documenting required env vars (`DATABASE_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, …)
 - [ ] `docker-compose.dev.yml` for local Postgres
-- [ ] `git init` + initial commit (repo is not yet a git repo)
 
 ---
 
