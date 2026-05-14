@@ -10,3 +10,4 @@ export * from "./event.js";
 export * from "./errors.js";
 export * from "./define-tool.js";
 export * from "./tool-registry.js";
+export * from "./permission-service.js";
