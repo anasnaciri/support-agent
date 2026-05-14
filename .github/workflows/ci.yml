@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test:
+    name: build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: support_agent
+          POSTGRES_PASSWORD: support_agent
+          POSTGRES_DB: support_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U support_agent -d support_agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://support_agent:support_agent@localhost:5432/support_agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (composite tsc)
+        run: pnpm build
+
+      - name: Apply migrations
+        run: pnpm --filter @support-agent/db db:migrate
+
+      - name: Test (unit + integration)
+        run: pnpm test
