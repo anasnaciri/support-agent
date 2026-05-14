@@ -13,11 +13,20 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
     "@support-agent/services": "workspace:*",
-    "effect": "^3.10.0"
+    "drizzle-orm": "^0.45.2",
+    "effect": "^3.10.0",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "drizzle-kit": "^0.31.10"
   }
 }
