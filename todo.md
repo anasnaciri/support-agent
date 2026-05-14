@@ -22,7 +22,7 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [x] `agent-core` has zero imports from `services` / `tools` / `db` / `providers` (dependency rule, §16)
 - [ ] `PermissionService` is consulted before every tool execution (§9). Until it exists, no tool may execute autonomously.
 - [ ] Audit log writes share the transaction with case state changes (outbox pattern, §4)
-- [ ] Case state machine guards every status transition (§10) — no raw `UPDATE cases SET status = …`
+- [x] Case state machine guards every status transition (§10) — enforced by typing: `CaseRepository.update`'s patch type omits `status`, so the only path that mutates status is `transitionStatus`, which writes the `case_state_transitions` row in the same SQL transaction. No raw `UPDATE cases SET status = …` is reachable through the Tag.
 - [ ] Effect Service / Layer separation: Tags are abstract in `services`; Live impls live in `db` / `providers` / feature packages
 - [x] `pnpm build` is green
 - [x] `pnpm test` is green
@@ -77,7 +77,7 @@ Pending (deferred from the thin-scaffold first pass):
 
 **Goal:** a workflow can move a case through states.
 
-- [ ] `CaseRepository` Tag + `CaseRepositoryLive` (Postgres/Drizzle) + `CaseRepositoryTest` (in-memory)
+- [x] `CaseRepository` Tag + `CaseRepositoryLive` (Postgres/Drizzle) + `CaseRepositoryTest` (in-memory). Interface: `create`, `getById`, `findByThreadId`, `update`, `transitionStatus`. Status changes flow only through `transitionStatus`, which writes a `case_state_transitions` row in the same SQL transaction and supports optimistic `expectedFromStatus` checks (→ `CaseStateConflict`). `update`'s patch type excludes `status` at compile time so callers cannot bypass the transition path. Errors: `CaseNotFound`, `CaseStateConflict`, `CaseRepositoryDbError`. Tests: 6 unit (Test layer) + 3 integration (Live + Postgres).
 - [ ] `AuditLogService` Tag + Live
 - [ ] `EventBus` Tag + Live (pg-boss-backed)
 - [ ] `WorkflowQueue` Tag + Live

@@ -16,4 +16,4 @@ export const makeDbClient = (opts: DbClientOptions) => {
   return { db, sql, close: () => sql.end({ timeout: 5 }) };
 };
 
-export type DbClient = ReturnType<typeof makeDbClient>["db"];
+export type DrizzleDb = ReturnType<typeof makeDbClient>["db"];
