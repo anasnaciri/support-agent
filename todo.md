@@ -78,7 +78,7 @@ Pending (deferred from the thin-scaffold first pass):
 **Goal:** a workflow can move a case through states.
 
 - [x] `CaseRepository` Tag + `CaseRepositoryLive` (Postgres/Drizzle) + `CaseRepositoryTest` (in-memory). Interface: `create`, `getById`, `findByThreadId`, `update`, `transitionStatus`. Status changes flow only through `transitionStatus`, which writes a `case_state_transitions` row in the same SQL transaction and supports optimistic `expectedFromStatus` checks (→ `CaseStateConflict`). `update`'s patch type excludes `status` at compile time so callers cannot bypass the transition path. Errors: `CaseNotFound`, `CaseStateConflict`, `CaseRepositoryDbError`. Tests: 6 unit (Test layer) + 3 integration (Live + Postgres).
-- [ ] `AuditLogService` Tag + Live
+- [x] `AuditLogService` Tag + `AuditLogServiceLive` + `AuditLogServiceTest`. Interface: `record(entry)` returns the persisted row with assigned id + occurredAt, `forCase(caseId, { limit, afterId })` returns ordered entries with cursor-style pagination. Errors: `AuditLogDbError`. Tests: 4 unit + 2 integration. **Note:** the cross-service audit-in-transaction invariant is still pending — it'll be enforced when `AgentRuntime.handleEvent` composes `CaseRepository.transitionStatus` and `AuditLogService.record` inside a single `db.transaction(...)` boundary.
 - [ ] `EventBus` Tag + Live (pg-boss-backed)
 - [ ] `WorkflowQueue` Tag + Live
 - [ ] `AgentRegistry` — loads TS configs from `packages/agents`
