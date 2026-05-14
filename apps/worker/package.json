@@ -1,0 +1,17 @@
+{
+  "name": "@support-agent/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@support-agent/agent-core": "workspace:*",
+    "@support-agent/services": "workspace:*",
+    "effect": "^3.10.0"
+  }
+}

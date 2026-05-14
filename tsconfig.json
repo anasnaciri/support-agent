@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/agent-core" },
+    { "path": "./packages/services" },
+    { "path": "./packages/providers" },
+    { "path": "./packages/tools" },
+    { "path": "./packages/agents" },
+    { "path": "./packages/db" },
+    { "path": "./packages/plugins/sdk" },
+    { "path": "./apps/api" },
+    { "path": "./apps/worker" }
+  ]
+}
