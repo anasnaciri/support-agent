@@ -8,3 +8,5 @@ export * from "./workflow.js";
 export * from "./llm.js";
 export * from "./event.js";
 export * from "./errors.js";
+export * from "./define-tool.js";
+export * from "./tool-registry.js";

@@ -82,7 +82,7 @@ Pending (deferred from the thin-scaffold first pass):
 - [ ] `EventBus` Tag + Live (pg-boss-backed)
 - [ ] `WorkflowQueue` Tag + Live
 - [ ] `AgentRegistry` — loads TS configs from `packages/agents`
-- [ ] `ToolRegistry` + `defineTool` helper (§8)
+- [x] `ToolRegistry` + `defineTool` helper (§8). `defineTool` is a typed-identity helper that preserves `Tool<I, O>` inference. `ToolRegistry` Tag in `agent-core` with default `ToolRegistryDefault` layer (Ref-backed in-memory map) and `ToolRegistryWith(tools)` for pre-registered layers. Methods: `register`, `get`, `tryGet`, `schemasFor` (uses `effect`'s `JSONSchema.make` to derive LLM-facing JSON Schemas from Effect Schemas), `all`. Errors: `ToolAlreadyRegistered`, `UnknownTool`. 10 unit tests.
 - [ ] `PermissionService` Tag + Live (static rules first; conditional rules in Phase 4)
 - [ ] `ApprovalService` Tag + Live (create, resolve, expire)
 - [ ] `AgentRuntime.handleEvent` — the tick loop from §5 / §18
