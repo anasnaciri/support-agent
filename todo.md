@@ -61,7 +61,7 @@ Done:
 Pending (deferred from the thin-scaffold first pass):
 - [x] `@effect/schema` set up — satisfied implicitly: in Effect 3.10+ the `Schema` namespace is exported from the main `effect` package (we verified `effect@3.21.2` exposes `Schema`, `Duration`, `Schedule`, `Effect`, `Data`). No separate `@effect/schema` install needed.
 - [x] Drizzle installed in `packages/db` + migration runner wired (`drizzle-kit generate` + `drizzle-kit migrate`). Phase 1 minimum schema: `tenants`, `cases`, `case_state_transitions`, `audit_log`, `approvals` with all check constraints, FKs, and indexes from §11. Migration `0000_fixed_nocturne.sql` applied to docker Postgres; integration test (7/7 incl. round-trip + CHECK rejection) green. `customers` / `users` FKs deferred (kept as nullable UUIDs without FK) until those tables land.
-- [ ] pg-boss installed in `apps/worker` + first connection test
+- [x] pg-boss installed in `apps/worker` + first connection test. `makeQueue({ databaseUrl, schema })` opens a connection, runs migrations into the configured schema, returns a started `PgBoss` instance. Worker entrypoint declares a `worker.heartbeat` queue and registers a handler. Integration test (uses a separate `pgboss_test` schema) sends and consumes a job — 1 test passing.
 - [ ] OpenTelemetry wiring with a local Tempo or Jaeger
 - [ ] Auth scaffold: HMAC verification middleware for webhooks (OIDC for dashboard later)
 - [x] Core types in `agent-core` from §17: 10 module files (`ids`, `payloads`, `case`, `agent`, `tool`, `approval`, `workflow`, `llm`, `event`, `errors`) re-exported via `index.ts`. All 9 branded IDs, full domain model, `Data.TaggedError` classes + union types. Pure types only — no Service Tags yet.

@@ -12,6 +12,10 @@
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
     "@support-agent/services": "workspace:*",
-    "effect": "^3.10.0"
+    "effect": "^3.10.0",
+    "pg-boss": "^12.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0"
   }
 }
