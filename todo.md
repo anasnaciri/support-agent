@@ -11,7 +11,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 0 — Foundations:** partial (thin scaffold only — workspace compiles, no infra wired yet)
 - **Phase 1 — Runtime spine:** not started
 - **Phase 2+:** not started
-- **Last checked:** 2026-05-14 — rechecked after `agent-core` type work. `pnpm build` green across all 9 projects; `agent-core` has no forbidden imports and no `any`. Repo is already initialized with commits. Next: finish remaining Phase 0 foundation setup before Phase 1.
+- **Last checked:** 2026-05-14 — rechecked after Vitest setup started. `pnpm build` green across all 9 projects; `pnpm test` green with `packages/agent-core/test/ids.test.ts` (3 tests). Next: finish remaining Phase 0 foundation setup before Phase 1.
 
 ---
 
@@ -25,7 +25,7 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [ ] Case state machine guards every status transition (§10) — no raw `UPDATE cases SET status = …`
 - [ ] Effect Service / Layer separation: Tags are abstract in `services`; Live impls live in `db` / `providers` / feature packages
 - [x] `pnpm build` is green
-- [ ] `pnpm test` is green (once tests exist)
+- [x] `pnpm test` is green
 - [ ] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
 - [ ] No secrets in git (`.env*` is gitignored except `.env.example`)
 
@@ -37,7 +37,7 @@ Run these before declaring any task done:
 
 - [x] `pnpm install` clean
 - [x] `pnpm build` green across all 9 projects
-- [ ] `pnpm test` green (vitest not yet configured)
+- [x] `pnpm test` green
 - [ ] CI runs install + build + test on PR (GitHub Actions not yet configured)
 
 ---
@@ -56,19 +56,20 @@ Done:
 - [x] `.gitignore` + `.nvmrc`
 - [x] `AGENT.md` (working agreement) + `CLAUDE.md` (symlink to AGENT.md) + `todo.md` (this file)
 - [x] `git init` + initial commits (`7934265`, `b42ea2c`)
+- [x] Root Vitest config + scripts (`vitest.config.ts`, `pnpm test`, `pnpm test:watch`) with initial `agent-core` ID tests
 
 Pending (deferred from the thin-scaffold first pass):
-- [ ] `@effect/schema` set up
+- [x] `@effect/schema` set up — satisfied implicitly: in Effect 3.10+ the `Schema` namespace is exported from the main `effect` package (we verified `effect@3.21.2` exposes `Schema`, `Duration`, `Schedule`, `Effect`, `Data`). No separate `@effect/schema` install needed.
 - [ ] Drizzle installed in `packages/db` + migration runner wired (`drizzle-kit`)
 - [ ] pg-boss installed in `apps/worker` + first connection test
 - [ ] OpenTelemetry wiring with a local Tempo or Jaeger
 - [ ] Auth scaffold: HMAC verification middleware for webhooks (OIDC for dashboard later)
 - [x] Core types in `agent-core` from §17: 10 module files (`ids`, `payloads`, `case`, `agent`, `tool`, `approval`, `workflow`, `llm`, `event`, `errors`) re-exported via `index.ts`. All 9 branded IDs, full domain model, `Data.TaggedError` classes + union types. Pure types only — no Service Tags yet.
 - [ ] Empty Live + Test Layer scaffolds for every Service Tag in §6
-- [ ] vitest configured at the root + one smoke test per package
+- [ ] Add smoke tests for the remaining packages/apps (`services`, `providers`, `tools`, `agents`, `db`, `plugins/sdk`, `api`, `worker`)
 - [ ] CI workflow (GitHub Actions): install + build + test on PR
-- [ ] `.env.example` documenting required env vars (`DATABASE_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, …)
-- [ ] `docker-compose.dev.yml` for local Postgres
+- [x] `.env.example` documenting required env vars (DB, OpenRouter, Resend, Google OAuth + Pub/Sub, Shopify, webhook HMAC, OTel)
+- [x] `docker-compose.dev.yml` for local Postgres 16 (single `postgres` service with healthcheck and named volume)
 
 ---
 
