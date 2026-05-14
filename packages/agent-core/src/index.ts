@@ -11,3 +11,4 @@ export * from "./errors.js";
 export * from "./define-tool.js";
 export * from "./tool-registry.js";
 export * from "./permission-service.js";
+export * from "./agent-registry.js";
