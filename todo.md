@@ -8,10 +8,10 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ## Current status
 
-- **Phase 0 — Foundations:** partial (thin scaffold only — workspace compiles, no infra wired yet)
+- **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
 - **Phase 1 — Runtime spine:** not started
 - **Phase 2+:** not started
-- **Last checked:** 2026-05-14 — rechecked after Vitest setup started. `pnpm build` green across all 9 projects; `pnpm test` green with `packages/agent-core/test/ids.test.ts` (3 tests). Next: finish remaining Phase 0 foundation setup before Phase 1.
+- **Last checked:** 2026-05-14 — Phase 0 complete. `pnpm build` green across all 10 projects; `pnpm test` green: 15 unit tests pass, 5 integration tests pass with Postgres up (skip otherwise). Commits: `334d765` (§17 types), `cbd85c8` (vitest + compose + env), `d519734` (Drizzle + schema), `1b3d21f` (pg-boss), `25983e8` (CI + OTel + HMAC). Next: start Phase 1 with `CaseRepository` Tag (interface + Drizzle Live + in-memory Test).
 
 ---
 
