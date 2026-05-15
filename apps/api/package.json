@@ -7,11 +7,19 @@
   "scripts": {
     "build": "tsc -b",
     "clean": "tsc -b --clean",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "start:dev": "tsx src/server.ts"
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
+    "@support-agent/db": "workspace:*",
+    "@support-agent/providers": "workspace:*",
     "@support-agent/services": "workspace:*",
     "effect": "^3.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "drizzle-orm": "^0.45.2",
+    "tsx": "^4.7.0"
   }
 }

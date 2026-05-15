@@ -8,6 +8,20 @@
       "when": 1778790046525,
       "tag": "0000_fixed_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778871302521,
+      "tag": "0001_hard_ultimo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778875043145,
+      "tag": "0002_chubby_captain_britain",
+      "breakpoints": true
     }
   ]
 }

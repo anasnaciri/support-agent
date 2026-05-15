@@ -6,3 +6,12 @@ dist/
 .DS_Store
 .turbo/
 coverage/
+
+# Claude Code internal state (per-project)
+.claude/
+
+# Cloudflare Tunnel credentials — never check in. The repo's cloudflared/
+# config.yml references the credentials file by absolute path; cloudflared
+# writes the JSON to ~/.cloudflared/ on `tunnel create`.
+cloudflared/*.json
+cloudflared/cert.pem

@@ -2,6 +2,7 @@ import {
   bigserial,
   boolean,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -13,15 +14,36 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const tenants = pgTable("tenants", {
-  id: uuid("id").primaryKey(),
-  name: text("name").notNull(),
-  shopifyDomain: text("shopify_domain"),
-  settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
+// Postgres `bytea` is not in drizzle-orm/pg-core's first-class set; defining a
+// minimal custom type keeps the column typed as `Buffer` in TS so we don't
+// accidentally store base64 / hex strings.
+const bytea = customType<{ data: Buffer; default: false }>({
+  dataType() {
+    return "bytea";
+  },
 });
+
+export const tenants = pgTable(
+  "tenants",
+  {
+    id: uuid("id").primaryKey(),
+    name: text("name").notNull(),
+    shopifyDomain: text("shopify_domain"),
+    settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // One tenant per Shopify shop. Partial index — NULL is allowed for
+    // tenants that don't have a Shopify connection yet (or use a non-
+    // Shopify connector). The callback's `resolveTenantByShop` relies on
+    // this constraint to make the upsert race-safe.
+    uniqueIndex("tenants_shopify_domain_unique")
+      .on(t.shopifyDomain)
+      .where(sql`${t.shopifyDomain} IS NOT NULL`),
+  ],
+);
 
 export const cases = pgTable(
   "cases",
@@ -151,6 +173,62 @@ export const approvals = pgTable(
       .where(sql`${t.status} = 'pending'`),
   ],
 );
+
+/**
+ * Per-tenant credentials for external connectors (Shopify, Gmail, …). Stores
+ * the encrypted access token + scopes granted at install time. One row per
+ * (tenant, provider, shop_domain). For non-shoppable connectors `shop_domain`
+ * is `''` (empty string) — we still want it in the unique key so the same
+ * tenant can install multiple Shopify shops or multiple Gmail mailboxes.
+ *
+ * `access_token_encrypted` layout: iv (12) || gcm_tag (16) || ciphertext.
+ * See `packages/services/src/crypto.ts`.
+ */
+export const connectorConnections = pgTable(
+  "connector_connections",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    shopDomain: text("shop_domain").notNull().default(""),
+    accessTokenEncrypted: bytea("access_token_encrypted").notNull(),
+    scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
+    apiVersion: text("api_version"),
+    status: text("status").notNull().default("active"),
+    installedAt: timestamp("installed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "connector_connections_status_check",
+      sql`${t.status} IN ('active','revoked')`,
+    ),
+    check(
+      "connector_connections_provider_check",
+      sql`${t.provider} IN ('shopify','gmail','outlook')`,
+    ),
+    uniqueIndex("connector_connections_tenant_provider_shop_idx").on(
+      t.tenantId,
+      t.provider,
+      t.shopDomain,
+    ),
+    index("connector_connections_active_idx")
+      .on(t.tenantId, t.provider)
+      .where(sql`${t.status} = 'active'`),
+  ],
+);
+
+export type ConnectorConnectionRow =
+  typeof connectorConnections.$inferSelect;
+export type ConnectorConnectionInsert =
+  typeof connectorConnections.$inferInsert;
 
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;

@@ -25,13 +25,16 @@ import {
   ApprovalServiceLive,
   AuditLogServiceLive,
   CaseRepositoryLive,
+  ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
+import { parseKey } from "@support-agent/services";
 import {
   LLMConfigFromEnv,
   LLMServiceLive,
+  ShopifyCredentialStoreFromConnector,
   ShopifyCredentialStoreFromEnv,
   ShopifyHttpLive,
   ShopifyServiceLive,
@@ -98,7 +101,14 @@ export const buildWorker = async (
   // here is better than discovering it on the first message.
   requireEnv("OPENROUTER_API_KEY");
 
-  if (opts.requireShopify) {
+  // Pick the Shopify credential source:
+  //   - If CREDENTIAL_ENCRYPTION_KEY is set, read tokens from
+  //     `connector_connections` (production / managed-install path).
+  //   - Otherwise fall back to SHOPIFY_TEST_* env vars (dev / single-tenant).
+  // `requireShopify` only gates the env-fallback variant — when we're on
+  // the connector-backed path we don't expect SHOPIFY_TEST_* to be set.
+  const credKeyB64 = process.env["CREDENTIAL_ENCRYPTION_KEY"];
+  if (!credKeyB64 && opts.requireShopify) {
     requireEnv("SHOPIFY_TEST_SHOP_DOMAIN");
     requireEnv("SHOPIFY_TEST_ACCESS_TOKEN");
   }
@@ -120,11 +130,17 @@ export const buildWorker = async (
   // LLM — depends on LLMConfig.
   const llm = LLMServiceLive.pipe(Layer.provide(LLMConfigFromEnv));
 
-  // Shopify — depends on ShopifyHttp + ShopifyCredentialStore.
+  // Shopify — depends on ShopifyHttp + ShopifyCredentialStore. When the
+  // encryption key is present, resolve credentials from the DB-backed
+  // ConnectorCredentialStore (managed-install path); otherwise fall back
+  // to env-supplied creds for single-tenant dev.
+  const credentialStoreLayer = credKeyB64
+    ? ShopifyCredentialStoreFromConnector().pipe(
+        Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+      )
+    : ShopifyCredentialStoreFromEnv;
   const shopify = ShopifyServiceLive.pipe(
-    Layer.provide(
-      Layer.mergeAll(ShopifyHttpLive, ShopifyCredentialStoreFromEnv),
-    ),
+    Layer.provide(Layer.mergeAll(ShopifyHttpLive, credentialStoreLayer)),
   );
 
   // In-memory registries + permission policy. AgentRegistryWith /

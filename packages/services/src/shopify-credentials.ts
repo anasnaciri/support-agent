@@ -12,7 +12,7 @@ import {
 export interface ShopifyCredentials {
   readonly shopDomain: string; // "shop-name.myshopify.com" — no protocol
   readonly accessToken: string;
-  readonly apiVersion: string; // e.g. "2025-01"
+  readonly apiVersion: string; // e.g. "2026-04"
 }
 
 export class ShopifyCredentialStore extends Context.Tag(

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "tenants_shopify_domain_unique" ON "tenants" USING btree ("shopify_domain") WHERE "tenants"."shopify_domain" IS NOT NULL;

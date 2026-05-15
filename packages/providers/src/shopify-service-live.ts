@@ -77,7 +77,7 @@ export const ShopifyCredentialStoreFromEnv = Layer.effect(
         "SHOPIFY_TEST_SHOP_DOMAIN and SHOPIFY_TEST_ACCESS_TOKEN are required for ShopifyCredentialStoreFromEnv",
       );
     }
-    const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
+    const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2026-04";
     const creds: ShopifyCredentials = { shopDomain, accessToken, apiVersion };
     return ShopifyCredentialStore.of({
       get: () => Effect.succeed(creds),

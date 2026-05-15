@@ -1,0 +1,29 @@
+# Cloudflare Tunnel config for support-agent-api.
+#
+# Exposes the local apps/api Node server as
+#   https://support-agent-api.nacirianas.com
+# so Shopify's OAuth callback (and any future webhooks) can reach it
+# without ngrok.
+#
+# Note: a single-level subdomain (one dot left of the root) is required
+# for Cloudflare's free Universal SSL cert to cover the hostname.
+# Multi-level names like api.support-agent.nacirianas.com would need a
+# paid Advanced Certificate.
+#
+# Run with:
+#   cloudflared tunnel --config cloudflared/config.yml run support-agent-api
+#
+# Credentials JSON lives at ~/.cloudflared/<tunnel-id>.json and is NOT
+# checked into git (cloudflared writes it there on `tunnel create`).
+
+tunnel: support-agent-api
+credentials-file: /Users/anasnaciri/.cloudflared/52265c89-b174-47ea-ba31-1af7515ca2ea.json
+
+# Each request to api.support-agent.nacirianas.com is reverse-proxied to
+# the local Node API server on API_PORT (default 4000). The wildcard
+# fallback at the end is required by cloudflared — without it the tunnel
+# refuses to start.
+ingress:
+  - hostname: support-agent-api.nacirianas.com
+    service: http://localhost:4000
+  - service: http_status:404

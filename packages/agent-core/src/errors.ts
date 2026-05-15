@@ -54,6 +54,29 @@ export class ToolOutputInvalid extends Data.TaggedError("ToolOutputInvalid")<{
   readonly issues: ReadonlyArray<string>;
 }> {}
 
+export class ConnectorNotFound extends Data.TaggedError("ConnectorNotFound")<{
+  readonly tenantId: TenantId;
+  readonly provider: string;
+  readonly shopDomain: string | null;
+}> {}
+
+export class ConnectorRevoked extends Data.TaggedError("ConnectorRevoked")<{
+  readonly tenantId: TenantId;
+  readonly provider: string;
+  readonly shopDomain: string | null;
+}> {}
+
+export class ConnectorStoreDbError extends Data.TaggedError(
+  "ConnectorStoreDbError",
+)<{
+  readonly cause: unknown;
+}> {}
+
+export type ConnectorStoreError =
+  | ConnectorNotFound
+  | ConnectorRevoked
+  | ConnectorStoreDbError;
+
 export type ShopifyError =
   | OrderNotFound
   | CustomerNotFound
