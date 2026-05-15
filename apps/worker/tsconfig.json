@@ -9,6 +9,7 @@
     { "path": "../../packages/agent-core" },
     { "path": "../../packages/services" },
     { "path": "../../packages/agents" },
-    { "path": "../../packages/tools" }
+    { "path": "../../packages/tools" },
+    { "path": "../../packages/db" }
   ]
 }

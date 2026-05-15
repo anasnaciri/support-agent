@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, FiberRef, Layer } from "effect";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
@@ -22,7 +22,11 @@ import {
   type ApprovalStatus,
   type TenantId,
 } from "@support-agent/agent-core";
-import { DbClient } from "./db-client.js";
+import { CurrentTxRef, DbClient } from "./db-client.js";
+import type { DrizzleDb } from "./client.js";
+
+const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
+  FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 import { approvals, type ApprovalRow } from "./schema.js";
 
 const rowToApproval = (r: ApprovalRow): Approval => ({
@@ -55,12 +59,13 @@ const wrap = <A>(
 export const ApprovalServiceLive = Layer.effect(
   ApprovalService,
   Effect.gen(function* () {
-    const db = yield* DbClient;
+    const defaultDb = yield* DbClient;
 
     const create = (
       input: CreateApprovalInput,
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const id = randomUUID();
         const inserted = yield* wrap(
           "create",
@@ -95,6 +100,7 @@ export const ApprovalServiceLive = Layer.effect(
       id: ReturnType<typeof ApprovalId>,
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "getById",
           db.select().from(approvals).where(eq(approvals.id, id)).limit(1),
@@ -116,6 +122,7 @@ export const ApprovalServiceLive = Layer.effect(
       },
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const result = yield* wrap(
           "transition",
           db.transaction(async (tx) => {
@@ -193,6 +200,7 @@ export const ApprovalServiceLive = Layer.effect(
       tenantId: TenantId,
     ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "listPending",
           db

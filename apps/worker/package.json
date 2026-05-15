@@ -12,8 +12,10 @@
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
     "@support-agent/agents": "workspace:*",
+    "@support-agent/db": "workspace:*",
     "@support-agent/services": "workspace:*",
     "@support-agent/tools": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "effect": "^3.10.0",
     "pg-boss": "^12.18.2"
   },

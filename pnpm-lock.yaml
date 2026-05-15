@@ -38,12 +38,18 @@ importers:
       '@support-agent/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@support-agent/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@support-agent/services':
         specifier: workspace:*
         version: link:../../packages/services
       '@support-agent/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.15.6)(pg@8.20.0)(postgres@3.4.9)
       effect:
         specifier: ^3.10.0
         version: 3.21.2

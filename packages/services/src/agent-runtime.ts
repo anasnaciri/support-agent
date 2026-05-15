@@ -18,6 +18,7 @@ import { CaseRepository } from "./case-repository.js";
 import { AuditLogService } from "./audit-log.js";
 import { ApprovalService } from "./approval-service.js";
 import { LLMService } from "./llm-service.js";
+import { TransactionRunner } from "./transaction-runner.js";
 
 // ============================================================
 // Helpers
@@ -128,6 +129,7 @@ export const AgentRuntimeDefault = Layer.effect(
     const perms = yield* PermissionService;
     const approvals = yield* ApprovalService;
     const llm = yield* LLMService;
+    const tx = yield* TransactionRunner;
 
     const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
@@ -140,25 +142,32 @@ export const AgentRuntimeDefault = Layer.effect(
           } as const;
         }
 
-        // 1. Load or create the case.
-        const caseRow =
-          lookup.kind === "load"
-            ? yield* cases.getById(lookup.caseId as never)
-            : yield* cases.create({
-                tenantId: lookup.tenantId as never,
-                channel: lookup.channel,
-                currentAgentId: makeAgentId("support-triage"),
-                subject: lookup.subject,
-              });
-
-        // 2. Record event arrival.
-        yield* audit.record({
-          tenantId: caseRow.tenantId,
-          caseId: caseRow.id,
-          actor: { type: "system", id: "runtime" },
-          action: "event.received",
-          details: { eventType: event.type },
-        });
+        // 1+2. Load/create case and audit event arrival in one tx
+        // (master-plan §4 invariant: event → case write must be atomic
+        // with audit). Subsequent per-turn writes happen outside this tx;
+        // a fully transactional tick is deferred until we can scope an LLM
+        // call outside the SQL tx without holding a connection open.
+        const caseRow = yield* tx.run(
+          Effect.gen(function* () {
+            const row =
+              lookup.kind === "load"
+                ? yield* cases.getById(lookup.caseId as never)
+                : yield* cases.create({
+                    tenantId: lookup.tenantId as never,
+                    channel: lookup.channel,
+                    currentAgentId: makeAgentId("support-triage"),
+                    subject: lookup.subject,
+                  });
+            yield* audit.record({
+              tenantId: row.tenantId,
+              caseId: row.id,
+              actor: { type: "system", id: "runtime" },
+              action: "event.received",
+              details: { eventType: event.type },
+            });
+            return row;
+          }),
+        );
 
         // 3. Run the workflow loop.
         let agent: AgentConfig = yield* registry.resolve(caseRow.currentAgentId);
@@ -190,9 +199,26 @@ export const AgentRuntimeDefault = Layer.effect(
 
           if (decision.type === "final_message") {
             if (current.status !== "resolved") {
-              current = yield* cases.transitionStatus(current.id, "resolved", {
-                reason: "runtime: final_message",
-              });
+              // Wrap the final transition + a "case.resolved" audit in one
+              // tx — keeps the resolved status and its audit row atomically
+              // consistent (master-plan §4).
+              current = yield* tx.run(
+                Effect.gen(function* () {
+                  const row = yield* cases.transitionStatus(
+                    current.id,
+                    "resolved",
+                    { reason: "runtime: final_message" },
+                  );
+                  yield* audit.record({
+                    tenantId: row.tenantId,
+                    caseId: row.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "case.resolved",
+                    details: { turn, finalMessage: decision.text },
+                  });
+                  return row;
+                }),
+              );
             }
             return { type: "Completed" } as const;
           }
@@ -270,7 +296,11 @@ export const AgentRuntimeDefault = Layer.effect(
             } as const;
           }
 
-          // allow → execute
+          // allow → execute (tool side effects + tool.invoked audit in one
+          // tx — master-plan §4 audit-in-transaction invariant). If the tool
+          // mutated case state (e.g. via case.update_status), the row write,
+          // the case_state_transitions row, AND the audit entry all commit
+          // together. If anything fails, all three roll back.
           const ctx: ToolContext = {
             tenantId: current.tenantId,
             caseId: current.id,
@@ -285,19 +315,23 @@ export const AgentRuntimeDefault = Layer.effect(
             decision.input,
             ctx,
           ) as unknown as Effect.Effect<unknown, unknown, never>;
-          const exec = yield* toolEffect.pipe(Effect.either);
-
-          yield* audit.record({
-            tenantId: current.tenantId,
-            caseId: current.id,
-            actor: { type: "agent", id: agent.id },
-            action: "tool.invoked",
-            details: {
-              tool: tool.name,
-              callId: decision.callId,
-              ok: exec._tag === "Right",
-            },
-          });
+          const exec = yield* tx.run(
+            Effect.gen(function* () {
+              const result = yield* toolEffect.pipe(Effect.either);
+              yield* audit.record({
+                tenantId: current.tenantId,
+                caseId: current.id,
+                actor: { type: "agent", id: agent.id },
+                action: "tool.invoked",
+                details: {
+                  tool: tool.name,
+                  callId: decision.callId,
+                  ok: result._tag === "Right",
+                },
+              });
+              return result;
+            }),
+          );
 
           if (exec._tag === "Right") {
             messages.push({

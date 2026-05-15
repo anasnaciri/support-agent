@@ -23,6 +23,7 @@ import {
   CaseRepository,
   CaseRepositoryTest,
   LLMServiceScripted,
+  TransactionRunnerPassthrough,
 } from "@support-agent/services";
 
 // ------------------------------------------------------------
@@ -62,6 +63,7 @@ const tickEnv = Layer.mergeAll(
   ToolRegistryWith([caseUpdateStatus as never, caseUpdateContext as never]),
   PermissionServiceDefault,
   LLMServiceScripted(triageScript),
+  TransactionRunnerPassthrough,
 );
 
 const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(tickEnv));
@@ -178,7 +180,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.fetched.context["classification"]).toBe("where_is_order");
     expect(out.fetched.context["identifiedOrderId"]).toBe("ord_42");
 
-    // Audit trail shape: 1 event.received + 3 llm.decision + 2 tool.invoked
+    // Audit trail shape: event.received + 3 llm.decision + 2 tool.invoked.
+    // No trailing `case.resolved` here because the case was already
+    // resolved by the second tool call before the final_message turn — the
+    // runtime's transition-on-final-message branch is a no-op when status
+    // is already "resolved".
     const actions = out.entries.map((e) => e.action);
     expect(actions).toEqual([
       "event.received",
@@ -224,6 +230,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             ]),
             PermissionServiceDefault,
             LLMServiceScripted(loopScript),
+            TransactionRunnerPassthrough,
           ),
         ),
       ),

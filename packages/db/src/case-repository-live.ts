@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, FiberRef, Layer } from "effect";
 import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
@@ -29,7 +29,11 @@ import {
   OrderId as makeOrderId,
   ThreadId as makeThreadId,
 } from "@support-agent/agent-core";
-import { DbClient } from "./db-client.js";
+import { CurrentTxRef, DbClient } from "./db-client.js";
+import type { DrizzleDb } from "./client.js";
+
+const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
+  FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 import {
   cases,
   caseStateTransitions,
@@ -67,12 +71,13 @@ const wrap = <A>(
 export const CaseRepositoryLive = Layer.effect(
   CaseRepository,
   Effect.gen(function* () {
-    const db = yield* DbClient;
+    const defaultDb = yield* DbClient;
 
     const create = (
       input: CreateCaseInput,
     ): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const id = randomUUID();
         const inserted = yield* wrap(
           "create",
@@ -109,6 +114,7 @@ export const CaseRepositoryLive = Layer.effect(
 
     const getById = (id: CaseId): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "getById",
           db.select().from(cases).where(eq(cases.id, id)).limit(1),
@@ -123,6 +129,7 @@ export const CaseRepositoryLive = Layer.effect(
       threadId: ThreadId,
     ): Effect.Effect<Case | null, CaseRepositoryError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "findByThreadId",
           db
@@ -140,6 +147,7 @@ export const CaseRepositoryLive = Layer.effect(
       patch: UpdatableCaseFields,
     ): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const dbPatch: Record<string, unknown> = { updatedAt: new Date() };
         if (patch.customerId !== undefined) dbPatch["customerId"] = patch.customerId;
         if (patch.orderId !== undefined) dbPatch["shopifyOrderId"] = patch.orderId;
@@ -167,7 +175,11 @@ export const CaseRepositoryLive = Layer.effect(
       opts: TransitionStatusOptions = {},
     ): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
-        // Both writes in one tx (master-plan §10 state-machine invariant)
+        const db = yield* useDb(defaultDb);
+        // Both writes in one tx (master-plan §10 state-machine invariant).
+        // If a withTransaction(...) is active, `db` is already a Drizzle tx;
+        // `db.transaction(...)` on a tx opens a SAVEPOINT — same atomic
+        // guarantee, nested in the outer tx.
         const result = yield* wrap(
           "transitionStatus",
           db.transaction(async (tx) => {

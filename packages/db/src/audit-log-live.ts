@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, FiberRef, Layer } from "effect";
 import { and, asc, eq, gt } from "drizzle-orm";
 import {
   AuditLogDbError,
@@ -15,7 +15,11 @@ import {
   TenantId as makeTenantId,
   type CaseId,
 } from "@support-agent/agent-core";
-import { DbClient } from "./db-client.js";
+import { CurrentTxRef, DbClient } from "./db-client.js";
+import type { DrizzleDb } from "./client.js";
+
+const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
+  FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 import { auditLog, type AuditLogRow } from "./schema.js";
 
 const rowToEntry = (r: AuditLogRow): AuditEntry => ({
@@ -40,12 +44,13 @@ const wrap = <A>(
 export const AuditLogServiceLive = Layer.effect(
   AuditLogService,
   Effect.gen(function* () {
-    const db = yield* DbClient;
+    const defaultDb = yield* DbClient;
 
     const record = (
       input: RecordAuditEntryInput,
     ): Effect.Effect<AuditEntry, AuditLogError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const inserted = yield* wrap(
           "record",
           db
@@ -77,6 +82,7 @@ export const AuditLogServiceLive = Layer.effect(
       opts: ForCaseOptions = {},
     ): Effect.Effect<ReadonlyArray<AuditEntry>, AuditLogError> =>
       Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
         const limit = opts.limit ?? 100;
         const whereClause =
           opts.afterId !== undefined
