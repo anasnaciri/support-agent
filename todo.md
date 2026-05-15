@@ -11,7 +11,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
 - **Phase 1 — Runtime spine:** partial
 - **Phase 2+:** not started
-- **Last checked:** 2026-05-15 — Phase 1 runtime spine is mostly in place. `pnpm build` green across all 9 workspace projects; `pnpm test` green locally with Postgres down: 75 passed, 14 skipped integration tests. Scripted `support-triage` e2e passes (`ticket.created`/`customer.replied` → tools → resolved + audit trail). Next: run Postgres-backed integration tests, then close the audit-in-same-transaction invariant.
+- **Last checked:** 2026-05-15 — Fixed CI Node 20 annotations by moving GitHub actions to Node 24-compatible majors (`actions/checkout@v6`, `pnpm/action-setup@v6`, `actions/setup-node@v6`) and running the job on `node-version: 24`; pnpm version still comes only from `packageManager: pnpm@9.12.3`. `pnpm build` green across all 9 workspace projects; `pnpm test` green locally with Postgres down: 75 passed, 14 skipped integration tests. Next: run Postgres-backed integration tests, then close the audit-in-same-transaction invariant.
 
 ---
 
