@@ -5,8 +5,9 @@ import {
   ToolRegistryWith,
   type AnyTool,
 } from "@support-agent/agent-core";
-import { supportTriage } from "@support-agent/agents";
+import { orderStatusAgent, supportTriage } from "@support-agent/agents";
 import {
+  agentHandoff,
   caseUpdateContext,
   caseUpdateStatus,
   shopifyGetOrder,
@@ -131,12 +132,13 @@ export const buildWorker = async (
   // ToolAlreadyRegistered during Layer build — that would be a programmer
   // error (we control the input list), so we promote it to a defect.
   const registry = Layer.mergeAll(
-    Layer.orDie(AgentRegistryWith([supportTriage])),
+    Layer.orDie(AgentRegistryWith([supportTriage, orderStatusAgent])),
     Layer.orDie(
       ToolRegistryWith([
         caseUpdateContext as AnyTool,
         caseUpdateStatus as AnyTool,
         shopifyGetOrder as AnyTool,
+        agentHandoff as AnyTool,
       ]),
     ),
     PermissionServiceDefault,

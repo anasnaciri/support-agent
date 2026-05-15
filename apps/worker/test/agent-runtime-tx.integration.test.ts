@@ -12,6 +12,7 @@ import {
 } from "@support-agent/agent-core";
 import { supportTriage } from "@support-agent/agents";
 import {
+  agentHandoff,
   caseUpdateContext,
   caseUpdateStatus,
 } from "@support-agent/tools";
@@ -56,6 +57,9 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     ToolRegistryWith([
       caseUpdateContext as never,
       caseUpdateStatus as never,
+      // supportTriage now declares `agent.handoff` in its tool list;
+      // ToolRegistry.schemasFor would fail with UnknownTool otherwise.
+      agentHandoff as never,
     ]),
     PermissionServiceDefault,
     // Script that returns ONE tool call then a final_message. We use the

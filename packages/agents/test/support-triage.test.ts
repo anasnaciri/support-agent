@@ -12,15 +12,21 @@ describe("support-triage agent config", () => {
     expect(supportTriage.mode).toBe("primary");
     expect(supportTriage.provider).toBe("openrouter");
     expect(supportTriage.tools).toContain("case.update_context");
+    expect(supportTriage.tools).toContain("agent.handoff");
+    expect(supportTriage.handoffs).toContain("order-status-agent");
     expect(supportTriage.maxTurnsPerTick).toBeGreaterThan(0);
     expect(supportTriage.promptTemplate.length).toBeGreaterThan(50);
   });
 
-  it("does not declare any tools outside the Phase 1 trivial set", () => {
-    // Defensive — keeps Phase 1's scope honest. If you want to give
-    // support-triage real tools (Shopify, email), drop this assertion
-    // explicitly so the change is visible in review.
-    const allowed = new Set(["case.update_status", "case.update_context"]);
+  it("does not declare any tools outside the triage-allowed set", () => {
+    // Defensive — keeps the agent's scope honest. Adding real tools
+    // (Shopify, email) belongs on a specialist agent, reached via
+    // `agent.handoff`, not on the triage prompt itself.
+    const allowed = new Set([
+      "case.update_status",
+      "case.update_context",
+      "agent.handoff",
+    ]);
     for (const t of supportTriage.tools) {
       expect(allowed.has(t)).toBe(true);
     }

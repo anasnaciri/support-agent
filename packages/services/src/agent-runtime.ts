@@ -246,6 +246,93 @@ export const AgentRuntimeDefault = Layer.effect(
           }
 
           // tool_call
+
+          // `agent.handoff` is a runtime-controlled pseudo-tool: it appears
+          // in the LLM tool list (so the model can invoke it) but the runtime
+          // intercepts the call here rather than running the tool body.
+          // We swap the active agent for the rest of the tick, persist the
+          // new `currentAgentId`, audit the handoff as a `tool.invoked`, and
+          // push a tool-result back into the conversation so the new agent
+          // sees the prior agent's work plus a record of the transition.
+          if (decision.tool === "agent.handoff") {
+            const raw = decision.input as {
+              readonly targetAgent?: unknown;
+              readonly reason?: unknown;
+            } | null;
+            const target =
+              raw && typeof raw.targetAgent === "string"
+                ? raw.targetAgent
+                : null;
+            const reason =
+              raw && typeof raw.reason === "string" ? raw.reason : "";
+            const allowed =
+              target !== null &&
+              agent.handoffs.some((h) => (h as string) === target);
+
+            if (!allowed) {
+              yield* tx.run(
+                audit.record({
+                  tenantId: current.tenantId,
+                  caseId: current.id,
+                  actor: { type: "agent", id: agent.id },
+                  action: "tool.invoked",
+                  details: {
+                    tool: "agent.handoff",
+                    callId: decision.callId,
+                    ok: false,
+                    error: "target_not_in_handoffs",
+                    target,
+                    turn,
+                  },
+                }),
+              );
+              messages.push({
+                role: "tool",
+                toolCallId: decision.callId,
+                toolName: "agent.handoff",
+                content: {
+                  error: "target_not_in_handoffs",
+                  target,
+                  allowed: agent.handoffs,
+                },
+              });
+              continue;
+            }
+
+            const targetAgentId = makeAgentId(target as string);
+            const targetAgent = yield* registry.resolve(targetAgentId);
+            current = yield* tx.run(
+              Effect.gen(function* () {
+                const updated = yield* cases.update(current.id, {
+                  currentAgentId: targetAgentId,
+                });
+                yield* audit.record({
+                  tenantId: updated.tenantId,
+                  caseId: updated.id,
+                  actor: { type: "agent", id: agent.id },
+                  action: "tool.invoked",
+                  details: {
+                    tool: "agent.handoff",
+                    callId: decision.callId,
+                    ok: true,
+                    target: target as string,
+                    reason,
+                    turn,
+                  },
+                });
+                return updated;
+              }),
+            );
+            messages.push({
+              role: "tool",
+              toolCallId: decision.callId,
+              toolName: "agent.handoff",
+              content: { ok: true, targetAgent: target as string },
+            });
+            agent = targetAgent;
+            continue;
+          }
+
           const tool = yield* tools.tryGet(decision.tool);
           if (!tool) {
             messages.push({
