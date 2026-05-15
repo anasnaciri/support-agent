@@ -35,9 +35,15 @@ importers:
       '@support-agent/agent-core':
         specifier: workspace:*
         version: link:../../packages/agent-core
+      '@support-agent/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@support-agent/services':
         specifier: workspace:*
         version: link:../../packages/services
+      '@support-agent/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       effect:
         specifier: ^3.10.0
         version: 3.21.2

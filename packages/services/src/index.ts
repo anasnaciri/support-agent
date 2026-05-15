@@ -4,3 +4,6 @@ export * from "./case-repository.js";
 export * from "./audit-log.js";
 export * from "./approval-service.js";
 export * from "./llm-service.js";
+export * from "./workflow-queue.js";
+export * from "./event-bus.js";
+export * from "./agent-runtime.js";

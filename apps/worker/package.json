@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
+    "@support-agent/agents": "workspace:*",
     "@support-agent/services": "workspace:*",
+    "@support-agent/tools": "workspace:*",
     "effect": "^3.10.0",
     "pg-boss": "^12.18.2"
   },

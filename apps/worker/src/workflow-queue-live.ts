@@ -1,0 +1,197 @@
+import { Effect, Layer } from "effect";
+import type {
+  Queue as PgBossQueue,
+  QueuePolicy,
+  SendOptions,
+  WorkOptions,
+} from "pg-boss";
+import type { DomainEvent } from "@support-agent/agent-core";
+import {
+  WorkflowQueue,
+  WorkflowQueueBackendError,
+  makeEnqueuedWorkflowEvent,
+  type EnqueuedWorkflowEvent,
+  type WorkflowEnqueueOptions,
+  type WorkflowJob,
+} from "@support-agent/services";
+import type { PgBoss } from "./queue.js";
+
+export const DEFAULT_WORKFLOW_QUEUE_NAME = "workflow.events";
+
+export interface PgBossWorkflowQueueOptions {
+  readonly queueName?: string;
+  readonly queuePolicy?: QueuePolicy;
+  readonly retryLimit?: number;
+  readonly retryDelay?: number;
+  readonly retryBackoff?: boolean;
+  readonly expireInSeconds?: number;
+  readonly retentionSeconds?: number;
+  readonly deleteAfterSeconds?: number;
+  readonly pollingIntervalSeconds?: number;
+  readonly batchSize?: number;
+}
+
+interface WorkflowJobData {
+  readonly eventId: string;
+  readonly event: DomainEvent;
+  readonly key: string;
+  readonly enqueuedAt: string;
+}
+
+const queueName = (opts: PgBossWorkflowQueueOptions): string =>
+  opts.queueName ?? DEFAULT_WORKFLOW_QUEUE_NAME;
+
+const createQueueOptions = (
+  opts: PgBossWorkflowQueueOptions,
+): Omit<PgBossQueue, "name"> => {
+  const out: Omit<PgBossQueue, "name"> = {
+    policy: opts.queuePolicy ?? "key_strict_fifo",
+    retryLimit: opts.retryLimit ?? 5,
+    retryBackoff: opts.retryBackoff ?? true,
+  };
+  if (opts.retryDelay !== undefined) out.retryDelay = opts.retryDelay;
+  if (opts.expireInSeconds !== undefined)
+    out.expireInSeconds = opts.expireInSeconds;
+  if (opts.retentionSeconds !== undefined)
+    out.retentionSeconds = opts.retentionSeconds;
+  if (opts.deleteAfterSeconds !== undefined)
+    out.deleteAfterSeconds = opts.deleteAfterSeconds;
+  return out;
+};
+
+const sendOptions = (
+  enqueued: EnqueuedWorkflowEvent,
+  opts: WorkflowEnqueueOptions,
+): SendOptions => {
+  const out: SendOptions = { singletonKey: enqueued.key };
+  if (opts.priority !== undefined) out.priority = opts.priority;
+  if (opts.startAfter !== undefined) out.startAfter = opts.startAfter;
+  return out;
+};
+
+const workOptions = (opts: PgBossWorkflowQueueOptions): WorkOptions => {
+  const out: WorkOptions = {};
+  if (opts.pollingIntervalSeconds !== undefined) {
+    out.pollingIntervalSeconds = opts.pollingIntervalSeconds;
+  }
+  if (opts.batchSize !== undefined) out.batchSize = opts.batchSize;
+  return out;
+};
+
+const reviveDomainEvent = (event: DomainEvent): DomainEvent => {
+  switch (event.type) {
+    case "email.received":
+    case "customer.replied":
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          receivedAt: new Date(event.payload.receivedAt),
+        },
+      };
+    case "tracking.changed":
+      return {
+        ...event,
+        payload: {
+          ...event.payload,
+          occurredAt: new Date(event.payload.occurredAt),
+        },
+      };
+    case "ticket.created":
+    case "approval.approved":
+    case "approval.rejected":
+    case "supplier.updated":
+    case "timer.expired":
+    case "manual.takeover":
+    case "case.resumed":
+      return event;
+  }
+};
+
+const toWorkflowJob = (jobId: string, data: WorkflowJobData): WorkflowJob => ({
+  jobId,
+  eventId: data.eventId,
+  event: reviveDomainEvent(data.event),
+  key: data.key,
+  enqueuedAt: new Date(data.enqueuedAt),
+});
+
+const toJobData = (enqueued: EnqueuedWorkflowEvent): WorkflowJobData => ({
+  eventId: enqueued.eventId,
+  event: enqueued.event,
+  key: enqueued.key,
+  enqueuedAt: enqueued.enqueuedAt.toISOString(),
+});
+
+const wrap = <A>(
+  operation: WorkflowQueueBackendError["operation"],
+  promise: Promise<A>,
+): Effect.Effect<A, WorkflowQueueBackendError> =>
+  Effect.tryPromise({
+    try: () => promise,
+    catch: (cause) => new WorkflowQueueBackendError({ operation, cause }),
+  });
+
+export const ensureWorkflowQueue = (
+  boss: PgBoss,
+  opts: PgBossWorkflowQueueOptions = {},
+): Effect.Effect<void, WorkflowQueueBackendError> =>
+  wrap("ensure_queue", boss.createQueue(queueName(opts), createQueueOptions(opts)));
+
+export const enqueueWorkflowEvent = (
+  boss: PgBoss,
+  event: DomainEvent,
+  enqueueOpts: WorkflowEnqueueOptions = {},
+  queueOpts: PgBossWorkflowQueueOptions = {},
+): Effect.Effect<EnqueuedWorkflowEvent, WorkflowQueueBackendError> =>
+  Effect.gen(function* () {
+    const enqueued = makeEnqueuedWorkflowEvent(event, enqueueOpts);
+    const jobId = yield* wrap(
+      "enqueue",
+      boss.send(
+        queueName(queueOpts),
+        toJobData(enqueued),
+        sendOptions(enqueued, enqueueOpts),
+      ),
+    );
+    return { ...enqueued, jobId };
+  });
+
+export const WorkflowQueuePgBossLive = (
+  boss: PgBoss,
+  opts: PgBossWorkflowQueueOptions = {},
+) =>
+  Layer.effect(
+    WorkflowQueue,
+    Effect.gen(function* () {
+      yield* ensureWorkflowQueue(boss, opts);
+
+      return WorkflowQueue.of({
+        enqueue: (event, enqueueOpts = {}) =>
+          enqueueWorkflowEvent(boss, event, enqueueOpts, opts),
+
+        consume: (handler) =>
+          Effect.gen(function* () {
+            const id = yield* wrap(
+              "consume",
+              boss.work<WorkflowJobData, void>(
+                queueName(opts),
+                workOptions(opts),
+                async (jobs) => {
+                  for (const job of jobs) {
+                    await Effect.runPromise(
+                      handler(toWorkflowJob(job.id, job.data)),
+                    );
+                  }
+                },
+              ),
+            );
+
+            return {
+              id,
+              shutdown: wrap("shutdown", boss.offWork(queueName(opts), { id })),
+            };
+          }),
+      });
+    }),
+  );

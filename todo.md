@@ -9,9 +9,9 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 ## Current status
 
 - **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
-- **Phase 1 — Runtime spine:** not started
+- **Phase 1 — Runtime spine:** partial
 - **Phase 2+:** not started
-- **Last checked:** 2026-05-14 — Phase 0 complete. `pnpm build` green across all 10 projects; `pnpm test` green: 15 unit tests pass, 5 integration tests pass with Postgres up (skip otherwise). Commits: `334d765` (§17 types), `cbd85c8` (vitest + compose + env), `d519734` (Drizzle + schema), `1b3d21f` (pg-boss), `25983e8` (CI + OTel + HMAC). Next: start Phase 1 with `CaseRepository` Tag (interface + Drizzle Live + in-memory Test).
+- **Last checked:** 2026-05-15 — Phase 1 runtime spine is mostly in place. `pnpm build` green across all 9 workspace projects; `pnpm test` green locally with Postgres down: 75 passed, 14 skipped integration tests. Scripted `support-triage` e2e passes (`ticket.created`/`customer.replied` → tools → resolved + audit trail). Next: run Postgres-backed integration tests, then close the audit-in-same-transaction invariant.
 
 ---
 
@@ -20,14 +20,14 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 These come from master-plan §16, §20, and the "never moves earlier" list (lines 2635–2642). If you can't tick all of these, do not mark a session complete.
 
 - [x] `agent-core` has zero imports from `services` / `tools` / `db` / `providers` (dependency rule, §16)
-- [ ] `PermissionService` is consulted before every tool execution (§9). Until it exists, no tool may execute autonomously.
+- [x] `PermissionService` is consulted before every tool execution (§9) in `AgentRuntime.handleEvent`; direct tool tests still invoke tools intentionally at the unit boundary.
 - [ ] Audit log writes share the transaction with case state changes (outbox pattern, §4)
 - [x] Case state machine guards every status transition (§10) — enforced by typing: `CaseRepository.update`'s patch type omits `status`, so the only path that mutates status is `transitionStatus`, which writes the `case_state_transitions` row in the same SQL transaction. No raw `UPDATE cases SET status = …` is reachable through the Tag.
 - [ ] Effect Service / Layer separation: Tags are abstract in `services`; Live impls live in `db` / `providers` / feature packages
 - [x] `pnpm build` is green
 - [x] `pnpm test` is green
-- [ ] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
-- [ ] No secrets in git (`.env*` is gitignored except `.env.example`)
+- [x] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
+- [x] No secrets in git (`.env*` is gitignored except `.env.example`)
 
 ---
 
@@ -36,9 +36,9 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 Run these before declaring any task done:
 
 - [x] `pnpm install` clean
-- [x] `pnpm build` green across all 9 projects
+- [x] `pnpm build` green across all 9 workspace projects
 - [x] `pnpm test` green
-- [ ] CI runs install + build + test on PR (GitHub Actions not yet configured)
+- [x] CI runs install + build + test on PR
 
 ---
 
@@ -77,18 +77,20 @@ Pending (deferred from the thin-scaffold first pass):
 
 **Goal:** a workflow can move a case through states.
 
+Current next slice: run Postgres-backed integration tests, then close the audit-in-same-transaction invariant.
+
 - [x] `CaseRepository` Tag + `CaseRepositoryLive` (Postgres/Drizzle) + `CaseRepositoryTest` (in-memory). Interface: `create`, `getById`, `findByThreadId`, `update`, `transitionStatus`. Status changes flow only through `transitionStatus`, which writes a `case_state_transitions` row in the same SQL transaction and supports optimistic `expectedFromStatus` checks (→ `CaseStateConflict`). `update`'s patch type excludes `status` at compile time so callers cannot bypass the transition path. Errors: `CaseNotFound`, `CaseStateConflict`, `CaseRepositoryDbError`. Tests: 6 unit (Test layer) + 3 integration (Live + Postgres).
 - [x] `AuditLogService` Tag + `AuditLogServiceLive` + `AuditLogServiceTest`. Interface: `record(entry)` returns the persisted row with assigned id + occurredAt, `forCase(caseId, { limit, afterId })` returns ordered entries with cursor-style pagination. Errors: `AuditLogDbError`. Tests: 4 unit + 2 integration. **Note:** the cross-service audit-in-transaction invariant is still pending — it'll be enforced when `AgentRuntime.handleEvent` composes `CaseRepository.transitionStatus` and `AuditLogService.record` inside a single `db.transaction(...)` boundary.
-- [ ] `EventBus` Tag + Live (pg-boss-backed)
-- [ ] `WorkflowQueue` Tag + Live
+- [x] `EventBus` Tag + Live (pg-boss-backed). Abstract Tag in `packages/services/src/event-bus.ts`; `EventBusFromWorkflowQueue` publishes to `WorkflowQueue`; pg-boss Live in `apps/worker/src/event-bus-live.ts`; unit test covers delegation and Postgres-gated integration test covers publish → consume through pg-boss.
+- [x] `WorkflowQueue` Tag + Live. Abstract Tag + in-memory FIFO Test layer in `packages/services/src/workflow-queue.ts`; pg-boss Live in `apps/worker/src/workflow-queue-live.ts` creates a `key_strict_fifo` queue, uses per-event singleton keys (`case:*`, `thread:*`, `order:*`, or `event:*`), revives Date payload fields on consume, and exposes consumer shutdown. Tests: 2 unit + 1 Postgres-gated integration.
 - [x] `AgentRegistry` Tag in `agent-core` + `AgentRegistryDefault` (Ref-backed) + `AgentRegistryWith(configs)` (pre-registered). Methods: `register`, `resolve`, `tryResolve`, `all`. Errors: `AgentAlreadyRegistered`, `UnknownAgent`. First real config: `support-triage` in `packages/agents/src/support-triage.ts` — OpenRouter `anthropic/claude-3.5-sonnet`, prompt declares 5 categories (`where_is_order`, `missing_package`, `damaged_product`, `refund_request`, `general_inquiry`), tools limited to the Phase 1 trivial set (`case.update_status`, `case.update_context`). 7 + 3 unit tests; defensive assertion locks the tool list until intentionally widened.
 - [x] `ToolRegistry` + `defineTool` helper (§8). `defineTool` is a typed-identity helper that preserves `Tool<I, O>` inference. `ToolRegistry` Tag in `agent-core` with default `ToolRegistryDefault` layer (Ref-backed in-memory map) and `ToolRegistryWith(tools)` for pre-registered layers. Methods: `register`, `get`, `tryGet`, `schemasFor` (uses `effect`'s `JSONSchema.make` to derive LLM-facing JSON Schemas from Effect Schemas), `all`. Errors: `ToolAlreadyRegistered`, `UnknownTool`. 10 unit tests.
 - [x] `PermissionService` Tag in `agent-core` + `PermissionServiceDefault` layer. Pure function: `check({ tenantId, agent, tool, payload }) → "allow" | "ask" | "deny"`. Decision order is `agent.permissionOverrides[tool.name] ?? tool.defaultPermission`. Tenant-level policy rules and conditional rules (e.g. amount thresholds) are deferred to Phase 4 — the Tag interface stays stable; the Default layer will swap for a Live layer that also consults `PolicyService`. 6 unit tests.
 - [x] `ApprovalService` Tag + `ApprovalServiceLive` (Drizzle) + `ApprovalServiceTest`. Interface: `create` (always starts in `pending`), `getById`, `approve` (optionally with `approvedInput` for edit-and-approve), `reject` (with `decisionReason`), `listPending(tenantId)`. State transitions use optimistic concurrency: `approve`/`reject` only succeed if the row is `pending`; double-decision returns `ApprovalStateConflict`. Live impl runs the SELECT-FOR-UPDATE + UPDATE in one tx. Errors: `ApprovalNotFound`, `ApprovalStateConflict`, `ApprovalServiceDbError`. 7 unit + 3 integration tests. Expiry sweep (`timer.expired` driven) is deferred — the `expiresAt` column is written on create, but nothing reads it yet.
-- [ ] `AgentRuntime.handleEvent` — the tick loop from §5 / §18
+- [x] `AgentRuntime.handleEvent` — Phase 1 tick loop from §5 / §18. Supports create/load case for `ticket.created` and case-scoped resume events, resolves agent + tools, calls scripted `LLMService`, audits event/LLM/tool steps, checks `PermissionService` before tool execution, creates approvals for `ask`, executes `allow` tools, handles handoff, final message, and `max_turns_exceeded`. Phase 1 limitations: `email.received` lookup-by-thread and `tracking.changed` lookup-by-order return `Failed`; customer/supplier wait actions return human takeover until those workflows land.
 - [x] Trivial tools: `case.update_status`, `case.update_context`. Both defined via `defineTool` in `packages/tools/src/case/`. They depend on `CaseRepository` (provided by the runtime's Layer). `case.update_status` wraps `transitionStatus` (carrying through `expectedFromStatus` + `reason`); `case.update_context` reads + shallow-merges named hint fields (`classification`, `identifiedOrderId`, `identifiedCustomerId`, `notes`) plus an `extra: Record<string, unknown>` escape hatch. Repository errors are mapped to `ToolOutputInvalid` with `issues: [<TaggedErrorName>]` at the tool boundary so the LLM gets a structured failure. 7 unit tests (transition happy path, optimistic conflict mapped to ToolOutputInvalid, schema decode, context merge, extra-keys merge, case-not-found, ToolRegistry schemasFor integration).
-- [ ] Trivial agent: `support-triage` (classifies and updates context only)
-- [ ] End-to-end test: synthetic `ticket.created` event → case row → audit entries → `resolved`
+- [x] Trivial agent: `support-triage` config + scripted runtime test classifies context and updates status using only `case.update_context` / `case.update_status`.
+- [x] End-to-end test: scripted synthetic event path in `apps/worker/test/agent-runtime.e2e.test.ts` covers `ticket.created` / `customer.replied` → case → audit entries → `resolved`.
 
 ---
 
