@@ -52,7 +52,7 @@ const runWith = <A, E>(eff: Effect.Effect<A, E, LLMService>) =>
   );
 
 const baseRequest: ToolCallingRequest = {
-  model: "anthropic/claude-3.5-sonnet",
+  model: "google/gemini-3.1-flash-lite",
   system: "you are a test",
   messages: [
     { role: "user", content: "where is my order?" } satisfies ChatMessage,
@@ -103,7 +103,7 @@ describe("LLMServiceLive — request mapping", () => {
     expect(arg.tools["case.update_status"]!.inputSchema).toEqual({
       __wrapped: { type: "object", properties: { to: { type: "string" } } },
     });
-    expect(arg.model.__chat).toBe("anthropic/claude-3.5-sonnet");
+    expect(arg.model.__chat).toBe("google/gemini-3.1-flash-lite");
   });
 
   it("translates assistant tool-call replays and tool-result messages", async () => {

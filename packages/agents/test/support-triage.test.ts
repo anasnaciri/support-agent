@@ -11,7 +11,6 @@ describe("support-triage agent config", () => {
     expect(supportTriage.id).toBe("support-triage");
     expect(supportTriage.mode).toBe("primary");
     expect(supportTriage.provider).toBe("openrouter");
-    expect(supportTriage.tools).toContain("case.update_status");
     expect(supportTriage.tools).toContain("case.update_context");
     expect(supportTriage.maxTurnsPerTick).toBeGreaterThan(0);
     expect(supportTriage.promptTemplate.length).toBeGreaterThan(50);

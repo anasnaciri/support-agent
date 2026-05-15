@@ -84,6 +84,20 @@ const toToolSet = (tools: ReadonlyArray<ToolSchema>) =>
 // ============================================================
 
 const mapError = (cause: unknown): LLMError => {
+  // Diagnostic: emit the raw error so the underlying message isn't lost
+  // when we wrap it in a tagged error whose toString is generic. Cheap +
+  // single line; leave on for now — we will swap this for a proper
+  // structured logger when OTel logging lands.
+  // eslint-disable-next-line no-console
+  console.error(
+    "[LLMServiceLive] underlying error:",
+    cause instanceof Error
+      ? `${cause.name}: ${cause.message}` +
+          ((cause as { statusCode?: number }).statusCode
+            ? ` (status ${(cause as { statusCode?: number }).statusCode})`
+            : "")
+      : cause,
+  );
   if (cause instanceof Error) {
     const msg = cause.message.toLowerCase();
     const status = (cause as { statusCode?: number }).statusCode;

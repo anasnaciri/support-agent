@@ -16,7 +16,7 @@ const make = (id: string): AgentConfig => ({
   description: `${id} description`,
   mode: "primary",
   provider: "openrouter",
-  model: "anthropic/claude-3.5-sonnet",
+  model: "google/gemini-3.1-flash-lite",
   promptTemplate: "test prompt",
   tools: [],
   permissionOverrides: {},

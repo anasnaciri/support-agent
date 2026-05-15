@@ -51,7 +51,9 @@ The mental model is closer to **Temporal + a typed tool harness + an LLM** than 
 
 ## 2. Core Philosophy
 
-The product is the runtime, not the model. Five tenets follow:
+The product is the runtime, not any one provider. Six tenets follow:
+
+**Providers are connectors; the runtime is not.** Shopify, Gmail, Outlook, Klaviyo, Gorgias, OpenRouter, and Anthropic are connector implementations. The core product is the durable agent runtime, not a Shopify app, a Gmail app, or a wrapper around one LLM vendor.
 
 **The LLM is replaceable; the runtime is not.** Anthropic Claude today, Gemini tomorrow, a fine-tuned local model for routing in six months. The agent's behavior should be defined by config (prompts, tools, permissions, policies), not by which provider is wired in.
 
@@ -229,7 +231,7 @@ AgentRuntime.handle(event):
           continue   // let the model react to the denial
 
     if decision.type === "wait_for_customer":
-      EmailService.send(decision.message)   // already permission-checked
+      ConversationService.reply(decision.message)   // already permission-checked
       return PausedWaitingForCustomer
 
     if decision.type === "escalate_supplier":
@@ -276,15 +278,15 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
   }
 >() {}
 
-export class EmailService extends Context.Tag("EmailService")<
-  EmailService,
+export class ConversationService extends Context.Tag("ConversationService")<
+  ConversationService,
   {
-    readonly send: (
-      msg: OutboundEmail,
-    ) => Effect.Effect<SentMessage, EmailError>;
     readonly fetchThread: (
       id: ThreadId,
-    ) => Effect.Effect<EmailThread, EmailError>;
+    ) => Effect.Effect<ConversationThread, ConversationError>;
+    readonly reply: (
+      input: ConversationReply,
+    ) => Effect.Effect<SentMessage, ConversationError>;
   }
 >() {}
 
@@ -490,14 +492,14 @@ fallback:
 prompt: ./prompts/damaged-product.md
 tools:
   [
-    email.send,
-    email.askCustomer,
+    conversation.reply,
+    conversation.ask_customer,
     supplier.addSheetRow,
     case.updateStatus,
     refund.recommend,
   ]
 permissions:
-  email.send: ask
+  conversation.reply: ask
   refund.recommend: allow
 mode: primary
 handoffs: [refund-review, supplier-escalation]
@@ -639,7 +641,7 @@ ToolExecutor.run(toolName, input, case):
 Key properties:
 
 - **Schema-first.** Both input from LLM and output from external system are validated. A flaky carrier API returning `null` where `string` is expected produces a typed `ToolOutputInvalid` error, not a downstream crash.
-- **Idempotent by default for state-changing tools.** `email.send` includes `(caseId, draftId)` in its idempotency key. Re-running a workflow tick doesn't double-send.
+- **Idempotent by default for state-changing tools.** `conversation.reply` includes `(caseId, draftId)` in its idempotency key. Re-running a workflow tick doesn't double-send.
 - **Audit is mandatory.** No code path skips audit. The audit write is in the same transaction as the case write.
 - **Denied calls feed back to the model.** A denied tool call returns a structured `{ error: "denied_by_policy", reason }` to the LLM as a tool result. The model often then proposes an allowed alternative (e.g. propose a refund recommendation instead of executing one).
 
@@ -700,17 +702,17 @@ The first hit wins. Input-pattern policies allow rules like "refunds under $25 �
 
 ```json
 {
-  "email.read": "allow",
+  "conversation.fetch_thread": "allow",
   "shopify.customer.read": "allow",
   "shopify.order.read": "allow",
   "shopify.fulfillment.read": "allow",
   "tracking.lookup": "allow",
-  "email.ask_customer": "allow",
+  "conversation.ask_customer": "allow",
   "supplier.add_sheet_row": "allow",
   "case.update_status": "allow",
   "case.mark_waiting": "allow",
 
-  "email.send": "ask",
+  "conversation.reply": "ask",
   "refund.recommend": "allow",
   "refund.create": "ask",
   "coupon.issue": "ask",
@@ -1159,8 +1161,9 @@ POST   /cases/:id/retry                           { fromState? }      // re-run 
 ### Webhooks (inbound)
 
 ```
-POST   /webhooks/email/:tenantId                  (Postmark/SendGrid inbound parse)
+POST   /webhooks/conversations/:provider/:tenantId (Gmail/Outlook/helpdesk/message connector callbacks)
 POST   /webhooks/shopify/:tenantId                (orders/customers/fulfillments)
+POST   /webhooks/shopify/compliance               (customers/data_request, customers/redact, shop/redact)
 POST   /webhooks/tracking/:tenantId               (Aftership/Easypost)
 POST   /webhooks/slack/interactive                (Slack approval buttons)
 POST   /webhooks/email/approval                   (signed approval-link clicks)
@@ -1417,11 +1420,11 @@ TICK 1 (agent = support-triage)
 TICK 2 (agent = order-status-agent)
   LLM call → decision: tool_call tracking.lookup({ carrier, number })
     ToolExecutor → tracking: in transit, ETA tomorrow
-  LLM call → decision: tool_call email.send({
+  LLM call → decision: tool_call conversation.reply({
     to, subject: "Re: Order #1045",
     body: "Hi Sarah, your order is on its way! Tracking 1ZX... ETA tomorrow..."
   })
-    PermissionService → "ask"  (email.send is ask by default)
+    PermissionService → "ask"  (conversation.reply is ask by default)
     Approval created, status=waiting_for_approval
 
 DASHBOARD
@@ -1429,13 +1432,13 @@ DASHBOARD
 
 EVENT approval.approved
   case status → approved_action_running
-  ToolExecutor re-runs email.send with same input
-  Email sent. outbound_messages row created.
+  ToolExecutor re-runs conversation.reply with same input
+  Reply sent. outbound_messages row created.
   LLM call → decision: final_message "case resolved"
   case status → resolved
 ```
 
-Total: ~8 seconds of compute, 1 manager click (or 0 if `email.send` is set to `allow` after trust is built), customer gets a useful answer within minutes.
+Total: ~8 seconds of compute, 1 manager click (or 0 if `conversation.reply` is set to `allow` after trust is built), customer gets a useful answer within minutes.
 
 ### 15.2 "Package delivered but not received"
 
@@ -1451,11 +1454,11 @@ missing-package-agent:
   → Tools: ask customer to (a) check with neighbors/household, (b) confirm
      shipping address, then wait 48h
 
-  decision: tool_call email.ask_customer({
+  decision: tool_call conversation.ask_customer({
     body: "Hi, before we proceed... [questions about porch/neighbors/address]..."
   })
-  PermissionService → allow (email.ask_customer is allow)
-  Email sent, case → waiting_for_customer
+  PermissionService → allow (conversation.ask_customer is allow)
+  Customer prompt sent, case → waiting_for_customer
   timer scheduled for +48h (timer.expired event)
 
   Customer replies "yes still missing, checked with everyone"
@@ -1489,11 +1492,11 @@ support-triage → damaged-product-agent
 
 damaged-product-agent:
   shopify.get_order → identify order
-  decision: tool_call email.ask_customer({
+  decision: tool_call conversation.ask_customer({
     body: "So sorry to hear that. Could you send 2–3 photos showing the damage and
            the packaging? That helps us file with the supplier."
   })
-  Email sent. case → waiting_for_customer.
+  Customer prompt sent. case → waiting_for_customer.
 
   Customer replies with 3 photo attachments.
     EVENT customer.replied (with attachments)
@@ -1509,12 +1512,12 @@ damaged-product-agent:
     })
     → allow → executed.
 
-    decision: tool_call email.send({
+    decision: tool_call conversation.reply({
       body: "We'll send a replacement at no cost. Tracking will arrive in 24h..."
     })
     → ask → approval created.
 
-  Manager approves (or edit-and-approves the tone) → email sent.
+  Manager approves (or edit-and-approves the tone) → reply sent.
 
   decision: tool_call shipping.create_replacement_order({...})
   → ask → approval created.
@@ -1542,11 +1545,11 @@ refund-review-agent:
   })
   → allow → recommendation logged.
 
-  decision: tool_call email.send({
+  decision: tool_call conversation.reply({
     body: "Happy to help! Two options: ... [explains both]"
   })
   → ask → approval (manager confirms tone & options).
-  Manager approves → email sent. case → waiting_for_customer.
+  Manager approves → reply sent. case → waiting_for_customer.
 
   Customer picks "store credit, keep item".
     EVENT customer.replied
@@ -1649,7 +1652,8 @@ ai-support-ops/
 │  │
 │  ├─ services/                         # Effect Services + Live/Test layers
 │  │  ├─ src/
-│  │  │  ├─ EmailService.ts             # tag + GmailLive + PostmarkLive + Test
+│  │  │  ├─ ConversationService.ts      # tag + connector dispatch + Test
+│  │  │  ├─ PlatformMailService.ts      # platform/system mail only
 │  │  │  ├─ ShopifyService.ts
 │  │  │  ├─ ShippingService.ts
 │  │  │  ├─ SupplierService.ts
@@ -1665,13 +1669,15 @@ ai-support-ops/
 │  │  │  └─ errors.ts
 │  │  └─ test/
 │  │
-│  ├─ providers/                        # LLM provider implementations
+│  ├─ providers/                        # LLM + integration connector implementations
 │  │  ├─ src/
 │  │  │  ├─ OpenAIProvider.ts
 │  │  │  ├─ AnthropicProvider.ts
 │  │  │  ├─ GeminiProvider.ts
 │  │  │  ├─ OpenRouterProvider.ts
 │  │  │  ├─ LocalModelProvider.ts
+│  │  │  ├─ GmailConversationConnector.ts
+│  │  │  ├─ ShopifyConnector.ts
 │  │  │  ├─ RoutingProvider.ts          # picks model by task tier
 │  │  │  └─ common/
 │  │  │     ├─ tool-schema.ts           # convert @effect/schema → JSON Schema
@@ -1680,10 +1686,10 @@ ai-support-ops/
 │  │
 │  ├─ tools/                            # First-party tools
 │  │  ├─ src/
-│  │  │  ├─ email/
-│  │  │  │  ├─ email.read.ts
-│  │  │  │  ├─ email.send.ts
-│  │  │  │  └─ email.askCustomer.ts
+│  │  │  ├─ conversation/
+│  │  │  │  ├─ fetch-thread.ts
+│  │  │  │  ├─ reply.ts
+│  │  │  │  └─ ask-customer.ts
 │  │  │  ├─ shopify/
 │  │  │  │  ├─ getCustomer.ts
 │  │  │  │  ├─ getOrder.ts
@@ -2238,9 +2244,9 @@ const runTick = (
         }
 
         case "wait_for_customer":
-          // Run email.send as a tool internally (so it goes through permissions).
+          // Run conversation.reply as a tool internally (so it goes through permissions).
           yield* exec.run(
-            "email.send",
+            "conversation.reply",
             decision.message,
             makeCtx(caseRow, agent),
           );
@@ -2417,7 +2423,7 @@ The agent has more power than a chatbot. The threat model must match.
 
 **Mitigations:**
 
-- **Permission policy in the runtime, not the prompt.** No prompt-only safeguard for money or customer-facing messages. Default policy is `ask` for `email.send` and any financial tool.
+- **Permission policy in the runtime, not the prompt.** No prompt-only safeguard for money or customer-facing messages. Default policy is `ask` for `conversation.reply` and any financial tool.
 - **Conditional rules for money.** `refund.create` with `amount > $25 → ask`; `refund.create` cumulative-per-day-per-customer above a threshold → `ask`; over $200 → `deny` until manager approval.
 - **Tool output validation.** A malicious "tool result" injected via a hijacked dependency still has to satisfy the output schema.
 - **Limited context.** The model sees only what the runtime gives it: the case timeline, customer info, order info. It does _not_ see other customers' data, the database password, or internal staff emails.
@@ -2465,7 +2471,19 @@ The agent has more power than a chatbot. The threat model must match.
 - **Local model fallback for sensitive fields.** Optional: redact customer name → `<CUSTOMER>` before sending to a cloud provider, re-hydrate on the way out.
 - **No PII in logs by default.** Logs reference IDs; the dashboard joins to the data.
 
-### 19.6 Reply tone & brand voice drift
+### 19.6 Shopify protected customer data and access review
+
+**Risk:** the managed Shopify connector requests more customer/order data than the first workflow needs, blocking app review or increasing compliance burden. This review path applies when we offer one-click Shopify installation through our app; merchant-provided custom app tokens remain a connector credential mode, not the core platform assumption. `read_all_orders` is a protected extra scope for orders older than Shopify's default 60-day window and should not be requested by default.
+
+**Mitigations:**
+
+- **Minimum scopes first.** Managed Shopify connector scopes start at `read_orders` and `read_customers`. `read_all_orders` is optional and requires a written support-use justification before it is requested.
+- **Minimum protected fields first.** The first review target is `Email` + `Name` only. `Phone` and `Address` require a concrete product path before they are added to GraphQL queries or protected-customer-data requests.
+- **Review-ready data handling.** Maintain a privacy policy and data protection details that state purpose, fields collected, retention, subprocessors, storage region, merchant/customer access and deletion process, and support-use limits.
+- **Operational controls.** Evidence must exist for TLS, encryption at rest, encrypted backups, dev/prod separation, staff access controls with MFA, access logs for protected data, and incident response.
+- **Mandatory compliance webhooks for managed distribution.** App Store distribution requires `customers/data_request`, `customers/redact`, and `shop/redact` handlers with Shopify HMAC verification, 200-series ACKs, and a redaction/access workflow completed within the required window.
+
+### 19.7 Reply tone & brand voice drift
 
 **Risk:** the agent sends customers an off-brand or inappropriate reply.
 
@@ -2475,7 +2493,7 @@ The agent has more power than a chatbot. The threat model must match.
 - **Tone tests in CI.** Every agent has a battery of fixtures whose draft outputs are graded by a judge LLM against the brand voice spec; regressions fail CI.
 - **Per-tenant prompt overrides.** Merchant supplies brand voice notes that override agent defaults.
 
-### 19.7 Race conditions on the same case
+### 19.8 Race conditions on the same case
 
 **Risk:** two events arrive simultaneously (e.g. customer reply + supplier update); both workers try to advance the case.
 
@@ -2485,7 +2503,7 @@ The agent has more power than a chatbot. The threat model must match.
 - **Optimistic version column** as a second line of defense.
 - **Events are queued per-case-key.** The workflow queue (e.g. BullMQ with named groups, or pg-boss with `singleton_key`) serializes per-case work.
 
-### 19.8 Bad migrations / agent config rollouts
+### 19.9 Bad migrations / agent config rollouts
 
 **Risk:** a tenant deploys an agent config change that breaks customer-facing behavior.
 
@@ -2495,7 +2513,7 @@ The agent has more power than a chatbot. The threat model must match.
 - **Canary rollout.** A new agent version handles 10% of cases for 24h before full rollout.
 - **One-click rollback.** Versions live in `agent_configs`; rolling back is changing the active pointer.
 
-### 19.9 Supplier escalation abuse
+### 19.10 Supplier escalation abuse
 
 **Risk:** an attacker repeatedly opens damaged-product cases against a competitor's supplier to flood their sheet.
 
@@ -2505,7 +2523,7 @@ The agent has more power than a chatbot. The threat model must match.
 - **Per-customer rate limits on supplier records.**
 - **Manager review for repeat damaged-product claims** from same customer within a window.
 
-### 19.10 Compliance and record-keeping
+### 19.11 Compliance and record-keeping
 
 **Risk:** disputes / chargebacks / regulatory requests need provable history.
 
@@ -2556,11 +2574,16 @@ Deliverable: the agent can answer "where is my order?"
 
 - `LLMService` tag + `AnthropicProviderLive` _or_ `OpenAIProviderLive` (one to start; abstraction is in place but only one impl).
 - `ShopifyService` Live with `getCustomer`, `getOrder`, `getFulfillment`, `searchByEmail`.
-- `EmailService` Live with a single provider (Postmark inbound parse + outbound).
-- Tools: `shopify.get_customer`, `shopify.get_order`, `tracking.lookup`, `email.send`, `email.ask_customer`.
+- Managed Shopify connector distribution prep (optional, not core-platform gating): keep scopes to `read_orders` + `read_customers` for the first workflow; defer `read_all_orders` until older-than-60-day order lookup is a proven requirement and Shopify approves it.
+- Reduce Shopify GraphQL field selection to minimum necessary protected customer fields before review; start with `Email` + `Name`, not `Phone` / `Address`, unless the workflow truly needs them.
+- `ConversationService` / `MailboxService` with a provider-neutral thread/message/reply contract.
+- `GmailConversationConnector` as the first connector implementation; future Outlook, IMAP/SMTP, Gorgias, Klaviyo, and Zendesk connectors must implement the same contract.
+- `ConnectorCredentialStore` for encrypted per-tenant provider credentials and connection mode (`managed_oauth`, `tenant_oauth_client`, `static_token`, `api_key`).
+- Tools: `shopify.get_customer`, `shopify.get_order`, `tracking.lookup`, `conversation.fetch_thread`, `conversation.reply`, `conversation.ask_customer`.
 - Agents: `support-triage`, `order-status-agent`.
-- Webhook: `POST /webhooks/email/:tenantId` → `email.received` event.
-- Manual happy path: send a real email, see a case resolve.
+- Webhook: `POST /webhooks/conversations/:provider/:tenantId` → normalized message event (`email.received` for now, `message.received` if/when the event model is widened).
+- Mandatory Shopify compliance webhooks for managed distribution: `customers/data_request`, `customers/redact`, `shop/redact`, with HMAC verification and redaction/access workflows.
+- Manual happy path: receive a customer message through the first conversation connector, reply through that connector, and see the case resolve.
 
 ### Phase 3 — The dashboard (Weeks 7–8)
 
@@ -2571,7 +2594,7 @@ Deliverable: a manager can see and act on cases.
 - Approval list + approval detail with Approve / Edit & Approve / Reject / Take Over.
 - SSE for live updates on case detail.
 - All command endpoints (`/approvals/:id/approve`, etc.) wired.
-- Manual happy path: agent proposes `email.send` (ask), manager approves in dashboard, email goes out.
+- Manual happy path: agent proposes `conversation.reply` (ask), manager approves in dashboard, reply goes out through the tenant's configured connector.
 
 ### Phase 4 — Safety & policy (Weeks 9–10)
 
@@ -2599,6 +2622,7 @@ Deliverable: the agent handles three real categories end-to-end.
 
 Deliverable: a tenant can switch LLM providers without redeploying.
 
+- Tenant-supplied LLM API keys and billing ownership for metered inference by default; platform-billed LLM access is an explicit plan/product decision, not the runtime default.
 - A second provider Live layer (whichever wasn't built in phase 2).
 - Routing provider that picks per-agent based on config.
 - Fallback chains (`Effect.orElse`).
@@ -2627,7 +2651,7 @@ Deliverable: ready for first paying merchant.
 ### Cuts that make the MVP smaller if needed
 
 - One provider only in v1; abstraction kept, but only `AnthropicProviderLive` shipped.
-- One email provider in v1 (Postmark).
+- One conversation connector in v1 (Gmail), with platform/system mail kept separate.
 - Google Sheets supplier escalation only; no first-party plugins for Klaviyo/Gorgias yet.
 - Slack approvals only; defer email-link approvals.
 - Manual onboarding (engineer-assisted) before self-serve.

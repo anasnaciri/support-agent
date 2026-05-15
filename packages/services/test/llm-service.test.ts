@@ -8,7 +8,7 @@ import {
 } from "../src/llm-service.js";
 
 const baseReq = {
-  model: "anthropic/claude-3.5-sonnet",
+  model: "google/gemini-3.1-flash-lite",
   system: "test system",
   messages: [],
   tools: [],

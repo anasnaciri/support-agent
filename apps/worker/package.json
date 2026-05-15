@@ -7,12 +7,15 @@
   "scripts": {
     "build": "tsc -b",
     "clean": "tsc -b --clean",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "start:dev": "tsx src/index.ts",
+    "publish:event": "tsx scripts/publish-event.ts"
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
     "@support-agent/agents": "workspace:*",
     "@support-agent/db": "workspace:*",
+    "@support-agent/providers": "workspace:*",
     "@support-agent/services": "workspace:*",
     "@support-agent/tools": "workspace:*",
     "drizzle-orm": "^0.45.2",
@@ -20,6 +23,7 @@
     "pg-boss": "^12.18.2"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0"
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.0"
   }
 }

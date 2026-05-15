@@ -16,7 +16,7 @@ const baseAgent = (
   description: "Classifies inbound support tickets.",
   mode: "primary",
   provider: "openrouter",
-  model: "anthropic/claude-3.5-sonnet",
+  model: "google/gemini-3.1-flash-lite",
   promptTemplate: "...",
   tools: ["case.update_status"],
   permissionOverrides: overrides,

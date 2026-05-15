@@ -10,6 +10,7 @@
     { "path": "../../packages/services" },
     { "path": "../../packages/agents" },
     { "path": "../../packages/tools" },
-    { "path": "../../packages/db" }
+    { "path": "../../packages/db" },
+    { "path": "../../packages/providers" }
   ]
 }

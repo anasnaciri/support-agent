@@ -44,6 +44,9 @@ importers:
       '@support-agent/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@support-agent/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@support-agent/services':
         specifier: workspace:*
         version: link:../../packages/services
@@ -63,6 +66,9 @@ importers:
       '@types/node':
         specifier: ^25.8.0
         version: 25.8.0
+      tsx:
+        specifier: ^4.22.0
+        version: 4.22.0
 
   packages/agent-core:
     dependencies:

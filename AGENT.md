@@ -33,8 +33,8 @@ From master-plan §16 (dependency rule) and §20 (never moves earlier):
 
 - **DB / migrations:** Drizzle (Postgres)
 - **Workflow queue:** pg-boss (Postgres-only, no Redis)
-- **LLM:** Vercel AI SDK + OpenRouter — **not** the hand-rolled per-provider Effect Layers from master-plan §7. The AI SDK is the provider abstraction; `LLMService` is a thin Effect wrapper over it.
-- **Email — customer-facing (inbound + outbound):** the **tenant's own mailbox** via OAuth. Gmail first (scope `gmail.modify` — covers read, send, thread modify; no delete), Microsoft Graph (Outlook) later. The same connection that reads incoming customer email is what sends the reply, so replies thread naturally and land in the merchant's Sent folder.
+- **LLM:** Vercel AI SDK + OpenRouter first — **not** the hand-rolled per-provider Effect Layers from master-plan §7. The AI SDK is the provider abstraction; `LLMService` is a thin Effect wrapper over it. Dev can use a platform env key, but production design is tenant-supplied provider credentials / billing ownership by default for metered inference.
+- **Customer conversations (inbound + outbound):** provider-neutral connector architecture. Core code exposes a generic conversation/mailbox service and generic tools; Gmail is only the first connector implementation, with Microsoft Graph, IMAP/SMTP, helpdesk, and marketing-message connectors later. The same tenant connection that reads incoming customer messages should send replies so threading and provider history stay natural.
 - **Email — platform/system mail:** Resend, from a single platform domain. Used only for emails that come from the platform itself (manager invites to the dashboard, approval-link emails to managers, billing, system alerts). Never used for customer replies.
 
 ## Where code goes
