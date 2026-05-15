@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "llm:smoke": "tsx scripts/llm-smoke.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^2.9.0",
@@ -24,6 +25,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0"
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.0"
   }
 }

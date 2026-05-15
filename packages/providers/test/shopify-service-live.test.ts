@@ -1,0 +1,421 @@
+import { Effect, Exit, Layer } from "effect";
+import { describe, expect, it } from "vitest";
+import {
+  CustomerId,
+  CustomerNotFound,
+  NetworkError,
+  OrderId,
+  OrderNotFound,
+  ShopifyAuthFailed,
+  ShopifyRateLimited,
+  TenantId,
+} from "@support-agent/agent-core";
+import {
+  ShopifyCredentialStoreAny,
+  ShopifyService,
+} from "@support-agent/services";
+import {
+  ShopifyHttpFromFn,
+  ShopifyServiceLive,
+  type ShopifyHttpClient,
+} from "../src/shopify-service-live.js";
+
+// ============================================================
+// Test helpers
+// ============================================================
+
+const tenantId = TenantId("t1");
+const creds = {
+  shopDomain: "test-shop.myshopify.com",
+  accessToken: "shpat_test",
+  apiVersion: "2025-01",
+};
+
+type Capture = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string;
+};
+const captures: Array<Capture> = [];
+
+const respond = (
+  status: number,
+  bodyJson: unknown,
+): ReturnType<ShopifyHttpClient> =>
+  Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => bodyJson,
+    text: async () =>
+      typeof bodyJson === "string" ? bodyJson : JSON.stringify(bodyJson),
+  });
+
+const httpFromSequence = (
+  responses: ReadonlyArray<() => ReturnType<ShopifyHttpClient>>,
+): ShopifyHttpClient => {
+  let i = 0;
+  return (url, init) => {
+    captures.push({
+      url,
+      method: init.method,
+      headers: init.headers,
+      body: init.body,
+    });
+    const fn = responses[i++];
+    if (!fn) throw new Error(`unexpected http call #${i}`);
+    return fn();
+  };
+};
+
+const buildLayer = (http: ShopifyHttpClient) =>
+  ShopifyServiceLive.pipe(
+    Layer.provide(
+      Layer.merge(ShopifyHttpFromFn(http), ShopifyCredentialStoreAny(creds)),
+    ),
+  );
+
+const reset = () => {
+  captures.length = 0;
+};
+
+// ============================================================
+// Fixtures
+// ============================================================
+
+const ORDER_PAYLOAD = {
+  data: {
+    order: {
+      id: "gid://shopify/Order/12345",
+      name: "#1001",
+      email: "customer@example.com",
+      customer: { id: "gid://shopify/Customer/777" },
+      displayFulfillmentStatus: "IN_TRANSIT",
+      displayFinancialStatus: "PAID",
+      totalPriceSet: { shopMoney: { amount: "29.99", currencyCode: "USD" } },
+      shippingAddress: {
+        name: "Jane Doe",
+        address1: "123 Main",
+        address2: null,
+        city: "Brooklyn",
+        province: "NY",
+        country: "US",
+        zip: "11201",
+        phone: null,
+      },
+      lineItems: {
+        nodes: [
+          {
+            id: "gid://shopify/LineItem/1",
+            title: "Mug",
+            quantity: 2,
+            sku: "MUG-01",
+            variantTitle: null,
+          },
+        ],
+      },
+      fulfillments: [
+        {
+          id: "gid://shopify/Fulfillment/1",
+          displayStatus: "IN_TRANSIT",
+          status: null,
+          trackingInfo: [
+            {
+              company: "UPS",
+              number: "1Z999",
+              url: "https://wwwapps.ups.com/tracking?t=1Z999",
+            },
+          ],
+          estimatedDeliveryAt: "2026-05-20T00:00:00.000Z",
+          deliveredAt: null,
+          createdAt: "2026-05-14T00:00:00.000Z",
+          updatedAt: "2026-05-15T00:00:00.000Z",
+        },
+      ],
+      createdAt: "2026-05-14T00:00:00.000Z",
+      updatedAt: "2026-05-15T00:00:00.000Z",
+    },
+  },
+};
+
+const CUSTOMER_PAYLOAD = {
+  data: {
+    customer: {
+      id: "gid://shopify/Customer/777",
+      email: "customer@example.com",
+      firstName: "Jane",
+      lastName: "Doe",
+      phone: null,
+      numberOfOrders: "3",
+      amountSpent: { amount: "89.97", currencyCode: "USD" },
+      defaultAddress: {
+        name: "Jane Doe",
+        address1: "123 Main",
+        address2: null,
+        city: "Brooklyn",
+        province: "NY",
+        country: "US",
+        zip: "11201",
+        phone: null,
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  },
+};
+
+// ============================================================
+// Tests
+// ============================================================
+
+describe("ShopifyServiceLive — getOrder", () => {
+  it("queries the GraphQL Admin endpoint and maps the response", async () => {
+    reset();
+    const layer = buildLayer(httpFromSequence([() => respond(200, ORDER_PAYLOAD)]));
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const order = exit.value;
+    expect(order.id).toBe("gid://shopify/Order/12345");
+    expect(order.name).toBe("#1001");
+    expect(order.fulfillmentStatus).toBe("in_transit");
+    expect(order.financialStatus).toBe("paid");
+    expect(order.totalPrice).toEqual({ amount: "29.99", currencyCode: "USD" });
+    expect(order.lineItems).toHaveLength(1);
+    expect(order.lineItems[0]!.title).toBe("Mug");
+    expect(order.fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
+
+    // Verify HTTP request was correctly assembled.
+    expect(captures).toHaveLength(1);
+    expect(captures[0]!.url).toBe(
+      "https://test-shop.myshopify.com/admin/api/2025-01/graphql.json",
+    );
+    expect(captures[0]!.method).toBe("POST");
+    expect(captures[0]!.headers["X-Shopify-Access-Token"]).toBe("shpat_test");
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    expect(body.query).toContain("query GetOrder");
+    expect(body.variables).toEqual({ id: "gid://shopify/Order/12345" });
+  });
+
+  it("wraps plain ids with the order gid prefix", async () => {
+    reset();
+    const layer = buildLayer(httpFromSequence([() => respond(200, ORDER_PAYLOAD)]));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { id: string };
+    };
+    expect(body.variables.id).toBe("gid://shopify/Order/12345");
+  });
+
+  it("fails OrderNotFound when the response order is null", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, { data: { order: null } })]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("missing")),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderNotFound);
+    }
+  });
+});
+
+describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", () => {
+  it("getCustomer maps the GraphQL response", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, CUSTOMER_PAYLOAD)]),
+    );
+    const customer = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getCustomer(tenantId, CustomerId("777")),
+        ),
+        layer,
+      ),
+    );
+    expect(customer.id).toBe("gid://shopify/Customer/777");
+    expect(customer.email).toBe("customer@example.com");
+    expect(customer.ordersCount).toBe(3);
+    expect(customer.totalSpent).toEqual({
+      amount: "89.97",
+      currencyCode: "USD",
+    });
+  });
+
+  it("getCustomer fails CustomerNotFound when null", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, { data: { customer: null } })]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getCustomer(tenantId, CustomerId("missing")),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(CustomerNotFound);
+    }
+  });
+
+  it("searchByEmail returns the first match or null", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              customers: { nodes: [CUSTOMER_PAYLOAD.data.customer] },
+            },
+          }),
+        () => respond(200, { data: { customers: { nodes: [] } } }),
+      ]),
+    );
+    const found = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchByEmail(tenantId, "customer@example.com"),
+        ),
+        layer,
+      ),
+    );
+    expect(found?.email).toBe("customer@example.com");
+
+    const missing = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchByEmail(tenantId, "nobody@example.com"),
+        ),
+        layer,
+      ),
+    );
+    expect(missing).toBeNull();
+
+    // Verify the query string includes the email filter.
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string };
+    };
+    expect(body.variables.q).toBe("email:customer@example.com");
+  });
+
+  it("getFulfillment returns the order's fulfillments array", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              order: { fulfillments: ORDER_PAYLOAD.data.order.fulfillments },
+            },
+          }),
+      ]),
+    );
+    const fulfillments = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getFulfillment(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+    expect(fulfillments).toHaveLength(1);
+    expect(fulfillments[0]!.status).toBe("in_transit");
+    expect(fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
+  });
+});
+
+describe("ShopifyServiceLive — error mapping", () => {
+  const callOrder = (layer: Layer.Layer<ShopifyService>) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrder(tenantId, OrderId("12345")),
+        ),
+        layer,
+      ),
+    );
+
+  it("401 → ShopifyAuthFailed", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(401, "unauthorized")]),
+    );
+    const exit = await callOrder(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(ShopifyAuthFailed);
+    }
+  });
+
+  it("429 → ShopifyRateLimited", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(429, "rate limited")]),
+    );
+    const exit = await callOrder(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(ShopifyRateLimited);
+    }
+  });
+
+  it("500 → NetworkError", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(500, "server error")]),
+    );
+    const exit = await callOrder(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(NetworkError);
+    }
+  });
+
+  it("GraphQL errors array → NetworkError (response-invalid)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { errors: [{ message: "Field 'foo' missing" }] }),
+      ]),
+    );
+    const exit = await callOrder(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(NetworkError);
+    }
+  });
+});

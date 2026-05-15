@@ -5,6 +5,8 @@ export * from "./audit-log.js";
 export * from "./approval-service.js";
 export * from "./llm-service.js";
 export * from "./llm-config.js";
+export * from "./shopify-credentials.js";
+export * from "./shopify-service.js";
 export * from "./transaction-runner.js";
 export * from "./workflow-queue.js";
 export * from "./event-bus.js";

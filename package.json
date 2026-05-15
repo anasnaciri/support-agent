@@ -15,10 +15,12 @@
     "hooks:install": "sh scripts/install-git-hooks.sh --required",
     "prepare": "sh scripts/install-git-hooks.sh",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "llm:smoke": "pnpm --filter @support-agent/providers llm:smoke"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.6",
+    "tsx": "^4.22.0",
     "typescript": "^5.6.3",
     "vitest": "^4.1.6"
   }

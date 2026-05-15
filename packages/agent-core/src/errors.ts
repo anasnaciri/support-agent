@@ -18,6 +18,10 @@ export class ShopifyAuthFailed extends Data.TaggedError("ShopifyAuthFailed")<{
   readonly tenantId: TenantId;
 }> {}
 
+export class ShopifyAuthMissing extends Data.TaggedError("ShopifyAuthMissing")<{
+  readonly tenantId: TenantId;
+}> {}
+
 export class NetworkError extends Data.TaggedError("NetworkError")<{
   readonly cause: unknown;
 }> {}
@@ -55,6 +59,7 @@ export type ShopifyError =
   | CustomerNotFound
   | ShopifyRateLimited
   | ShopifyAuthFailed
+  | ShopifyAuthMissing
   | NetworkError;
 
 export type LLMError =
