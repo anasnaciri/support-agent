@@ -65,6 +65,15 @@ curl https://support-agent-api.nacirianas.com/healthz
 - Shopify Partner Dashboard "Allowed redirection URLs" must contain
   `https://support-agent-api.nacirianas.com/shopify/auth/callback`
   exactly — no trailing slash, no other paths.
+- Shopify Partner Dashboard "App URL" should point at
+  `https://support-agent-api.nacirianas.com/installed`. This is the
+  merchant-facing landing page; the callback redirects here after a
+  successful install, and Shopify also calls it when the merchant
+  re-opens the app from their admin (with `host` + `shop` query
+  parameters that the page can read).
+  `/shopify/install` remains the OAuth entry point — Shopify calls it
+  with `hmac`+`shop`+`host`+`timestamp` to kick off the install flow,
+  but it isn't the App URL.
 
 ## Tearing it down
 

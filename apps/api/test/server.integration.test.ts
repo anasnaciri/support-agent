@@ -19,6 +19,7 @@ import { startServer, type ServerHandle } from "../src/server.js";
 import {
   canonicalQueryForHmac,
   signState,
+  verifyState,
 } from "../src/shopify-install.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
@@ -31,6 +32,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   const encryptionKey = randomBytes(32);
   const encryptionKeyB64 = encryptionKey.toString("base64");
   const stateSigningKey = "test-state-key";
+  const autoCreatedShopDomains = [
+    "custom-dist-shop.myshopify.com",
+    "signed-install-shop.myshopify.com",
+  ] as const;
 
   const cfg: ApiConfig = {
     port: 0,
@@ -40,7 +45,6 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     shopify: {
       clientId: "test-client-id",
       clientSecret: "test-client-secret",
-      scopes: ["read_orders", "read_customers"],
       callbackUrl: "http://localhost/shopify/auth/callback",
       apiVersion: "2025-01",
     },
@@ -67,12 +71,13 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .delete(connectorConnections)
       .where(sql`${connectorConnections.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
-    // Sweep any auto-created tenants from the custom-distribution test.
-    // Each such tenant has shopify_domain set to a `custom-dist-*` shop;
-    // cascade on connector_connections.tenant_id cleans the row too.
-    await raw.db
-      .delete(tenants)
-      .where(sql`${tenants.shopifyDomain} LIKE 'custom-dist-%'`);
+    // Sweep any auto-created tenants from signed Shopify install paths;
+    // cascade on connector_connections.tenant_id cleans those rows too.
+    for (const shop of autoCreatedShopDomains) {
+      await raw.db
+        .delete(tenants)
+        .where(sql`${tenants.shopifyDomain} = ${shop}`);
+    }
     await raw.close();
     globalThis.fetch = originalFetch;
   });
@@ -89,7 +94,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(u.host).toBe("acme.myshopify.com");
     expect(u.pathname).toBe("/admin/oauth/authorize");
     expect(u.searchParams.get("client_id")).toBe("test-client-id");
-    expect(u.searchParams.get("scope")).toBe("read_orders,read_customers");
+    expect(u.searchParams.has("scope")).toBe(false);
     expect(u.searchParams.get("state")).toBeTruthy();
   });
 
@@ -107,6 +112,43 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       { redirect: "manual" },
     );
     expect(res.status).toBe(400);
+  });
+
+  it("GET /shopify/install accepts Shopify's signed install request without a tenant", async () => {
+    const shop = "signed-install-shop.myshopify.com";
+    const query: Record<string, string> = {
+      shop,
+      host: "YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvc2lnbmVkLWluc3RhbGw",
+      timestamp: "1700000004",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+
+    const url = new URL(`${baseUrl}/shopify/install`);
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+    url.searchParams.set("hmac", hmac);
+
+    const res = await fetch(url, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location");
+    expect(loc).toBeTruthy();
+    const redirect = new URL(loc!);
+    expect(redirect.host).toBe(shop);
+    expect(redirect.pathname).toBe("/admin/oauth/authorize");
+    expect(redirect.searchParams.get("client_id")).toBe("test-client-id");
+    expect(redirect.searchParams.has("scope")).toBe(false);
+
+    const state = redirect.searchParams.get("state");
+    expect(state).toBeTruthy();
+    const decoded = verifyState(stateSigningKey, state!);
+    expect(decoded).toBeTruthy();
+
+    const tenantRows = await raw!.db
+      .select()
+      .from(tenants)
+      .where(sql`${tenants.shopifyDomain} = ${shop}`);
+    expect(tenantRows).toHaveLength(1);
+    expect(tenantRows[0]!.id).toBe(decoded!.tenantId);
   });
 
   it("GET /shopify/auth/callback verifies HMAC, exchanges code, and persists the token", async () => {
@@ -144,7 +186,13 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
     cbUrl.searchParams.set("hmac", hmac);
 
-    const res = await fetch(cbUrl, { redirect: "manual" });
+    // `Accept: application/json` opts into the structured success body so
+    // the test can assert on it directly; browsers (no Accept header) get
+    // the 302-to-admin instead.
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -198,7 +246,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
     cbUrl.searchParams.set("hmac", hmac);
 
-    const res = await fetch(cbUrl, { redirect: "manual" });
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -249,7 +300,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
     cbUrl.searchParams.set("hmac", hmac);
 
-    const res = await fetch(cbUrl, { redirect: "manual" });
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
     expect(res.status).toBe(200);
 
     // Still exactly one tenants row for this shop (unique index prevents
@@ -265,6 +319,98 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .from(connectorConnections)
       .where(sql`${connectorConnections.shopDomain} = ${shop}`);
     expect(ccRows).toHaveLength(1);
+  });
+
+  it("GET /shopify/auth/callback without Accept: application/json redirects browsers to the merchant admin", async () => {
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/admin/oauth/access_token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "shpoa_browser",
+            scope: "read_orders",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return originalFetch(url as never, init);
+    }) as unknown as typeof fetch;
+
+    const shop = "custom-dist-shop.myshopify.com";
+    const query: Record<string, string> = {
+      shop,
+      code: "the-code-browser",
+      timestamp: "1700000010",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    // No Accept header → browser flow → 302 redirect to our /installed
+    // landing page (Shopify's documented non-embedded app pattern).
+    const res = await fetch(cbUrl, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location");
+    expect(loc).toBe("/installed?shop=custom-dist-shop.myshopify.com");
+  });
+
+  it("GET /shopify/auth/callback echoes the Shopify `host` param into the /installed redirect", async () => {
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/admin/oauth/access_token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "shpoa_host",
+            scope: "read_orders",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return originalFetch(url as never, init);
+    }) as unknown as typeof fetch;
+
+    const shop = "custom-dist-shop.myshopify.com";
+    const hostB64 = Buffer.from(
+      "admin.shopify.com/store/custom-dist-shop",
+    ).toString("base64");
+    const query: Record<string, string> = {
+      shop,
+      host: hostB64,
+      code: "the-code-host",
+      timestamp: "1700000011",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    const res = await fetch(cbUrl, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!, baseUrl);
+    expect(loc.pathname).toBe("/installed");
+    expect(loc.searchParams.get("shop")).toBe(shop);
+    expect(loc.searchParams.get("host")).toBe(hostB64);
+  });
+
+  it("GET /installed renders the connected landing page with the shop name", async () => {
+    const shop = "support-agent-test.myshopify.com";
+    const hostB64 = Buffer.from(
+      "admin.shopify.com/store/support-agent-test",
+    ).toString("base64");
+    const res = await fetch(
+      `${baseUrl}/installed?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(hostB64)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    const body = await res.text();
+    expect(body).toContain("Connected");
+    expect(body).toContain(shop);
+    expect(body).toContain(
+      "https://admin.shopify.com/store/support-agent-test",
+    );
   });
 
   it("GET /shopify/auth/callback with TAMPERED state returns 401 (does not silently fall back)", async () => {

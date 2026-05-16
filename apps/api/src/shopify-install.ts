@@ -84,7 +84,6 @@ export const verifyState = (
 export interface InstallUrlOptions {
   readonly shop: string;
   readonly clientId: string;
-  readonly scopes: ReadonlyArray<string>;
   readonly redirectUri: string;
   readonly state: string;
   /** Optional. Defaults to "per-user=false" (offline access mode). */
@@ -97,7 +96,6 @@ export const buildInstallUrl = (opts: InstallUrlOptions): string => {
   }
   const params = new URLSearchParams({
     client_id: opts.clientId,
-    scope: opts.scopes.join(","),
     redirect_uri: opts.redirectUri,
     state: opts.state,
   });

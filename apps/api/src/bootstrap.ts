@@ -16,7 +16,6 @@ import {
 export interface ShopifyAppConfig {
   readonly clientId: string;
   readonly clientSecret: string;
-  readonly scopes: ReadonlyArray<string>;
   readonly callbackUrl: string;
   readonly apiVersion: string;
 }
@@ -59,10 +58,6 @@ export const loadApiConfig = (): ApiConfig => {
     shopify: {
       clientId: requireEnv("SHOPIFY_APP_CLIENT_ID"),
       clientSecret: requireEnv("SHOPIFY_APP_CLIENT_SECRET"),
-      scopes: requireEnv("SHOPIFY_APP_SCOPES")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
       callbackUrl,
       apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2026-04",
     },

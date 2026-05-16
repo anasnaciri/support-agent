@@ -31,7 +31,6 @@ describe("shopify-install — buildInstallUrl", () => {
     const url = buildInstallUrl({
       shop: "acme.myshopify.com",
       clientId: "abc123",
-      scopes: ["read_orders", "read_customers"],
       redirectUri: "https://api.example.com/shopify/auth/callback",
       state: "state-token",
     });
@@ -39,7 +38,7 @@ describe("shopify-install — buildInstallUrl", () => {
     expect(u.host).toBe("acme.myshopify.com");
     expect(u.pathname).toBe("/admin/oauth/authorize");
     expect(u.searchParams.get("client_id")).toBe("abc123");
-    expect(u.searchParams.get("scope")).toBe("read_orders,read_customers");
+    expect(u.searchParams.has("scope")).toBe(false);
     expect(u.searchParams.get("redirect_uri")).toBe(
       "https://api.example.com/shopify/auth/callback",
     );
@@ -51,7 +50,6 @@ describe("shopify-install — buildInstallUrl", () => {
       buildInstallUrl({
         shop: "not-a-shop",
         clientId: "x",
-        scopes: [],
         redirectUri: "https://x",
         state: "s",
       }),

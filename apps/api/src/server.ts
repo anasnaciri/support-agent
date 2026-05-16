@@ -60,27 +60,53 @@ const sendText = (res: ServerResponse, status: number, body: string): void => {
  * OAuth `state` parameter so the callback can recover it and bind the
  * resulting access token to the right tenant.
  */
-const handleShopifyInstall = (
+const handleShopifyInstall = async (
   cfg: ApiConfig,
+  layer: ApiLayer,
   req: IncomingMessage,
   res: ServerResponse,
-): void => {
+): Promise<void> => {
   const { params } = readQuery(req);
   const shop = params["shop"];
-  const tenant = params["tenant"];
+  let tenant = params["tenant"];
   if (!shop || !isValidShopDomain(shop)) {
     sendJson(res, 400, { error: "missing_or_invalid_shop" });
     return;
   }
+
   if (!tenant) {
-    sendJson(res, 400, { error: "missing_tenant" });
-    return;
+    const hmac = params["hmac"];
+    if (!hmac) {
+      sendJson(res, 400, { error: "missing_tenant" });
+      return;
+    }
+    const hmacOk = verifyCallbackHmac({
+      clientSecret: cfg.shopify.clientSecret,
+      query: params,
+      receivedHmac: hmac,
+    });
+    if (!hmacOk) {
+      sendJson(res, 401, { error: "hmac_verification_failed" });
+      return;
+    }
+
+    const resolveExit = await Effect.runPromiseExit(
+      Effect.provide(resolveTenantByShop(shop), layer),
+    );
+    if (resolveExit._tag !== "Success") {
+      sendJson(res, 500, {
+        error: "tenant_resolve_failed",
+        detail: String(resolveExit.cause),
+      });
+      return;
+    }
+    tenant = resolveExit.value;
   }
+
   const state = signState(cfg.stateSigningKey, tenant);
   const installUrl = buildInstallUrl({
     shop,
     clientId: cfg.shopify.clientId,
-    scopes: cfg.shopify.scopes,
     redirectUri: cfg.shopify.callbackUrl,
     state,
   });
@@ -119,12 +145,37 @@ const handleShopifyCallback = async (
   const state = params["state"];
   const hmac = params["hmac"];
 
+  // Shopify sometimes redirects the merchant back to redirect_uri with an
+  // `error=...&error_description=...` instead of `code` (e.g. the merchant
+  // clicked "Cancel" on the consent screen, or the app version is missing
+  // a required field). Surface that directly so the caller can debug
+  // instead of getting a generic "missing_required_param".
+  if (params["error"]) {
+    sendJson(res, 400, {
+      error: "shopify_oauth_error",
+      shopifyError: params["error"],
+      shopifyErrorDescription: params["error_description"] ?? null,
+    });
+    return;
+  }
+
   if (!shop || !isValidShopDomain(shop)) {
-    sendJson(res, 400, { error: "invalid_shop" });
+    sendJson(res, 400, { error: "invalid_shop", shop: shop ?? null });
     return;
   }
   if (!code || !hmac) {
-    sendJson(res, 400, { error: "missing_required_param" });
+    const missing: Array<string> = [];
+    if (!code) missing.push("code");
+    if (!hmac) missing.push("hmac");
+    sendJson(res, 400, {
+      error: "missing_required_param",
+      missing,
+      // Echo the keys we DID see (not the values — those may include the
+      // shop's `host` token which is sensitive-ish). Helps tell apart "I
+      // hit the callback URL by hand" (empty) from "Shopify called us
+      // weirdly" (has `shop`, `host`, `timestamp` but no `code`).
+      receivedParamNames: Object.keys(params).sort(),
+    });
     return;
   }
   const hmacOk = verifyCallbackHmac({
@@ -202,12 +253,87 @@ const handleShopifyCallback = async (
     return;
   }
 
-  sendJson(res, 200, {
-    ok: true,
-    tenantId,
-    shop,
-    scopes: token.scope,
-  });
+  // Install succeeded — redirect to our App URL (`/installed`) per
+  // Shopify's non-embedded app pattern, echoing the `host` + `shop` so
+  // the landing page has the merchant context. JSON callers (tests,
+  // curl with `Accept: application/json`) still get a structured
+  // success body so assertions don't have to follow redirects.
+  const acceptsJson = (req.headers["accept"] ?? "")
+    .toString()
+    .toLowerCase()
+    .includes("application/json");
+  if (acceptsJson) {
+    sendJson(res, 200, {
+      ok: true,
+      tenantId,
+      shop,
+      scopes: token.scope,
+    });
+    return;
+  }
+  const installedQs = new URLSearchParams({ shop });
+  const hostParam = params["host"];
+  if (hostParam) installedQs.set("host", hostParam);
+  sendRedirect(res, `/installed?${installedQs.toString()}`);
+};
+
+/**
+ * GET /installed?host=<base64>&shop=<shop>
+ *
+ * The merchant-facing landing page after a successful install. Shopify
+ * also calls this URL when the merchant opens the app from their admin
+ * (the "App URL" in the Partner Dashboard release). For now we serve a
+ * minimal HTML "connected" page — once the dashboard exists this becomes
+ * its entry point.
+ *
+ * This route does NOT verify HMAC: Shopify only HMAC-signs entry-point
+ * calls (install + webhooks), and we redirect to this URL from our own
+ * callback after persisting the token, so there's no token-bearing
+ * Shopify request to verify here.
+ */
+const handleInstalledPage = (
+  req: IncomingMessage,
+  res: ServerResponse,
+): void => {
+  const { params } = readQuery(req);
+  const shop = params["shop"] ?? null;
+  const host = params["host"] ?? null;
+  let adminUrl: string | null = null;
+  if (host) {
+    try {
+      const decoded = Buffer.from(host, "base64").toString("utf8");
+      adminUrl = decoded.startsWith("admin.shopify.com/")
+        ? `https://${decoded}`
+        : null;
+    } catch {
+      adminUrl = null;
+    }
+  }
+  const safeShop = shop && shop.length < 200 ? shop : null;
+  const adminAnchor = adminUrl
+    ? `<a href="${adminUrl}">return to your Shopify admin</a>`
+    : "return to your Shopify admin";
+  // No-op pages should be HTML so the browser renders them; the user
+  // typed the URL or got bounced here from the callback.
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>support-agent — connected</title>
+  <style>
+    body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
+    code { background: #f3f3f3; padding: 0.1em 0.3em; border-radius: 4px; }
+    .ok { color: #1a7a3a; }
+  </style>
+</head>
+<body>
+  <h1 class="ok">Connected</h1>
+  <p>${safeShop ? `Your store <code>${safeShop}</code> is connected to support-agent.` : "Your store is connected to support-agent."}</p>
+  <p>You can ${adminAnchor} now. A dashboard for managing cases, agents, and approvals is on the way.</p>
+</body>
+</html>`);
 };
 
 // ============================================================
@@ -230,11 +356,15 @@ export const startServer = async (
     void (async () => {
       try {
         if (method === "GET" && url.startsWith("/shopify/install")) {
-          handleShopifyInstall(cfg, req, res);
+          await handleShopifyInstall(cfg, layer, req, res);
           return;
         }
         if (method === "GET" && url.startsWith("/shopify/auth/callback")) {
           await handleShopifyCallback(cfg, layer, req, res);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/installed")) {
+          handleInstalledPage(req, res);
           return;
         }
         if (method === "GET" && url === "/healthz") {

@@ -22,7 +22,6 @@ const baseEnv = (overrides: Record<string, string> = {}) => ({
   STATE_SIGNING_KEY: "state-key",
   SHOPIFY_APP_CLIENT_ID: "cid",
   SHOPIFY_APP_CLIENT_SECRET: "cs",
-  SHOPIFY_APP_SCOPES: "read_orders",
   SHOPIFY_APP_CALLBACK_URL:
     "https://api.support-agent.nacirianas.com/shopify/auth/callback",
   ...overrides,
