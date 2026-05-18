@@ -29,6 +29,11 @@ export const tenants = pgTable(
     id: uuid("id").primaryKey(),
     name: text("name").notNull(),
     shopifyDomain: text("shopify_domain"),
+    // WorkOS organization id (`org_…`). The dashboard maps a signed-in
+    // user's `organizationId` to `tenants.id` through this column. NULL
+    // for tenants with a Shopify install but no dashboard manager yet,
+    // or headless API-only tenants. Migration 0004.
+    workosOrganizationId: text("workos_organization_id"),
     settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -42,6 +47,10 @@ export const tenants = pgTable(
     uniqueIndex("tenants_shopify_domain_unique")
       .on(t.shopifyDomain)
       .where(sql`${t.shopifyDomain} IS NOT NULL`),
+    // One tenant per WorkOS organization. Same partial-index pattern.
+    uniqueIndex("tenants_workos_org_unique")
+      .on(t.workosOrganizationId)
+      .where(sql`${t.workosOrganizationId} IS NOT NULL`),
   ],
 );
 
@@ -181,8 +190,18 @@ export const approvals = pgTable(
  * is `''` (empty string) — we still want it in the unique key so the same
  * tenant can install multiple Shopify shops or multiple Gmail mailboxes.
  *
- * `access_token_encrypted` layout: iv (12) || gcm_tag (16) || ciphertext.
- * See `packages/services/src/crypto.ts`.
+ * `access_token_encrypted` (and `refresh_token_encrypted` when present)
+ * layout: iv (12) || gcm_tag (16) || ciphertext. See
+ * `packages/services/src/crypto.ts`.
+ *
+ * OAuth-shaped connectors (Gmail, Outlook) hand back short-lived access
+ * tokens + long-lived refresh tokens; we encrypt both columns. Shopify's
+ * managed-install offline access token never expires, so `refresh_token_*`
+ * stays null and `token_expires_at` stays null for it.
+ *
+ * `metadata` is a per-connector JSON blob for state that doesn't deserve
+ * its own column. Today: Gmail's `historyId` (last successfully processed
+ * mailbox history cursor) and `watchExpiresAt` (Gmail watch lease expiry).
  */
 export const connectorConnections = pgTable(
   "connector_connections",
@@ -194,6 +213,9 @@ export const connectorConnections = pgTable(
     provider: text("provider").notNull(),
     shopDomain: text("shop_domain").notNull().default(""),
     accessTokenEncrypted: bytea("access_token_encrypted").notNull(),
+    refreshTokenEncrypted: bytea("refresh_token_encrypted"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
     apiVersion: text("api_version"),
     status: text("status").notNull().default("active"),

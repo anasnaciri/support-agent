@@ -21,9 +21,32 @@ export type ConnectorProvider = "shopify" | "gmail" | "outlook";
 export interface ConnectorConnection {
   readonly tenantId: TenantId;
   readonly provider: ConnectorProvider;
-  /** "" for non-shoppable connectors (gmail/outlook), otherwise the myshopify domain. */
+  /**
+   * Provider-specific second key. For Shopify it's the `*.myshopify.com`
+   * domain; for Gmail it's the mailbox address (`user@gmail.com`); for
+   * Outlook the UPN. The unique key on (tenant, provider, shopDomain) lets a
+   * single tenant install multiple shops / mailboxes per provider.
+   */
   readonly shopDomain: string;
   readonly accessToken: string;
+  /**
+   * Long-lived refresh token for OAuth providers (Gmail, Outlook). `null`
+   * for static-token providers (Shopify offline access). Used by the
+   * connector's HTTP layer to mint a fresh access token when the current
+   * one is past `tokenExpiresAt`.
+   */
+  readonly refreshToken: string | null;
+  /**
+   * Absolute time at which `accessToken` expires. `null` for non-expiring
+   * tokens (Shopify offline access).
+   */
+  readonly tokenExpiresAt: Date | null;
+  /**
+   * Per-connector state that doesn't deserve its own column. Today: Gmail's
+   * `historyId` (last processed mailbox history cursor) and `watchExpiresAt`
+   * (Gmail watch lease expiry). Always an object — never null.
+   */
+  readonly metadata: Readonly<Record<string, unknown>>;
   readonly scopes: ReadonlyArray<string>;
   readonly apiVersion: string | null;
   readonly installedAt: Date;
@@ -37,6 +60,27 @@ export interface PutConnectorInput {
   readonly accessToken: string;
   readonly scopes: ReadonlyArray<string>;
   readonly apiVersion?: string;
+  readonly refreshToken?: string | null;
+  readonly tokenExpiresAt?: Date | null;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface PatchConnectorMetadataInput {
+  readonly tenantId: TenantId;
+  readonly provider: ConnectorProvider;
+  readonly shopDomain: string;
+  /** Shallow-merged on top of the existing metadata blob. */
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
+
+export interface PatchConnectorTokensInput {
+  readonly tenantId: TenantId;
+  readonly provider: ConnectorProvider;
+  readonly shopDomain: string;
+  readonly accessToken: string;
+  readonly tokenExpiresAt: Date | null;
+  /** When omitted, the existing refresh token is kept. */
+  readonly refreshToken?: string | null;
 }
 
 // ============================================================
@@ -81,6 +125,29 @@ export class ConnectorCredentialStore extends Context.Tag(
     readonly listForTenant: (
       tenantId: TenantId,
     ) => Effect.Effect<ReadonlyArray<ConnectorConnection>, ConnectorStoreDbError>;
+
+    /**
+     * Refresh-token / access-token rotation. Hot path on the Gmail connector
+     * — every call after `tokenExpiresAt` lapses goes through here.
+     */
+    readonly patchTokens: (
+      input: PatchConnectorTokensInput,
+    ) => Effect.Effect<
+      ConnectorConnection,
+      ConnectorNotFound | ConnectorStoreDbError
+    >;
+
+    /**
+     * Shallow-merge the per-connector metadata blob (e.g. Gmail historyId,
+     * watch expiry). Atomic single-row UPDATE so concurrent webhook
+     * deliveries don't clobber each other.
+     */
+    readonly patchMetadata: (
+      input: PatchConnectorMetadataInput,
+    ) => Effect.Effect<
+      ConnectorConnection,
+      ConnectorNotFound | ConnectorStoreDbError
+    >;
   }
 >() {}
 
@@ -111,17 +178,31 @@ export const ConnectorCredentialStoreTest = (
       input: PutConnectorInput,
     ) => Effect.Effect<ConnectorConnection, ConnectorStoreDbError> = (input) =>
       Effect.sync(() => {
+        const k = key(input.tenantId, input.provider, input.shopDomain);
+        const prior = store.get(k);
         const row: ConnectorConnection = {
           tenantId: input.tenantId,
           provider: input.provider,
           shopDomain: input.shopDomain,
           accessToken: input.accessToken,
+          refreshToken:
+            input.refreshToken !== undefined
+              ? input.refreshToken
+              : (prior?.refreshToken ?? null),
+          tokenExpiresAt:
+            input.tokenExpiresAt !== undefined
+              ? input.tokenExpiresAt
+              : (prior?.tokenExpiresAt ?? null),
+          metadata:
+            input.metadata !== undefined
+              ? { ...(prior?.metadata ?? {}), ...input.metadata }
+              : (prior?.metadata ?? {}),
           scopes: input.scopes,
           apiVersion: input.apiVersion ?? null,
-          installedAt: new Date(),
+          installedAt: prior?.installedAt ?? new Date(),
           status: "active",
         };
-        store.set(key(input.tenantId, input.provider, input.shopDomain), row);
+        store.set(k, row);
         return row;
       });
 
@@ -200,10 +281,75 @@ export const ConnectorCredentialStoreTest = (
         Array.from(store.values()).filter((r) => r.tenantId === tenantId),
       );
 
+    const patchTokens: (
+      input: PatchConnectorTokensInput,
+    ) => Effect.Effect<
+      ConnectorConnection,
+      ConnectorNotFound | ConnectorStoreDbError
+    > = (input) =>
+      Effect.suspend((): Effect.Effect<
+        ConnectorConnection,
+        ConnectorNotFound | ConnectorStoreDbError
+      > => {
+        const k = key(input.tenantId, input.provider, input.shopDomain);
+        const prior = store.get(k);
+        if (!prior) {
+          return Effect.fail(
+            new ConnectorNotFound({
+              tenantId: input.tenantId,
+              provider: input.provider,
+              shopDomain: input.shopDomain,
+            }),
+          );
+        }
+        const next: ConnectorConnection = {
+          ...prior,
+          accessToken: input.accessToken,
+          tokenExpiresAt: input.tokenExpiresAt,
+          refreshToken:
+            input.refreshToken !== undefined
+              ? input.refreshToken
+              : prior.refreshToken,
+        };
+        store.set(k, next);
+        return Effect.succeed(next);
+      });
+
+    const patchMetadata: (
+      input: PatchConnectorMetadataInput,
+    ) => Effect.Effect<
+      ConnectorConnection,
+      ConnectorNotFound | ConnectorStoreDbError
+    > = (input) =>
+      Effect.suspend((): Effect.Effect<
+        ConnectorConnection,
+        ConnectorNotFound | ConnectorStoreDbError
+      > => {
+        const k = key(input.tenantId, input.provider, input.shopDomain);
+        const prior = store.get(k);
+        if (!prior) {
+          return Effect.fail(
+            new ConnectorNotFound({
+              tenantId: input.tenantId,
+              provider: input.provider,
+              shopDomain: input.shopDomain,
+            }),
+          );
+        }
+        const next: ConnectorConnection = {
+          ...prior,
+          metadata: { ...prior.metadata, ...input.metadata },
+        };
+        store.set(k, next);
+        return Effect.succeed(next);
+      });
+
     return ConnectorCredentialStore.of({
       put,
       get,
       revoke,
       listForTenant,
+      patchTokens,
+      patchMetadata,
     });
   });

@@ -7,6 +7,8 @@ import {
   encrypt,
   type ConnectorConnection,
   type ConnectorProvider,
+  type PatchConnectorMetadataInput,
+  type PatchConnectorTokensInput,
   type PutConnectorInput,
 } from "@support-agent/services";
 import {
@@ -39,6 +41,11 @@ const rowToConnection = (
   provider: r.provider as ConnectorProvider,
   shopDomain: r.shopDomain,
   accessToken: decryptToString(key, r.accessTokenEncrypted),
+  refreshToken: r.refreshTokenEncrypted
+    ? decryptToString(key, r.refreshTokenEncrypted)
+    : null,
+  tokenExpiresAt: r.tokenExpiresAt,
+  metadata: (r.metadata ?? {}) as Readonly<Record<string, unknown>>,
   scopes: r.scopes,
   apiVersion: r.apiVersion,
   installedAt: r.installedAt,
@@ -64,8 +71,35 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
           const encrypted = encrypt(encryptionKey, input.accessToken);
+          const encryptedRefresh =
+            input.refreshToken !== undefined && input.refreshToken !== null
+              ? encrypt(encryptionKey, input.refreshToken)
+              : null;
           const id = randomUUID();
           const now = new Date();
+          // `metadata` defaults to {} so the column NOT NULL is honoured on
+          // first insert. On conflict, the SET clause only includes
+          // `metadata` when the caller explicitly passes it — re-installing
+          // shouldn't clobber the existing watch/historyId blob.
+          const setClause: Record<string, unknown> = {
+            accessTokenEncrypted: encrypted,
+            scopes: [...input.scopes],
+            status: "active",
+            revokedAt: null,
+            updatedAt: now,
+          };
+          if (input.apiVersion !== undefined) {
+            setClause["apiVersion"] = input.apiVersion;
+          }
+          if (input.refreshToken !== undefined) {
+            setClause["refreshTokenEncrypted"] = encryptedRefresh;
+          }
+          if (input.tokenExpiresAt !== undefined) {
+            setClause["tokenExpiresAt"] = input.tokenExpiresAt;
+          }
+          if (input.metadata !== undefined) {
+            setClause["metadata"] = input.metadata;
+          }
           const rows = yield* wrap(
             db
               .insert(connectorConnections)
@@ -75,6 +109,15 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
                 provider: input.provider,
                 shopDomain: input.shopDomain,
                 accessTokenEncrypted: encrypted,
+                ...(encryptedRefresh !== null
+                  ? { refreshTokenEncrypted: encryptedRefresh }
+                  : {}),
+                ...(input.tokenExpiresAt !== undefined
+                  ? { tokenExpiresAt: input.tokenExpiresAt }
+                  : {}),
+                ...(input.metadata !== undefined
+                  ? { metadata: input.metadata }
+                  : {}),
                 scopes: [...input.scopes],
                 ...(input.apiVersion !== undefined
                   ? { apiVersion: input.apiVersion }
@@ -90,16 +133,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
                   connectorConnections.provider,
                   connectorConnections.shopDomain,
                 ],
-                set: {
-                  accessTokenEncrypted: encrypted,
-                  scopes: [...input.scopes],
-                  ...(input.apiVersion !== undefined
-                    ? { apiVersion: input.apiVersion }
-                    : {}),
-                  status: "active",
-                  revokedAt: null,
-                  updatedAt: now,
-                },
+                set: setClause,
               })
               .returning(),
           );
@@ -210,11 +244,125 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
           return rows.map((r) => rowToConnection(r, encryptionKey));
         });
 
+      const patchTokens = (
+        input: PatchConnectorTokensInput,
+      ): Effect.Effect<
+        ConnectorConnection,
+        ConnectorNotFound | ConnectorStoreDbError
+      > =>
+        Effect.gen(function* () {
+          const db = yield* useDb(defaultDb);
+          const encrypted = encrypt(encryptionKey, input.accessToken);
+          const now = new Date();
+          const setClause: Record<string, unknown> = {
+            accessTokenEncrypted: encrypted,
+            tokenExpiresAt: input.tokenExpiresAt,
+            updatedAt: now,
+          };
+          if (input.refreshToken !== undefined) {
+            setClause["refreshTokenEncrypted"] =
+              input.refreshToken !== null
+                ? encrypt(encryptionKey, input.refreshToken)
+                : null;
+          }
+          const rows = yield* wrap(
+            db
+              .update(connectorConnections)
+              .set(setClause)
+              .where(
+                and(
+                  eq(connectorConnections.tenantId, input.tenantId),
+                  eq(connectorConnections.provider, input.provider),
+                  eq(connectorConnections.shopDomain, input.shopDomain),
+                ),
+              )
+              .returning(),
+          );
+          const row = rows[0];
+          if (!row) {
+            return yield* Effect.fail(
+              new ConnectorNotFound({
+                tenantId: input.tenantId,
+                provider: input.provider,
+                shopDomain: input.shopDomain,
+              }),
+            );
+          }
+          return rowToConnection(row, encryptionKey);
+        });
+
+      const patchMetadata = (
+        input: PatchConnectorMetadataInput,
+      ): Effect.Effect<
+        ConnectorConnection,
+        ConnectorNotFound | ConnectorStoreDbError
+      > =>
+        Effect.gen(function* () {
+          const db = yield* useDb(defaultDb);
+          // Read-modify-write inside a SELECT FOR UPDATE so two concurrent
+          // webhook pushes don't lose each other's keys. The shopDomain
+          // index makes this single-row lookup cheap.
+          const rows = yield* wrap(
+            db
+              .select()
+              .from(connectorConnections)
+              .where(
+                and(
+                  eq(connectorConnections.tenantId, input.tenantId),
+                  eq(connectorConnections.provider, input.provider),
+                  eq(connectorConnections.shopDomain, input.shopDomain),
+                ),
+              )
+              .for("update")
+              .limit(1),
+          );
+          const prior = rows[0];
+          if (!prior) {
+            return yield* Effect.fail(
+              new ConnectorNotFound({
+                tenantId: input.tenantId,
+                provider: input.provider,
+                shopDomain: input.shopDomain,
+              }),
+            );
+          }
+          const merged = {
+            ...((prior.metadata as Record<string, unknown> | null) ?? {}),
+            ...input.metadata,
+          };
+          const updated = yield* wrap(
+            db
+              .update(connectorConnections)
+              .set({ metadata: merged, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(connectorConnections.tenantId, input.tenantId),
+                  eq(connectorConnections.provider, input.provider),
+                  eq(connectorConnections.shopDomain, input.shopDomain),
+                ),
+              )
+              .returning(),
+          );
+          const row = updated[0];
+          if (!row) {
+            return yield* Effect.fail(
+              new ConnectorNotFound({
+                tenantId: input.tenantId,
+                provider: input.provider,
+                shopDomain: input.shopDomain,
+              }),
+            );
+          }
+          return rowToConnection(row, encryptionKey);
+        });
+
       return ConnectorCredentialStore.of({
         put,
         get,
         revoke,
         listForTenant,
+        patchTokens,
+        patchMetadata,
       });
     }),
   );
