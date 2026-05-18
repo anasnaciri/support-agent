@@ -42,6 +42,43 @@ export const verifyWebhookSignature = (
   return timingSafeEqualHex(expected, opts.signature);
 };
 
+/**
+ * Verify a Shopify webhook HMAC.
+ *
+ * Shopify signs webhooks with HMAC-SHA256 over the RAW request body bytes
+ * using the app's `client_secret` (NOT a separate webhook secret) and ships
+ * the result as **base64** in the `X-Shopify-Hmac-Sha256` header.
+ *
+ * This is a different scheme from:
+ *   - `verifyWebhookSignature` — expects hex
+ *   - the OAuth callback HMAC — computed over a canonical query string
+ *
+ * The body MUST be the unmodified raw bytes. Re-encoding through JSON.parse
+ * + JSON.stringify will change byte order / whitespace and the HMAC won't
+ * verify.
+ */
+export const verifyShopifyWebhookHmac = (opts: {
+  readonly clientSecret: string;
+  readonly rawBody: Buffer;
+  readonly receivedHmacB64: string;
+}): boolean => {
+  const expected = createHmac("sha256", opts.clientSecret)
+    .update(opts.rawBody)
+    .digest();
+  let received: Buffer;
+  try {
+    received = Buffer.from(opts.receivedHmacB64, "base64");
+  } catch {
+    return false;
+  }
+  if (expected.length !== received.length) return false;
+  try {
+    return timingSafeEqual(expected, received);
+  } catch {
+    return false;
+  }
+};
+
 export const verifySignedRequest = (
   opts: VerifySignedRequestOptions,
 ): SignedRequestResult => {

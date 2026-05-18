@@ -1,6 +1,8 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   computeHmac,
+  verifyShopifyWebhookHmac,
   verifySignedRequest,
   verifyWebhookSignature,
 } from "../src/hmac.js";
@@ -53,6 +55,71 @@ describe("verifyWebhookSignature", () => {
         algorithm: "sha512",
       }),
     ).toBe(true);
+  });
+});
+
+describe("verifyShopifyWebhookHmac", () => {
+  const clientSecret = "shpss_fake_secret";
+  const payload = Buffer.from(
+    '{"id":1,"name":"acme.myshopify.com","domain":"acme.com"}',
+    "utf8",
+  );
+  const goodB64 = createHmac("sha256", clientSecret)
+    .update(payload)
+    .digest("base64");
+
+  it("accepts a valid base64 signature over the raw bytes", () => {
+    expect(
+      verifyShopifyWebhookHmac({
+        clientSecret,
+        rawBody: payload,
+        receivedHmacB64: goodB64,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a tampered body", () => {
+    const tampered = Buffer.concat([payload, Buffer.from(" ", "utf8")]);
+    expect(
+      verifyShopifyWebhookHmac({
+        clientSecret,
+        rawBody: tampered,
+        receivedHmacB64: goodB64,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a wrong secret", () => {
+    expect(
+      verifyShopifyWebhookHmac({
+        clientSecret: "wrong",
+        rawBody: payload,
+        receivedHmacB64: goodB64,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a hex-encoded signature (must be base64)", () => {
+    const hex = createHmac("sha256", clientSecret)
+      .update(payload)
+      .digest("hex");
+    expect(
+      verifyShopifyWebhookHmac({
+        clientSecret,
+        rawBody: payload,
+        receivedHmacB64: hex,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects an empty signature", () => {
+    expect(
+      verifyShopifyWebhookHmac({
+        clientSecret,
+        rawBody: payload,
+        receivedHmacB64: "",
+      }),
+    ).toBe(false);
   });
 });
 

@@ -4,6 +4,32 @@ import { eq } from "drizzle-orm";
 import { DbClient, tenants } from "@support-agent/db";
 
 /**
+ * Look up a tenant by Shopify shop domain without auto-creating. Returns
+ * the tenant id, or `null` if no tenant is linked to that shop.
+ *
+ * Used by the `app/uninstalled` webhook: if Shopify fires an uninstall for
+ * a shop we don't know, the webhook is a no-op — we MUST NOT mint a tenant
+ * here (that's only valid on install).
+ */
+export const findTenantByShop = (
+  shopDomain: string,
+): Effect.Effect<string | null, Error, DbClient> =>
+  Effect.gen(function* () {
+    const db = yield* DbClient;
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ id: tenants.id })
+          .from(tenants)
+          .where(eq(tenants.shopifyDomain, shopDomain))
+          .limit(1),
+      catch: (cause) =>
+        new Error(`findTenantByShop select failed: ${String(cause)}`),
+    });
+    return rows[0]?.id ?? null;
+  });
+
+/**
  * Look up a tenant by Shopify shop domain. If none exists, mint one and
  * link it to the shop.
  *
