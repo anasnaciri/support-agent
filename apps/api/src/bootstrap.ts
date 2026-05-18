@@ -1,9 +1,11 @@
 import { Effect, Layer } from "effect";
 import {
+  ApprovalService,
   ConnectorCredentialStore,
   parseKey,
 } from "@support-agent/services";
 import {
+  ApprovalServiceLive,
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
@@ -20,12 +22,46 @@ export interface ShopifyAppConfig {
   readonly apiVersion: string;
 }
 
+export interface GoogleAppConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly callbackUrl: string;
+  /**
+   * Fully-qualified Pub/Sub topic the Gmail watch publishes to, e.g.
+   * `projects/<gcp-project>/topics/gmail-inbox`. Required at install time
+   * because the OAuth callback registers a `users.watch` on this topic.
+   */
+  readonly pubsubTopic: string;
+  /**
+   * Shared secret the Pub/Sub push subscription must include in the
+   * webhook URL query (`?token=…`). Without this, anyone hitting our
+   * `/webhooks/conversations/gmail/:tenantId` endpoint can replay
+   * mailbox-update notifications. Generate with `randomBytes(32).hex`.
+   */
+  readonly pushToken: string;
+}
+
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
   readonly encryptionKey: Buffer;
   readonly stateSigningKey: string;
   readonly shopify: ShopifyAppConfig;
+  /**
+   * `null` when Google OAuth env vars are unset — the API still boots and
+   * Shopify routes work; `/google/*` and `/webhooks/conversations/gmail/*`
+   * respond 503 in that case. Dev convenience: a single-tenant dev box
+   * doesn't have to provision Google credentials to test Shopify.
+   */
+  readonly google: GoogleAppConfig | null;
+  /**
+   * Shared HMAC secret for approval-link tokens. Verifies the signed
+   * `?token=...` on `/approvals/:id/approve|reject` URLs. MUST be the
+   * same value the worker uses to sign tokens (APPROVAL_SIGNING_KEY env
+   * in apps/worker). Required even when no approvals are yet in flight —
+   * the worker may have already mailed live links before this restart.
+   */
+  readonly approvalSigningKey: string;
 }
 
 const requireEnv = (name: string): string => {
@@ -50,6 +86,22 @@ export const loadApiConfig = (): ApiConfig => {
       `SHOPIFY_APP_CALLBACK_URL must use https:// (got ${callbackUrl}). Expose apps/api through the Cloudflare Tunnel in cloudflared/ or set ALLOW_HTTP_CALLBACK=1 for a non-Shopify local test.`,
     );
   }
+  const googleClientId = process.env["GOOGLE_OAUTH_CLIENT_ID"];
+  const googleClientSecret = process.env["GOOGLE_OAUTH_CLIENT_SECRET"];
+  const googleCallbackUrl = process.env["GOOGLE_OAUTH_CALLBACK_URL"];
+  const googlePubsubTopic = process.env["GMAIL_PUBSUB_TOPIC"];
+  const googlePushToken = process.env["GMAIL_PUSH_TOKEN"];
+  const googleConfigured =
+    !!googleClientId &&
+    !!googleClientSecret &&
+    !!googleCallbackUrl &&
+    !!googlePubsubTopic &&
+    !!googlePushToken;
+  if (googleConfigured && !googleCallbackUrl.startsWith("https://") && !allowHttp) {
+    throw new Error(
+      `GOOGLE_OAUTH_CALLBACK_URL must use https:// (got ${googleCallbackUrl}). Google rejects http callbacks except for http://localhost loopback installs.`,
+    );
+  }
   return {
     port: Number(process.env["API_PORT"] ?? 4000),
     databaseUrl: requireEnv("DATABASE_URL"),
@@ -61,6 +113,16 @@ export const loadApiConfig = (): ApiConfig => {
       callbackUrl,
       apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2026-04",
     },
+    approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
+    google: googleConfigured
+      ? {
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          callbackUrl: googleCallbackUrl,
+          pubsubTopic: googlePubsubTopic,
+          pushToken: googlePushToken,
+        }
+      : null,
   };
 };
 
@@ -73,13 +135,14 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const store = ConnectorCredentialStoreLive(cfg.encryptionKey).pipe(
     Layer.provide(dbLayer),
   );
-  // Expose both layers so request handlers can yield ConnectorCredentialStore
-  // and (if needed later) DbClient directly.
-  return Layer.mergeAll(store, dbLayer);
+  // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
+  // row decided in the same Live impl the runtime uses to create them.
+  const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
+  return Layer.mergeAll(store, approvals, dbLayer);
 };
 
 export type ApiLayer = Layer.Layer<
-  ConnectorCredentialStore | DbClient,
+  ConnectorCredentialStore | ApprovalService | DbClient,
   never,
   never
 >;

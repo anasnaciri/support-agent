@@ -1,5 +1,5 @@
 import type { AgentId } from "./ids.js";
-import type { OutboundEmailDraft, SupplierEscalationPayload } from "./payloads.js";
+import type { OutboundMessageDraft, SupplierEscalationPayload } from "./payloads.js";
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -56,7 +56,7 @@ export type LLMDecision =
     }
   | {
       readonly type: "wait_for_customer";
-      readonly message: OutboundEmailDraft;
+      readonly message: OutboundMessageDraft;
     }
   | {
       readonly type: "escalate_supplier";

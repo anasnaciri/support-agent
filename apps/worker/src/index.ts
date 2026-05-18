@@ -7,6 +7,10 @@ import {
   ensureWorkflowQueue,
   reviveDomainEvent,
 } from "./workflow-queue-live.js";
+import {
+  GMAIL_WATCH_RENEWAL_QUEUE,
+  registerGmailWatchRenewal,
+} from "./gmail-watch-renewal-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -68,6 +72,19 @@ const main = async (): Promise<void> => {
   console.log(
     `[worker] running. workerId=${workerId} queue=${DEFAULT_WORKFLOW_QUEUE_NAME}`,
   );
+
+  // Schedule the Gmail watch-renewal cron. No-ops when Google OAuth env
+  // vars are missing — single-tenant dev runs that only exercise Shopify
+  // don't need this.
+  const renewalRegistered = await registerGmailWatchRenewal({
+    boss,
+    runtimeLayer,
+  });
+  if (renewalRegistered) {
+    console.log(
+      `[worker] scheduled gmail-watch-renewal cron on queue=${GMAIL_WATCH_RENEWAL_QUEUE}`,
+    );
+  }
 
   const onShutdown = async (signal: NodeJS.Signals) => {
     console.log(`[worker] received ${signal}, shutting down`);

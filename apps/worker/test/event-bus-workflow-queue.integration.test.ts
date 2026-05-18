@@ -78,7 +78,7 @@ describe.skip("EventBusPgBossLive + WorkflowQueuePgBossLive", () => {
       );
 
       const event = {
-        type: "email.received" as const,
+        type: "message.received" as const,
         tenantId: TenantId("tenant-1"),
         threadId: ThreadId("thread-1"),
         payload: {
@@ -109,8 +109,8 @@ describe.skip("EventBusPgBossLive + WorkflowQueuePgBossLive", () => {
       expect(published.key).toBe("thread:tenant-1:thread-1");
       expect(job.eventId).toBe("event-1");
       expect(job.key).toBe("thread:tenant-1:thread-1");
-      expect(job.event.type).toBe("email.received");
-      if (job.event.type === "email.received") {
+      expect(job.event.type).toBe("message.received");
+      if (job.event.type === "message.received") {
         expect(job.event.payload.receivedAt).toBeInstanceOf(Date);
         expect(job.event.payload.receivedAt.toISOString()).toBe(
           "2026-05-14T12:00:00.000Z",

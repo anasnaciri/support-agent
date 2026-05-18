@@ -60,7 +60,7 @@ export const workflowEventKey = (
   eventId: string,
 ): string => {
   switch (event.type) {
-    case "email.received":
+    case "message.received":
       return `thread:${event.tenantId}:${event.threadId}`;
     case "customer.replied":
     case "supplier.updated":

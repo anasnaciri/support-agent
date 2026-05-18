@@ -20,6 +20,7 @@ const baseEnv = (overrides: Record<string, string> = {}) => ({
   DATABASE_URL: "postgres://x@y/z",
   CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
   STATE_SIGNING_KEY: "state-key",
+  APPROVAL_SIGNING_KEY: "approval-key",
   SHOPIFY_APP_CLIENT_ID: "cid",
   SHOPIFY_APP_CLIENT_SECRET: "cs",
   SHOPIFY_APP_CALLBACK_URL:

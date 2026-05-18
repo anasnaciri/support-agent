@@ -1,7 +1,11 @@
 import { Effect } from "effect";
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ConnectorCredentialStore } from "@support-agent/services";
-import { TenantId } from "@support-agent/agent-core";
+import {
+  ConnectorCredentialStore,
+  verifyShopifyWebhookHmac,
+} from "@support-agent/services";
+import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
 import {
   buildInstallUrl,
   isValidShopDomain,
@@ -10,7 +14,34 @@ import {
   verifyState,
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
-import { resolveTenantByShop } from "./tenant-resolver.js";
+import { findTenantByShop, resolveTenantByShop } from "./tenant-resolver.js";
+import {
+  parseCustomersDataRequest,
+  parseCustomersRedact,
+  parseShopRedact,
+  parseUninstallPayload,
+  readRawBody,
+} from "./shopify-webhook.js";
+import {
+  recordDataRequest,
+  redactCustomer,
+  redactShop,
+} from "./compliance-redaction.js";
+import { buildGoogleAuthorizeUrl } from "./google-install.js";
+import {
+  exchangeCodeForGoogleToken,
+  fetchGoogleUserEmail,
+} from "./google-callback.js";
+import { startGmailWatch } from "@support-agent/providers";
+import { handleGmailPushNotification } from "./gmail-webhook.js";
+import {
+  decideApproval,
+  extractToken,
+  makePgBossApprovalPublisher,
+  matchApprovalRoute,
+  renderApprovalPage,
+} from "./approval-endpoints.js";
+import { PgBoss } from "pg-boss";
 import {
   buildApiLayers,
   loadApiConfig,
@@ -46,6 +77,11 @@ const sendRedirect = (res: ServerResponse, target: string): void => {
 
 const sendText = (res: ServerResponse, status: number, body: string): void => {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end(body);
+};
+
+const sendHtml = (res: ServerResponse, status: number, body: string): void => {
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
   res.end(body);
 };
 
@@ -336,6 +372,685 @@ const handleInstalledPage = (
 </html>`);
 };
 
+/**
+ * POST /webhooks/shopify/app/uninstalled
+ *
+ * Shopify fires this webhook after a merchant uninstalls the app. The
+ * shop's access token is already invalid by the time we receive it — we
+ * mark our `connector_connections` row `revoked` so any subsequent
+ * `shopify.*` tool call fails loudly with `ShopifyAuthMissing` instead of
+ * hammering a dead token.
+ *
+ * Lifecycle:
+ *   1. Read raw body + `X-Shopify-Hmac-Sha256` + `X-Shopify-Shop-Domain`.
+ *   2. Verify HMAC over the raw bytes with `client_secret`. Bad sig → 401.
+ *   3. Find the tenant linked to that shop. Unknown shop → 200 no-op.
+ *   4. `revoke(tenantId, "shopify", shopDomain)`. Already-revoked or
+ *      missing row → still 200 (idempotent: nothing to do).
+ *   5. Return 200 once HMAC verified, regardless of downstream state.
+ *      Returning a 5xx would make Shopify retry indefinitely.
+ */
+const handleAppUninstalled = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  const hmacHeader = req.headers["x-shopify-hmac-sha256"];
+  const shopHeader = req.headers["x-shopify-shop-domain"];
+  const receivedHmac = Array.isArray(hmacHeader) ? hmacHeader[0] : hmacHeader;
+  const shop = Array.isArray(shopHeader) ? shopHeader[0] : shopHeader;
+
+  if (!receivedHmac || !shop) {
+    sendJson(res, 400, { error: "missing_required_header" });
+    return;
+  }
+  if (!isValidShopDomain(shop)) {
+    sendJson(res, 400, { error: "invalid_shop", shop });
+    return;
+  }
+
+  let rawBody: Buffer;
+  try {
+    rawBody = await readRawBody(req);
+  } catch (cause) {
+    sendJson(res, 413, {
+      error: "body_too_large_or_unreadable",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  const hmacOk = verifyShopifyWebhookHmac({
+    clientSecret: cfg.shopify.clientSecret,
+    rawBody,
+    receivedHmacB64: receivedHmac,
+  });
+  if (!hmacOk) {
+    sendJson(res, 401, { error: "hmac_verification_failed" });
+    return;
+  }
+
+  // Body parse is informational only — the HMAC-verified shop header is
+  // authoritative. We don't reject the request if the body is malformed
+  // after a valid HMAC; Shopify wouldn't accept the 200 retry policy if
+  // we did.
+  parseUninstallPayload(rawBody);
+
+  const tenantExit = await Effect.runPromiseExit(
+    Effect.provide(findTenantByShop(shop), layer),
+  );
+  if (tenantExit._tag !== "Success") {
+    sendJson(res, 500, {
+      error: "tenant_lookup_failed",
+      detail: String(tenantExit.cause),
+    });
+    return;
+  }
+  const tenantId = tenantExit.value;
+  if (!tenantId) {
+    sendJson(res, 200, { ok: true, action: "noop_unknown_shop" });
+    return;
+  }
+
+  const revokeResult = await Effect.runPromise(
+    Effect.provide(
+      Effect.either(
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.revoke(TenantId(tenantId), "shopify", shop);
+        }),
+      ),
+      layer,
+    ),
+  );
+
+  if (revokeResult._tag === "Right") {
+    sendJson(res, 200, { ok: true, action: "revoked" });
+    return;
+  }
+  // ConnectorNotFound → idempotent no-op (the row was never written, or
+  // a concurrent uninstall already collapsed it). ConnectorStoreDbError →
+  // genuine infra error; we still 200 (Shopify would retry storm on 5xx)
+  // but log loudly so the operator notices.
+  if (revokeResult.left instanceof ConnectorNotFound) {
+    sendJson(res, 200, { ok: true, action: "noop_already_gone" });
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error("[webhook app/uninstalled] revoke failed:", revokeResult.left);
+  sendJson(res, 200, { ok: true, action: "noop_revoke_failed" });
+};
+
+// ============================================================
+// Shopify compliance webhooks (mandatory for App Store distribution)
+// ============================================================
+//
+// Three webhooks Shopify requires every app to implement:
+//   - customers/data_request — customer asked Shopify for their data;
+//     we have 30 days to comply. Today: persist to audit_log as a
+//     paper trail; ops fulfils manually.
+//   - customers/redact — Shopify-mandated erasure 10 days after the
+//     customer is redacted on the merchant side. We delete every case
+//     (and its transitions, audit, approvals) matching the email or
+//     customer id stamped at case-create time.
+//   - shop/redact — 48h after a merchant uninstalls. We delete every
+//     row tied to the tenant: cases, audit, approvals, connector
+//     credentials, and finally the tenant row.
+//
+// All three share the same HMAC + raw-body pattern as
+// `app/uninstalled`. The HMAC envelope authenticates `shop_domain`, so
+// we treat the body as trusted once it verifies. Always 200 once HMAC
+// passes — Shopify retries indefinitely on non-200, and a partial state
+// is more dangerous than a 200 + log.
+
+/**
+ * Shared scaffolding for the three compliance webhooks: HMAC verify,
+ * raw-body capture, tenant resolution by shop domain. Returns null on
+ * any failure (handler should already have responded by then) or the
+ * resolved `{ tenantId, shop, rawBody }` for the per-route logic to
+ * consume.
+ */
+const verifyComplianceWebhook = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<{ tenantId: string | null; shop: string; rawBody: Buffer } | null> => {
+  const hmacHeader = req.headers["x-shopify-hmac-sha256"];
+  const shopHeader = req.headers["x-shopify-shop-domain"];
+  const receivedHmac = Array.isArray(hmacHeader) ? hmacHeader[0] : hmacHeader;
+  const shop = Array.isArray(shopHeader) ? shopHeader[0] : shopHeader;
+  if (!receivedHmac || !shop) {
+    sendJson(res, 400, { error: "missing_required_header" });
+    return null;
+  }
+  if (!isValidShopDomain(shop)) {
+    sendJson(res, 400, { error: "invalid_shop", shop });
+    return null;
+  }
+
+  let rawBody: Buffer;
+  try {
+    rawBody = await readRawBody(req);
+  } catch (cause) {
+    sendJson(res, 413, {
+      error: "body_too_large_or_unreadable",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return null;
+  }
+
+  const hmacOk = verifyShopifyWebhookHmac({
+    clientSecret: cfg.shopify.clientSecret,
+    rawBody,
+    receivedHmacB64: receivedHmac,
+  });
+  if (!hmacOk) {
+    sendJson(res, 401, { error: "hmac_verification_failed" });
+    return null;
+  }
+
+  const tenantExit = await Effect.runPromiseExit(
+    Effect.provide(findTenantByShop(shop), layer),
+  );
+  if (tenantExit._tag !== "Success") {
+    // 500 here would make Shopify retry; we still 200 below with a noop
+    // action so the caller sees the failure path. Log loudly.
+    // eslint-disable-next-line no-console
+    console.error(
+      "[compliance webhook] tenant lookup failed:",
+      tenantExit.cause,
+    );
+    return { tenantId: null, shop, rawBody };
+  }
+  return { tenantId: tenantExit.value, shop, rawBody };
+};
+
+/** POST /webhooks/shopify/customers/data_request */
+const handleCustomersDataRequest = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  const verified = await verifyComplianceWebhook(cfg, layer, req, res);
+  if (!verified) return;
+  const payload = parseCustomersDataRequest(verified.rawBody);
+
+  if (!verified.tenantId) {
+    // No tenant for this shop — nothing to log against. Still 200 so
+    // Shopify doesn't retry.
+    sendJson(res, 200, { ok: true, action: "noop_unknown_shop" });
+    return;
+  }
+
+  const recordExit = await Effect.runPromiseExit(
+    Effect.provide(
+      recordDataRequest({
+        tenantId: verified.tenantId,
+        shopDomain: verified.shop,
+        customerEmail: payload.customer.email,
+        shopifyCustomerNumericId: payload.customer.id,
+        dataRequestId: payload.dataRequestId,
+        ordersRequested: payload.ordersRequested,
+      }),
+      layer,
+    ),
+  );
+  if (recordExit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[webhook customers/data_request] record failed:",
+      recordExit.cause,
+    );
+    sendJson(res, 200, { ok: true, action: "noop_record_failed" });
+    return;
+  }
+  sendJson(res, 200, { ok: true, action: "recorded" });
+};
+
+/** POST /webhooks/shopify/customers/redact */
+const handleCustomersRedact = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  const verified = await verifyComplianceWebhook(cfg, layer, req, res);
+  if (!verified) return;
+  const payload = parseCustomersRedact(verified.rawBody);
+
+  if (!verified.tenantId) {
+    sendJson(res, 200, { ok: true, action: "noop_unknown_shop" });
+    return;
+  }
+
+  const redactExit = await Effect.runPromiseExit(
+    Effect.provide(
+      redactCustomer({
+        tenantId: verified.tenantId,
+        email: payload.customer.email,
+        shopifyCustomerNumericId: payload.customer.id,
+      }),
+      layer,
+    ),
+  );
+  if (redactExit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[webhook customers/redact] redact failed:",
+      redactExit.cause,
+    );
+    sendJson(res, 200, { ok: true, action: "noop_redact_failed" });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    action: "redacted",
+    matchedCases: redactExit.value.matchedCaseIds.length,
+  });
+};
+
+/** POST /webhooks/shopify/shop/redact */
+const handleShopRedact = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  const verified = await verifyComplianceWebhook(cfg, layer, req, res);
+  if (!verified) return;
+  // Payload is informational; tenant resolution already happened via
+  // shop domain. Parse anyway so a malformed body surfaces in logs.
+  parseShopRedact(verified.rawBody);
+
+  if (!verified.tenantId) {
+    sendJson(res, 200, { ok: true, action: "noop_unknown_shop" });
+    return;
+  }
+
+  const redactExit = await Effect.runPromiseExit(
+    Effect.provide(redactShop(verified.tenantId), layer),
+  );
+  if (redactExit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[webhook shop/redact] redact failed:",
+      redactExit.cause,
+    );
+    sendJson(res, 200, { ok: true, action: "noop_redact_failed" });
+    return;
+  }
+  sendJson(res, 200, { ok: true, action: "redacted", ...redactExit.value });
+};
+
+// ============================================================
+// Gmail OAuth — install + callback
+// ============================================================
+
+/**
+ * GET /google/install?tenant=<uuid>[&loginHint=<email>]
+ *
+ * Mirror of the Shopify install entrypoint. We sign the tenant into the
+ * OAuth `state` so the callback can recover it and rejecting tampered
+ * states. Unlike Shopify, Google has no platform-driven install initiation
+ * — every install starts from our own dashboard / link, so there's no
+ * Shopify-style HMAC fallback for a tenant-less call.
+ */
+const handleGoogleInstall = (
+  cfg: ApiConfig,
+  req: IncomingMessage,
+  res: ServerResponse,
+): void => {
+  if (!cfg.google) {
+    sendJson(res, 503, { error: "google_oauth_not_configured" });
+    return;
+  }
+  const { params } = readQuery(req);
+  const tenant = params["tenant"];
+  if (!tenant) {
+    sendJson(res, 400, { error: "missing_tenant" });
+    return;
+  }
+  const state = signState(cfg.stateSigningKey, tenant);
+  const loginHint = params["login_hint"] ?? params["loginHint"];
+  const authorizeUrl = buildGoogleAuthorizeUrl({
+    clientId: cfg.google.clientId,
+    redirectUri: cfg.google.callbackUrl,
+    state,
+    ...(loginHint ? { loginHint } : {}),
+  });
+  sendRedirect(res, authorizeUrl);
+};
+
+/**
+ * GET /google/auth/callback?code=&state=
+ *
+ * Order of operations:
+ *   1. Verify signed state → tenantId.
+ *   2. Exchange code for `{ accessToken, refreshToken, expiresIn }`.
+ *      Google only hands back a refresh token on first consent (we set
+ *      `prompt=consent` to force it on every install).
+ *   3. Fetch the OIDC `userinfo.email` so we know which mailbox the
+ *      tokens authorize — it becomes the `shopDomain` discriminator.
+ *   4. Persist via `ConnectorCredentialStore.put`.
+ *   5. Register a `users.watch` so Gmail starts pushing notifications to
+ *      our Pub/Sub topic. Store the returned `historyId` + lease expiry
+ *      in the connector's metadata blob.
+ *
+ * If steps 1-4 succeed but 5 fails, we still 200 — the credentials are
+ * saved and a re-install (or a scheduled watch-refresh) can recover.
+ * Failing the install over a flaky watch call would orphan the OAuth grant.
+ */
+const handleGoogleCallback = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  if (!cfg.google) {
+    sendJson(res, 503, { error: "google_oauth_not_configured" });
+    return;
+  }
+  const { params } = readQuery(req);
+  if (params["error"]) {
+    sendJson(res, 400, {
+      error: "google_oauth_error",
+      googleError: params["error"],
+      googleErrorDescription: params["error_description"] ?? null,
+    });
+    return;
+  }
+  const code = params["code"];
+  const state = params["state"];
+  if (!code || !state) {
+    sendJson(res, 400, { error: "missing_required_param" });
+    return;
+  }
+  const decoded = verifyState(cfg.stateSigningKey, state);
+  if (!decoded) {
+    sendJson(res, 401, { error: "state_verification_failed" });
+    return;
+  }
+  const tenantId = decoded.tenantId;
+
+  let token;
+  try {
+    token = await exchangeCodeForGoogleToken({
+      clientId: cfg.google.clientId,
+      clientSecret: cfg.google.clientSecret,
+      redirectUri: cfg.google.callbackUrl,
+      code,
+    });
+  } catch (cause) {
+    sendJson(res, 502, {
+      error: "token_exchange_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  if (!token.refreshToken) {
+    // We *always* set prompt=consent, so the only realistic way to get here
+    // is the merchant revoking and re-granting in the same browser session
+    // — Google then declines to re-issue. Surface explicitly instead of
+    // persisting a connection we can't keep alive past one hour.
+    sendJson(res, 400, {
+      error: "missing_refresh_token",
+      hint: "Re-run the install; if it persists, revoke the prior grant at https://myaccount.google.com/permissions",
+    });
+    return;
+  }
+
+  let email: string;
+  try {
+    email = await fetchGoogleUserEmail({ accessToken: token.accessToken });
+  } catch (cause) {
+    sendJson(res, 502, {
+      error: "userinfo_fetch_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  const expiresAt = new Date(Date.now() + token.expiresInSeconds * 1000);
+  const putExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.put({
+          tenantId: TenantId(tenantId),
+          provider: "gmail",
+          shopDomain: email,
+          accessToken: token.accessToken,
+          refreshToken: token.refreshToken,
+          tokenExpiresAt: expiresAt,
+          scopes: token.scope,
+        });
+      }),
+      layer,
+    ),
+  );
+  if (putExit._tag !== "Success") {
+    sendJson(res, 500, {
+      error: "persist_failed",
+      detail: String(putExit.cause),
+    });
+    return;
+  }
+
+  // Register the Gmail watch. Soft-fails by design — see the comment on
+  // this route. A re-install or operator-driven re-registration recovers.
+  let watch: { historyId: string; expiresAt: Date } | null = null;
+  try {
+    watch = await startGmailWatch({
+      accessToken: token.accessToken,
+      topicName: cfg.google.pubsubTopic,
+    });
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error("[google callback] watch registration failed:", cause);
+  }
+
+  if (watch) {
+    const patchExit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.patchMetadata({
+            tenantId: TenantId(tenantId),
+            provider: "gmail",
+            shopDomain: email,
+            metadata: {
+              historyId: watch.historyId,
+              watchExpiresAt: watch.expiresAt.toISOString(),
+            },
+          });
+        }),
+        layer,
+      ),
+    );
+    if (patchExit._tag !== "Success") {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[google callback] metadata patch failed:",
+        patchExit.cause,
+      );
+    }
+  }
+
+  const acceptsJson = (req.headers["accept"] ?? "")
+    .toString()
+    .toLowerCase()
+    .includes("application/json");
+  if (acceptsJson) {
+    sendJson(res, 200, {
+      ok: true,
+      tenantId,
+      email,
+      scopes: token.scope,
+      watchRegistered: !!watch,
+    });
+    return;
+  }
+  sendRedirect(res, `/installed?email=${encodeURIComponent(email)}`);
+};
+
+// ============================================================
+// Gmail Pub/Sub push webhook
+// ============================================================
+
+/**
+ * POST /webhooks/conversations/gmail/:tenantId?token=<shared-secret>
+ *
+ * Google's Pub/Sub push delivers JSON like:
+ *   {
+ *     message: { data: base64(JSON({emailAddress, historyId})), publishTime, ... },
+ *     subscription: "projects/.../subscriptions/...",
+ *   }
+ *
+ * Auth uses a shared-secret URL token (Google's "push authentication"
+ * options support this directly via `pushConfig.oidcToken` OR query string;
+ * we use the query string here — simplest, works with any push subscription
+ * created with `--push-auth-token=...`).
+ *
+ * Always 200 on a verified token even when downstream work fails: Pub/Sub
+ * retries on 5xx and will retry-storm us if we surface flaky state. The
+ * handler logs and absorbs.
+ */
+const handleGmailWebhook = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  if (!cfg.google) {
+    sendJson(res, 503, { error: "google_oauth_not_configured" });
+    return;
+  }
+
+  const url = req.url ?? "/";
+  // Path shape: /webhooks/conversations/gmail/<tenantId>
+  const m = /^\/webhooks\/conversations\/gmail\/([^/?]+)/.exec(url);
+  if (!m || !m[1]) {
+    sendJson(res, 400, { error: "missing_tenant_id_in_path" });
+    return;
+  }
+  const tenantId = m[1];
+
+  const { params } = readQuery(req);
+  const presented = params["token"] ?? "";
+  // Constant-time compare. Buffer lengths MUST match — bail early
+  // otherwise to avoid the timingSafeEqual throw.
+  const expected = cfg.google.pushToken;
+  if (
+    presented.length !== expected.length ||
+    !timingSafeEqual(Buffer.from(presented), Buffer.from(expected))
+  ) {
+    sendJson(res, 401, { error: "invalid_push_token" });
+    return;
+  }
+
+  let rawBody: Buffer;
+  try {
+    rawBody = await readRawBody(req);
+  } catch (cause) {
+    sendJson(res, 413, {
+      error: "body_too_large_or_unreadable",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  try {
+    await handleGmailPushNotification({
+      tenantId,
+      rawBody,
+      layer,
+      google: cfg.google,
+    });
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error("[gmail webhook] push handling failed:", cause);
+  }
+  // Always 200 once token verified — Pub/Sub retries on 5xx.
+  sendJson(res, 200, { ok: true });
+};
+
+// ============================================================
+// GET /approvals/:id/(approve|reject)?token=<signed>
+// ============================================================
+//
+// One-click approval surface emailed to the operator. Token is HMAC-
+// signed over `<approvalId>.<expiresAt>` with `cfg.approvalSigningKey`
+// (same key the worker uses to sign). On success, marks the approval
+// decided + publishes the matching `approval.*` workflow event so the
+// worker resumes the case. Idempotent: a second click renders an
+// "already decided" page.
+
+let cachedApprovalBoss: PgBoss | null = null;
+const acquireApprovalBoss = async (
+  databaseUrl: string,
+): Promise<PgBoss> => {
+  if (cachedApprovalBoss) return cachedApprovalBoss;
+  const boss = new PgBoss({ connectionString: databaseUrl, schema: "pgboss" });
+  boss.on("error", (err: Error) => {
+    // eslint-disable-next-line no-console
+    console.error("[pg-boss] error", err);
+  });
+  await boss.start();
+  await boss.createQueue("workflow.events", {
+    policy: "key_strict_fifo",
+    retryLimit: 5,
+    retryBackoff: true,
+  });
+  cachedApprovalBoss = boss;
+  return boss;
+};
+
+const handleApprovalDecision = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> => {
+  const url = req.url ?? "/";
+  // Match the path BEFORE the query string.
+  const pathOnly = url.split("?")[0] ?? "";
+  const match = matchApprovalRoute(pathOnly);
+  if (!match) {
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const token = extractToken(url);
+  if (!token) {
+    sendHtml(
+      res,
+      400,
+      renderApprovalPage(
+        { kind: "bad_token", reason: { ok: false, reason: "malformed" } },
+        match.action,
+      ).body,
+    );
+    return;
+  }
+
+  const outcome = await decideApproval({
+    approvalId: match.approvalId,
+    action: match.action,
+    token,
+    signingKey: cfg.approvalSigningKey,
+    layer,
+    publish: makePgBossApprovalPublisher(() =>
+      acquireApprovalBoss(cfg.databaseUrl),
+    ),
+  });
+
+  const page = renderApprovalPage(outcome, match.action);
+  sendHtml(res, page.status, page.body);
+};
+
 // ============================================================
 // Server
 // ============================================================
@@ -365,6 +1080,53 @@ export const startServer = async (
         }
         if (method === "GET" && url.startsWith("/installed")) {
           handleInstalledPage(req, res);
+          return;
+        }
+        if (
+          method === "POST" &&
+          url.startsWith("/webhooks/shopify/app/uninstalled")
+        ) {
+          await handleAppUninstalled(cfg, layer, req, res);
+          return;
+        }
+        if (
+          method === "POST" &&
+          url.startsWith("/webhooks/shopify/customers/data_request")
+        ) {
+          await handleCustomersDataRequest(cfg, layer, req, res);
+          return;
+        }
+        if (
+          method === "POST" &&
+          url.startsWith("/webhooks/shopify/customers/redact")
+        ) {
+          await handleCustomersRedact(cfg, layer, req, res);
+          return;
+        }
+        if (
+          method === "POST" &&
+          url.startsWith("/webhooks/shopify/shop/redact")
+        ) {
+          await handleShopRedact(cfg, layer, req, res);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/google/install")) {
+          handleGoogleInstall(cfg, req, res);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/google/auth/callback")) {
+          await handleGoogleCallback(cfg, layer, req, res);
+          return;
+        }
+        if (
+          method === "POST" &&
+          url.startsWith("/webhooks/conversations/gmail/")
+        ) {
+          await handleGmailWebhook(cfg, layer, req, res);
+          return;
+        }
+        if (method === "GET" && url.startsWith("/approvals/")) {
+          await handleApprovalDecision(cfg, layer, req, res);
           return;
         }
         if (method === "GET" && url === "/healthz") {

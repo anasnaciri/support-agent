@@ -49,7 +49,7 @@ describe("WorkflowQueue (Test layer)", () => {
     expect(
       workflowEventKey(
         {
-          type: "email.received",
+          type: "message.received",
           tenantId: TenantId("tenant-1"),
           threadId: ThreadId("thread-1"),
           payload: {

@@ -19,7 +19,10 @@ import {
 import {
   AgentRuntime,
   AgentRuntimeDefault,
+  ApprovalLinkConfig,
   LLMServiceScripted,
+  PlatformMailServiceTest,
+  ShopifyServiceTest,
   TransactionRunnerPassthrough,
 } from "@support-agent/services";
 import {
@@ -75,6 +78,13 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
       },
       { type: "final_message" as const, text: "done" },
     ] as ReadonlyArray<LLMDecision>),
+    ShopifyServiceTest({}),
+    PlatformMailServiceTest({}),
+    Layer.succeed(ApprovalLinkConfig, {
+      baseUrl: "https://api.test.example",
+      signingKey: "test-signing-key",
+      ttlMs: 60_000,
+    }),
   );
   // Build dbLayer → satisfy env's DbClient dep → that's `envWithDb`, which
   // both AgentRuntime depends on AND tools yield from (case.update_status /

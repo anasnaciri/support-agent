@@ -80,7 +80,7 @@ const workOptions = (opts: PgBossWorkflowQueueOptions): WorkOptions => {
 
 export const reviveDomainEvent = (event: DomainEvent): DomainEvent => {
   switch (event.type) {
-    case "email.received":
+    case "message.received":
     case "customer.replied":
       return {
         ...event,

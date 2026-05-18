@@ -442,6 +442,162 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(res.status).toBe(401);
   });
 
+  describe("POST /webhooks/shopify/app/uninstalled", () => {
+    // Each test seeds its own shop + tenant + active connector so the test
+    // assertions are self-contained and order-independent.
+    const seedShop = async (
+      shop: string,
+    ): Promise<{ tenantId: string }> => {
+      const newTenantId = randomUUID();
+      await raw!.db
+        .insert(tenants)
+        .values({ id: newTenantId, name: shop, shopifyDomain: shop });
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const store = yield* ConnectorCredentialStore;
+            yield* store.put({
+              tenantId: TenantId(newTenantId),
+              provider: "shopify",
+              shopDomain: shop,
+              accessToken: "shpoa_seed_for_uninstall_test",
+              scopes: ["read_orders"],
+              apiVersion: "2025-01",
+            });
+          }),
+          ConnectorCredentialStoreLive(encryptionKey).pipe(
+            Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
+          ),
+        ).pipe(Effect.scoped),
+      );
+      return { tenantId: newTenantId };
+    };
+
+    const post = async (
+      headers: Record<string, string>,
+      body: string,
+    ): Promise<Response> =>
+      fetch(`${baseUrl}/webhooks/shopify/app/uninstalled`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body,
+      });
+
+    const signBody = (body: string): string =>
+      Buffer.from(
+        computeHmac(cfg.shopify.clientSecret, body),
+        "hex",
+      ).toString("base64");
+
+    it("flips the matching connector row to revoked on a valid signature", async () => {
+      const shop = "uninstall-happy.myshopify.com";
+      const { tenantId: t } = await seedShop(shop);
+      const body = JSON.stringify({
+        id: 1,
+        name: shop,
+        domain: shop.replace(".myshopify.com", ".com"),
+      });
+      const res = await post(
+        {
+          "X-Shopify-Hmac-Sha256": signBody(body),
+          "X-Shopify-Shop-Domain": shop,
+        },
+        body,
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).action).toBe("revoked");
+
+      const rows = await raw!.db
+        .select()
+        .from(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${t}`);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("revoked");
+      expect(rows[0]!.revokedAt).not.toBeNull();
+    });
+
+    it("returns 401 on a bad signature and does NOT mutate the row", async () => {
+      const shop = "uninstall-badsig.myshopify.com";
+      const { tenantId: t } = await seedShop(shop);
+      const body = JSON.stringify({ id: 2, name: shop });
+      const res = await post(
+        {
+          "X-Shopify-Hmac-Sha256": Buffer.from("not-the-right-sig").toString(
+            "base64",
+          ),
+          "X-Shopify-Shop-Domain": shop,
+        },
+        body,
+      );
+      expect(res.status).toBe(401);
+
+      const rows = await raw!.db
+        .select()
+        .from(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${t}`);
+      expect(rows[0]!.status).toBe("active");
+    });
+
+    it("returns 200 with noop_unknown_shop when no tenant is linked to the shop", async () => {
+      const shop = "no-tenant-here.myshopify.com";
+      const body = JSON.stringify({ id: 3, name: shop });
+      const res = await post(
+        {
+          "X-Shopify-Hmac-Sha256": signBody(body),
+          "X-Shopify-Shop-Domain": shop,
+        },
+        body,
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).action).toBe("noop_unknown_shop");
+    });
+
+    it("is idempotent: a second uninstall for an already-revoked row still returns 200", async () => {
+      const shop = "uninstall-idempotent.myshopify.com";
+      const { tenantId: t } = await seedShop(shop);
+      const body = JSON.stringify({ id: 4, name: shop });
+      const headers = {
+        "X-Shopify-Hmac-Sha256": signBody(body),
+        "X-Shopify-Shop-Domain": shop,
+      };
+      const first = await post(headers, body);
+      expect(first.status).toBe(200);
+      expect((await first.json()).action).toBe("revoked");
+
+      const second = await post(headers, body);
+      // The row already exists (revoked) — revoke() finds it and re-sets
+      // revokedAt/updatedAt. Action stays "revoked"; row stays revoked.
+      expect(second.status).toBe(200);
+      expect((await second.json()).action).toBe("revoked");
+
+      const rows = await raw!.db
+        .select()
+        .from(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${t}`);
+      expect(rows[0]!.status).toBe("revoked");
+    });
+
+    it("returns 400 when required headers are missing", async () => {
+      const res = await post({}, "{}");
+      expect(res.status).toBe(400);
+    });
+
+    // Sweep the seeded tenants + their cascaded connector rows so this
+    // describe block doesn't leak fixtures into the outer afterAll.
+    afterAll(async () => {
+      if (!raw) return;
+      for (const shop of [
+        "uninstall-happy.myshopify.com",
+        "uninstall-badsig.myshopify.com",
+        "uninstall-idempotent.myshopify.com",
+      ]) {
+        await raw.db
+          .delete(tenants)
+          .where(sql`${tenants.shopifyDomain} = ${shop}`);
+      }
+    });
+  });
+
   it("GET /healthz returns 200", async () => {
     const res = await fetch(`${baseUrl}/healthz`);
     expect(res.status).toBe(200);

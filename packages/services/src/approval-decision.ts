@@ -1,0 +1,121 @@
+import { Effect } from "effect";
+import {
+  ApprovalId as makeApprovalId,
+  type Approval,
+  type ApprovalId,
+  type DomainEvent,
+  type TenantId,
+  type UserId,
+} from "@support-agent/agent-core";
+import { ApprovalService } from "./approval-service.js";
+
+// ============================================================
+// Apply an approval decision
+// ============================================================
+//
+// The token-free inner core of "the manager said yes/no". Both apps/api
+// (verifies a signed token from the email link) and apps/dashboard
+// (uses the WorkOS session) call this once they've established the
+// caller is allowed to act on the approval. Everything here is
+// transport-agnostic.
+//
+// The function deliberately returns `approval_not_found` for cross-
+// tenant access when a `tenantId` scope is provided — we never want
+// the caller to learn that an id exists in another tenant.
+
+export type ApprovalDecisionResult =
+  | { readonly kind: "decided"; readonly approval: Approval }
+  | { readonly kind: "already_decided"; readonly approval: Approval }
+  | { readonly kind: "approval_not_found" };
+
+export interface ApplyApprovalDecisionInput {
+  readonly approvalId: string;
+  readonly action: "approve" | "reject";
+  readonly managerId: UserId;
+  /**
+   * When set, the function checks that the approval belongs to this
+   * tenant. Cross-tenant ids surface as `approval_not_found`. Leave
+   * undefined when the caller has already verified ownership (e.g. the
+   * email-link flow where the signed token IS the auth).
+   */
+  readonly tenantId?: TenantId;
+}
+
+export const applyApprovalDecision = (
+  input: ApplyApprovalDecisionInput,
+): Effect.Effect<ApprovalDecisionResult, never, ApprovalService> =>
+  Effect.gen(function* () {
+    const svc = yield* ApprovalService;
+    const approvalIdTyped: ApprovalId = makeApprovalId(input.approvalId);
+
+    // 1. Pre-fetch. Lets us return `already_decided` on a re-click
+    //    without burning a state-conflict path, AND scope by tenant.
+    const existingEither = yield* svc
+      .getById(approvalIdTyped)
+      .pipe(Effect.either);
+    if (existingEither._tag === "Left") {
+      return { kind: "approval_not_found" };
+    }
+    const existing = existingEither.right;
+
+    // 2. Tenant scope. The api endpoint binds tenancy via its signed
+    //    token + email recipient; the dashboard binds it via the
+    //    WorkOS session. Both pass `tenantId` so a row that exists in
+    //    another tenant looks identical to a row that doesn't exist.
+    if (input.tenantId && existing.tenantId !== input.tenantId) {
+      return { kind: "approval_not_found" };
+    }
+
+    if (existing.status !== "pending") {
+      return { kind: "already_decided", approval: existing };
+    }
+
+    // 3. Apply the decision.
+    const decided = yield* (input.action === "approve"
+      ? svc.approve({ id: approvalIdTyped, decidedBy: input.managerId })
+      : svc.reject({ id: approvalIdTyped, decidedBy: input.managerId })
+    ).pipe(Effect.either);
+
+    if (decided._tag === "Left") {
+      // Most likely an ApprovalStateConflict from a concurrent decision
+      // (manager double-clicked, or both the dashboard + email link
+      // raced). Re-read to surface as already_decided.
+      const reread = yield* svc
+        .getById(approvalIdTyped)
+        .pipe(Effect.either);
+      if (reread._tag === "Right") {
+        return { kind: "already_decided", approval: reread.right };
+      }
+      return { kind: "approval_not_found" };
+    }
+
+    return { kind: "decided", approval: decided.right };
+  });
+
+// ============================================================
+// Convert a decided result into the matching DomainEvent
+// ============================================================
+//
+// Centralised so apps/api and apps/dashboard can't drift on event
+// shape. Returns null for non-`decided` outcomes (no event should fire).
+
+export const decisionToEvent = (
+  result: ApprovalDecisionResult,
+  action: "approve" | "reject",
+  managerId: UserId,
+): DomainEvent | null => {
+  if (result.kind !== "decided") return null;
+  return action === "approve"
+    ? {
+        type: "approval.approved",
+        approvalId: result.approval.id,
+        caseId: result.approval.caseId,
+        managerId,
+      }
+    : {
+        type: "approval.rejected",
+        approvalId: result.approval.id,
+        caseId: result.approval.caseId,
+        managerId,
+      };
+};

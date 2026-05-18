@@ -13,12 +13,18 @@ import {
   type ToolContext,
   type WorkflowResult,
   AgentId as makeAgentId,
+  TenantId as makeTenantId,
+  ThreadId as makeThreadId,
 } from "@support-agent/agent-core";
 import { CaseRepository } from "./case-repository.js";
 import { AuditLogService } from "./audit-log.js";
 import { ApprovalService } from "./approval-service.js";
 import { LLMService } from "./llm-service.js";
+import { ShopifyService } from "./shopify-service.js";
 import { TransactionRunner } from "./transaction-runner.js";
+import { PlatformMailService } from "./platform-mail.js";
+import { ApprovalLinkConfig } from "./approval-link-config.js";
+import { signApprovalToken } from "./approval-tokens.js";
 
 // ============================================================
 // Helpers
@@ -29,6 +35,14 @@ type CaseLookup =
   | {
       readonly kind: "create";
       readonly tenantId: string;
+      readonly channel: CaseChannel;
+      readonly subject: string | null;
+      readonly initialUserMessage: string | null;
+    }
+  | {
+      readonly kind: "loadOrCreateByThread";
+      readonly tenantId: string;
+      readonly threadId: string;
       readonly channel: CaseChannel;
       readonly subject: string | null;
       readonly initialUserMessage: string | null;
@@ -52,9 +66,24 @@ const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
     case "manual.takeover":
     case "case.resumed":
       return { kind: "load", caseId: event.caseId };
-    case "email.received":
+    case "message.received":
+      // The connector has already normalised this into a thread + body.
+      // First message on a thread → create a case bound to the thread;
+      // subsequent messages → resume the same case via `findByThreadId`.
+      // Channel defaults to "email" because every connector that emits
+      // this event today (Gmail; later Outlook / IMAP) is email-shaped;
+      // when a non-email connector (SMS, helpdesk) ships, widen this.
+      return {
+        kind: "loadOrCreateByThread",
+        tenantId: event.tenantId,
+        threadId: event.threadId,
+        channel: "email",
+        subject: event.payload.subject,
+        initialUserMessage: event.payload.bodyText,
+      };
     case "tracking.changed":
-      // Phase 1 does not implement lookup-by-thread / lookup-by-order.
+      // Phase 1 does not implement lookup-by-order. (When a tracking-
+      // change specialist lands, swap this for findByOrderId.)
       return null;
   }
 };
@@ -80,6 +109,23 @@ const buildInitialMessages = (
       },
     ];
   }
+  if (event.type === "message.received") {
+    // The payload IS the customer message — same shape as ticket.created
+    // but from a connector instead of a synthetic publisher. We pass the
+    // subject inline so the LLM sees thread context on turn 1, plus a
+    // bracketed header carrying `threadId` and the customer email so
+    // specialists (refund-review, etc.) can wire `conversation.reply`
+    // without an extra `conversation.fetch_thread` round trip.
+    const subject =
+      event.payload.subject ?? caseSubject ?? "(no subject)";
+    const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
+    return [
+      {
+        role: "user",
+        content: `${header}\n\nSubject: ${subject}\n\n${event.payload.bodyText}`,
+      },
+    ];
+  }
   // Other events resume an in-flight case; for Phase 1 we don't have message
   // history, so we just signal what woke the case up.
   return [
@@ -88,6 +134,35 @@ const buildInitialMessages = (
       content: `(system event: ${event.type})`,
     },
   ];
+};
+
+// Derive a human-readable preview of the tool input for the approval
+// email body. For `conversation.reply` / `conversation.ask_customer`,
+// the bodyText is the right thing to show; for other gated tools we
+// fall back to a JSON dump so the operator still sees what's being
+// proposed. Capped so even a long reply stays inside a reasonable
+// email height.
+const PREVIEW_MAX = 600;
+const derivePreview = (input: unknown): string => {
+  if (input && typeof input === "object") {
+    const r = input as Record<string, unknown>;
+    if (typeof r["bodyText"] === "string") {
+      return (r["bodyText"] as string).slice(0, PREVIEW_MAX);
+    }
+  }
+  try {
+    return JSON.stringify(input, null, 2).slice(0, PREVIEW_MAX);
+  } catch {
+    return String(input).slice(0, PREVIEW_MAX);
+  }
+};
+
+const deriveSubject = (input: unknown): string | null => {
+  if (input && typeof input === "object") {
+    const r = input as Record<string, unknown>;
+    if (typeof r["subject"] === "string") return r["subject"] as string;
+  }
+  return null;
 };
 
 const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
@@ -129,7 +204,10 @@ export const AgentRuntimeDefault = Layer.effect(
     const perms = yield* PermissionService;
     const approvals = yield* ApprovalService;
     const llm = yield* LLMService;
+    const shopify = yield* ShopifyService;
     const tx = yield* TransactionRunner;
+    const mail = yield* PlatformMailService;
+    const linkConfig = yield* ApprovalLinkConfig;
 
     const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
@@ -147,17 +225,43 @@ export const AgentRuntimeDefault = Layer.effect(
         // with audit). Subsequent per-turn writes happen outside this tx;
         // a fully transactional tick is deferred until we can scope an LLM
         // call outside the SQL tx without holding a connection open.
-        const caseRow = yield* tx.run(
+        const { row: caseRow, wasCreated } = yield* tx.run(
           Effect.gen(function* () {
-            const row =
-              lookup.kind === "load"
-                ? yield* cases.getById(lookup.caseId as never)
-                : yield* cases.create({
-                    tenantId: lookup.tenantId as never,
-                    channel: lookup.channel,
-                    currentAgentId: makeAgentId("support-triage"),
-                    subject: lookup.subject,
-                  });
+            let row;
+            let wasCreated = false;
+            if (lookup.kind === "load") {
+              row = yield* cases.getById(lookup.caseId as never);
+            } else if (lookup.kind === "create") {
+              row = yield* cases.create({
+                tenantId: lookup.tenantId as never,
+                channel: lookup.channel,
+                currentAgentId: makeAgentId("support-triage"),
+                subject: lookup.subject,
+              });
+              wasCreated = true;
+            } else {
+              // loadOrCreateByThread: connector-driven inbound message.
+              // The thread is the natural correlation key; a duplicate
+              // `message.received` from a retried Pub/Sub push finds the
+              // same case and just appends another tick (Audit log will
+              // show double `event.received` but no double-create).
+              const existing = yield* cases.findByThreadId(
+                makeTenantId(lookup.tenantId),
+                makeThreadId(lookup.threadId),
+              );
+              if (existing) {
+                row = existing;
+              } else {
+                row = yield* cases.create({
+                  tenantId: makeTenantId(lookup.tenantId),
+                  channel: lookup.channel,
+                  currentAgentId: makeAgentId("support-triage"),
+                  subject: lookup.subject,
+                  threadId: makeThreadId(lookup.threadId),
+                });
+                wasCreated = true;
+              }
+            }
             yield* audit.record({
               tenantId: row.tenantId,
               caseId: row.id,
@@ -165,17 +269,173 @@ export const AgentRuntimeDefault = Layer.effect(
               action: "event.received",
               details: { eventType: event.type },
             });
-            return row;
+            return { row, wasCreated };
           }),
         );
 
+        let working = caseRow;
+
+        // 2.5. Approval-resume short-circuit. `approval.approved` and
+        // `approval.rejected` are NOT routed through the agent loop —
+        // they execute (or escalate) the previously-gated tool directly.
+        // The agent's contribution was made when it proposed the tool
+        // call; running the prompt again would just re-invent that work
+        // and risk drifting the input from what the manager approved.
+        //
+        // Assumption today: gated tools are TERMINAL — once they run
+        // (e.g. `conversation.reply` sends a customer-facing message),
+        // the agent's job is done and the case resolves. When a gated
+        // tool is mid-workflow (`refund.create` followed by a reply),
+        // widen this branch to push the tool result into a fresh tick
+        // and re-enter the agent loop.
+        if (event.type === "approval.approved") {
+          const approval = yield* approvals.getById(event.approvalId).pipe(
+            Effect.catchTag("ApprovalNotFound", () =>
+              Effect.succeed(null),
+            ),
+            Effect.catchAll(() => Effect.succeed(null)),
+          );
+          if (!approval) {
+            return {
+              type: "Failed",
+              reason: `approval ${event.approvalId} not found`,
+              retryable: false,
+            } as const;
+          }
+          const toolToRun = yield* tools.tryGet(approval.tool);
+          if (!toolToRun) {
+            return {
+              type: "Failed",
+              reason: `tool ${approval.tool} not in registry`,
+              retryable: false,
+            } as const;
+          }
+          const callId = `approval-${approval.id}`;
+          const ctx: ToolContext = {
+            tenantId: working.tenantId,
+            caseId: working.id,
+            agentId: approval.agentId,
+            callId,
+            attemptNumber: 1,
+          };
+          const toolInput = approval.approvedInput ?? approval.proposedInput;
+          const toolEffect = toolToRun.execute(
+            toolInput,
+            ctx,
+          ) as unknown as Effect.Effect<unknown, unknown, never>;
+          const exec = yield* tx.run(
+            Effect.gen(function* () {
+              const result = yield* toolEffect.pipe(Effect.either);
+              yield* audit.record({
+                tenantId: working.tenantId,
+                caseId: working.id,
+                actor: { type: "user", id: event.managerId },
+                action: "tool.invoked",
+                details: {
+                  tool: approval.tool,
+                  callId,
+                  ok: result._tag === "Right",
+                  viaApprovalId: approval.id,
+                },
+              });
+              return result;
+            }),
+          );
+          if (exec._tag === "Left") {
+            // Tool failed AFTER approval — escalate to human takeover so
+            // someone can intervene. The approval row is already approved,
+            // which is the right audit shape (the manager said yes; the
+            // platform tried; the platform failed).
+            return {
+              type: "HumanTakeoverRequired",
+              reason: `approved tool ${approval.tool} failed`,
+            } as const;
+          }
+          working = yield* tx.run(
+            Effect.gen(function* () {
+              const resolved = yield* cases.transitionStatus(
+                working.id,
+                "resolved",
+                { reason: `approved tool ${approval.tool}` },
+              );
+              yield* audit.record({
+                tenantId: resolved.tenantId,
+                caseId: resolved.id,
+                actor: { type: "user", id: event.managerId },
+                action: "case.resolved",
+                details: {
+                  viaApprovalId: approval.id,
+                  tool: approval.tool,
+                },
+              });
+              return resolved;
+            }),
+          );
+          return { type: "Completed" } as const;
+        }
+
+        if (event.type === "approval.rejected") {
+          working = yield* tx.run(
+            Effect.gen(function* () {
+              const updated = yield* cases.transitionStatus(
+                working.id,
+                "human_takeover",
+                { reason: "approval rejected" },
+              );
+              yield* audit.record({
+                tenantId: updated.tenantId,
+                caseId: updated.id,
+                actor: { type: "user", id: event.managerId },
+                action: "case.escalated_to_human",
+                details: {
+                  approvalId: event.approvalId,
+                  reason: event.reason ?? null,
+                },
+              });
+              return updated;
+            }),
+          );
+          return {
+            type: "HumanTakeoverRequired",
+            reason: "approval rejected",
+          } as const;
+        }
+
+        // 2a. Customer identification — only on a freshly-created case
+        // bound to an inbound message. Best-effort: the tick proceeds
+        // even if Shopify is down / not configured / has no match for
+        // this email. Persists `customerEmail` (always when we have one)
+        // and `shopifyCustomerId` (only on a positive match) into the
+        // case context. Specialists like refund-review can read these
+        // without firing their own searchByEmail per tick.
+        if (wasCreated && event.type === "message.received") {
+          const email = event.payload.from.email;
+          if (email) {
+            const resolved = yield* shopify
+              .searchByEmail(working.tenantId, email)
+              .pipe(Effect.either);
+            const contextPatch: Record<string, unknown> = {
+              ...working.context,
+              customerEmail: email,
+            };
+            if (resolved._tag === "Right" && resolved.right) {
+              contextPatch["shopifyCustomerId"] = resolved.right.id;
+            }
+            working = yield* cases
+              .update(working.id, { context: contextPatch as never })
+              .pipe(
+                Effect.catchAll(() => Effect.succeed(working)),
+              );
+          }
+        }
+
         // 3. Run the workflow loop.
-        let agent: AgentConfig = yield* registry.resolve(caseRow.currentAgentId);
+        let agent: AgentConfig = yield* registry.resolve(working.currentAgentId);
         const messages: ChatMessage[] = buildInitialMessages(
           event,
-          caseRow.subject,
+          working.subject,
         );
-        let current = caseRow;
+        let current = working;
 
         for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
           const schemas = yield* tools.schemasFor(agent.tools);
@@ -246,6 +506,26 @@ export const AgentRuntimeDefault = Layer.effect(
           }
 
           // tool_call
+
+          // Record the LLM's tool call in the conversation BEFORE invoking
+          // the tool. The Anthropic/Gemini APIs (and the AI SDK in front of
+          // them) expect every `tool` role message to be paired with a
+          // preceding `assistant` message that carries the matching
+          // `toolCallId`. Without this push, subsequent turns see only
+          // user + orphan tool results — providers drop the tool messages
+          // and the model behaves as if no prior tool call ever happened,
+          // looping on the same tool every turn until `max_turns_exceeded`.
+          messages.push({
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: decision.callId,
+                name: decision.tool,
+                input: decision.input,
+              },
+            ],
+          });
 
           // `agent.handoff` is a runtime-controlled pseudo-tool: it appears
           // in the LLM tool list (so the model can invoke it) but the runtime
@@ -377,6 +657,35 @@ export const AgentRuntimeDefault = Layer.effect(
               "waiting_for_approval",
               { reason: `tool ${tool.name} pending approval` },
             );
+
+            // Fire the approval-link email. Best-effort: a Resend outage,
+            // a tenant without `notificationEmail` configured, or any other
+            // mail failure must NOT block the case. The approval row is
+            // the source of truth and the dashboard (when it lands) will
+            // pick it up regardless. Both URLs use the SAME signed token
+            // — the action is encoded in the path, not the token.
+            const token = signApprovalToken({
+              approvalId: approval.id,
+              secret: linkConfig.signingKey,
+              ttlMs: linkConfig.ttlMs,
+            });
+            const encodedToken = encodeURIComponent(token);
+            const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodedToken}`;
+            const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodedToken}`;
+            const draftPreview = derivePreview(decision.input);
+            const draftSubject = deriveSubject(decision.input);
+            yield* mail
+              .sendApprovalLink({
+                tenantId: current.tenantId,
+                approvalId: approval.id,
+                draftSubject,
+                draftPreview,
+                toolName: tool.name,
+                approveUrl,
+                rejectUrl,
+              })
+              .pipe(Effect.either);
+
             return {
               type: "PausedWaitingForApproval",
               approvalId: approval.id,
