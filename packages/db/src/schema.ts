@@ -241,6 +241,9 @@ export const connectorConnections = pgTable(
       t.provider,
       t.shopDomain,
     ),
+    uniqueIndex("connector_connections_active_shopify_shop_unique")
+      .on(t.provider, t.shopDomain)
+      .where(sql`${t.provider} = 'shopify' AND ${t.status} = 'active'`),
     index("connector_connections_active_idx")
       .on(t.tenantId, t.provider)
       .where(sql`${t.status} = 'active'`),

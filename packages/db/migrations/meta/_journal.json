@@ -36,6 +36,13 @@
       "when": 1779068375411,
       "tag": "0004_tenants_workos",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779129600000,
+      "tag": "0005_shopify_active_shop_unique",
+      "breakpoints": true
     }
   ]
 }

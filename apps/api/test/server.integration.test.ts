@@ -36,6 +36,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     "custom-dist-shop.myshopify.com",
     "signed-install-shop.myshopify.com",
   ] as const;
+  const extraTenantIds: Array<string> = [];
 
   const cfg: ApiConfig = {
     port: 0,
@@ -71,6 +72,12 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .delete(connectorConnections)
       .where(sql`${connectorConnections.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
+    for (const id of extraTenantIds) {
+      await raw.db
+        .delete(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${id}`);
+      await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
+    }
     // Sweep any auto-created tenants from signed Shopify install paths;
     // cascade on connector_connections.tenant_id cleans those rows too.
     for (const shop of autoCreatedShopDomains) {
@@ -81,6 +88,34 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     await raw.close();
     globalThis.fetch = originalFetch;
   });
+
+  const seedShopifyConnection = async (
+    ownerTenantId: string,
+    shop: string,
+    status: "active" | "revoked" = "active",
+  ): Promise<void> => {
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          yield* store.put({
+            tenantId: TenantId(ownerTenantId),
+            provider: "shopify",
+            shopDomain: shop,
+            accessToken: `shpoa_seed_${status}`,
+            scopes: ["read_orders"],
+            apiVersion: "2025-01",
+          });
+          if (status === "revoked") {
+            yield* store.revoke(TenantId(ownerTenantId), "shopify", shop);
+          }
+        }),
+        ConnectorCredentialStoreLive(encryptionKey).pipe(
+          Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
+        ),
+      ).pipe(Effect.scoped),
+    );
+  };
 
   it("GET /shopify/install redirects to Shopify's authorize URL", async () => {
     const res = await fetch(
@@ -112,6 +147,26 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       { redirect: "manual" },
     );
     expect(res.status).toBe(400);
+  });
+
+  it("GET /shopify/install blocks a dashboard tenant from connecting another tenant's active shop", async () => {
+    const shop = "owned-active-shop.myshopify.com";
+    const ownerTenantId = randomUUID();
+    extraTenantIds.push(ownerTenantId);
+    await raw!.db
+      .insert(tenants)
+      .values({ id: ownerTenantId, name: shop, shopifyDomain: shop });
+    await seedShopifyConnection(ownerTenantId, shop);
+
+    const res = await fetch(
+      `${baseUrl}/shopify/install?shop=${shop}&tenant=${tenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "shop_already_connected",
+      shop,
+    });
   });
 
   it("GET /shopify/install accepts Shopify's signed install request without a tenant", async () => {
@@ -319,6 +374,84 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .from(connectorConnections)
       .where(sql`${connectorConnections.shopDomain} = ${shop}`);
     expect(ccRows).toHaveLength(1);
+  });
+
+  it("GET /shopify/auth/callback transfers a revoked shop to the signed tenant after OAuth succeeds", async () => {
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/admin/oauth/access_token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "shpoa_transferred",
+            scope: "read_orders,read_customers",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return originalFetch(url as never, init);
+    }) as unknown as typeof fetch;
+
+    const shop = "revoked-transfer-shop.myshopify.com";
+    const oldTenantId = randomUUID();
+    const newTenantId = randomUUID();
+    extraTenantIds.push(oldTenantId, newTenantId);
+    await raw!.db
+      .insert(tenants)
+      .values([
+        { id: oldTenantId, name: "old-transfer-owner", shopifyDomain: shop },
+        { id: newTenantId, name: "new-transfer-owner" },
+      ]);
+    await seedShopifyConnection(oldTenantId, shop, "revoked");
+
+    const query: Record<string, string> = {
+      shop,
+      code: "the-code-transfer",
+      state: signState(stateSigningKey, newTenantId),
+      timestamp: "1700000005",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.tenantId).toBe(newTenantId);
+    expect(body.ownershipTransferred).toBe(true);
+
+    const tenantRows = await raw!.db
+      .select({
+        id: tenants.id,
+        shopifyDomain: tenants.shopifyDomain,
+      })
+      .from(tenants)
+      .where(sql`${tenants.id} IN (${oldTenantId}, ${newTenantId})`);
+    expect(
+      tenantRows.find((row) => row.id === oldTenantId)!.shopifyDomain,
+    ).toBeNull();
+    expect(
+      tenantRows.find((row) => row.id === newTenantId)!.shopifyDomain,
+    ).toBe(shop);
+
+    const ccRows = await raw!.db
+      .select({
+        tenantId: connectorConnections.tenantId,
+        status: connectorConnections.status,
+      })
+      .from(connectorConnections)
+      .where(sql`${connectorConnections.shopDomain} = ${shop}`);
+    expect(ccRows).toEqual(
+      expect.arrayContaining([
+        { tenantId: oldTenantId, status: "revoked" },
+        { tenantId: newTenantId, status: "active" },
+      ]),
+    );
   });
 
   it("GET /shopify/auth/callback without Accept: application/json redirects browsers to the merchant admin", async () => {

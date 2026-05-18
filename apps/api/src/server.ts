@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   ConnectorCredentialStore,
+  TransactionRunner,
   verifyShopifyWebhookHmac,
 } from "@support-agent/services";
 import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
@@ -14,7 +15,14 @@ import {
   verifyState,
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
-import { findTenantByShop, resolveTenantByShop } from "./tenant-resolver.js";
+import {
+  assertShopifyShopConnectable,
+  claimShopifyShopForTenant,
+  findTenantByShop,
+  resolveTenantByShop,
+  ShopifyInstallTenantNotFound,
+  ShopifyShopAlreadyConnected,
+} from "./tenant-resolver.js";
 import {
   parseCustomersDataRequest,
   parseCustomersRedact,
@@ -137,6 +145,27 @@ const handleShopifyInstall = async (
       return;
     }
     tenant = resolveExit.value;
+  } else {
+    const ownership = await Effect.runPromise(
+      Effect.provide(
+        Effect.either(assertShopifyShopConnectable(shop, tenant)),
+        layer,
+      ),
+    );
+    if (ownership._tag === "Left") {
+      if (ownership.left instanceof ShopifyShopAlreadyConnected) {
+        sendJson(res, 409, {
+          error: "shop_already_connected",
+          shop,
+        });
+        return;
+      }
+      sendJson(res, 500, {
+        error: "shop_ownership_check_failed",
+        detail: ownership.left.message,
+      });
+      return;
+    }
   }
 
   const state = signState(cfg.stateSigningKey, tenant);
@@ -264,27 +293,56 @@ const handleShopifyCallback = async (
     return;
   }
 
-  const putExit = await Effect.runPromiseExit(
+  const persistResult = await Effect.runPromise(
     Effect.provide(
-      Effect.gen(function* () {
-        const store = yield* ConnectorCredentialStore;
-        return yield* store.put({
-          tenantId: TenantId(tenantId),
-          provider: "shopify",
-          shopDomain: shop,
-          accessToken: token.accessToken,
-          scopes: token.scope,
-          apiVersion: cfg.shopify.apiVersion,
-        });
-      }),
+      Effect.either(
+        Effect.gen(function* () {
+          const tx = yield* TransactionRunner;
+          return yield* tx.run(
+            Effect.gen(function* () {
+              const ownership = yield* claimShopifyShopForTenant(
+                shop,
+                tenantId,
+              );
+              const store = yield* ConnectorCredentialStore;
+              yield* store.put({
+                tenantId: TenantId(tenantId),
+                provider: "shopify",
+                shopDomain: shop,
+                accessToken: token.accessToken,
+                scopes: token.scope,
+                apiVersion: cfg.shopify.apiVersion,
+              });
+              return { ownership };
+            }),
+          );
+        }),
+      ),
       layer,
     ),
   );
 
-  if (putExit._tag !== "Success") {
+  if (persistResult._tag === "Left") {
+    if (persistResult.left instanceof ShopifyShopAlreadyConnected) {
+      sendJson(res, 409, {
+        error: "shop_already_connected",
+        shop,
+      });
+      return;
+    }
+    if (persistResult.left instanceof ShopifyInstallTenantNotFound) {
+      sendJson(res, 404, {
+        error: "tenant_not_found",
+        tenantId,
+      });
+      return;
+    }
     sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(putExit.cause),
+      detail:
+        persistResult.left instanceof Error
+          ? persistResult.left.message
+          : String(persistResult.left),
     });
     return;
   }
@@ -304,6 +362,7 @@ const handleShopifyCallback = async (
       tenantId,
       shop,
       scopes: token.scope,
+      ownershipTransferred: persistResult.right.ownership.transferred,
     });
     return;
   }

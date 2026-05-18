@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "connector_connections_active_shopify_shop_unique" ON "connector_connections" USING btree ("provider","shop_domain") WHERE "connector_connections"."provider" = 'shopify' AND "connector_connections"."status" = 'active';

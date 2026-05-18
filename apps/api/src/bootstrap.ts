@@ -3,12 +3,14 @@ import {
   ApprovalService,
   ConnectorCredentialStore,
   parseKey,
+  TransactionRunner,
 } from "@support-agent/services";
 import {
   ApprovalServiceLive,
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  TransactionRunnerLive,
 } from "@support-agent/db";
 
 // ============================================================
@@ -138,11 +140,12 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
-  return Layer.mergeAll(store, approvals, dbLayer);
+  const tx = TransactionRunnerLive.pipe(Layer.provide(dbLayer));
+  return Layer.mergeAll(store, approvals, tx, dbLayer);
 };
 
 export type ApiLayer = Layer.Layer<
-  ConnectorCredentialStore | ApprovalService | DbClient,
+  ConnectorCredentialStore | ApprovalService | TransactionRunner | DbClient,
   never,
   never
 >;
