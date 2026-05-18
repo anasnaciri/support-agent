@@ -30,6 +30,7 @@ export default async function RootLayout({
             <Link href="/cases">Cases</Link>
             <Link href="/approvals">Approvals</Link>
             <Link href="/audit">Audit</Link>
+            <Link href="/settings">Settings</Link>
           </nav>
           <div className="account">
             {user?.email ? <span>{user.email}</span> : null}

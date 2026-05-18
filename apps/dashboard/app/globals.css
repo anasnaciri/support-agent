@@ -199,6 +199,24 @@ tr:last-child td { border-bottom: 0; }
 .badge.system { background: #f3f4f6; color: var(--muted); }
 .badge.agent { background: #dbeafe; color: var(--accent); }
 .badge.user { background: #d1fae5; color: var(--success); }
+.badge.primary { background: #dbeafe; color: var(--accent); }
+.badge.subagent { background: #f3e8ff; color: #6b21a8; }
+.badge.perm-allow { background: #d1fae5; color: var(--success); }
+.badge.perm-ask { background: #fef3c7; color: var(--warn); }
+.badge.perm-deny { background: #fee2e2; color: var(--danger); }
+.badge.perm-na { background: #f3f4f6; color: var(--muted); }
+.badge.integration-active { background: #d1fae5; color: var(--success); }
+.badge.integration-revoked { background: #fee2e2; color: var(--danger); }
+.badge.integration-missing { background: #f3f4f6; color: var(--muted); }
+
+.stat-link {
+  display: block;
+  color: inherit;
+}
+.stat-link:hover {
+  text-decoration: none;
+  border-color: var(--accent);
+}
 
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
