@@ -12,7 +12,13 @@ import { formatRelativeTime } from "@/lib/format";
 
 const TOP_N = 5;
 
-export default async function TodayPage() {
+interface TodaySearchParams {
+  readonly searchParams?: Promise<{ readonly onboarded?: string }>;
+}
+
+export default async function TodayPage({ searchParams }: TodaySearchParams) {
+  const sp = searchParams ? await searchParams : {};
+  const justOnboarded = sp.onboarded === "1";
   const d = db();
   const tenantId = await getTenantId();
   const todayStart = new Date();
@@ -93,6 +99,13 @@ export default async function TodayPage() {
 
   return (
     <>
+      {justOnboarded ? (
+        <div className="banner success">
+          Tenant created. Connect Shopify or Gmail from{" "}
+          <a href="/settings/integrations">Settings → Integrations</a>{" "}
+          to start receiving cases.
+        </div>
+      ) : null}
       <h1>Today</h1>
       <p className="summary">
         AI handled <strong>{resolvedTodayCount}</strong> ticket

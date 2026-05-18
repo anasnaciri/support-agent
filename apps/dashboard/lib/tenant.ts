@@ -81,7 +81,49 @@ export const getTenantId = async (): Promise<string> => {
     .limit(1);
   const row = rows[0];
   if (!row) {
-    throw new NoTenantAccess("no_tenant_mapping", organizationId);
+    // A WorkOS org without a tenant row is a self-service onboarding
+    // case, not an access denial. `/onboarding` renders a form that
+    // creates the tenant + claims the org. Same `redirect()` pattern
+    // as `/sign-in` above — throws a signal not an error.
+    redirect("/onboarding");
   }
   return row.id;
+};
+
+// ============================================================
+// Onboarding helper
+// ============================================================
+
+export interface OrgContext {
+  readonly userId: string;
+  readonly organizationId: string;
+  readonly email: string | null;
+  readonly existingTenantId: string | null;
+}
+
+/**
+ * For `/onboarding` and similar pre-tenant pages. Returns the WorkOS
+ * user + organizationId without requiring a tenant row, and surfaces
+ * the existing tenant id (if any) so the page can short-circuit users
+ * who already onboarded.
+ */
+export const requireOrganization = async (): Promise<OrgContext> => {
+  const { user, organizationId } = await withAuth();
+  if (!user) {
+    redirect("/sign-in");
+  }
+  if (!organizationId) {
+    throw new NoTenantAccess("no_organization", null);
+  }
+  const rows = await db()
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.workosOrganizationId, organizationId))
+    .limit(1);
+  return {
+    userId: user.id,
+    organizationId,
+    email: user.email ?? null,
+    existingTenantId: rows[0]?.id ?? null,
+  };
 };
