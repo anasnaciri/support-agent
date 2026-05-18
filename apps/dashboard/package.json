@@ -1,0 +1,29 @@
+{
+  "name": "@support-agent/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@support-agent/agent-core": "workspace:*",
+    "@support-agent/db": "workspace:*",
+    "@support-agent/services": "workspace:*",
+    "@workos-inc/authkit-nextjs": "4.1.0",
+    "drizzle-orm": "^0.45.2",
+    "effect": "^3.10.0",
+    "next": "16.2.6",
+    "pg-boss": "^12.18.2",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.3"
+  }
+}
