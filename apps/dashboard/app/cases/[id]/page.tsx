@@ -4,13 +4,45 @@ import { cases, auditLog } from "@support-agent/db";
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import CaseLiveBoundary from "./CaseLiveBoundary";
+import { takeOverAction } from "./actions";
 
 interface Params {
-  readonly params: Promise<{ readonly id: string }>;
+  readonly params: Promise<{
+    readonly id: string;
+  }>;
+  readonly searchParams: Promise<{
+    readonly takenOver?: string;
+  }>;
 }
 
-export default async function CaseDetailPage({ params }: Params) {
+const takeOverBanner = (
+  kind: string | undefined,
+): { readonly tone: "success" | "info" | "warn"; readonly text: string } | null => {
+  if (!kind) return null;
+  if (kind === "taken_over") {
+    return {
+      tone: "success",
+      text: "You've taken over this case. The agent will not act on it further; pending approvals were canceled.",
+    };
+  }
+  if (kind === "already_terminal") {
+    return {
+      tone: "info",
+      text: "This case was already in a terminal state — no change.",
+    };
+  }
+  return null;
+};
+
+const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
+
+export default async function CaseDetailPage({
+  params,
+  searchParams,
+}: Params) {
   const { id } = await params;
+  const sp = await searchParams;
+  const banner = takeOverBanner(sp.takenOver);
   const d = db();
   const tenantId = await getTenantId();
   // Cross-tenant access shows as a 404, not 403. We don't want to
@@ -30,11 +62,28 @@ export default async function CaseDetailPage({ params }: Params) {
     )
     .orderBy(asc(auditLog.id));
 
+  const canTakeOver = !TERMINAL.has(caseRow.status);
+
   return (
     <>
+      {banner ? (
+        <div className={`banner ${banner.tone}`}>{banner.text}</div>
+      ) : null}
       <div className="case-header">
         <h1>{caseRow.subject ?? "(no subject)"}</h1>
         <CaseLiveBoundary caseId={caseRow.id} />
+        {canTakeOver ? (
+          <form action={takeOverAction} style={{ marginLeft: "auto" }}>
+            <input type="hidden" name="caseId" value={caseRow.id} />
+            <button
+              type="submit"
+              className="btn btn-secondary"
+              title="Stop the agent on this case and handle it manually"
+            >
+              Take over
+            </button>
+          </form>
+        ) : null}
       </div>
       <p className="muted">
         <span className={`badge ${caseRow.status}`}>{caseRow.status}</span>

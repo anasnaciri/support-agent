@@ -39,6 +39,14 @@ export interface ApplyApprovalDecisionInput {
    * email-link flow where the signed token IS the auth).
    */
   readonly tenantId?: TenantId;
+  /**
+   * Manager-edited override for the tool input. Only honored on
+   * `action: "approve"` — ignored for reject. The runtime resume
+   * branch reads `approval.approvedInput ?? approval.proposedInput`
+   * so passing this here is what actually changes what the customer
+   * sees. Use for "Edit reply & approve" UX flows.
+   */
+  readonly approvedInput?: unknown;
 }
 
 export const applyApprovalDecision = (
@@ -70,9 +78,18 @@ export const applyApprovalDecision = (
       return { kind: "already_decided", approval: existing };
     }
 
-    // 3. Apply the decision.
+    // 3. Apply the decision. `approvedInput` is honored only for
+    //    `approve` — the runtime reads it via
+    //    `approval.approvedInput ?? approval.proposedInput`, which is
+    //    how Edit-and-Approve actually changes what the customer sees.
     const decided = yield* (input.action === "approve"
-      ? svc.approve({ id: approvalIdTyped, decidedBy: input.managerId })
+      ? svc.approve({
+          id: approvalIdTyped,
+          decidedBy: input.managerId,
+          ...(input.approvedInput !== undefined
+            ? { approvedInput: input.approvedInput }
+            : {}),
+        })
       : svc.reject({ id: approvalIdTyped, decidedBy: input.managerId })
     ).pipe(Effect.either);
 

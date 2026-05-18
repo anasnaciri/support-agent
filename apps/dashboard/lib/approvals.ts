@@ -50,6 +50,7 @@ const buildLayer = () => {
 export const decideApprovalFromDashboard = async (
   approvalId: string,
   action: "approve" | "reject",
+  opts: { readonly approvedInput?: unknown } = {},
 ): Promise<ApprovalDecisionResult> => {
   const tenantId = await getTenantId();
   const { user } = await withAuth();
@@ -66,6 +67,9 @@ export const decideApprovalFromDashboard = async (
     action,
     managerId,
     tenantId: TenantId(tenantId),
+    ...(opts.approvedInput !== undefined
+      ? { approvedInput: opts.approvedInput }
+      : {}),
   }) as unknown as Effect.Effect<ApprovalDecisionResult, never, never>;
   const result: ApprovalDecisionResult = await Effect.runPromise(
     Effect.provide(eff, buildLayer()),

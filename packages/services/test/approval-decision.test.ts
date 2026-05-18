@@ -144,6 +144,65 @@ describe("applyApprovalDecision", () => {
     }
   });
 
+  it("approves with manager-edited approvedInput (Edit-and-Approve path)", async () => {
+    const svc = makeService();
+    const row = svc.seed({
+      tenantId: tenantA,
+      caseId: caseA,
+      agentId,
+      proposedInput: { bodyText: "draft from agent", subject: null },
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        applyApprovalDecision({
+          approvalId: row.id,
+          action: "approve",
+          managerId: manager,
+          approvedInput: {
+            bodyText: "manager-edited version",
+            subject: null,
+          },
+        }),
+        svc.layer,
+      ),
+    );
+    expect(result.kind).toBe("decided");
+    if (result.kind === "decided") {
+      expect(result.approval.status).toBe("approved");
+      // Runtime resume reads `approvedInput ?? proposedInput` — the
+      // edit must land in the column for the customer to see it.
+      const edited = result.approval.approvedInput as {
+        readonly bodyText: string;
+      };
+      expect(edited.bodyText).toBe("manager-edited version");
+    }
+  });
+
+  it("ignores approvedInput on reject", async () => {
+    const svc = makeService();
+    const row = svc.seed({
+      tenantId: tenantA,
+      caseId: caseA,
+      agentId,
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        applyApprovalDecision({
+          approvalId: row.id,
+          action: "reject",
+          managerId: manager,
+          approvedInput: { bodyText: "should not be saved" },
+        }),
+        svc.layer,
+      ),
+    );
+    expect(result.kind).toBe("decided");
+    if (result.kind === "decided") {
+      expect(result.approval.status).toBe("rejected");
+      expect(result.approval.approvedInput).toBeNull();
+    }
+  });
+
   it("rejects a pending row", async () => {
     const svc = makeService();
     const row = svc.seed({

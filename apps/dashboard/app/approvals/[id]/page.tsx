@@ -19,6 +19,18 @@ export default async function ApprovalDetailPage({ params }: Params) {
     .limit(1);
   if (!row) notFound();
   const isPending = row.status === "pending";
+  // Edit-and-Approve only makes sense when there's a bodyText to edit
+  // — conversation.reply / conversation.ask_customer today, future
+  // text-bearing tools tomorrow. Other tools fall back to read-only
+  // JSON + a plain Approve button (the JSON edit UX is a future slice).
+  const proposed =
+    row.proposedInput && typeof row.proposedInput === "object"
+      ? (row.proposedInput as Record<string, unknown>)
+      : null;
+  const editableBodyText =
+    proposed && typeof proposed["bodyText"] === "string"
+      ? (proposed["bodyText"] as string)
+      : null;
 
   return (
     <>
@@ -51,25 +63,53 @@ export default async function ApprovalDetailPage({ params }: Params) {
         </pre>
 
         {isPending ? (
-          <div className="approval-actions">
-            <form action={approveAction}>
-              <input type="hidden" name="approvalId" value={row.id} />
-              <button type="submit" className="btn btn-approve">
-                Approve
-              </button>
-            </form>
-            <form action={rejectAction}>
+          <>
+            {editableBodyText !== null ? (
+              <form action={approveAction} className="edit-and-approve">
+                <input type="hidden" name="approvalId" value={row.id} />
+                <label>
+                  Reply body (edit before approving)
+                  <textarea
+                    name="bodyText"
+                    defaultValue={editableBodyText}
+                    rows={8}
+                  />
+                </label>
+                <div className="approval-actions">
+                  <button type="submit" className="btn btn-approve">
+                    Approve
+                  </button>
+                </div>
+                <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                  Your edits land in <code>approvedInput</code>; the runtime
+                  resume sends exactly this text to the customer.
+                </p>
+              </form>
+            ) : (
+              <form action={approveAction}>
+                <input type="hidden" name="approvalId" value={row.id} />
+                <div className="approval-actions">
+                  <button type="submit" className="btn btn-approve">
+                    Approve
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <form action={rejectAction} style={{ marginTop: 12 }}>
               <input type="hidden" name="approvalId" value={row.id} />
               <button type="submit" className="btn btn-reject">
                 Reject
               </button>
             </form>
+
             <p className="muted" style={{ marginTop: 16 }}>
-              Approving sends the drafted reply to the customer through the
-              tenant's configured connector. Rejecting escalates the case
-              to human takeover; no customer reply goes out.
+              Approving sends the (possibly edited) reply to the customer
+              through the tenant's configured connector. Rejecting
+              escalates the case to human takeover; no customer reply
+              goes out.
             </p>
-          </div>
+          </>
         ) : (
           <p className="muted">
             Decided{" "}
@@ -77,6 +117,14 @@ export default async function ApprovalDetailPage({ params }: Params) {
               ? row.decidedAt.toISOString().slice(0, 19).replace("T", " ")
               : "(no timestamp)"}
             {row.decidedBy ? ` by ${row.decidedBy}` : ""}.
+            {row.approvedInput &&
+            typeof row.approvedInput === "object" &&
+            "bodyText" in (row.approvedInput as Record<string, unknown>) ? (
+              <>
+                {" "}
+                Manager edited the body text before approving.
+              </>
+            ) : null}
           </p>
         )}
       </div>
