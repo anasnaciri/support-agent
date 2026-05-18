@@ -11,6 +11,7 @@
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
     "@support-agent/db": "workspace:*",
+    "@support-agent/providers": "workspace:*",
     "@support-agent/services": "workspace:*",
     "@workos-inc/authkit-nextjs": "4.1.0",
     "drizzle-orm": "^0.45.2",

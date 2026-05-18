@@ -8,6 +8,7 @@ const config: NextConfig = {
   transpilePackages: [
     "@support-agent/agent-core",
     "@support-agent/db",
+    "@support-agent/providers",
     "@support-agent/services",
   ],
 };

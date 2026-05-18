@@ -60,6 +60,9 @@ importers:
       '@support-agent/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@support-agent/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@support-agent/services':
         specifier: workspace:*
         version: link:../../packages/services

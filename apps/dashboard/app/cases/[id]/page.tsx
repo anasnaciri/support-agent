@@ -1,9 +1,13 @@
 import { notFound } from "next/navigation";
 import { asc, and, eq } from "drizzle-orm";
 import { cases, auditLog } from "@support-agent/db";
+import { TenantId } from "@support-agent/agent-core";
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
+import { fetchCustomerForCase, fetchOrderForCase } from "@/lib/shopify";
 import CaseLiveBoundary from "./CaseLiveBoundary";
+import { CustomerPanel } from "./CustomerPanel";
+import { OrderPanel } from "./OrderPanel";
 import { takeOverAction } from "./actions";
 
 interface Params {
@@ -54,13 +58,25 @@ export default async function CaseDetailPage({
     .limit(1);
   if (!caseRow) notFound();
 
-  const entries = await d
-    .select()
-    .from(auditLog)
-    .where(
-      and(eq(auditLog.caseId, id), eq(auditLog.tenantId, tenantId)),
-    )
-    .orderBy(asc(auditLog.id));
+  const context = (caseRow.context ?? {}) as Readonly<Record<string, unknown>>;
+  const customerEmail =
+    typeof context["customerEmail"] === "string"
+      ? (context["customerEmail"] as string)
+      : null;
+  const orderHint =
+    typeof context["identifiedOrderId"] === "string"
+      ? (context["identifiedOrderId"] as string)
+      : null;
+
+  const [entries, customer, order] = await Promise.all([
+    d
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.caseId, id), eq(auditLog.tenantId, tenantId)))
+      .orderBy(asc(auditLog.id)),
+    fetchCustomerForCase(TenantId(tenantId), context),
+    fetchOrderForCase(TenantId(tenantId), context),
+  ]);
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
 
@@ -94,6 +110,11 @@ export default async function CaseDetailPage({
         {" · "}
         opened {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
       </p>
+
+      <div className="case-panels">
+        <CustomerPanel customer={customer} customerEmail={customerEmail} />
+        <OrderPanel order={order} orderHint={orderHint} />
+      </div>
 
       <h2>Timeline</h2>
       <ol className="timeline">
