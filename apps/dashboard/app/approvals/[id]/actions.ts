@@ -46,6 +46,27 @@ const approvalIdOf = (formData: FormData): string => {
   return id;
 };
 
+// Optional `returnTo` form field lets a caller redirect back to a
+// page other than /approvals after the decision — e.g. the inline
+// approval card on the case detail page wants to stay on the case.
+// We only honor in-app absolute paths (starting with "/") to avoid
+// turning this into an open redirect.
+const returnToOf = (formData: FormData): string | null => {
+  const raw = formData.get("returnTo");
+  if (typeof raw !== "string") return null;
+  if (!raw.startsWith("/")) return null;
+  if (raw.startsWith("//")) return null;
+  return raw;
+};
+
+const banneredPath = (
+  basePath: string,
+  approvalId: string,
+  action: "approve" | "reject",
+  kind: string,
+): string =>
+  `${basePath}${basePath.includes("?") ? "&" : "?"}decided=${approvalId}&action=${action}&kind=${kind}`;
+
 export const approveAction = async (formData: FormData): Promise<void> => {
   const approvalId = approvalIdOf(formData);
 
@@ -78,10 +99,14 @@ export const approveAction = async (formData: FormData): Promise<void> => {
   );
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${approvalId}`);
+  const returnTo = returnToOf(formData);
+  if (returnTo) revalidatePath(returnTo);
   // Race: dashboard click + email link click can both decide the same
   // row. `result.kind` distinguishes — we let the list page render
   // the right "Approved ✓" / "Already decided" banner.
-  redirect(`/approvals?decided=${approvalId}&action=approve&kind=${result.kind}`);
+  redirect(
+    banneredPath(returnTo ?? "/approvals", approvalId, "approve", result.kind),
+  );
 };
 
 export const rejectAction = async (formData: FormData): Promise<void> => {
@@ -89,5 +114,9 @@ export const rejectAction = async (formData: FormData): Promise<void> => {
   const result = await decideApprovalFromDashboard(approvalId, "reject");
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${approvalId}`);
-  redirect(`/approvals?decided=${approvalId}&action=reject&kind=${result.kind}`);
+  const returnTo = returnToOf(formData);
+  if (returnTo) revalidatePath(returnTo);
+  redirect(
+    banneredPath(returnTo ?? "/approvals", approvalId, "reject", result.kind),
+  );
 };

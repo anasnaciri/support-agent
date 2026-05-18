@@ -275,6 +275,32 @@ code {
   50% { opacity: 0.35; }
 }
 
+.approval-card {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 16px 0;
+}
+.approval-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.approval-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--warn);
+}
+.approval-reject-form {
+  border-top: 1px dashed #fcd34d;
+  padding-top: 12px;
+}
+
 .case-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

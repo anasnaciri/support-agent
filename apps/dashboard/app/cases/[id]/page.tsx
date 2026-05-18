@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import { asc, and, eq } from "drizzle-orm";
-import { cases, auditLog } from "@support-agent/db";
+import { asc, desc, and, eq } from "drizzle-orm";
+import { cases, auditLog, approvals } from "@support-agent/db";
 import { TenantId } from "@support-agent/agent-core";
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
@@ -8,6 +8,7 @@ import { fetchCustomerForCase, fetchOrderForCase } from "@/lib/shopify";
 import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
+import { ApprovalCard } from "./ApprovalCard";
 import { takeOverAction } from "./actions";
 
 interface Params {
@@ -16,12 +17,15 @@ interface Params {
   }>;
   readonly searchParams: Promise<{
     readonly takenOver?: string;
+    readonly decided?: string;
+    readonly action?: string;
+    readonly kind?: string;
   }>;
 }
 
-const takeOverBanner = (
-  kind: string | undefined,
-): { readonly tone: "success" | "info" | "warn"; readonly text: string } | null => {
+type Banner = { readonly tone: "success" | "info" | "warn"; readonly text: string };
+
+const takeOverBanner = (kind: string | undefined): Banner | null => {
   if (!kind) return null;
   if (kind === "taken_over") {
     return {
@@ -38,6 +42,33 @@ const takeOverBanner = (
   return null;
 };
 
+const approvalBanner = (sp: {
+  decided?: string;
+  action?: string;
+  kind?: string;
+}): Banner | null => {
+  if (!sp.decided) return null;
+  const isApprove = sp.action === "approve";
+  if (sp.kind === "decided") {
+    return {
+      tone: "success",
+      text: isApprove
+        ? "Approved. The customer reply will be sent in a moment."
+        : "Rejected. The case is now in human takeover.",
+    };
+  }
+  if (sp.kind === "already_decided") {
+    return {
+      tone: "info",
+      text: "This approval had already been decided — no change.",
+    };
+  }
+  if (sp.kind === "approval_not_found") {
+    return { tone: "warn", text: "Approval not found." };
+  }
+  return null;
+};
+
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
 
 export default async function CaseDetailPage({
@@ -46,7 +77,7 @@ export default async function CaseDetailPage({
 }: Params) {
   const { id } = await params;
   const sp = await searchParams;
-  const banner = takeOverBanner(sp.takenOver);
+  const banner = takeOverBanner(sp.takenOver) ?? approvalBanner(sp);
   const d = db();
   const tenantId = await getTenantId();
   // Cross-tenant access shows as a 404, not 403. We don't want to
@@ -68,7 +99,7 @@ export default async function CaseDetailPage({
       ? (context["identifiedOrderId"] as string)
       : null;
 
-  const [entries, customer, order] = await Promise.all([
+  const [entries, customer, order, pendingApprovals] = await Promise.all([
     d
       .select()
       .from(auditLog)
@@ -76,6 +107,17 @@ export default async function CaseDetailPage({
       .orderBy(asc(auditLog.id)),
     fetchCustomerForCase(TenantId(tenantId), context),
     fetchOrderForCase(TenantId(tenantId), context),
+    d
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.caseId, id),
+          eq(approvals.tenantId, tenantId),
+          eq(approvals.status, "pending"),
+        ),
+      )
+      .orderBy(desc(approvals.createdAt)),
   ]);
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
@@ -110,6 +152,14 @@ export default async function CaseDetailPage({
         {" · "}
         opened {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
       </p>
+
+      {pendingApprovals.map((a) => (
+        <ApprovalCard
+          key={a.id}
+          approval={a}
+          returnTo={`/cases/${caseRow.id}`}
+        />
+      ))}
 
       <div className="case-panels">
         <CustomerPanel customer={customer} customerEmail={customerEmail} />
