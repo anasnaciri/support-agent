@@ -28,9 +28,13 @@ vi.mock("ai", () => ({
 vi.mock("@openrouter/ai-sdk-provider", () => ({
   createOpenRouter: (opts: unknown) => {
     const provider = (modelId: string) => ({ __chat: modelId });
-    (provider as unknown as { chat: unknown }).chat = (modelId: string) => ({
+    (provider as unknown as { chat: unknown }).chat = (
+      modelId: string,
+      settings?: unknown,
+    ) => ({
       __chat: modelId,
       __providerOpts: opts,
+      __chatSettings: settings,
     });
     return provider;
   },
@@ -202,6 +206,164 @@ describe("LLMServiceLive — decision mapping", () => {
       type: "final_message",
       text: "Your order shipped Tuesday.",
     });
+  });
+});
+
+// Regression tests for the Anthropic-specific fixes that landed during
+// the 2026-05-16 live demo. Anthropic's API rejects dot-containing tool
+// names (regex `^[a-zA-Z0-9_-]{1,128}$`), and OpenRouter routes Anthropic
+// models across multiple backends (Anthropic native, Amazon Bedrock,
+// Google Vertex) all of which enforce the same regex. The LLM service:
+//  1. sanitizes dots → underscores in tool schemas + tool-call references
+//     in conversation history when the model is `anthropic/*`,
+//  2. reverse-maps the underscored names back to the original on inbound,
+//  3. pins `anthropic/*` requests to the native Anthropic endpoint via
+//     `provider: { only: ["anthropic"], allow_fallbacks: false }`.
+describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => {
+  const anthropicRequest: ToolCallingRequest = {
+    model: "anthropic/claude-haiku-4.5",
+    system: "you are claude",
+    messages: [
+      { role: "user", content: "hi" } satisfies ChatMessage,
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "call-a", name: "case.update_context", input: { x: 1 } },
+        ],
+      },
+      {
+        role: "tool",
+        toolCallId: "call-a",
+        toolName: "case.update_context",
+        content: { ok: true },
+      },
+    ],
+    tools: [
+      {
+        name: "case.update_context",
+        description: "update context",
+        inputSchema: { type: "object" },
+      },
+      {
+        name: "shopify.get_order",
+        description: "get an order",
+        inputSchema: { type: "object" },
+      },
+    ],
+  };
+
+  it("rewrites dot tool names to underscores in tool schemas for anthropic/* models", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(anthropicRequest)),
+    );
+    const arg = generateText.mock.calls[0]![0] as {
+      tools: Record<string, unknown>;
+    };
+    const toolNames = Object.keys(arg.tools).sort();
+    // Anthropic sees ONLY the underscored names — the dotted ones would
+    // be rejected with `tools.0.custom.name: String should match
+    // pattern '^[a-zA-Z0-9_-]{1,128}$'`.
+    expect(toolNames).toEqual(["case_update_context", "shopify_get_order"]);
+    expect(arg.tools["case.update_context"]).toBeUndefined();
+  });
+
+  it("rewrites tool-call + tool-result toolName references in conversation history for anthropic/* models", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(anthropicRequest)),
+    );
+    const arg = generateText.mock.calls[0]![0] as {
+      messages: ReadonlyArray<{ role: string; content: unknown }>;
+    };
+    // assistant message: tool-call must reference the sanitized name to
+    // pair with the schema; otherwise Anthropic returns
+    // `tools.*: Invalid tool name`.
+    const assistant = arg.messages[1] as {
+      content: ReadonlyArray<{ type: string; toolName?: string }>;
+    };
+    const toolCallEntry = assistant.content.find((c) => c.type === "tool-call");
+    expect(toolCallEntry?.toolName).toBe("case_update_context");
+    // tool message: tool-result must also reference the sanitized name.
+    const toolMsg = arg.messages[2] as {
+      content: ReadonlyArray<{ type: string; toolName?: string }>;
+    };
+    const toolResultEntry = toolMsg.content.find(
+      (c) => c.type === "tool-result",
+    );
+    expect(toolResultEntry?.toolName).toBe("case_update_context");
+  });
+
+  it("reverse-maps the sanitized tool name when the SDK returns a tool_call for an anthropic/* model", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [
+        {
+          toolCallId: "call-2",
+          toolName: "shopify_get_order",
+          input: { orderId: "1001" },
+        },
+      ],
+      text: "",
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(anthropicRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    // The internal `LLMDecision` must carry the ORIGINAL dotted name so
+    // downstream code (ToolRegistry.tryGet, audit log, prompts) keeps
+    // working unchanged.
+    expect(exit.value).toEqual({
+      type: "tool_call",
+      callId: "call-2",
+      tool: "shopify.get_order",
+      input: { orderId: "1001" },
+    });
+  });
+
+  it("pins anthropic/* models to the native Anthropic endpoint via provider.only", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(anthropicRequest)),
+    );
+    const arg = generateText.mock.calls[0]![0] as {
+      model: { __chatSettings?: { provider?: unknown } };
+    };
+    // Without `only: ["anthropic"]`, OpenRouter is free to route the call
+    // to Amazon Bedrock — which enforces the same tool-name regex but
+    // surfaces errors as "[Amazon Bedrock] tools.0.custom.name..." that
+    // are harder to recognize.
+    expect(arg.model.__chatSettings).toEqual({
+      provider: {
+        only: ["anthropic"],
+        allow_fallbacks: false,
+      },
+    });
+  });
+
+  it("does NOT sanitize tool names or pin routing for non-anthropic models", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s.runToolCalling({
+          ...anthropicRequest,
+          model: "google/gemini-3-flash-preview",
+        }),
+      ),
+    );
+    const arg = generateText.mock.calls[0]![0] as {
+      tools: Record<string, unknown>;
+      model: { __chatSettings?: unknown };
+    };
+    // Tool names pass through unchanged for non-Anthropic providers.
+    expect(Object.keys(arg.tools).sort()).toEqual([
+      "case.update_context",
+      "shopify.get_order",
+    ]);
+    // No provider routing pin for non-Anthropic — `chatSettings` is
+    // either undefined or an empty object.
+    expect(arg.model.__chatSettings).toEqual({});
   });
 });
 

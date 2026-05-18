@@ -16,13 +16,47 @@ import {
 import { LLMConfig, LLMService } from "@support-agent/services";
 
 // ============================================================
+// Anthropic tool-name sanitization
+// ============================================================
+//
+// Anthropic's API enforces a tool-name regex `^[a-zA-Z0-9_-]{1,128}$` —
+// dots are rejected. Our tool names use dotted namespacing
+// (`case.update_context`, `shopify.get_order`, etc.) which works on every
+// other provider. To support Anthropic without renaming every tool
+// globally, we sanitize dots → underscores at the LLM provider boundary
+// (on tool schemas going out + tool-call references in conversation
+// history) and reverse-map on the way back. Internal API everywhere else
+// — `AgentRuntime`, `ToolRegistry`, audit log, prompts — keeps the dotted
+// names unchanged.
+
+const needsToolNameSanitization = (model: string): boolean =>
+  model.startsWith("anthropic/");
+
+const sanitizeToolName = (name: string): string => name.replace(/\./g, "_");
+
+const buildReverseToolNameMap = (
+  tools: ReadonlyArray<ToolSchema>,
+): Map<string, string> => {
+  const m = new Map<string, string>();
+  for (const t of tools) m.set(sanitizeToolName(t.name), t.name);
+  return m;
+};
+
+const desanitize = (
+  name: string,
+  reverseMap: ReadonlyMap<string, string>,
+): string => reverseMap.get(name) ?? name;
+
+// ============================================================
 // Internal: ChatMessage → AI SDK ModelMessage
 // ============================================================
 
 const toModelMessages = (
   messages: ReadonlyArray<ChatMessage>,
-): Array<ModelMessage> =>
-  messages.map((m): ModelMessage => {
+  sanitize: boolean,
+): Array<ModelMessage> => {
+  const tn = (n: string): string => (sanitize ? sanitizeToolName(n) : n);
+  return messages.map((m): ModelMessage => {
     if (m.role === "user") {
       return { role: "user", content: m.content };
     }
@@ -41,7 +75,7 @@ const toModelMessages = (
           ...calls.map((c) => ({
             type: "tool-call" as const,
             toolCallId: c.id,
-            toolName: c.name,
+            toolName: tn(c.name),
             input: c.input,
           })),
         ],
@@ -54,21 +88,25 @@ const toModelMessages = (
         {
           type: "tool-result",
           toolCallId: m.toolCallId,
-          toolName: m.toolName,
+          toolName: tn(m.toolName),
           output: { type: "json", value: m.content as never },
         },
       ],
     };
   });
+};
 
 // ============================================================
 // Internal: ToolSchema[] → AI SDK ToolSet
 // ============================================================
 
-const toToolSet = (tools: ReadonlyArray<ToolSchema>) =>
+const toToolSet = (
+  tools: ReadonlyArray<ToolSchema>,
+  sanitize: boolean,
+) =>
   Object.fromEntries(
     tools.map((t) => [
-      t.name,
+      sanitize ? sanitizeToolName(t.name) : t.name,
       {
         description: t.description,
         // The schemas we receive are already JSON Schema (derived from Effect
@@ -151,15 +189,36 @@ export const LLMServiceLive = Layer.effect(
       ...(cfg.siteName !== undefined ? { appName: cfg.siteName } : {}),
     });
 
+    // OpenRouter routes requests for Anthropic models across multiple
+    // backends (Anthropic native, Amazon Bedrock, Google Vertex). Bedrock
+    // enforces a stricter tool-name regex (`^[a-zA-Z0-9_-]{1,128}$`) that
+    // rejects the dots in our tool names (`case.update_context` etc).
+    // Pin Anthropic models to the native Anthropic endpoint so the tool
+    // schema is accepted. Other providers (google/*, openai/*, etc.) use
+    // OpenRouter's default routing.
+    const chatSettingsFor = (model: string) =>
+      model.startsWith("anthropic/")
+        ? {
+            provider: {
+              only: ["anthropic"],
+              allow_fallbacks: false,
+            },
+          }
+        : {};
+
     return LLMService.of({
-      runToolCalling: (req: ToolCallingRequest) =>
-        Effect.tryPromise({
+      runToolCalling: (req: ToolCallingRequest) => {
+        const sanitize = needsToolNameSanitization(req.model);
+        const reverseMap = sanitize
+          ? buildReverseToolNameMap(req.tools)
+          : new Map<string, string>();
+        return Effect.tryPromise({
           try: () =>
             generateText({
-              model: provider.chat(req.model),
+              model: provider.chat(req.model, chatSettingsFor(req.model)),
               system: req.system,
-              messages: toModelMessages(req.messages),
-              tools: toToolSet(req.tools),
+              messages: toModelMessages(req.messages, sanitize),
+              tools: toToolSet(req.tools, sanitize),
               ...(req.temperature !== undefined
                 ? { temperature: req.temperature }
                 : {}),
@@ -175,7 +234,9 @@ export const LLMServiceLive = Layer.effect(
               return Effect.succeed({
                 type: "tool_call",
                 callId: call.toolCallId,
-                tool: call.toolName,
+                tool: sanitize
+                  ? desanitize(call.toolName, reverseMap)
+                  : call.toolName,
                 input: call.input,
               });
             }
@@ -184,7 +245,8 @@ export const LLMServiceLive = Layer.effect(
               text: result.text,
             });
           }),
-        ),
+        );
+      },
     });
   }),
 );
