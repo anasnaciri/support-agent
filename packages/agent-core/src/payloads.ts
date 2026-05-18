@@ -1,6 +1,18 @@
 import type { CustomerId, OrderId, ThreadId } from "./ids.js";
 
-export interface InboundEmail {
+/**
+ * Inbound customer message normalised by a connector. The event
+ * `message.received` carries this as its payload.
+ *
+ * Shape is intentionally provider-neutral — Gmail, Outlook, IMAP, and
+ * helpdesk-style connectors all map their wire formats onto this. The
+ * agent runtime and tools never reach behind it.
+ *
+ * Distinct from `ConversationMessage` (which carries a `direction` field
+ * for thread history) because at the event boundary direction is always
+ * "inbound" — narrowing it here keeps route handlers honest.
+ */
+export interface InboundMessage {
   readonly threadId: ThreadId;
   readonly messageId: string;
   readonly from: { readonly name: string | null; readonly email: string };
@@ -9,19 +21,24 @@ export interface InboundEmail {
   readonly bodyText: string;
   readonly bodyHtml: string | null;
   readonly receivedAt: Date;
-  readonly attachments: ReadonlyArray<EmailAttachment>;
+  readonly attachments: ReadonlyArray<MessageAttachment>;
 }
 
-export interface OutboundEmailDraft {
+/**
+ * Provider-neutral outbound draft. The `wait_for_customer` LLM decision
+ * carries this; tools that send replies also accept this shape (or its
+ * dedicated tool-input variants).
+ */
+export interface OutboundMessageDraft {
   readonly threadId: ThreadId | null;
   readonly to: ReadonlyArray<{ readonly name: string | null; readonly email: string }>;
   readonly subject: string;
   readonly bodyText: string;
   readonly bodyHtml: string | null;
-  readonly attachments: ReadonlyArray<EmailAttachment>;
+  readonly attachments: ReadonlyArray<MessageAttachment>;
 }
 
-export interface EmailAttachment {
+export interface MessageAttachment {
   readonly filename: string;
   readonly contentType: string;
   readonly storageKey: string;

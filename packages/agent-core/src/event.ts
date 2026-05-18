@@ -7,7 +7,7 @@ import type {
   UserId,
 } from "./ids.js";
 import type {
-  InboundEmail,
+  InboundMessage,
   SupplierUpdate,
   TicketInput,
   TrackingEvent,
@@ -15,15 +15,15 @@ import type {
 
 export type DomainEvent =
   | {
-      readonly type: "email.received";
+      readonly type: "message.received";
       readonly tenantId: TenantId;
       readonly threadId: ThreadId;
-      readonly payload: InboundEmail;
+      readonly payload: InboundMessage;
     }
   | {
       readonly type: "customer.replied";
       readonly caseId: CaseId;
-      readonly payload: InboundEmail;
+      readonly payload: InboundMessage;
     }
   | {
       readonly type: "ticket.created";

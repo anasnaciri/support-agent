@@ -13,3 +13,4 @@ export * from "./tool-registry.js";
 export * from "./permission-service.js";
 export * from "./agent-registry.js";
 export * from "./shopify.js";
+export * from "./conversation.js";
