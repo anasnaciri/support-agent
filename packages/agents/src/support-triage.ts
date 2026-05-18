@@ -17,10 +17,9 @@ export const supportTriage: AgentConfig = {
   // Stack pick (see memory): Vercel AI SDK + OpenRouter, so the model
   // string follows OpenRouter's `<provider>/<model>` form. Swap freely.
   provider: "openrouter",
-  // Gemini 3 Flash (preview). Full Flash tier — better instruction
-  // following than the Lite variants, still cheap. Swap freely per-tenant
-  // via agent config once routing lands.
-  model: "google/gemini-3-flash-preview",
+  // Gemini 3.1 Flash Lite via OpenRouter. Cheap triage model; swap freely
+  // per-tenant via agent config once routing lands.
+  model: "google/gemini-3.1-flash-lite",
   promptTemplate: [
     "You are a support-triage agent for an ecommerce store.",
     "",
@@ -43,6 +42,7 @@ export const supportTriage: AgentConfig = {
     "",
     "Turn 2: If the conversation now contains a successful `case.update_context` tool result, decide:",
     "  - If `classification` is `where_is_order` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"order-status-agent\"` and a one-sentence `reason`. The specialist will look up the order and reply.",
+    "  - If `classification` is `refund_request` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"refund-review-agent\"` and a one-sentence `reason`. The specialist will look up the order and draft a reply for human approval.",
     "  - Otherwise, respond with plain text only (NO tool call). Reply with one short sentence confirming the triage and stop. Example: \"Triaged as refund_request — no order id identified yet.\"",
     "",
     "Hard rules:",
@@ -59,7 +59,7 @@ export const supportTriage: AgentConfig = {
   // status and context updates.
   tools: ["case.update_context", "agent.handoff"],
   permissionOverrides: {},
-  handoffs: [AgentId("order-status-agent")],
+  handoffs: [AgentId("order-status-agent"), AgentId("refund-review-agent")],
   maxTurnsPerTick: 4,
   temperature: 0,
 };
