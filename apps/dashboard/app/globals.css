@@ -226,6 +226,32 @@ tr:last-child td { border-bottom: 0; }
   border-color: var(--accent);
 }
 
+.integration-connect {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.integration-connect input[type="text"] {
+  flex: 1;
+  min-width: 200px;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+.integration-connect input:invalid {
+  border-color: var(--danger);
+}
+.integration-connect .btn {
+  padding: 8px 14px;
+  font-size: 14px;
+  text-decoration: none;
+}
+a.btn-primary { display: inline-block; }
+
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
