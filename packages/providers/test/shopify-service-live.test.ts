@@ -328,6 +328,85 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
     expect(body.variables.q).toBe("email:customer@example.com");
   });
 
+  // Regression test for the 2026-05-16 live demo. Customers reference
+  // orders by their *name* (`#1001`), not their internal id
+  // (`12098337702252`). The `shopify.get_order` tool dispatches non-GID
+  // input through `findOrderByName`, which uses Shopify's `orders` query
+  // with `query: "name:#XXXX"`.
+  it("findOrderByName issues a name search and maps the first result", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: { orders: { nodes: [ORDER_PAYLOAD.data.order] } },
+          }),
+      ]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByName(tenantId, "#1001"),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect(exit.value).not.toBeNull();
+    expect(exit.value!.name).toBe("#1001");
+    expect(exit.value!.id).toBe("gid://shopify/Order/12345");
+
+    // Verify the GraphQL `q` variable was built with the leading `#`.
+    expect(captures).toHaveLength(1);
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string };
+    };
+    expect(body.variables.q).toBe("name:#1001");
+  });
+
+  it("findOrderByName auto-prepends `#` when the caller omits it", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: { orders: { nodes: [ORDER_PAYLOAD.data.order] } },
+          }),
+      ]),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByName(tenantId, "1001"),
+        ),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string };
+    };
+    expect(body.variables.q).toBe("name:#1001");
+  });
+
+  it("findOrderByName returns null on no match (not a typed error)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { orders: { nodes: [] } } }),
+      ]),
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByName(tenantId, "#9999"),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toBeNull();
+  });
+
   it("getFulfillment returns the order's fulfillments array", async () => {
     reset();
     const layer = buildLayer(

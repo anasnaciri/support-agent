@@ -418,6 +418,14 @@ const SEARCH_CUSTOMER_QUERY = `
   }
 `;
 
+const SEARCH_ORDER_BY_NAME_QUERY = `
+  query SearchOrderByName($q: String!) {
+    orders(first: 1, query: $q) {
+      nodes { ${ORDER_FIELDS} }
+    }
+  }
+`;
+
 const GET_FULFILLMENT_QUERY = `
   query GetFulfillments($id: ID!) {
     order(id: $id) {
@@ -501,6 +509,26 @@ export const ShopifyServiceLive = Layer.effect(
             }),
           ),
         ),
+
+      findOrderByName: (tenantId, name) =>
+        withCreds(tenantId, (creds) => {
+          // Shopify's `orders` query expects names with the leading `#`.
+          // Customers sometimes type it with the `#`, sometimes without —
+          // normalize so the agent never has to think about it.
+          const normalized = name.startsWith("#") ? name : `#${name}`;
+          return runQuery<{ orders: { nodes: ReadonlyArray<GqlOrder> } }>(
+            http,
+            creds,
+            tenantId,
+            SEARCH_ORDER_BY_NAME_QUERY,
+            { q: `name:${normalized}` },
+          ).pipe(
+            Effect.map((data) => {
+              const first = data.orders.nodes[0];
+              return first ? mapOrder(first) : null;
+            }),
+          );
+        }),
 
       getFulfillment: (tenantId, orderId) =>
         withCreds(tenantId, (creds) =>

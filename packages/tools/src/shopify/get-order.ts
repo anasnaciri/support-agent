@@ -60,7 +60,7 @@ const Output = Schema.Struct({
 export const shopifyGetOrder = defineTool({
   name: "shopify.get_order",
   description:
-    "Look up a Shopify order by its id or GraphQL gid. Returns the order with line items, fulfillment status, financial status, and tracking info. Use this to answer 'where is my order?' questions.",
+    "Look up a Shopify order. Accepts the merchant-facing order name (`#1001`, with or without the leading `#`), the numeric Shopify internal id, or a `gid://shopify/Order/...` GID. Returns the order with line items, fulfillment status, financial status, and tracking info. Use this to answer 'where is my order?' questions — customers typically reference orders by name (`#1001`), not by internal id.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
@@ -69,17 +69,50 @@ export const shopifyGetOrder = defineTool({
   execute: (input, ctx) =>
     Effect.gen(function* () {
       const shopify = yield* ShopifyService;
-      const order = yield* shopify
-        .getOrder(ctx.tenantId, OrderId(input.orderId))
-        .pipe(
-          Effect.mapError(
-            (e) =>
-              new ToolOutputInvalid({
-                tool: "shopify.get_order",
-                issues: [e._tag],
-              }),
-          ),
-        );
+
+      // Branch on input shape:
+      //   - `gid://shopify/Order/<n>` → direct id lookup (the rare power-
+      //     user case where the caller already has a GID).
+      //   - `#1001` or `1001` (any non-GID string) → name search through
+      //     `findOrderByName`. Customers reference orders by their name,
+      //     not their internal numeric id, so this is the common path.
+      // The name-search returns `null` (not a typed error) when no match
+      // is found — map that to `OrderNotFound` at the tool boundary so the
+      // LLM sees the same failure shape as a by-id miss.
+      const raw = input.orderId;
+      const order = raw.startsWith("gid://")
+        ? yield* shopify
+            .getOrder(ctx.tenantId, OrderId(raw))
+            .pipe(
+              Effect.mapError(
+                (e) =>
+                  new ToolOutputInvalid({
+                    tool: "shopify.get_order",
+                    issues: [e._tag],
+                  }),
+              ),
+            )
+        : yield* shopify
+            .findOrderByName(ctx.tenantId, raw)
+            .pipe(
+              Effect.mapError(
+                (e) =>
+                  new ToolOutputInvalid({
+                    tool: "shopify.get_order",
+                    issues: [e._tag],
+                  }),
+              ),
+              Effect.flatMap((o) =>
+                o
+                  ? Effect.succeed(o)
+                  : Effect.fail(
+                      new ToolOutputInvalid({
+                        tool: "shopify.get_order",
+                        issues: ["OrderNotFound"],
+                      }),
+                    ),
+              ),
+            );
       return {
         id: order.id,
         name: order.name,

@@ -8,11 +8,12 @@ import {
   ShopifyAuthMissing,
   TenantId,
   ToolOutputInvalid,
+  type ShopifyCustomer,
   type ShopifyOrder,
   type ToolContext,
 } from "@support-agent/agent-core";
 import { ShopifyServiceTest } from "@support-agent/services";
-import { shopifyGetOrder } from "../src/index.js";
+import { shopifyGetCustomer, shopifyGetOrder } from "../src/index.js";
 
 const tenantId = TenantId("t1");
 const baseCtx = (caseId: string): ToolContext => ({
@@ -68,7 +69,7 @@ const buildOrder = (id: string): ShopifyOrder => ({
 });
 
 describe("shopify.get_order tool", () => {
-  it("returns a flattened order payload on success", async () => {
+  it("returns a flattened order payload on success (by GID)", async () => {
     const orderId = OrderId("gid://shopify/Order/12345");
     const env = ShopifyServiceTest({
       orders: new Map([[orderId, buildOrder(orderId)]]),
@@ -107,6 +108,72 @@ describe("shopify.get_order tool", () => {
     );
   });
 
+  // Regression for the 2026-05-16 live demo: customers reference orders
+  // by name (`#1001`), not internal id. The tool must dispatch non-GID
+  // input through `findOrderByName`, not synthesize a fake GID.
+  it("dispatches non-GID input through findOrderByName (name lookup)", async () => {
+    const order = buildOrder("gid://shopify/Order/12098337702252");
+    const env = ShopifyServiceTest({
+      ordersByName: new Map([["#1001", order]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetOrder.execute(
+          { orderId: "#1001" } as never,
+          baseCtx("c-name"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect((exit.value as Record<string, unknown>)["name"]).toBe("#1001");
+  });
+
+  it("accepts a bare name (no `#`) and still resolves through findOrderByName", async () => {
+    const order = buildOrder("gid://shopify/Order/12098337702252");
+    const env = ShopifyServiceTest({
+      ordersByName: new Map([["#1001", order]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetOrder.execute(
+          { orderId: "1001" } as never,
+          baseCtx("c-bare"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect((exit.value as Record<string, unknown>)["name"]).toBe("#1001");
+  });
+
+  it("maps a null findOrderByName result to ToolOutputInvalid OrderNotFound", async () => {
+    // The ordersByName map is empty → findOrderByName returns null →
+    // the tool MUST map that to ToolOutputInvalid, not silently succeed
+    // with null and crash the output-schema decode at the runtime boundary.
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetOrder.execute(
+          { orderId: "#9999" } as never,
+          baseCtx("c-miss"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.get_order");
+        expect(err.issues).toEqual(["OrderNotFound"]);
+      }
+    }
+  });
+
   it("maps OrderNotFound to ToolOutputInvalid", async () => {
     const env = ShopifyServiceTest({});
     const exit = await Effect.runPromiseExit(
@@ -129,7 +196,7 @@ describe("shopify.get_order tool", () => {
     }
   });
 
-  it("propagates ShopifyAuthMissing through the tool boundary", async () => {
+  it("propagates ShopifyAuthMissing through the tool boundary on get_order", async () => {
     // ShopifyServiceTest never fails with auth-missing — we build a tiny
     // alternate layer that does, to assert the error mapping works end-to-end.
     const env = Layer.succeed(
@@ -156,6 +223,147 @@ describe("shopify.get_order tool", () => {
       expect(err).toBeInstanceOf(ToolOutputInvalid);
       if (err instanceof ToolOutputInvalid) {
         expect(err.issues).toEqual(["ShopifyAuthMissing"]);
+      }
+    }
+  });
+});
+
+const buildCustomer = (id: string, email: string | null): ShopifyCustomer => ({
+  id: CustomerId(id),
+  email,
+  firstName: "Jane",
+  lastName: "Doe",
+  phone: "+15555550100",
+  ordersCount: 4,
+  totalSpent: { amount: "129.96", currencyCode: "USD" },
+  defaultAddress: {
+    name: "Jane Doe",
+    address1: "123 Main",
+    address2: null,
+    city: "Brooklyn",
+    province: "NY",
+    country: "US",
+    zip: "11201",
+    phone: null,
+  },
+  createdAt: new Date("2025-01-02T03:04:05.000Z"),
+});
+
+describe("shopify.get_customer tool", () => {
+  it("returns a flattened customer payload on lookup by id", async () => {
+    const customerId = CustomerId("gid://shopify/Customer/777");
+    const env = ShopifyServiceTest({
+      customers: new Map([[customerId, buildCustomer(customerId, "j@d.com")]]),
+    });
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetCustomer.execute(
+          { customerId } as never,
+          baseCtx("c-cust-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["id"]).toBe(customerId);
+    expect(result["email"]).toBe("j@d.com");
+    expect(result["ordersCount"]).toBe(4);
+    expect(result["createdAt"]).toBe("2025-01-02T03:04:05.000Z");
+    expect((result["totalSpent"] as Record<string, unknown>)["amount"]).toBe(
+      "129.96",
+    );
+    expect((result["defaultAddress"] as Record<string, unknown>)["city"]).toBe(
+      "Brooklyn",
+    );
+  });
+
+  it("returns a flattened customer payload on lookup by email", async () => {
+    const customerId = CustomerId("gid://shopify/Customer/888");
+    const env = ShopifyServiceTest({
+      customersByEmail: new Map([
+        ["jane@example.com", buildCustomer(customerId, "jane@example.com")],
+      ]),
+    });
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetCustomer.execute(
+          { email: "jane@example.com" } as never,
+          baseCtx("c-cust-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["id"]).toBe(customerId);
+    expect(result["email"]).toBe("jane@example.com");
+  });
+
+  it("rejects with ToolOutputInvalid when both customerId and email are provided", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetCustomer.execute(
+          { customerId: "gid://shopify/Customer/1", email: "x@y.com" } as never,
+          baseCtx("c-cust-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["exactly_one_of_customerId_email"]);
+      }
+    }
+  });
+
+  it("rejects with ToolOutputInvalid when neither customerId nor email is provided", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetCustomer.execute(
+          {} as never,
+          baseCtx("c-cust-4"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["exactly_one_of_customerId_email"]);
+      }
+    }
+  });
+
+  it("maps a null searchByEmail result to ToolOutputInvalid CustomerNotFound", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetCustomer.execute(
+          { email: "nobody@example.com" } as never,
+          baseCtx("c-cust-5"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.get_customer");
+        expect(err.issues).toEqual(["CustomerNotFound"]);
       }
     }
   });

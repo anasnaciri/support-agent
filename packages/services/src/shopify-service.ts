@@ -36,6 +36,18 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       email: string,
     ) => Effect.Effect<ShopifyCustomer | null, ShopifyError>;
 
+    /**
+     * Look up an order by its merchant-facing name (e.g. "#1001" or
+     * "1001"). Returns null when no match exists — Shopify's `orders`
+     * query is a search, not a lookup, so a miss isn't an error. Use this
+     * when the agent extracted an order number from a customer message;
+     * use `getOrder` only when you already have a GID or internal id.
+     */
+    readonly findOrderByName: (
+      tenantId: TenantId,
+      name: string,
+    ) => Effect.Effect<ShopifyOrder | null, ShopifyError>;
+
     readonly getFulfillment: (
       tenantId: TenantId,
       orderId: OrderId,
@@ -51,6 +63,12 @@ export interface ShopifyTestFixtures {
   readonly orders?: ReadonlyMap<OrderId, ShopifyOrder>;
   readonly customers?: ReadonlyMap<CustomerId, ShopifyCustomer>;
   readonly customersByEmail?: ReadonlyMap<string, ShopifyCustomer>;
+  /**
+   * Map from order *name* (with or without leading `#`) to ShopifyOrder.
+   * Keys are normalized to `#XXXX` on lookup so tests can write either
+   * `"#1001"` or `"1001"` in the fixture.
+   */
+  readonly ordersByName?: ReadonlyMap<string, ShopifyOrder>;
   readonly fulfillments?: ReadonlyMap<
     OrderId,
     ReadonlyArray<ShopifyFulfillment>
@@ -81,6 +99,14 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
       },
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
+      findOrderByName: (_tenantId, name) => {
+        const normalized = name.startsWith("#") ? name : `#${name}`;
+        return Effect.succeed(
+          fixtures.ordersByName?.get(normalized) ??
+            fixtures.ordersByName?.get(name) ??
+            null,
+        );
+      },
       getFulfillment: (_tenantId, orderId) =>
         Effect.succeed(fixtures.fulfillments?.get(orderId) ?? []),
     }),
