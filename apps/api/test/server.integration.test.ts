@@ -133,6 +133,20 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(u.searchParams.get("state")).toBeTruthy();
   });
 
+  it("GET /shopify/install without a shop redirects to Shopify's store picker", async () => {
+    const res = await fetch(
+      `${baseUrl}/shopify/install?tenant=${tenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location");
+    expect(loc).toBe("https://admin.shopify.com/oauth/install?client_id=test-client-id");
+    const cookie = res.headers.get("set-cookie");
+    expect(cookie).toContain("support_agent_shopify_install=");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
+  });
+
   it("GET /shopify/install rejects an invalid shop", async () => {
     const res = await fetch(
       `${baseUrl}/shopify/install?shop=not-a-shop&tenant=${tenantId}`,
@@ -204,6 +218,45 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .where(sql`${tenants.shopifyDomain} = ${shop}`);
     expect(tenantRows).toHaveLength(1);
     expect(tenantRows[0]!.id).toBe(decoded!.tenantId);
+  });
+
+  it("GET /shopify/install uses the pending dashboard tenant after Shopify store selection", async () => {
+    const shop = "signed-cookie-shop.myshopify.com";
+    const query: Record<string, string> = {
+      shop,
+      host: "YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvc2lnbmVkLWNvb2tpZQ",
+      timestamp: "1700000005",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+    const pendingState = signState(stateSigningKey, tenantId);
+
+    const url = new URL(`${baseUrl}/shopify/install`);
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+    url.searchParams.set("hmac", hmac);
+
+    const res = await fetch(url, {
+      redirect: "manual",
+      headers: {
+        Cookie: `support_agent_shopify_install=${encodeURIComponent(pendingState)}`,
+      },
+    });
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location");
+    expect(loc).toBeTruthy();
+    const redirect = new URL(loc!);
+    expect(redirect.host).toBe(shop);
+
+    const state = redirect.searchParams.get("state");
+    expect(state).toBeTruthy();
+    const decoded = verifyState(stateSigningKey, state!);
+    expect(decoded?.tenantId).toBe(tenantId);
+
+    const tenantRows = await raw!.db
+      .select()
+      .from(tenants)
+      .where(sql`${tenants.shopifyDomain} = ${shop}`);
+    expect(tenantRows).toHaveLength(0);
   });
 
   it("GET /shopify/auth/callback verifies HMAC, exchanges code, and persists the token", async () => {

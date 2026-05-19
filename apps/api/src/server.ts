@@ -9,7 +9,9 @@ import {
 import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
 import {
   buildInstallUrl,
+  buildManagedInstallUrl,
   isValidShopDomain,
+  normalizeShopDomain,
   signState,
   verifyCallbackHmac,
   verifyState,
@@ -83,10 +85,49 @@ const sendRedirect = (res: ServerResponse, target: string): void => {
   res.end();
 };
 
+const sendRedirectWithHeaders = (
+  res: ServerResponse,
+  target: string,
+  headers: Record<string, string | ReadonlyArray<string>>,
+): void => {
+  res.writeHead(302, { Location: target, ...headers });
+  res.end();
+};
+
 const sendText = (res: ServerResponse, status: number, body: string): void => {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(body);
 };
+
+const parseCookies = (raw: string | undefined): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const part of raw.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (!key) continue;
+    try {
+      out[key] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
+  }
+  return out;
+};
+
+const SHOPIFY_INSTALL_COOKIE = "support_agent_shopify_install";
+
+const shopifyInstallCookie = (state: string, secure: boolean): string =>
+  `${SHOPIFY_INSTALL_COOKIE}=${encodeURIComponent(state)}; Path=/shopify/install; Max-Age=600; HttpOnly; SameSite=Lax${
+    secure ? "; Secure" : ""
+  }`;
+
+const clearShopifyInstallCookie = (secure: boolean): string =>
+  `${SHOPIFY_INSTALL_COOKIE}=; Path=/shopify/install; Max-Age=0; HttpOnly; SameSite=Lax${
+    secure ? "; Secure" : ""
+  }`;
 
 const sendHtml = (res: ServerResponse, status: number, body: string): void => {
   res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
@@ -98,11 +139,14 @@ const sendHtml = (res: ServerResponse, status: number, body: string): void => {
 // ============================================================
 
 /**
+ * GET /shopify/install?tenant=<uuid>
  * GET /shopify/install?shop=<shop>.myshopify.com&tenant=<uuid>
  *
- * Starts the managed-install OAuth flow. We sign the tenant id into the
- * OAuth `state` parameter so the callback can recover it and bind the
- * resulting access token to the right tenant.
+ * Starts the Shopify install flow. Dashboard clicks omit `shop`: we stash the
+ * tenant id in a short-lived signed cookie and send the merchant to Shopify's
+ * central Admin install URL so Shopify can show the store picker. Shopify then
+ * returns to this same route with a signed `shop`, where we continue through
+ * the authorization-code grant and sign the tenant into OAuth `state`.
  */
 const handleShopifyInstall = async (
   cfg: ApiConfig,
@@ -111,10 +155,28 @@ const handleShopifyInstall = async (
   res: ServerResponse,
 ): Promise<void> => {
   const { params } = readQuery(req);
-  const shop = params["shop"];
+  const shopParam = params["shop"];
+  const shop = shopParam ? normalizeShopDomain(shopParam) : null;
   let tenant = params["tenant"];
-  if (!shop || !isValidShopDomain(shop)) {
+  if (shopParam && !shop) {
     sendJson(res, 400, { error: "missing_or_invalid_shop" });
+    return;
+  }
+  if (!shop) {
+    if (!tenant) {
+      sendJson(res, 400, { error: "missing_tenant" });
+      return;
+    }
+    const pendingState = signState(cfg.stateSigningKey, tenant);
+    const managedInstallUrl = buildManagedInstallUrl({
+      clientId: cfg.shopify.clientId,
+    });
+    sendRedirectWithHeaders(res, managedInstallUrl, {
+      "Set-Cookie": shopifyInstallCookie(
+        pendingState,
+        cfg.shopify.callbackUrl.startsWith("https://"),
+      ),
+    });
     return;
   }
 
@@ -134,17 +196,25 @@ const handleShopifyInstall = async (
       return;
     }
 
-    const resolveExit = await Effect.runPromiseExit(
-      Effect.provide(resolveTenantByShop(shop), layer),
-    );
-    if (resolveExit._tag !== "Success") {
-      sendJson(res, 500, {
-        error: "tenant_resolve_failed",
-        detail: String(resolveExit.cause),
-      });
-      return;
+    const pending = parseCookies(req.headers.cookie)[SHOPIFY_INSTALL_COOKIE];
+    if (pending) {
+      const decoded = verifyState(cfg.stateSigningKey, pending);
+      if (decoded) tenant = decoded.tenantId;
     }
-    tenant = resolveExit.value;
+
+    if (!tenant) {
+      const resolveExit = await Effect.runPromiseExit(
+        Effect.provide(resolveTenantByShop(shop), layer),
+      );
+      if (resolveExit._tag !== "Success") {
+        sendJson(res, 500, {
+          error: "tenant_resolve_failed",
+          detail: String(resolveExit.cause),
+        });
+        return;
+      }
+      tenant = resolveExit.value;
+    }
   } else {
     const ownership = await Effect.runPromise(
       Effect.provide(
@@ -175,7 +245,11 @@ const handleShopifyInstall = async (
     redirectUri: cfg.shopify.callbackUrl,
     state,
   });
-  sendRedirect(res, installUrl);
+  sendRedirectWithHeaders(res, installUrl, {
+    "Set-Cookie": clearShopifyInstallCookie(
+      cfg.shopify.callbackUrl.startsWith("https://"),
+    ),
+  });
 };
 
 /**

@@ -3,8 +3,10 @@ import { createHmac } from "node:crypto";
 import { computeHmac } from "@support-agent/services";
 import {
   buildInstallUrl,
+  buildManagedInstallUrl,
   canonicalQueryForHmac,
   isValidShopDomain,
+  normalizeShopDomain,
   signState,
   verifyCallbackHmac,
   verifyState,
@@ -23,6 +25,26 @@ describe("shopify-install — isValidShopDomain", () => {
     expect(isValidShopDomain("acme.shopify.com")).toBe(false);
     expect(isValidShopDomain(".myshopify.com")).toBe(false);
     expect(isValidShopDomain("-bad.myshopify.com")).toBe(false);
+  });
+});
+
+describe("shopify-install — normalizeShopDomain", () => {
+  it("accepts bare domains and pasted Shopify URLs", () => {
+    expect(normalizeShopDomain("support-agent-test.myshopify.com")).toBe(
+      "support-agent-test.myshopify.com",
+    );
+    expect(normalizeShopDomain("https://support-agent-test.myshopify.com/")).toBe(
+      "support-agent-test.myshopify.com",
+    );
+    expect(
+      normalizeShopDomain("https://SUPPORT-AGENT-TEST.myshopify.com/admin"),
+    ).toBe("support-agent-test.myshopify.com");
+  });
+
+  it("rejects non-Shopify hosts", () => {
+    expect(normalizeShopDomain("https://example.com/")).toBeNull();
+    expect(normalizeShopDomain("https://acme.myshopify.com.evil.test/")).toBeNull();
+    expect(normalizeShopDomain("https://acme.shopify.com/")).toBeNull();
   });
 });
 
@@ -54,6 +76,16 @@ describe("shopify-install — buildInstallUrl", () => {
         state: "s",
       }),
     ).toThrow(/invalid shop domain/);
+  });
+});
+
+describe("shopify-install — buildManagedInstallUrl", () => {
+  it("composes Shopify's central install URL", () => {
+    const url = buildManagedInstallUrl({ clientId: "abc123" });
+    const u = new URL(url);
+    expect(u.origin).toBe("https://admin.shopify.com");
+    expect(u.pathname).toBe("/oauth/install");
+    expect(u.searchParams.get("client_id")).toBe("abc123");
   });
 });
 

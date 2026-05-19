@@ -18,6 +18,28 @@ const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 export const isValidShopDomain = (shop: string): boolean =>
   shop.length <= 100 && SHOP_RE.test(shop);
 
+export const normalizeShopDomain = (shop: string): string | null => {
+  const trimmed = shop.trim();
+  if (!trimmed) return null;
+
+  let candidate = trimmed;
+  if (trimmed.includes("/") || /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(
+        /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+          ? trimmed
+          : `https://${trimmed}`,
+      );
+      candidate = url.hostname;
+    } catch {
+      return null;
+    }
+  }
+
+  const normalized = candidate.toLowerCase();
+  return isValidShopDomain(normalized) ? normalized : null;
+};
+
 // ------------------------------------------------------------
 // State signing (tenant binding through the OAuth redirect)
 // ------------------------------------------------------------
@@ -91,7 +113,8 @@ export interface InstallUrlOptions {
 }
 
 export const buildInstallUrl = (opts: InstallUrlOptions): string => {
-  if (!isValidShopDomain(opts.shop)) {
+  const shop = normalizeShopDomain(opts.shop);
+  if (!shop) {
     throw new Error(`invalid shop domain: ${opts.shop}`);
   }
   const params = new URLSearchParams({
@@ -102,7 +125,20 @@ export const buildInstallUrl = (opts: InstallUrlOptions): string => {
   if (opts.grantOptions !== undefined) {
     params.set("grant_options[]", opts.grantOptions);
   }
-  return `https://${opts.shop}/admin/oauth/authorize?${params.toString()}`;
+  return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
+};
+
+export interface ManagedInstallUrlOptions {
+  readonly clientId: string;
+}
+
+export const buildManagedInstallUrl = (
+  opts: ManagedInstallUrlOptions,
+): string => {
+  const params = new URLSearchParams({
+    client_id: opts.clientId,
+  });
+  return `https://admin.shopify.com/oauth/install?${params.toString()}`;
 };
 
 // ------------------------------------------------------------

@@ -66,14 +66,13 @@ curl https://support-agent-api.nacirianas.com/healthz
   `https://support-agent-api.nacirianas.com/shopify/auth/callback`
   exactly — no trailing slash, no other paths.
 - Shopify Partner Dashboard "App URL" should point at
-  `https://support-agent-api.nacirianas.com/installed`. This is the
-  merchant-facing landing page; the callback redirects here after a
-  successful install, and Shopify also calls it when the merchant
-  re-opens the app from their admin (with `host` + `shop` query
-  parameters that the page can read).
-  `/shopify/install` remains the OAuth entry point — Shopify calls it
-  with `hmac`+`shop`+`host`+`timestamp` to kick off the install flow,
-  but it isn't the App URL.
+  `https://support-agent-api.nacirianas.com/shopify/install`. This lets
+  Shopify's central install/store-picker flow return to our API with
+  `hmac`+`shop`+`host`+`timestamp`, after which the API starts the
+  authorization-code grant and persists the offline access token.
+- The post-install landing page is
+  `https://support-agent-api.nacirianas.com/installed`; the OAuth
+  callback redirects there after a successful token exchange.
 
 ## Tearing it down
 

@@ -22,9 +22,25 @@ const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
 
 const SUPPORTED_PROVIDERS = ["shopify", "gmail"] as const;
 
+const originFromEnvUrl = (raw: string | undefined): string | null => {
+  const value = raw?.trim();
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
+const getApiBaseUrl = (): string | null =>
+  originFromEnvUrl(process.env["DASHBOARD_API_BASE_URL"]) ??
+  originFromEnvUrl(process.env["SHOPIFY_APP_CALLBACK_URL"]) ??
+  originFromEnvUrl(process.env["GOOGLE_OAUTH_CALLBACK_URL"]) ??
+  originFromEnvUrl(process.env["APPROVAL_BASE_URL"]);
+
 export default async function IntegrationsPage() {
   const tenantId = await getTenantId();
-  const apiBaseUrl = process.env["DASHBOARD_API_BASE_URL"];
+  const apiBaseUrl = getApiBaseUrl();
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
 
@@ -51,7 +67,9 @@ export default async function IntegrationsPage() {
   // Connect buttons hit apps/api install endpoints, which 302 to the
   // provider's OAuth flow. We pre-fill `tenant=<id>` server-side from
   // the signed-in session; the user only needs to provide the Shopify
-  // shop domain on the Shopify form. Gmail just needs a click.
+  // shop domain on the Shopify form. Gmail just needs a click. Prefer
+  // an explicit dashboard API origin, but fall back to the configured
+  // OAuth callback origins so local tunnel setups only need one API URL.
 
   return (
     <>
@@ -69,9 +87,9 @@ export default async function IntegrationsPage() {
       {!apiBaseUrl ? (
         <div className="banner warn">
           Connect buttons disabled —{" "}
-          <code>DASHBOARD_API_BASE_URL</code> is not set on the dashboard
-          server. Point it at the public origin of <code>apps/api</code>{" "}
-          (e.g. <code>https://api.example.com</code>) and restart.
+          No API origin is configured for the dashboard. Set{" "}
+          <code>DASHBOARD_API_BASE_URL</code> or one of the API callback URL
+          env vars to the public origin of <code>apps/api</code> and restart.
         </div>
       ) : null}
 
@@ -116,24 +134,14 @@ export default async function IntegrationsPage() {
               {showConnect ? (
                 <div style={{ marginTop: 12 }}>
                   {p === "shopify" ? (
-                    <form
-                      method="get"
-                      action={`${apiBaseUrl}/shopify/install`}
-                      className="integration-connect"
+                    <a
+                      className="btn btn-primary"
+                      href={`${apiBaseUrl}/shopify/install?tenant=${encodeURIComponent(
+                        tenantId,
+                      )}`}
                     >
-                      <input type="hidden" name="tenant" value={tenantId} />
-                      <input
-                        type="text"
-                        name="shop"
-                        required
-                        pattern="[a-z0-9][a-z0-9-]*\.myshopify\.com"
-                        placeholder="yourshop.myshopify.com"
-                        aria-label="Shopify shop domain"
-                      />
-                      <button type="submit" className="btn btn-primary">
-                        {tone === "revoked" ? "Reconnect" : "Connect"}
-                      </button>
-                    </form>
+                      {tone === "revoked" ? "Reconnect" : "Connect Shopify"}
+                    </a>
                   ) : null}
                   {p === "gmail" ? (
                     <a
