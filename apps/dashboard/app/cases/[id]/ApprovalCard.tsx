@@ -1,22 +1,22 @@
 import type { ApprovalRow } from "@support-agent/db";
+import Link from "next/link";
+import { ClipboardCheck } from "lucide-react";
+
 import { formatRelativeTime } from "@/lib/format";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
+import { riskVariant } from "@/lib/status-variants";
+
 import { approveAction, rejectAction } from "../../approvals/[id]/actions";
 
 interface Props {
   readonly approval: ApprovalRow;
   readonly returnTo: string;
 }
-
-// Inline approval surface on the case detail page. Master-plan §13's
-// case-detail mock places the approve/reject buttons inline so the
-// operator doesn't have to navigate away from the timeline + Customer
-// + Order context they came here to see.
-//
-// We reuse the /approvals/[id] server actions verbatim — they now
-// honor a `returnTo` form field so the redirect bounces back to the
-// case (with the decided=/action=/kind= banner params) rather than
-// the approvals list. The action is also unchanged when invoked from
-// the original detail page; `returnTo` is opt-in.
 
 export const ApprovalCard = ({ approval, returnTo }: Props) => {
   const proposed =
@@ -29,94 +29,99 @@ export const ApprovalCard = ({ approval, returnTo }: Props) => {
       : null;
 
   return (
-    <div className="approval-card">
-      <div className="approval-card-header">
-        <div>
-          <div className="approval-card-title">
-            Awaiting approval
-            <span className={`badge perm-ask`}>{approval.tool}</span>
-          </div>
-          <div className="muted">
-            {approval.agentId} · risk: {approval.riskLevel} ·{" "}
-            {formatRelativeTime(approval.createdAt)}
+    <Card className="border-warning/40 bg-warning/5">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="size-4 text-warning" />
+              <span className="text-base font-semibold text-warning">
+                Awaiting approval
+              </span>
+              <Badge variant="outline" className="font-mono text-xs">
+                {approval.tool}
+              </Badge>
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{approval.agentId}</span>
+              <span>·</span>
+              <Badge variant={riskVariant(approval.riskLevel)} className="px-1.5 py-0">
+                risk: {approval.riskLevel}
+              </Badge>
+              <span>·</span>
+              <span>{formatRelativeTime(approval.createdAt)}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-0">
+        {approval.reasoning ? (
+          <p className="text-sm">{approval.reasoning}</p>
+        ) : null}
 
-      {approval.reasoning ? (
-        <p style={{ margin: "8px 0" }}>{approval.reasoning}</p>
-      ) : null}
-
-      {editableBodyText !== null ? (
-        <form action={approveAction} className="edit-and-approve">
-          <input type="hidden" name="approvalId" value={approval.id} />
-          <input type="hidden" name="returnTo" value={returnTo} />
-          <label>
-            Reply body (edit before approving)
-            <textarea
-              name="bodyText"
-              defaultValue={editableBodyText}
-              rows={6}
-            />
-          </label>
-          <div className="approval-actions">
-            <button type="submit" className="btn btn-approve">
-              Approve & send
-            </button>
-            <a
-              href={`/approvals/${approval.id}`}
-              className="btn btn-secondary"
-            >
-              Open full view
-            </a>
-          </div>
-        </form>
-      ) : (
-        <>
-          <details style={{ margin: "8px 0" }}>
-            <summary className="muted">Proposed input</summary>
-            <pre
-              style={{
-                background: "#fafafa",
-                padding: 12,
-                borderRadius: 6,
-                fontSize: 13,
-                overflow: "auto",
-                marginTop: 8,
-              }}
-            >
-              {JSON.stringify(approval.proposedInput, null, 2)}
-            </pre>
-          </details>
-          <form action={approveAction}>
+        {editableBodyText !== null ? (
+          <form action={approveAction} className="space-y-3">
             <input type="hidden" name="approvalId" value={approval.id} />
             <input type="hidden" name="returnTo" value={returnTo} />
-            <div className="approval-actions">
-              <button type="submit" className="btn btn-approve">
-                Approve
-              </button>
-              <a
-                href={`/approvals/${approval.id}`}
-                className="btn btn-secondary"
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="bodyText"
+                className="text-xs uppercase tracking-wider text-muted-foreground"
               >
-                Open full view
-              </a>
+                Reply body (edit before approving)
+              </Label>
+              <Textarea
+                id="bodyText"
+                name="bodyText"
+                defaultValue={editableBodyText}
+                rows={6}
+                className="bg-card"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" variant="success">
+                Approve &amp; send
+              </Button>
+              <Button asChild variant="outline">
+                <Link href={`/approvals/${approval.id}`}>Open full view</Link>
+              </Button>
             </div>
           </form>
-        </>
-      )}
+        ) : (
+          <>
+            <details className="text-sm">
+              <summary className="cursor-pointer text-muted-foreground">
+                Proposed input
+              </summary>
+              <pre className="mt-2 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
+                {JSON.stringify(approval.proposedInput, null, 2)}
+              </pre>
+            </details>
+            <form action={approveAction}>
+              <input type="hidden" name="approvalId" value={approval.id} />
+              <input type="hidden" name="returnTo" value={returnTo} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="submit" variant="success">
+                  Approve
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href={`/approvals/${approval.id}`}>Open full view</Link>
+                </Button>
+              </div>
+            </form>
+          </>
+        )}
 
-      <form
-        action={rejectAction}
-        style={{ marginTop: 12 }}
-        className="approval-reject-form"
-      >
-        <input type="hidden" name="approvalId" value={approval.id} />
-        <input type="hidden" name="returnTo" value={returnTo} />
-        <button type="submit" className="btn btn-reject">
-          Reject (escalate to human takeover)
-        </button>
-      </form>
-    </div>
+        <Separator className="bg-warning/30" />
+
+        <form action={rejectAction}>
+          <input type="hidden" name="approvalId" value={approval.id} />
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <Button type="submit" variant="destructive">
+            Reject (escalate to human takeover)
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 };

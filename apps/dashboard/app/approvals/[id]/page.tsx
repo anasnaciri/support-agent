@@ -1,8 +1,20 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { approvals } from "@support-agent/db";
+
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
+import {
+  approvalStatusVariant,
+  riskVariant,
+} from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
 import { approveAction, rejectAction } from "./actions";
 
 interface Params {
@@ -19,10 +31,6 @@ export default async function ApprovalDetailPage({ params }: Params) {
     .limit(1);
   if (!row) notFound();
   const isPending = row.status === "pending";
-  // Edit-and-Approve only makes sense when there's a bodyText to edit
-  // — conversation.reply / conversation.ask_customer today, future
-  // text-bearing tools tomorrow. Other tools fall back to read-only
-  // JSON + a plain Approve button (the JSON edit UX is a future slice).
   const proposed =
     row.proposedInput && typeof row.proposedInput === "object"
       ? (row.proposedInput as Record<string, unknown>)
@@ -33,101 +41,138 @@ export default async function ApprovalDetailPage({ params }: Params) {
       : null;
 
   return (
-    <>
-      <h1>Approval · {row.tool}</h1>
-      <p className="muted">
-        <span className={`badge ${row.status}`}>{row.status}</span>
-        {" · "}
-        risk: {row.riskLevel}
-        {" · "}
-        agent: {row.agentId}
-        {" · "}
-        case: <a href={`/cases/${row.caseId}`}>{row.caseId.slice(0, 8)}…</a>
-      </p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
+          Approval
+          <code className="rounded bg-muted px-2 py-1 text-sm">{row.tool}</code>
+        </h1>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant={approvalStatusVariant(row.status)}>{row.status}</Badge>
+          <Badge variant={riskVariant(row.riskLevel)}>
+            risk: {row.riskLevel}
+          </Badge>
+          <span>·</span>
+          <span>
+            agent:{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              {row.agentId}
+            </code>
+          </span>
+          <span>·</span>
+          <span>
+            case:{" "}
+            <Link
+              href={`/cases/${row.caseId}`}
+              className="font-mono text-primary hover:underline"
+            >
+              {row.caseId.slice(0, 8)}…
+            </Link>
+          </span>
+        </div>
+      </div>
 
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Reasoning</h2>
-        <p>{row.reasoning || <span className="muted">(no reasoning recorded)</span>}</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>Reasoning</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {row.reasoning ? (
+            <p className="text-sm">{row.reasoning}</p>
+          ) : (
+            <p className="text-sm italic text-muted-foreground">
+              (no reasoning recorded)
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
-        <h2>Proposed input</h2>
-        <pre
-          style={{
-            background: "#fafafa",
-            padding: 12,
-            borderRadius: 6,
-            fontSize: 13,
-            overflow: "auto",
-          }}
-        >
-          {JSON.stringify(row.proposedInput, null, 2)}
-        </pre>
+      <Card>
+        <CardHeader>
+          <CardTitle>Proposed input</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <pre className="overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
+            {JSON.stringify(row.proposedInput, null, 2)}
+          </pre>
+        </CardContent>
+      </Card>
 
-        {isPending ? (
-          <>
+      {isPending ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Decision</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             {editableBodyText !== null ? (
-              <form action={approveAction} className="edit-and-approve">
+              <form action={approveAction} className="space-y-3">
                 <input type="hidden" name="approvalId" value={row.id} />
-                <label>
-                  Reply body (edit before approving)
-                  <textarea
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="bodyText"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Reply body (edit before approving)
+                  </Label>
+                  <Textarea
+                    id="bodyText"
                     name="bodyText"
                     defaultValue={editableBodyText}
                     rows={8}
                   />
-                </label>
-                <div className="approval-actions">
-                  <button type="submit" className="btn btn-approve">
-                    Approve
-                  </button>
                 </div>
-                <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                  Your edits land in <code>approvedInput</code>; the runtime
-                  resume sends exactly this text to the customer.
+                <Button type="submit" variant="success">
+                  Approve
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Your edits land in{" "}
+                  <code className="rounded bg-muted px-1.5 py-0.5">
+                    approvedInput
+                  </code>
+                  ; the runtime resume sends exactly this text to the customer.
                 </p>
               </form>
             ) : (
               <form action={approveAction}>
                 <input type="hidden" name="approvalId" value={row.id} />
-                <div className="approval-actions">
-                  <button type="submit" className="btn btn-approve">
-                    Approve
-                  </button>
-                </div>
+                <Button type="submit" variant="success">
+                  Approve
+                </Button>
               </form>
             )}
 
-            <form action={rejectAction} style={{ marginTop: 12 }}>
+            <form action={rejectAction}>
               <input type="hidden" name="approvalId" value={row.id} />
-              <button type="submit" className="btn btn-reject">
+              <Button type="submit" variant="destructive">
                 Reject
-              </button>
+              </Button>
             </form>
 
-            <p className="muted" style={{ marginTop: 16 }}>
+            <p className="text-sm text-muted-foreground">
               Approving sends the (possibly edited) reply to the customer
-              through the tenant's configured connector. Rejecting
-              escalates the case to human takeover; no customer reply
-              goes out.
+              through the tenant's configured connector. Rejecting escalates
+              the case to human takeover; no customer reply goes out.
             </p>
-          </>
-        ) : (
-          <p className="muted">
-            Decided{" "}
-            {row.decidedAt
-              ? row.decidedAt.toISOString().slice(0, 19).replace("T", " ")
-              : "(no timestamp)"}
-            {row.decidedBy ? ` by ${row.decidedBy}` : ""}.
-            {row.approvedInput &&
-            typeof row.approvedInput === "object" &&
-            "bodyText" in (row.approvedInput as Record<string, unknown>) ? (
-              <>
-                {" "}
-                Manager edited the body text before approving.
-              </>
-            ) : null}
-          </p>
-        )}
-      </div>
-    </>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              Decided{" "}
+              {row.decidedAt
+                ? row.decidedAt.toISOString().slice(0, 19).replace("T", " ")
+                : "(no timestamp)"}
+              {row.decidedBy ? ` by ${row.decidedBy}` : ""}.
+              {row.approvedInput &&
+              typeof row.approvedInput === "object" &&
+              "bodyText" in (row.approvedInput as Record<string, unknown>)
+                ? " Manager edited the body text before approving."
+                : null}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

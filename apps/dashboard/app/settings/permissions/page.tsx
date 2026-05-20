@@ -1,76 +1,109 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+
 import { agents, tools, effectivePermission } from "@/lib/catalog";
-import type { Permission } from "@support-agent/agent-core";
-
-// Permissions matrix — one row per tool, one column per agent. Cell
-// shows the effective permission: the agent's `permissionOverrides`
-// entry if present, otherwise the tool's `defaultPermission`. Cells
-// for tools the agent doesn't have in its `tools` list show "—".
-
-const cell = (
-  agentTools: ReadonlyArray<string>,
-  perm: Permission | null,
-  toolName: string,
-): { readonly className: string; readonly text: string } => {
-  if (!agentTools.includes(toolName)) {
-    return { className: "perm-na", text: "—" };
-  }
-  if (!perm) return { className: "perm-na", text: "?" };
-  return { className: `perm-${perm}`, text: perm };
-};
+import { permissionVariant } from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export default function PermissionsMatrixPage() {
   return (
-    <>
-      <p className="muted">
-        <Link href="/settings">← Settings</Link>
-      </p>
-      <h1>Tool permissions</h1>
-      <p className="muted">
-        Effective permission per (agent, tool). <code>ask</code> tools pause
-        the case in <code>waiting_for_approval</code> until a human approves
-        via the approval surface.
-      </p>
+    <div className="space-y-6">
+      <Link
+        href="/settings"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        Settings
+      </Link>
 
-      <div style={{ overflowX: "auto" }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Tool</th>
-              <th>Default</th>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Tool permissions
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Effective permission per (agent, tool).{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">ask</code>{" "}
+          tools pause the case in{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+            waiting_for_approval
+          </code>{" "}
+          until a human approves via the approval surface.
+        </p>
+      </div>
+
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tool</TableHead>
+              <TableHead>Default</TableHead>
               {agents.map((a) => (
-                <th key={a.id}>
-                  <Link href={`/settings/agents/${a.id}`}>{a.name}</Link>
-                </th>
+                <TableHead key={a.id}>
+                  <Link
+                    href={`/settings/agents/${a.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {a.name}
+                  </Link>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {tools.map((t) => (
-              <tr key={t.name}>
-                <td>
-                  <code>{t.name}</code>
-                  <div className="muted">{t.description}</div>
-                </td>
-                <td>
-                  <span className={`badge perm-${t.defaultPermission}`}>
+              <TableRow key={t.name}>
+                <TableCell>
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                    {t.name}
+                  </code>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {t.description}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={permissionVariant(t.defaultPermission)}>
                     {t.defaultPermission}
-                  </span>
-                </td>
+                  </Badge>
+                </TableCell>
                 {agents.map((a) => {
                   const eff = effectivePermission(a, t.name);
-                  const c = cell(a.tools, eff, t.name);
+                  const inToolList = a.tools.includes(t.name);
+                  if (!inToolList) {
+                    return (
+                      <TableCell key={a.id}>
+                        <span className="text-xs text-muted-foreground">
+                          —
+                        </span>
+                      </TableCell>
+                    );
+                  }
+                  if (!eff) {
+                    return (
+                      <TableCell key={a.id}>
+                        <Badge variant="muted">?</Badge>
+                      </TableCell>
+                    );
+                  }
                   return (
-                    <td key={a.id}>
-                      <span className={`badge ${c.className}`}>{c.text}</span>
-                    </td>
+                    <TableCell key={a.id}>
+                      <Badge variant={permissionVariant(eff)}>{eff}</Badge>
+                    </TableCell>
                   );
                 })}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </>
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
   );
 }

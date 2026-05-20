@@ -1,14 +1,24 @@
 import Link from "next/link";
 import { and, desc, eq, like, lt, type SQL } from "drizzle-orm";
 import { auditLog } from "@support-agent/db";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
-
-// Master-plan §13: "Audit Log · Per-tenant chronological log; filterable."
-// MVP filters: action prefix, actor type. Cursor pagination via `?after=<id>`
-// where `after` is the bigserial id of the OLDEST row currently shown —
-// clicking "Older" advances past it. Newer pages are reachable by
-// removing the cursor (the page always renders newest-first).
+import { actorVariant } from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const ACTION_FILTERS = [
   { label: "Any action", value: "" },
@@ -32,10 +42,15 @@ const PAGE_SIZE = 100;
 const formatDetails = (details: unknown): string => {
   if (!details || typeof details !== "object") return "";
   const obj = details as Record<string, unknown>;
-  // Pick the fields a manager actually scans for. Falls back to a
-  // compact JSON dump for unknown shapes.
   const interesting: Array<[string, string]> = [];
-  for (const k of ["tool", "target", "decisionType", "eventType", "viaApprovalId", "ok"] as const) {
+  for (const k of [
+    "tool",
+    "target",
+    "decisionType",
+    "eventType",
+    "viaApprovalId",
+    "ok",
+  ] as const) {
     if (k in obj) interesting.push([k, String(obj[k])]);
   }
   if (interesting.length > 0) {
@@ -56,6 +71,15 @@ interface SearchParams {
   }>;
 }
 
+const safeBigInt = (s: string): bigint | null => {
+  try {
+    if (!/^\d+$/u.test(s)) return null;
+    return BigInt(s);
+  } catch {
+    return null;
+  }
+};
+
 export default async function AuditLogPage({ searchParams }: SearchParams) {
   const tenantId = await getTenantId();
   const sp = await searchParams;
@@ -65,10 +89,6 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
 
   const whereParts: SQL[] = [eq(auditLog.tenantId, tenantId)];
   if (actionFilter) {
-    // Prefix match — `tool.invoked` matches `tool.invoked`, `compliance.`
-    // matches every `compliance.*` action. Using LIKE keeps the query
-    // simple; the column is short (~30 chars) so a sequential scan over
-    // the per-tenant slice is fine for MVP.
     whereParts.push(like(auditLog.action, `${actionFilter}%`));
   }
   if (actorFilter) {
@@ -111,108 +131,148 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
   })();
 
   return (
-    <>
-      <h1>Audit log</h1>
-      <p className="muted">
-        Cross-case chronological view. Tenant-scoped, newest first.
-      </p>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Audit log</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Cross-case chronological view. Tenant-scoped, newest first.
+        </p>
+      </div>
 
-      <form method="get" className="filter-bar">
-        <label>
-          Action
-          <select name="action" defaultValue={actionFilter}>
-            {ACTION_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Actor
-          <select name="actor" defaultValue={actorFilter}>
-            {ACTOR_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="btn btn-primary">Apply</button>
-        {after !== null ? (
-          <Link href={`/audit?${resetQuery}`} className="muted">
-            ← Back to newest
-          </Link>
-        ) : null}
-      </form>
+      <Card>
+        <CardContent className="p-4">
+          <form
+            method="get"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto] lg:items-end"
+          >
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="action"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Action
+              </Label>
+              <NativeSelect
+                id="action"
+                name="action"
+                defaultValue={actionFilter}
+              >
+                {ACTION_FILTERS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="actor"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Actor
+              </Label>
+              <NativeSelect id="actor" name="actor" defaultValue={actorFilter}>
+                {ACTOR_FILTERS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <Button type="submit">Apply</Button>
+            {after !== null ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/audit?${resetQuery}`}>
+                  <ArrowLeft className="size-3.5" />
+                  Back to newest
+                </Link>
+              </Button>
+            ) : null}
+          </form>
+        </CardContent>
+      </Card>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Action</th>
-            <th>Actor</th>
-            <th>Case</th>
-            <th>Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="muted" style={{ textAlign: "center" }}>
-                No audit entries match these filters.
-              </td>
-            </tr>
-          ) : null}
-          {rows.map((r) => (
-            <tr key={r.id.toString()}>
-              <td>
-                {r.occurredAt.toISOString().slice(0, 19).replace("T", " ")}
-              </td>
-              <td>
-                <code>{r.action}</code>
-              </td>
-              <td>
-                <span className={`badge ${r.actorType}`}>{r.actorType}</span>
-                {r.actorId ? <span className="muted"> {r.actorId}</span> : null}
-              </td>
-              <td>
-                {r.caseId ? (
-                  <Link href={`/cases/${r.caseId}`}>
-                    {r.caseId.slice(0, 8)}…
-                  </Link>
-                ) : (
-                  <span className="muted">—</span>
-                )}
-              </td>
-              <td className="muted" style={{ fontSize: 12 }}>
-                {formatDetails(r.details)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Time</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Actor</TableHead>
+              <TableHead>Case</TableHead>
+              <TableHead>Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="py-8 text-center text-sm italic text-muted-foreground"
+                >
+                  No audit entries match these filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => (
+                <TableRow key={r.id.toString()}>
+                  <TableCell className="tabular-nums text-xs text-muted-foreground">
+                    {r.occurredAt
+                      .toISOString()
+                      .slice(0, 19)
+                      .replace("T", " ")}
+                  </TableCell>
+                  <TableCell>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                      {r.action}
+                    </code>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant={actorVariant(r.actorType)}>
+                        {r.actorType}
+                      </Badge>
+                      {r.actorId ? (
+                        <span className="text-xs text-muted-foreground">
+                          {r.actorId}
+                        </span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {r.caseId ? (
+                      <Link
+                        href={`/cases/${r.caseId}`}
+                        className="font-mono text-xs text-primary hover:underline"
+                      >
+                        {r.caseId.slice(0, 8)}…
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatDetails(r.details)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
 
       {hasMore ? (
-        <p style={{ marginTop: 16 }}>
-          <Link href={`/audit?${olderQuery}`} className="btn btn-secondary">
-            Older →
-          </Link>
-        </p>
+        <div>
+          <Button asChild variant="outline">
+            <Link href={`/audit?${olderQuery}`}>
+              Older
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
+        </div>
       ) : (
-        <p className="muted" style={{ marginTop: 16 }}>
-          End of log.
-        </p>
+        <p className="text-sm italic text-muted-foreground">End of log.</p>
       )}
-    </>
+    </div>
   );
 }
-
-const safeBigInt = (s: string): bigint | null => {
-  try {
-    if (!/^\d+$/u.test(s)) return null;
-    return BigInt(s);
-  } catch {
-    return null;
-  }
-};

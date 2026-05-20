@@ -1,10 +1,26 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import Link from "next/link";
 import { eq, desc } from "drizzle-orm";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
+
 import { connectorConnections } from "@support-agent/db";
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
+import { integrationStatusVariant } from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 import { disconnectGmailAction } from "./actions";
 
 const PROVIDER_LABELS: Readonly<Record<string, string>> = {
@@ -40,7 +56,9 @@ const getApiBaseUrl = (): string | null =>
   originFromEnvUrl(process.env["APPROVAL_BASE_URL"]);
 
 interface PageProps {
-  readonly searchParams?: Promise<Readonly<Record<string, string | string[] | undefined>>>;
+  readonly searchParams?: Promise<
+    Readonly<Record<string, string | string[] | undefined>>
+  >;
 }
 
 export default async function IntegrationsPage({ searchParams }: PageProps) {
@@ -74,40 +92,55 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
     if (!byProvider.has(r.provider)) byProvider.set(r.provider, r);
   }
 
-  // Connect buttons hit apps/api install endpoints, which 302 to the
-  // provider's OAuth flow. We pre-fill `tenant=<id>` server-side from
-  // the signed-in session; the user only needs to provide the Shopify
-  // shop domain on the Shopify form. Gmail just needs a click. Prefer
-  // an explicit dashboard API origin, but fall back to the configured
-  // OAuth callback origins so local tunnel setups only need one API URL.
-
   return (
-    <>
-      <p className="muted">
-        <Link href="/settings">← Settings</Link>
-      </p>
-      <h1>Integrations</h1>
-      <p className="muted">
-        Per-tenant credentials read by the worker. After clicking Connect,
-        the provider (Shopify or Google) takes over; on completion the
-        token lands in <code>connector_connections</code> and this page
-        flips to <code>active</code>.
-      </p>
+    <div className="space-y-6">
+      <Link
+        href="/settings"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        Settings
+      </Link>
+
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Integrations</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Per-tenant credentials read by the worker. After clicking Connect, the
+          provider (Shopify or Google) takes over; on completion the token lands
+          in{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+            connector_connections
+          </code>{" "}
+          and this page flips to{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">active</code>.
+        </p>
+      </div>
 
       {gmailBanner ? (
-        <div className="banner success">Gmail disconnected.</div>
+        <Alert variant="success">
+          <AlertDescription>Gmail disconnected.</AlertDescription>
+        </Alert>
       ) : null}
 
       {!apiBaseUrl ? (
-        <div className="banner warn">
-          Connect buttons disabled —{" "}
-          No API origin is configured for the dashboard. Set{" "}
-          <code>DASHBOARD_API_BASE_URL</code> or one of the API callback URL
-          env vars to the public origin of <code>apps/api</code> and restart.
-        </div>
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Connect buttons disabled</AlertTitle>
+          <AlertDescription>
+            No API origin is configured for the dashboard. Set{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              DASHBOARD_API_BASE_URL
+            </code>{" "}
+            or one of the API callback URL env vars to the public origin of{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              apps/api
+            </code>{" "}
+            and restart.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
-      <div className="stat-grid">
+      <div className="grid gap-4 sm:grid-cols-2">
         {SUPPORTED_PROVIDERS.map((p) => {
           const row = byProvider.get(p);
           const label = PROVIDER_LABELS[p] ?? p;
@@ -121,122 +154,142 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
           const showDisconnect = p === "gmail" && tone === "active";
 
           return (
-            <div key={p} className="stat">
-              <div className="label">{label}</div>
-              <div className="value">
-                <span className={`badge integration-${tone}`}>{tone}</span>
-              </div>
-              {row ? (
-                <>
-                  {row.shopDomain ? (
-                    <div className="muted">
-                      <code>{row.shopDomain}</code>
+            <Card key={p}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base">{label}</CardTitle>
+                  <Badge variant={integrationStatusVariant(tone)}>{tone}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                {row ? (
+                  <div className="space-y-1 text-sm">
+                    {row.shopDomain ? (
+                      <div>
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                          {row.shopDomain}
+                        </code>
+                      </div>
+                    ) : null}
+                    <div className="text-xs text-muted-foreground">
+                      {row.scopes.length} scope
+                      {row.scopes.length === 1 ? "" : "s"} · installed{" "}
+                      {formatRelativeTime(row.installedAt)}
+                      {row.revokedAt
+                        ? ` · revoked ${formatRelativeTime(row.revokedAt)}`
+                        : ""}
                     </div>
-                  ) : null}
-                  <div className="muted">
-                    {row.scopes.length} scope
-                    {row.scopes.length === 1 ? "" : "s"} · installed{" "}
-                    {formatRelativeTime(row.installedAt)}
-                    {row.revokedAt
-                      ? ` · revoked ${formatRelativeTime(row.revokedAt)}`
-                      : ""}
                   </div>
-                </>
-              ) : (
-                <div className="muted">Not connected for this tenant.</div>
-              )}
+                ) : (
+                  <p className="text-sm italic text-muted-foreground">
+                    Not connected for this tenant.
+                  </p>
+                )}
 
-              {showConnect ? (
-                <div style={{ marginTop: 12 }}>
-                  {p === "shopify" ? (
-                    <a
-                      className="btn btn-primary"
-                      href={`${apiBaseUrl}/shopify/install?tenant=${encodeURIComponent(
-                        tenantId,
-                      )}`}
-                    >
-                      {tone === "revoked" ? "Reconnect" : "Connect Shopify"}
-                    </a>
+                <div className="flex flex-wrap gap-2">
+                  {showConnect ? (
+                    <>
+                      {p === "shopify" ? (
+                        <Button asChild>
+                          <a
+                            href={`${apiBaseUrl}/shopify/install?tenant=${encodeURIComponent(
+                              tenantId,
+                            )}`}
+                          >
+                            {tone === "revoked"
+                              ? "Reconnect"
+                              : "Connect Shopify"}
+                          </a>
+                        </Button>
+                      ) : null}
+                      {p === "gmail" ? (
+                        <Button asChild>
+                          <a
+                            href={
+                              `${apiBaseUrl}/google/install?tenant=${encodeURIComponent(
+                                tenantId,
+                              )}` +
+                              (loginHint
+                                ? `&login_hint=${encodeURIComponent(loginHint)}`
+                                : "")
+                            }
+                          >
+                            {tone === "missing"
+                              ? "Connect Gmail"
+                              : "Reconnect Gmail"}
+                          </a>
+                        </Button>
+                      ) : null}
+                    </>
                   ) : null}
-                  {p === "gmail" ? (
-                    <a
-                      className="btn btn-primary"
-                      href={
-                        `${apiBaseUrl}/google/install?tenant=${encodeURIComponent(
-                          tenantId,
-                        )}` +
-                        (loginHint
-                          ? `&login_hint=${encodeURIComponent(loginHint)}`
-                          : "")
-                      }
-                    >
-                      {tone === "missing" ? "Connect Gmail" : "Reconnect Gmail"}
-                    </a>
+
+                  {showDisconnect ? (
+                    <form action={disconnectGmailAction}>
+                      <Button type="submit" variant="outline">
+                        Disconnect Gmail
+                      </Button>
+                    </form>
                   ) : null}
                 </div>
-              ) : null}
 
-              {showDisconnect ? (
-                <form action={disconnectGmailAction} style={{ marginTop: 12 }}>
-                  <button className="btn btn-secondary" type="submit">
-                    Disconnect Gmail
-                  </button>
-                </form>
-              ) : null}
-
-              <div className="muted" style={{ marginTop: 8 }}>
-                {description}
-              </div>
-            </div>
+                <p className="text-xs text-muted-foreground">{description}</p>
+              </CardContent>
+            </Card>
           );
         })}
       </div>
 
       {rows.length > 0 ? (
-        <>
-          <h2>All connections</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Provider</th>
-                <th>Shop</th>
-                <th>Status</th>
-                <th>Scopes</th>
-                <th>Installed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>{PROVIDER_LABELS[r.provider] ?? r.provider}</td>
-                  <td>
-                    {r.shopDomain ? (
-                      <code>{r.shopDomain}</code>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`badge integration-${r.status}`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td>
-                    {r.scopes.length === 0 ? (
-                      <span className="muted">—</span>
-                    ) : (
-                      <code style={{ fontSize: 12 }}>
-                        {r.scopes.join(", ")}
-                      </code>
-                    )}
-                  </td>
-                  <td>{formatRelativeTime(r.installedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">All connections</h2>
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Provider</TableHead>
+                  <TableHead>Shop</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Scopes</TableHead>
+                  <TableHead>Installed</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>
+                      {PROVIDER_LABELS[r.provider] ?? r.provider}
+                    </TableCell>
+                    <TableCell>
+                      {r.shopDomain ? (
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                          {r.shopDomain}
+                        </code>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={integrationStatusVariant(r.status)}>
+                        {r.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {r.scopes.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <code className="text-xs">{r.scopes.join(", ")}</code>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatRelativeTime(r.installedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </div>
       ) : null}
-    </>
+    </div>
   );
 }

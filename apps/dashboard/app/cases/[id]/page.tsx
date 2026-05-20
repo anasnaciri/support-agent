@@ -2,9 +2,16 @@ import { notFound } from "next/navigation";
 import { asc, desc, and, eq } from "drizzle-orm";
 import { cases, auditLog, approvals } from "@support-agent/db";
 import { TenantId } from "@support-agent/agent-core";
+
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import { fetchCustomerForCase, fetchOrderForCase } from "@/lib/shopify";
+import { caseStatusVariant } from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
 import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
@@ -23,7 +30,10 @@ interface Params {
   }>;
 }
 
-type Banner = { readonly tone: "success" | "info" | "warn"; readonly text: string };
+type Banner = {
+  readonly tone: "success" | "info" | "warn";
+  readonly text: string;
+};
 
 const takeOverBanner = (kind: string | undefined): Banner | null => {
   if (!kind) return null;
@@ -71,6 +81,9 @@ const approvalBanner = (sp: {
 
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
 
+const toneToVariant = (tone: Banner["tone"]) =>
+  tone === "success" ? "success" : tone === "info" ? "info" : "warning";
+
 export default async function CaseDetailPage({
   params,
   searchParams,
@@ -80,8 +93,6 @@ export default async function CaseDetailPage({
   const banner = takeOverBanner(sp.takenOver) ?? approvalBanner(sp);
   const d = db();
   const tenantId = await getTenantId();
-  // Cross-tenant access shows as a 404, not 403. We don't want to
-  // disclose whether a case id exists in another tenant.
   const [caseRow] = await d
     .select()
     .from(cases)
@@ -123,35 +134,52 @@ export default async function CaseDetailPage({
   const canTakeOver = !TERMINAL.has(caseRow.status);
 
   return (
-    <>
+    <div className="space-y-6">
       {banner ? (
-        <div className={`banner ${banner.tone}`}>{banner.text}</div>
+        <Alert variant={toneToVariant(banner.tone)}>
+          <AlertDescription>{banner.text}</AlertDescription>
+        </Alert>
       ) : null}
-      <div className="case-header">
-        <h1>{caseRow.subject ?? "(no subject)"}</h1>
-        <CaseLiveBoundary caseId={caseRow.id} />
-        {canTakeOver ? (
-          <form action={takeOverAction} style={{ marginLeft: "auto" }}>
-            <input type="hidden" name="caseId" value={caseRow.id} />
-            <button
-              type="submit"
-              className="btn btn-secondary"
-              title="Stop the agent on this case and handle it manually"
-            >
-              Take over
-            </button>
-          </form>
-        ) : null}
+
+      <div>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {caseRow.subject ?? "(no subject)"}
+          </h1>
+          <CaseLiveBoundary caseId={caseRow.id} />
+          {canTakeOver ? (
+            <form action={takeOverAction} className="ml-auto">
+              <input type="hidden" name="caseId" value={caseRow.id} />
+              <Button
+                type="submit"
+                variant="outline"
+                title="Stop the agent on this case and handle it manually"
+              >
+                Take over
+              </Button>
+            </form>
+          ) : null}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant={caseStatusVariant(caseRow.status)}>
+            {caseRow.status}
+          </Badge>
+          <span>·</span>
+          <span>{caseRow.category ?? "uncategorized"}</span>
+          <span>·</span>
+          <span>
+            agent:{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              {caseRow.currentAgentId}
+            </code>
+          </span>
+          <span>·</span>
+          <span>
+            opened{" "}
+            {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+          </span>
+        </div>
       </div>
-      <p className="muted">
-        <span className={`badge ${caseRow.status}`}>{caseRow.status}</span>
-        {" · "}
-        {caseRow.category ?? "uncategorized"}
-        {" · "}
-        agent: {caseRow.currentAgentId}
-        {" · "}
-        opened {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
-      </p>
 
       {pendingApprovals.map((a) => (
         <ApprovalCard
@@ -161,49 +189,45 @@ export default async function CaseDetailPage({
         />
       ))}
 
-      <div className="case-panels">
+      <div className="grid gap-4 md:grid-cols-2">
         <CustomerPanel customer={customer} customerEmail={customerEmail} />
         <OrderPanel order={order} orderHint={orderHint} />
       </div>
 
-      <h2>Timeline</h2>
-      <ol className="timeline">
-        {entries.map((e) => (
-          <li key={e.id}>
-            <div className="action">{e.action}</div>
-            <div className="meta">
-              {e.actorType}:{e.actorId} ·{" "}
-              {e.occurredAt.toISOString().slice(0, 19).replace("T", " ")}
-            </div>
-            {e.details ? (
-              <pre
-                style={{
-                  background: "#fafafa",
-                  padding: 8,
-                  borderRadius: 4,
-                  marginTop: 6,
-                  fontSize: 12,
-                  overflow: "auto",
-                }}
-              >
-                {JSON.stringify(e.details, null, 2)}
-              </pre>
-            ) : null}
-          </li>
-        ))}
-      </ol>
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Timeline</h2>
+        <ol className="relative space-y-3">
+          {entries.map((e) => (
+            <li
+              key={e.id}
+              className="relative ml-2 border-l-2 border-border pl-5"
+            >
+              <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
+              <Card>
+                <CardContent className="space-y-1.5 p-4">
+                  <div className="font-medium text-sm">{e.action}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {e.actorType}:{e.actorId} ·{" "}
+                    {e.occurredAt.toISOString().slice(0, 19).replace("T", " ")}
+                  </div>
+                  {e.details ? (
+                    <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
+                      {JSON.stringify(e.details, null, 2)}
+                    </pre>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </li>
+          ))}
+        </ol>
+      </div>
 
-      <h2>Context</h2>
-      <pre
-        style={{
-          background: "#fafafa",
-          padding: 12,
-          borderRadius: 6,
-          fontSize: 13,
-        }}
-      >
-        {JSON.stringify(caseRow.context, null, 2)}
-      </pre>
-    </>
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Context</h2>
+        <pre className="overflow-auto rounded-md border bg-card p-3 text-xs">
+          {JSON.stringify(caseRow.context, null, 2)}
+        </pre>
+      </div>
+    </div>
   );
 }

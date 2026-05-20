@@ -1,9 +1,28 @@
 import Link from "next/link";
 import { desc, and, eq, sql, type SQL } from "drizzle-orm";
 import { approvals } from "@support-agent/db";
+
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
+import {
+  approvalStatusVariant,
+  riskVariant,
+} from "@/lib/status-variants";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface SearchParams {
   readonly searchParams: Promise<{
@@ -32,9 +51,14 @@ const RISK_FILTERS = [
   { label: "Critical", value: "critical" },
 ] as const;
 
-const bannerFor = (
-  params: { decided?: string; action?: string; kind?: string },
-): { readonly tone: "success" | "info" | "warn"; readonly text: string } | null => {
+const bannerFor = (params: {
+  decided?: string;
+  action?: string;
+  kind?: string;
+}): {
+  readonly tone: "success" | "info" | "warning";
+  readonly text: string;
+} | null => {
   if (!params.decided) return null;
   const isApprove = params.action === "approve";
   if (params.kind === "decided") {
@@ -52,7 +76,7 @@ const bannerFor = (
     };
   }
   if (params.kind === "approval_not_found") {
-    return { tone: "warn", text: "Approval not found." };
+    return { tone: "warning", text: "Approval not found." };
   }
   return null;
 };
@@ -75,10 +99,6 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   if (toolFilter) whereParts.push(eq(approvals.tool, toolFilter));
   if (agentFilter) whereParts.push(eq(approvals.agentId, agentFilter));
 
-  // Distinct tool + agent values for the dropdowns. Scoped to the
-  // tenant so a tenant only sees their own activity. Cheap query on
-  // small tables — we cap at the most-recent 100 per facet to avoid
-  // pulling the entire history if the table grows.
   const [toolFacets, agentFacets, rows] = await Promise.all([
     db()
       .selectDistinct({ tool: approvals.tool })
@@ -107,8 +127,6 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
       .limit(100),
   ]);
 
-  // Count summary for the headline. Run as a single grouped count so
-  // we don't fan out four separate queries.
   const counts = await db()
     .select({
       status: approvals.status,
@@ -121,121 +139,193 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   const countOf = (s: string): number =>
     counts.find((c) => c.status === s)?.count ?? 0;
 
+  const isReset =
+    !riskFilter &&
+    !toolFilter &&
+    !agentFilter &&
+    statusFilter === "pending";
+
   return (
-    <>
+    <div className="space-y-6">
       {banner ? (
-        <div className={`banner ${banner.tone}`}>{banner.text}</div>
+        <Alert variant={banner.tone}>
+          <AlertDescription>{banner.text}</AlertDescription>
+        </Alert>
       ) : null}
-      <h1>Approvals</h1>
-      <p className="muted">
-        <strong>{countOf("pending")}</strong> pending ·{" "}
-        <strong>{countOf("approved")}</strong> approved ·{" "}
-        <strong>{countOf("rejected")}</strong> rejected
-      </p>
 
-      <form method="get" className="filter-bar">
-        <label>
-          Status
-          <select name="status" defaultValue={statusFilter}>
-            {STATUS_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Risk
-          <select name="risk" defaultValue={riskFilter}>
-            {RISK_FILTERS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tool
-          <select name="tool" defaultValue={toolFilter}>
-            <option value="">Any tool</option>
-            {toolFacets.map((f) => (
-              <option key={f.tool} value={f.tool}>
-                {f.tool}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Agent
-          <select name="agent" defaultValue={agentFilter}>
-            <option value="">Any agent</option>
-            {agentFacets.map((f) => (
-              <option key={f.agentId} value={f.agentId}>
-                {f.agentId}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="btn btn-primary">
-          Apply
-        </button>
-        {riskFilter || toolFilter || agentFilter || statusFilter !== "pending" ? (
-          <Link href="/approvals" className="muted">
-            Reset
-          </Link>
-        ) : null}
-      </form>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Approvals</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant="warning">{countOf("pending")} pending</Badge>
+          <Badge variant="success">{countOf("approved")} approved</Badge>
+          <Badge variant="destructive">{countOf("rejected")} rejected</Badge>
+        </div>
+      </div>
 
-      <p className="muted">
+      <Card>
+        <CardContent className="p-4">
+          <form
+            method="get"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          >
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="status"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Status
+              </Label>
+              <NativeSelect
+                id="status"
+                name="status"
+                defaultValue={statusFilter}
+              >
+                {STATUS_FILTERS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="risk"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Risk
+              </Label>
+              <NativeSelect id="risk" name="risk" defaultValue={riskFilter}>
+                {RISK_FILTERS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="tool"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Tool
+              </Label>
+              <NativeSelect id="tool" name="tool" defaultValue={toolFilter}>
+                <option value="">Any tool</option>
+                {toolFacets.map((f) => (
+                  <option key={f.tool} value={f.tool}>
+                    {f.tool}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="agent"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Agent
+              </Label>
+              <NativeSelect
+                id="agent"
+                name="agent"
+                defaultValue={agentFilter}
+              >
+                <option value="">Any agent</option>
+                {agentFacets.map((f) => (
+                  <option key={f.agentId} value={f.agentId}>
+                    {f.agentId}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex items-end gap-2">
+              <Button type="submit">Apply</Button>
+              {!isReset ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/approvals">Reset</Link>
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <p className="text-sm text-muted-foreground">
         Showing {rows.length} of{" "}
         {statusFilter === "any" ? "any status" : statusFilter}.
       </p>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Tool</th>
-            <th>Status</th>
-            <th>Risk</th>
-            <th>Agent</th>
-            <th>Case</th>
-            <th>Created</th>
-            <th>Decided</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="muted" style={{ textAlign: "center" }}>
-                No approvals match these filters.
-              </td>
-            </tr>
-          ) : null}
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>
-                <Link href={`/approvals/${r.id}`}>{r.tool}</Link>
-              </td>
-              <td>
-                <span className={`badge ${r.status}`}>{r.status}</span>
-              </td>
-              <td>
-                <span className={`badge ${r.riskLevel}`}>{r.riskLevel}</span>
-              </td>
-              <td>{r.agentId}</td>
-              <td>
-                <Link href={`/cases/${r.caseId}`}>{r.caseId.slice(0, 8)}…</Link>
-              </td>
-              <td>{formatRelativeTime(r.createdAt)}</td>
-              <td>
-                {r.decidedAt ? formatRelativeTime(r.decidedAt) : (
-                  <span className="muted">—</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tool</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Risk</TableHead>
+              <TableHead>Agent</TableHead>
+              <TableHead>Case</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead>Decided</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="py-8 text-center text-sm italic text-muted-foreground"
+                >
+                  No approvals match these filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>
+                    <Link
+                      href={`/approvals/${r.id}`}
+                      className="font-mono text-xs text-primary hover:underline"
+                    >
+                      {r.tool}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={approvalStatusVariant(r.status)}>
+                      {r.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={riskVariant(r.riskLevel)}>
+                      {r.riskLevel}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {r.agentId}
+                  </TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/cases/${r.caseId}`}
+                      className="font-mono text-xs text-primary hover:underline"
+                    >
+                      {r.caseId.slice(0, 8)}…
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatRelativeTime(r.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {r.decidedAt ? (
+                      formatRelativeTime(r.decidedAt)
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
   );
 }

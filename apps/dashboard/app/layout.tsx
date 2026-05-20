@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { cookies } from "next/headers";
 import { withAuth } from "@workos-inc/authkit-nextjs";
+
+import { SidebarShell } from "./SidebarShell";
 import "./globals.css";
 
 export const metadata = {
@@ -13,31 +15,20 @@ export default async function RootLayout({
 }: {
   readonly children: ReactNode;
 }) {
-  // `withAuth()` reads the session cookie set by the AuthKit proxy.
-  // The proxy redirects unauth'd requests to /sign-in before we ever
-  // get here, so a null user inside an authed route means something
-  // went wrong with cookie decryption — render an empty shell rather
-  // than crashing.
   const { user } = await withAuth();
+  const cookieStore = await cookies();
+  // Default to open on first visit; the SidebarShell client component
+  // updates the cookie on every toggle so subsequent reloads land in
+  // the same state without a server round-trip.
+  const sidebarCookie = cookieStore.get("sidebar:state");
+  const defaultOpen = sidebarCookie?.value !== "closed";
 
   return (
-    <html lang="en">
-      <body>
-        <header className="topbar">
-          <Link href="/" className="brand">Support Agent</Link>
-          <nav>
-            <Link href="/">Today</Link>
-            <Link href="/cases">Cases</Link>
-            <Link href="/approvals">Approvals</Link>
-            <Link href="/audit">Audit</Link>
-            <Link href="/settings">Settings</Link>
-          </nav>
-          <div className="account">
-            {user?.email ? <span>{user.email}</span> : null}
-            <Link href="/sign-out">Sign out</Link>
-          </div>
-        </header>
-        <main>{children}</main>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="min-h-screen bg-sidebar text-foreground antialiased">
+        <SidebarShell email={user?.email ?? null} defaultOpen={defaultOpen}>
+          {children}
+        </SidebarShell>
       </body>
     </html>
   );

@@ -1,49 +1,81 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+
 import { agents } from "@/lib/catalog";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+const modeVariant = (mode: string): "info" | "secondary" =>
+  mode === "primary" ? "info" : "secondary";
 
 export default function AgentsListPage() {
   return (
-    <>
-      <p className="muted">
-        <Link href="/settings">← Settings</Link>
-      </p>
-      <h1>Agents</h1>
-      <p className="muted">
-        {agents.length} agent{agents.length === 1 ? "" : "s"} registered in
-        the worker.
-      </p>
+    <div className="space-y-6">
+      <Link
+        href="/settings"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        Settings
+      </Link>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {agents.length} agent{agents.length === 1 ? "" : "s"} registered in
+          the worker.
+        </p>
+      </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Mode</th>
-            <th>Model</th>
-            <th>Tools</th>
-            <th>Handoffs</th>
-          </tr>
-        </thead>
-        <tbody>
-          {agents.map((a) => (
-            <tr key={a.id}>
-              <td>
-                <Link href={`/settings/agents/${a.id}`}>{a.name}</Link>
-                <div className="muted">
-                  <code>{a.id}</code>
-                </div>
-              </td>
-              <td>
-                <span className={`badge ${a.mode}`}>{a.mode}</span>
-              </td>
-              <td>
-                <code>{a.provider}:{a.model}</code>
-              </td>
-              <td>{a.tools.length}</td>
-              <td>{a.handoffs.length === 0 ? "—" : a.handoffs.length}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Mode</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead>Tools</TableHead>
+              <TableHead>Handoffs</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {agents.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell>
+                  <Link
+                    href={`/settings/agents/${a.id}`}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {a.name}
+                  </Link>
+                  <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                    {a.id}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={modeVariant(a.mode)}>{a.mode}</Badge>
+                </TableCell>
+                <TableCell>
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                    {a.provider}:{a.model}
+                  </code>
+                </TableCell>
+                <TableCell className="tabular-nums">{a.tools.length}</TableCell>
+                <TableCell className="tabular-nums">
+                  {a.handoffs.length === 0 ? "—" : a.handoffs.length}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
   );
 }

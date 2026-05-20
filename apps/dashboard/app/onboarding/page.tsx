@@ -1,35 +1,45 @@
 import { redirect } from "next/navigation";
-import { requireOrganization } from "@/lib/tenant";
-import { OnboardingForm } from "./OnboardingForm";
 
-// Self-service onboarding for a WorkOS org that has no tenant yet.
-// `getTenantId()` redirects to this route when it sees an org with no
-// matching `tenants.workos_organization_id` row, replacing the manual
-// `UPDATE tenants SET workos_organization_id = 'org_...'` step.
+import { requireOrganization } from "@/lib/tenant";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+import { OnboardingForm } from "./OnboardingForm";
 
 export default async function OnboardingPage() {
   const org = await requireOrganization();
   if (org.existingTenantId) {
-    // The org is already onboarded — getTenantId() would have returned
-    // a tenant on any other route. Bounce home so this page never
-    // surfaces stale state.
     redirect("/");
   }
 
   return (
-    <div className="card" style={{ maxWidth: 560, margin: "60px auto" }}>
-      <h1>Welcome — let's set up your team</h1>
-      <p className="muted">
-        You're signed in as <strong>{org.email}</strong> under WorkOS
-        organization <code>{org.organizationId}</code>, but your team
-        doesn't have a support-agent tenant yet.
-      </p>
-      <p className="muted">
-        Fill this in once and you'll be sent to the dashboard. You can
-        connect Shopify and Gmail from <code>Settings → Integrations</code>{" "}
-        once the tenant exists.
-      </p>
-      <OnboardingForm defaultEmail={org.email} />
+    <div className="mx-auto mt-12 max-w-xl">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">
+            Welcome — let&apos;s set up your team
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            You&apos;re signed in as{" "}
+            <span className="font-medium text-foreground">{org.email}</span>{" "}
+            under WorkOS organization{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              {org.organizationId}
+            </code>
+            , but your team doesn&apos;t have a support-agent tenant yet.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Fill this in once and you&apos;ll be sent to the dashboard. You can
+            connect Shopify and Gmail from{" "}
+            <span className="font-medium text-foreground">
+              Settings → Integrations
+            </span>{" "}
+            once the tenant exists.
+          </p>
+          <OnboardingForm defaultEmail={org.email} />
+        </CardContent>
+      </Card>
     </div>
   );
 }

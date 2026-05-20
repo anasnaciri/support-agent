@@ -1,5 +1,8 @@
 import type { ShopifyCustomer } from "@support-agent/agent-core";
+import { User } from "lucide-react";
+
 import { formatRelativeTime } from "@/lib/format";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface Props {
   readonly customer: ShopifyCustomer | null;
@@ -13,28 +16,60 @@ const fullName = (c: ShopifyCustomer): string | null => {
   return parts.length > 0 ? parts.join(" ") : null;
 };
 
+const PanelShell = ({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children: React.ReactNode;
+}) => (
+  <Card>
+    <CardHeader className="pb-3">
+      <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+        <User className="size-3.5" aria-hidden />
+        {title}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="pt-0">{children}</CardContent>
+  </Card>
+);
+
+const Row = ({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: React.ReactNode;
+}) => (
+  <>
+    <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+      {label}
+    </dt>
+    <dd className="text-sm">{children}</dd>
+  </>
+);
+
 export const CustomerPanel = ({ customer, customerEmail }: Props) => {
   if (!customer && !customerEmail) {
     return (
-      <div className="panel">
-        <div className="panel-header">Customer</div>
-        <p className="panel-empty">No customer linked to this case yet.</p>
-      </div>
+      <PanelShell title="Customer">
+        <p className="text-sm italic text-muted-foreground">
+          No customer linked to this case yet.
+        </p>
+      </PanelShell>
     );
   }
 
   if (!customer) {
     return (
-      <div className="panel">
-        <div className="panel-header">Customer</div>
-        <dl className="panel-grid">
-          <dt>Email</dt>
-          <dd>{customerEmail}</dd>
+      <PanelShell title="Customer">
+        <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-3 gap-y-1.5">
+          <Row label="Email">{customerEmail}</Row>
         </dl>
-        <p className="panel-empty">
+        <p className="mt-3 text-sm italic text-muted-foreground">
           No matching Shopify customer (or store not connected).
         </p>
-      </div>
+      </PanelShell>
     );
   }
 
@@ -43,42 +78,24 @@ export const CustomerPanel = ({ customer, customerEmail }: Props) => {
   const addr = customer.defaultAddress;
 
   return (
-    <div className="panel">
-      <div className="panel-header">Customer</div>
-      <dl className="panel-grid">
-        {name ? (
-          <>
-            <dt>Name</dt>
-            <dd>{name}</dd>
-          </>
-        ) : null}
-        <dt>Email</dt>
-        <dd>{customer.email ?? customerEmail ?? "—"}</dd>
-        {customer.phone ? (
-          <>
-            <dt>Phone</dt>
-            <dd>{customer.phone}</dd>
-          </>
-        ) : null}
-        <dt>Orders</dt>
-        <dd>{customer.ordersCount}</dd>
-        <dt>Lifetime</dt>
-        <dd>
+    <PanelShell title="Customer">
+      <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-3 gap-y-1.5">
+        {name ? <Row label="Name">{name}</Row> : null}
+        <Row label="Email">{customer.email ?? customerEmail ?? "—"}</Row>
+        {customer.phone ? <Row label="Phone">{customer.phone}</Row> : null}
+        <Row label="Orders">{customer.ordersCount}</Row>
+        <Row label="Lifetime">
           {total.amount} {total.currencyCode}
-        </dd>
-        <dt>Customer since</dt>
-        <dd>{formatRelativeTime(customer.createdAt)}</dd>
+        </Row>
+        <Row label="Since">{formatRelativeTime(customer.createdAt)}</Row>
         {addr ? (
-          <>
-            <dt>Address</dt>
-            <dd>
-              {[addr.city, addr.province, addr.country]
-                .filter((s): s is string => Boolean(s))
-                .join(", ") || "—"}
-            </dd>
-          </>
+          <Row label="Address">
+            {[addr.city, addr.province, addr.country]
+              .filter((s): s is string => Boolean(s))
+              .join(", ") || "—"}
+          </Row>
         ) : null}
       </dl>
-    </div>
+    </PanelShell>
   );
 };
