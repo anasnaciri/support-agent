@@ -243,7 +243,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     }
   });
 
-  it("hands off from support-triage to order-status-agent and resolves via the specialist", async () => {
+  it("hands off to order-status-agent, drafts a conversation.reply, and pauses for approval", async () => {
     const orderId = OrderId("gid://shopify/Order/12345");
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
@@ -283,7 +283,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // turn 0 — triage classifies + records the order id on the case
     // turn 1 — triage hands off to order-status-agent
     // turn 2 — order-status-agent fetches the order via shopify.get_order
-    // turn 3 — order-status-agent writes a final_message; runtime resolves
+    // turn 3 — order-status-agent drafts conversation.reply; permission
+    //          service returns "ask" -> runtime parks the case.
     const handoffScript: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
@@ -311,8 +312,19 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         input: { orderId },
       },
       {
-        type: "final_message",
-        text: "Your order #1001 is in transit with UPS, tracking 1Z999; estimated delivery 2026-05-20.",
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-x",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText:
+            "Your order #1001 is paid and currently in transit with UPS. The tracking number is 1Z999, and Shopify shows an estimated delivery date of 2026-05-20.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "order-status-reply-test-1",
+        },
       },
     ];
 
@@ -326,6 +338,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        conversationReply as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(handoffScript),
@@ -333,6 +346,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({
         orders: new Map([[orderId, fixtureOrder]]),
       }),
+      ConversationServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
     );
@@ -347,6 +361,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           const runtime = yield* AgentRuntime;
           const repo = yield* CaseRepository;
           const audit = yield* AuditLogService;
+          const approvalsSvc = yield* ApprovalService;
 
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -373,24 +388,44 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const fetched = yield* repo.getById(created.id);
           const entries = yield* audit.forCase(created.id);
-          return { result, fetched, entries };
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, entries, pending };
         }),
         layer,
       ),
     );
 
-    expect(out.result.type).toBe("Completed");
-    expect(out.fetched.status).toBe("resolved");
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    if (out.result.type === "PausedWaitingForApproval") {
+      expect(out.result.approvalId).toBeTruthy();
+    }
+    expect(out.fetched.status).toBe("waiting_for_approval");
     // The handoff persisted the new agent on the case row.
     expect(out.fetched.currentAgentId).toBe(orderStatusAgent.id);
     expect(out.fetched.context["classification"]).toBe("where_is_order");
     expect(out.fetched.context["identifiedOrderId"]).toBe(orderId);
 
+    expect(out.pending).toHaveLength(1);
+    const approval = out.pending[0]!;
+    expect(approval.tool).toBe("conversation.reply");
+    expect(approval.agentId).toBe(orderStatusAgent.id);
+    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.status).toBe("pending");
+    const proposed = approval.proposedInput as {
+      readonly threadId: string;
+      readonly to: ReadonlyArray<{ email: string }>;
+      readonly draftId: string;
+    };
+    expect(proposed.threadId).toBe("thread-x");
+    expect(proposed.to[0]?.email).toBe("cust@example.com");
+    expect(proposed.draftId).toBe("order-status-reply-test-1");
+
     const actions = out.entries.map((e) => e.action);
-    // event.received + (llm.decision, tool.invoked) × 3 + final llm.decision +
-    // case.resolved. The handoff is an audit row tagged tool.invoked from the
-    // SOURCE agent's perspective; tool.invoked for shopify.get_order is from
-    // the target's perspective.
+    // event.received + (llm.decision, tool.invoked) x 3 + final llm.decision.
+    // No `tool.invoked` for conversation.reply because permission=ask
+    // short-circuits before execute. No `case.resolved` because we paused.
     expect(actions).toEqual([
       "event.received",
       "llm.decision",
@@ -400,7 +435,6 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
-      "case.resolved",
     ]);
 
     // The handoff audit row carries the source agent id (support-triage) and

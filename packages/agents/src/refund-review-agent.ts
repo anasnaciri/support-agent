@@ -22,7 +22,7 @@ export const refundReviewAgent: AgentConfig = {
     "Drafts a customer reply for refund-request cases by reading the order from Shopify and proposing a response for human approval.",
   mode: "subagent",
   provider: "openrouter",
-  model: "google/gemini-3-flash-preview",
+  model: "google/gemini-3.5-flash",
   promptTemplate: [
     "You are the refund-review agent. The case has been triaged as `refund_request` and an order id has been identified on the case context (look for `identifiedOrderId` in the prior `case.update_context` tool result).",
     "",

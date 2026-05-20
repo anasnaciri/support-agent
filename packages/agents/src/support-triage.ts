@@ -17,9 +17,9 @@ export const supportTriage: AgentConfig = {
   // Stack pick (see memory): Vercel AI SDK + OpenRouter, so the model
   // string follows OpenRouter's `<provider>/<model>` form. Swap freely.
   provider: "openrouter",
-  // Gemini 3.1 Flash Lite via OpenRouter. Cheap triage model; swap freely
+  // Gemini 3.5 Flash via OpenRouter. Cheap triage model; swap freely
   // per-tenant via agent config once routing lands.
-  model: "google/gemini-3.1-flash-lite",
+  model: "google/gemini-3.5-flash",
   promptTemplate: [
     "You are a support-triage agent for an ecommerce store.",
     "",

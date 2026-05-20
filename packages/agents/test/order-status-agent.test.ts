@@ -11,12 +11,13 @@ describe("order-status-agent config", () => {
     expect(orderStatusAgent.id).toBe("order-status-agent");
     expect(orderStatusAgent.mode).toBe("subagent");
     expect(orderStatusAgent.provider).toBe("openrouter");
-    // It must be able to look up the order AND record context patches; it
-    // must not be able to hand off (terminal specialist) or transition
-    // status (the runtime auto-resolves on final_message).
+    // It must be able to look up the order, record context patches, and
+    // propose the customer reply through the approval-gated reply tool.
+    // It must not be able to hand off or transition status directly.
     expect(orderStatusAgent.tools).toEqual([
       "shopify.get_order",
       "case.update_context",
+      "conversation.reply",
     ]);
     expect(orderStatusAgent.handoffs).toEqual([]);
     expect(orderStatusAgent.maxTurnsPerTick).toBeGreaterThan(1);
