@@ -42,8 +42,16 @@ import {
   exchangeCodeForGoogleToken,
   fetchGoogleUserEmail,
 } from "./google-callback.js";
+import {
+  appUninstalledWebhookUrl,
+  registerAppUninstalledWebhook,
+} from "./shopify-webhook-registration.js";
 import { startGmailWatch } from "@support-agent/providers";
-import { handleGmailPushNotification } from "./gmail-webhook.js";
+import {
+  findTenantByGmailMailbox,
+  handleGmailPushNotification,
+  parseGmailPushEnvelope,
+} from "./gmail-webhook.js";
 import {
   decideApproval,
   extractToken,
@@ -367,6 +375,20 @@ const handleShopifyCallback = async (
     return;
   }
 
+  const appUninstalledWebhook = await registerAppUninstalledWebhook({
+    shop,
+    accessToken: token.accessToken,
+    apiVersion: cfg.shopify.apiVersion,
+    webhookUrl: appUninstalledWebhookUrl(cfg.shopify.callbackUrl),
+  }).catch((cause) => {
+    sendJson(res, 502, {
+      error: "webhook_registration_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return null;
+  });
+  if (!appUninstalledWebhook) return;
+
   const persistResult = await Effect.runPromise(
     Effect.provide(
       Effect.either(
@@ -386,6 +408,16 @@ const handleShopifyCallback = async (
                 accessToken: token.accessToken,
                 scopes: token.scope,
                 apiVersion: cfg.shopify.apiVersion,
+                metadata: {
+                  shopifyWebhooks: {
+                    appUninstalled: {
+                      id: appUninstalledWebhook.id,
+                      uri: appUninstalledWebhook.uri,
+                      status: appUninstalledWebhook.status,
+                      registeredAt: new Date().toISOString(),
+                    },
+                  },
+                },
               });
               return { ownership };
             }),
@@ -437,6 +469,7 @@ const handleShopifyCallback = async (
       shop,
       scopes: token.scope,
       ownershipTransferred: persistResult.right.ownership.transferred,
+      appUninstalledWebhook,
     });
     return;
   }
@@ -1035,6 +1068,7 @@ const handleGoogleCallback = async (
 // ============================================================
 
 /**
+ * POST /webhooks/conversations/gmail?token=<shared-secret>
  * POST /webhooks/conversations/gmail/:tenantId?token=<shared-secret>
  *
  * Google's Pub/Sub push delivers JSON like:
@@ -1043,10 +1077,10 @@ const handleGoogleCallback = async (
  *     subscription: "projects/.../subscriptions/...",
  *   }
  *
- * Auth uses a shared-secret URL token (Google's "push authentication"
- * options support this directly via `pushConfig.oidcToken` OR query string;
- * we use the query string here — simplest, works with any push subscription
- * created with `--push-auth-token=...`).
+ * Auth uses a shared-secret URL token. The tenant-less route is the preferred
+ * multi-tenant shape: Gmail includes the watched mailbox in the Pub/Sub
+ * payload, and we resolve that mailbox back to `connector_connections`.
+ * The tenant path remains supported for old single-tenant subscriptions.
  *
  * Always 200 on a verified token even when downstream work fails: Pub/Sub
  * retries on 5xx and will retry-storm us if we surface flaky state. The
@@ -1064,13 +1098,13 @@ const handleGmailWebhook = async (
   }
 
   const url = req.url ?? "/";
-  // Path shape: /webhooks/conversations/gmail/<tenantId>
-  const m = /^\/webhooks\/conversations\/gmail\/([^/?]+)/.exec(url);
-  if (!m || !m[1]) {
-    sendJson(res, 400, { error: "missing_tenant_id_in_path" });
+  const pathMatch =
+    /^\/webhooks\/conversations\/gmail(?:\/([^/?]+))?(?:[/?]|$)/.exec(url);
+  if (!pathMatch) {
+    sendJson(res, 404, { error: "not_found" });
     return;
   }
-  const tenantId = m[1];
+  let tenantId = pathMatch[1] ?? null;
 
   const { params } = readQuery(req);
   const presented = params["token"] ?? "";
@@ -1094,6 +1128,35 @@ const handleGmailWebhook = async (
       detail: cause instanceof Error ? cause.message : String(cause),
     });
     return;
+  }
+
+  if (!tenantId) {
+    const payload = parseGmailPushEnvelope(rawBody);
+    if (!payload) {
+      // eslint-disable-next-line no-console
+      console.warn("[gmail webhook] unparseable push envelope; dropping");
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    const tenantExit = await Effect.runPromiseExit(
+      Effect.provide(findTenantByGmailMailbox(payload.emailAddress), layer),
+    );
+    if (tenantExit._tag !== "Success") {
+      // eslint-disable-next-line no-console
+      console.error("[gmail webhook] tenant lookup failed:", tenantExit.cause);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    tenantId = tenantExit.value;
+    if (!tenantId) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[gmail webhook] no active connection for mailbox=${payload.emailAddress}`,
+      );
+      sendJson(res, 200, { ok: true });
+      return;
+    }
   }
 
   try {
@@ -1253,7 +1316,7 @@ export const startServer = async (
         }
         if (
           method === "POST" &&
-          url.startsWith("/webhooks/conversations/gmail/")
+          url.startsWith("/webhooks/conversations/gmail")
         ) {
           await handleGmailWebhook(cfg, layer, req, res);
           return;

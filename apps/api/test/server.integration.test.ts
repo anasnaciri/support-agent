@@ -117,6 +117,50 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     );
   };
 
+  let webhookSequence = 0;
+  const mockShopifyFetch = (token: {
+    readonly access_token: string;
+    readonly scope: string;
+  }): void => {
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const u = String(url);
+      if (u.endsWith("/admin/oauth/access_token")) {
+        return new Response(JSON.stringify(token), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (u.endsWith("/graphql.json")) {
+        const body = JSON.parse(String(init?.body)) as {
+          variables?: {
+            webhookSubscription?: {
+              uri?: string;
+            };
+          };
+        };
+        return new Response(
+          JSON.stringify({
+            data: {
+              webhookSubscriptionCreate: {
+                webhookSubscription: {
+                  id: `gid://shopify/WebhookSubscription/${++webhookSequence}`,
+                  topic: "APP_UNINSTALLED",
+                  uri: body.variables?.webhookSubscription?.uri,
+                },
+                userErrors: [],
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return originalFetch(url as never, init);
+    }) as unknown as typeof fetch;
+  };
+
   it("GET /shopify/install redirects to Shopify's authorize URL", async () => {
     const res = await fetch(
       `${baseUrl}/shopify/install?shop=acme.myshopify.com&tenant=${tenantId}`,
@@ -260,24 +304,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   });
 
   it("GET /shopify/auth/callback verifies HMAC, exchanges code, and persists the token", async () => {
-    // Patch global fetch so the token-exchange call (made by the API
-    // server inside its own request handler) hits our mock instead of
-    // the real Shopify endpoint. We restore in afterAll.
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_test_token",
-            scope: "read_orders,read_customers",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      // Everything else (including the test's own HTTP call) uses the
-      // real fetch.
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_test_token",
+      scope: "read_orders,read_customers",
+    });
 
     const shop = "acme.myshopify.com";
     const state = signState(stateSigningKey, tenantId);
@@ -305,6 +335,12 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.shop).toBe(shop);
+    expect(body.appUninstalledWebhook).toEqual({
+      id: expect.stringMatching(/^gid:\/\/shopify\/WebhookSubscription\//),
+      topic: "APP_UNINSTALLED",
+      uri: "http://localhost/webhooks/shopify/app/uninstalled",
+      status: "created",
+    });
 
     // The token landed in the store (encrypted; we read it back through
     // the same Live layer to decrypt).
@@ -322,24 +358,21 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(fetched.accessToken).toBe("shpoa_test_token");
     expect(fetched.scopes).toEqual(["read_orders", "read_customers"]);
     expect(fetched.apiVersion).toBe("2025-01");
+    expect(fetched.metadata).toMatchObject({
+      shopifyWebhooks: {
+        appUninstalled: {
+          uri: "http://localhost/webhooks/shopify/app/uninstalled",
+          status: "created",
+        },
+      },
+    });
   });
 
   it("GET /shopify/auth/callback without state (Custom Distribution) auto-creates a tenant for the shop", async () => {
-    // Same global fetch mock as the prior callback test — the token
-    // exchange short-circuits to a fake `shpoa_` token.
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_custom_dist",
-            scope: "read_orders,read_customers",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_custom_dist",
+      scope: "read_orders,read_customers",
+    });
 
     const shop = "custom-dist-shop.myshopify.com";
     const query: Record<string, string> = {
@@ -382,19 +415,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   });
 
   it("a second install for the same shop reuses the same tenant (idempotent resolve)", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_reinstall",
-            scope: "read_orders,read_customers",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_reinstall",
+      scope: "read_orders,read_customers",
+    });
 
     const shop = "custom-dist-shop.myshopify.com";
     const query: Record<string, string> = {
@@ -430,19 +454,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   });
 
   it("GET /shopify/auth/callback transfers a revoked shop to the signed tenant after OAuth succeeds", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_transferred",
-            scope: "read_orders,read_customers",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_transferred",
+      scope: "read_orders,read_customers",
+    });
 
     const shop = "revoked-transfer-shop.myshopify.com";
     const oldTenantId = randomUUID();
@@ -508,19 +523,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   });
 
   it("GET /shopify/auth/callback without Accept: application/json redirects browsers to the merchant admin", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_browser",
-            scope: "read_orders",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_browser",
+      scope: "read_orders",
+    });
 
     const shop = "custom-dist-shop.myshopify.com";
     const query: Record<string, string> = {
@@ -543,19 +549,10 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   });
 
   it("GET /shopify/auth/callback echoes the Shopify `host` param into the /installed redirect", async () => {
-    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/admin/oauth/access_token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "shpoa_host",
-            scope: "read_orders",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return originalFetch(url as never, init);
-    }) as unknown as typeof fetch;
+    mockShopifyFetch({
+      access_token: "shpoa_host",
+      scope: "read_orders",
+    });
 
     const shop = "custom-dist-shop.myshopify.com";
     const hostB64 = Buffer.from(

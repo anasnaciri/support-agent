@@ -5,6 +5,7 @@ import { connectorConnections } from "@support-agent/db";
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
+import { disconnectGmailAction } from "./actions";
 
 const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   shopify: "Shopify",
@@ -38,8 +39,17 @@ const getApiBaseUrl = (): string | null =>
   originFromEnvUrl(process.env["GOOGLE_OAUTH_CALLBACK_URL"]) ??
   originFromEnvUrl(process.env["APPROVAL_BASE_URL"]);
 
-export default async function IntegrationsPage() {
+interface PageProps {
+  readonly searchParams?: Promise<Readonly<Record<string, string | string[] | undefined>>>;
+}
+
+export default async function IntegrationsPage({ searchParams }: PageProps) {
   const tenantId = await getTenantId();
+  const params = (await searchParams) ?? {};
+  const gmailParam = params["gmail"];
+  const gmailBanner =
+    (Array.isArray(gmailParam) ? gmailParam[0] : gmailParam) ===
+    "disconnected";
   const apiBaseUrl = getApiBaseUrl();
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
@@ -84,6 +94,10 @@ export default async function IntegrationsPage() {
         flips to <code>active</code>.
       </p>
 
+      {gmailBanner ? (
+        <div className="banner success">Gmail disconnected.</div>
+      ) : null}
+
       {!apiBaseUrl ? (
         <div className="banner warn">
           Connect buttons disabled —{" "}
@@ -104,6 +118,7 @@ export default async function IntegrationsPage() {
               ? "active"
               : "revoked";
           const showConnect = !!apiBaseUrl && tone !== "active";
+          const showDisconnect = p === "gmail" && tone === "active";
 
           return (
             <div key={p} className="stat">
@@ -155,10 +170,18 @@ export default async function IntegrationsPage() {
                           : "")
                       }
                     >
-                      {tone === "revoked" ? "Reconnect" : "Connect Gmail"}
+                      {tone === "missing" ? "Connect Gmail" : "Reconnect Gmail"}
                     </a>
                   ) : null}
                 </div>
+              ) : null}
+
+              {showDisconnect ? (
+                <form action={disconnectGmailAction} style={{ marginTop: 12 }}>
+                  <button className="btn btn-secondary" type="submit">
+                    Disconnect Gmail
+                  </button>
+                </form>
               ) : null}
 
               <div className="muted" style={{ marginTop: 8 }}>

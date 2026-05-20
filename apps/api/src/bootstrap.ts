@@ -37,7 +37,7 @@ export interface GoogleAppConfig {
   /**
    * Shared secret the Pub/Sub push subscription must include in the
    * webhook URL query (`?token=…`). Without this, anyone hitting our
-   * `/webhooks/conversations/gmail/:tenantId` endpoint can replay
+   * `/webhooks/conversations/gmail` endpoint can replay
    * mailbox-update notifications. Generate with `randomBytes(32).hex`.
    */
   readonly pushToken: string;

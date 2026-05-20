@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
 import { PgBoss } from "pg-boss";
+import { and, eq } from "drizzle-orm";
 import {
   ConnectorCredentialStore,
   makeEnqueuedWorkflowEvent,
@@ -20,6 +21,7 @@ import {
   refreshGmailToken,
   toInboundMessage,
 } from "@support-agent/providers";
+import { connectorConnections, DbClient } from "@support-agent/db";
 import type { ApiLayer, GoogleAppConfig } from "./bootstrap.js";
 
 // ============================================================
@@ -138,6 +140,32 @@ export interface GmailPushHandlerOptions {
 }
 
 const PROVIDER = "gmail" as const;
+
+export const findTenantByGmailMailbox = (
+  mailbox: string,
+): Effect.Effect<string | null, Error, DbClient> =>
+  Effect.gen(function* () {
+    const db = yield* DbClient;
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ tenantId: connectorConnections.tenantId })
+          .from(connectorConnections)
+          .where(
+            and(
+              eq(connectorConnections.provider, PROVIDER),
+              eq(connectorConnections.shopDomain, mailbox),
+              eq(connectorConnections.status, "active"),
+            ),
+          )
+          .limit(1),
+      catch: (cause) =>
+        new Error(
+          `findTenantByGmailMailbox select failed: ${String(cause)}`,
+        ),
+    });
+    return rows[0]?.tenantId ?? null;
+  });
 
 /**
  * Process one Pub/Sub push delivery:
