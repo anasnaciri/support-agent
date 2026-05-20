@@ -196,6 +196,91 @@ describe("GmailConversationLive — reply", () => {
     expect(sent.threadId).toBe("t-1");
   });
 
+  it("infers reply subject and RFC threading headers from the Gmail thread", async () => {
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/threads/t-1")) {
+        return okJson({
+          id: "t-1",
+          messages: [
+            {
+              id: "m-1",
+              threadId: "t-1",
+              labelIds: ["INBOX"],
+              internalDate: "1747000000000",
+              payload: {
+                headers: [
+                  { name: "From", value: "jane@example.com" },
+                  { name: "To", value: "support@merchant.com" },
+                  { name: "Subject", value: "Product inquiry" },
+                  { name: "Message-ID", value: "<m-1@example.com>" },
+                ],
+                body: { data: "aGk" },
+              },
+            },
+            {
+              id: "m-2",
+              threadId: "t-1",
+              labelIds: ["INBOX"],
+              internalDate: "1747000060000",
+              payload: {
+                headers: [
+                  { name: "From", value: "jane@example.com" },
+                  { name: "To", value: "support@merchant.com" },
+                  { name: "Subject", value: "Product inquiry" },
+                  { name: "Message-ID", value: "<m-2@example.com>" },
+                ],
+                body: { data: "cGluZw" },
+              },
+            },
+          ],
+        });
+      }
+
+      const body = JSON.parse(String(init.body)) as {
+        raw: string;
+        threadId?: string;
+      };
+      expect(body.threadId).toBe("t-1");
+      const decoded = Buffer.from(
+        body.raw.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString("utf8");
+      expect(decoded).toContain("Subject: Re: Product inquiry");
+      expect(decoded).toContain("In-Reply-To: <m-2@example.com>");
+      expect(decoded).toContain(
+        "References: <m-1@example.com> <m-2@example.com>",
+      );
+      return okJson({ id: "sent-100", threadId: "t-1" });
+    });
+
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("t-1"),
+            to: [{ name: null, email: "jane@example.com" }],
+            subject: null,
+            bodyText: "We shipped yesterday.",
+            bodyHtml: null,
+            attachments: [],
+            inReplyToMessageId: null,
+            draftId: "d-infer",
+          }),
+        ),
+        layer,
+      ),
+    );
+
+    expect(sent.id).toBe("sent-100");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("maps a 401 from Gmail onto ConversationAuthFailed", async () => {
     const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
     const layer = GmailConversationLive({

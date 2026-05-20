@@ -156,6 +156,20 @@ const headerLookup = (headers: ReadonlyArray<RawHeader>, name: string): string |
   return null;
 };
 
+const normaliseRfcMessageId = (raw: string | null): string | null => {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^<+/, "").replace(/>+$/, "");
+};
+
+const parseReferences = (raw: string | null): ReadonlyArray<string> => {
+  if (!raw) return [];
+  return raw
+    .split(/\s+/u)
+    .map((part) => normaliseRfcMessageId(part))
+    .filter((part): part is string => part !== null && part.length > 0);
+};
+
 const decodeBase64Url = (s: string): string =>
   Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
 
@@ -234,7 +248,15 @@ const firstAddress = (raw: string | null): MessageParticipant | null => {
 // Normalisers
 // ============================================================
 
-const normaliseMessage = (m: RawMessage, threadId: ThreadId): ConversationMessage => {
+export interface NormalisedGmailMessage extends ConversationMessage {
+  readonly rfcMessageId: string | null;
+  readonly references: ReadonlyArray<string>;
+}
+
+const normaliseMessage = (
+  m: RawMessage,
+  threadId: ThreadId,
+): NormalisedGmailMessage => {
   const headers = m.payload?.headers ?? [];
   const bodies = { text: [] as Array<string>, html: [] as Array<string> };
   if (m.payload) collectBodies(m.payload, bodies);
@@ -265,6 +287,8 @@ const normaliseMessage = (m: RawMessage, threadId: ThreadId): ConversationMessag
     bodyHtml: bodies.html.length > 0 ? bodies.html.join("\n") : null,
     sentAt,
     attachments: [], // TODO: surface attachment metadata when a tool needs it
+    rfcMessageId: normaliseRfcMessageId(headerLookup(headers, "Message-ID")),
+    references: parseReferences(headerLookup(headers, "References")),
   };
 };
 
@@ -273,7 +297,7 @@ export interface NormalisedThread {
   readonly historyId: string | null;
   readonly subject: string;
   readonly participants: ReadonlyArray<MessageParticipant>;
-  readonly messages: ReadonlyArray<ConversationMessage>;
+  readonly messages: ReadonlyArray<NormalisedGmailMessage>;
 }
 
 const normaliseThread = (raw: RawThread): NormalisedThread => {
@@ -462,11 +486,15 @@ export const buildGmailMime = (opts: OutboundMimeOptions): string => {
   // RFC 2047 isn't worth pulling in a library for; ASCII-only subject keeps
   // things sane until a tenant complains. Strip control chars defensively.
   lines.push(`Subject: ${opts.subject.replace(/[\r\n]+/g, " ")}`);
-  if (opts.inReplyToMessageId) {
-    lines.push(`In-Reply-To: <${opts.inReplyToMessageId}>`);
+  const inReplyTo = normaliseRfcMessageId(opts.inReplyToMessageId ?? null);
+  if (inReplyTo) {
+    lines.push(`In-Reply-To: <${inReplyTo}>`);
   }
-  if (opts.references && opts.references.length > 0) {
-    lines.push(`References: ${opts.references.map((r) => `<${r}>`).join(" ")}`);
+  const references = (opts.references ?? [])
+    .map((r) => normaliseRfcMessageId(r))
+    .filter((r): r is string => r !== null && r.length > 0);
+  if (references.length > 0) {
+    lines.push(`References: ${references.map((r) => `<${r}>`).join(" ")}`);
   }
   lines.push("MIME-Version: 1.0");
 

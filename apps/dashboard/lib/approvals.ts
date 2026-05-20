@@ -14,6 +14,7 @@ import {
 import { TenantId, UserId } from "@support-agent/agent-core";
 import { getTenantId } from "./tenant";
 import { publishWorkflowEvent } from "./event-publisher";
+import { dashboardUserDecisionUuid } from "./user-id";
 
 // ============================================================
 // Dashboard approval decision pipeline
@@ -58,7 +59,7 @@ export const decideApprovalFromDashboard = async (
     throw new Error("unauthenticated");
   }
 
-  const managerId = UserId(user.id);
+  const managerId = UserId(dashboardUserDecisionUuid(user.id));
   // The Effect needs ApprovalService in its env, satisfied by the
   // cached layer below. Casting the layer keeps TypeScript happy
   // without recomputing the precise Layer.Layer<...> shape.

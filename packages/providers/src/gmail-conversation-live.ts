@@ -49,6 +49,12 @@ export interface GmailProviderConfig {
 
 const DEFAULT_REFRESH_SKEW_MS = 60_000;
 
+const replySubject = (subject: string): string => {
+  const trimmed = subject.trim();
+  if (!trimmed) return "Re: support";
+  return /^re:/iu.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+};
+
 // ============================================================
 // Error mapping
 // ============================================================
@@ -216,13 +222,40 @@ export const GmailConversationLive = (
       ): Effect.Effect<SentMessage, ConversationError> =>
         Effect.gen(function* () {
           const conn = yield* resolveToken(tenantId);
+          let subject = draft.subject;
+          let inReplyToMessageId = inReplyTo;
+          let references: ReadonlyArray<string> = [];
+
+          if (!subject || !inReplyToMessageId) {
+            const thread = yield* Effect.tryPromise({
+              try: () =>
+                gmailGetThread({
+                  token: conn.accessToken,
+                  threadId: draft.threadId,
+                  ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+                }),
+              catch: (cause) => mapHttpError(cause, {
+                tenantId,
+                threadId: draft.threadId,
+                draftId: draft.draftId,
+              }),
+            });
+            subject ??= replySubject(thread.subject);
+            const rfcIds = thread.messages
+              .map((m) => m.rfcMessageId)
+              .filter((id): id is string => id !== null);
+            references = rfcIds;
+            inReplyToMessageId ??= rfcIds.at(-1) ?? null;
+          }
+
           const mime = buildGmailMime({
             from: { name: null, email: conn.shopDomain },
             to: draft.to,
-            subject: draft.subject ?? "Re: support",
+            subject: subject ?? "Re: support",
             bodyText: draft.bodyText,
             bodyHtml: draft.bodyHtml,
-            inReplyToMessageId: inReplyTo,
+            inReplyToMessageId,
+            references,
           });
           const result = yield* Effect.tryPromise({
             try: () =>

@@ -56,6 +56,7 @@ describe("gmailGetThread — normalisation", () => {
                   value: "support@merchant.com, billing@merchant.com",
                 },
                 { name: "Subject", value: "Where is my order?" },
+                { name: "Message-ID", value: "<msg-1@example.com>" },
               ],
               parts: [
                 {
@@ -79,6 +80,8 @@ describe("gmailGetThread — normalisation", () => {
                 { name: "From", value: "support@merchant.com" },
                 { name: "To", value: "jane@example.com" },
                 { name: "Subject", value: "Re: Where is my order?" },
+                { name: "Message-ID", value: "<msg-2@example.com>" },
+                { name: "References", value: "<msg-1@example.com>" },
               ],
               body: { data: b64url("Tracking is #ABC123") },
             },
@@ -107,6 +110,9 @@ describe("gmailGetThread — normalisation", () => {
     ]);
     expect(thread.messages[0]!.bodyText).toBe("Hi, where is #1001?");
     expect(thread.messages[0]!.bodyHtml).toBe("<p>Hi, where is #1001?</p>");
+    expect(thread.messages[0]!.rfcMessageId).toBe("msg-1@example.com");
+    expect(thread.messages[1]!.rfcMessageId).toBe("msg-2@example.com");
+    expect(thread.messages[1]!.references).toEqual(["msg-1@example.com"]);
     // Participants deduped across the thread, first-seen order.
     expect(thread.participants.map((p) => p.email)).toEqual([
       "jane@example.com",
@@ -182,6 +188,7 @@ describe("buildGmailMime", () => {
       subject: "Re: Order #1001",
       bodyText: "We shipped it yesterday.",
       inReplyToMessageId: "abc123@mail.gmail.com",
+      references: ["root@mail.gmail.com", "<abc123@mail.gmail.com>"],
     });
     const decoded = Buffer.from(
       raw.replace(/-/g, "+").replace(/_/g, "/"),
@@ -193,6 +200,9 @@ describe("buildGmailMime", () => {
     expect(decoded).toContain('To: "Jane" <jane@example.com>');
     expect(decoded).toContain("Subject: Re: Order #1001");
     expect(decoded).toContain("In-Reply-To: <abc123@mail.gmail.com>");
+    expect(decoded).toContain(
+      "References: <root@mail.gmail.com> <abc123@mail.gmail.com>",
+    );
     expect(decoded).toContain("We shipped it yesterday.");
     expect(decoded).toContain("Content-Type: text/plain");
   });

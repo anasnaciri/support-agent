@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { takeOverCase } from "@/lib/case-actions";
 import { getTenantId } from "@/lib/tenant";
+import { dashboardUserDecisionUuid } from "@/lib/user-id";
 
 const caseIdOf = (formData: FormData): string => {
   const id = formData.get("caseId");
@@ -23,7 +24,7 @@ export const takeOverAction = async (formData: FormData): Promise<void> => {
   const result = await takeOverCase({
     caseId,
     tenantId,
-    managerId: user.id,
+    managerId: dashboardUserDecisionUuid(user.id),
   });
 
   revalidatePath(`/cases/${caseId}`);

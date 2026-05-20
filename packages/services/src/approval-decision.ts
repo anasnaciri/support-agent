@@ -94,16 +94,23 @@ export const applyApprovalDecision = (
     ).pipe(Effect.either);
 
     if (decided._tag === "Left") {
-      // Most likely an ApprovalStateConflict from a concurrent decision
-      // (manager double-clicked, or both the dashboard + email link
-      // raced). Re-read to surface as already_decided.
+      // Only state conflicts are idempotency/race conditions. Other
+      // failures are real write failures (for example a DB type error) and
+      // must not be reported as "already_decided" while the row remains
+      // pending.
+      if (decided.left._tag !== "ApprovalStateConflict") {
+        return yield* Effect.die(decided.left);
+      }
+
+      // A concurrent decision may have won the race. Re-read to surface it
+      // as already_decided, but only when the row actually left pending.
       const reread = yield* svc
         .getById(approvalIdTyped)
         .pipe(Effect.either);
-      if (reread._tag === "Right") {
+      if (reread._tag === "Right" && reread.right.status !== "pending") {
         return { kind: "already_decided", approval: reread.right };
       }
-      return { kind: "approval_not_found" };
+      return yield* Effect.die(decided.left);
     }
 
     return { kind: "decided", approval: decided.right };

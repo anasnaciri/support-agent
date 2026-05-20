@@ -5,6 +5,7 @@ import {
   applyApprovalDecision,
   decisionToEvent,
   ApprovalService,
+  ApprovalServiceDbError,
   ApprovalNotFound,
   ApprovalStateConflict,
 } from "../src/index.js";
@@ -259,6 +260,61 @@ describe("applyApprovalDecision", () => {
       ),
     );
     expect(reread.status).toBe("pending");
+  });
+
+  it("does not report already_decided when the transition write fails", async () => {
+    const row: Approval = {
+      id: randomUUID() as never,
+      tenantId: tenantA,
+      caseId: caseA,
+      agentId,
+      status: "pending",
+      tool: "conversation.reply",
+      proposedInput: {},
+      approvedInput: null,
+      reasoning: "",
+      riskLevel: "medium",
+      decidedBy: null,
+      decidedAt: null,
+      decisionReason: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+    };
+    const layer = Layer.succeed(
+      ApprovalService,
+      ApprovalService.of({
+        create: () => Effect.succeed(row),
+        getById: () => Effect.succeed(row),
+        approve: () =>
+          Effect.fail(
+            new ApprovalServiceDbError({
+              operation: "transition",
+              cause: "invalid decided_by",
+            }),
+          ),
+        reject: () =>
+          Effect.fail(
+            new ApprovalServiceDbError({
+              operation: "transition",
+              cause: "invalid decided_by",
+            }),
+          ),
+        listPending: () => Effect.succeed([row]),
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(
+        Effect.provide(
+          applyApprovalDecision({
+            approvalId: row.id,
+            action: "approve",
+            managerId: manager,
+          }),
+          layer,
+        ),
+      ),
+    ).rejects.toThrow();
   });
 
   it("returns already_decided on re-decide (idempotency)", async () => {
