@@ -23,6 +23,7 @@ import {
   LLMServiceScripted,
   PlatformMailServiceTest,
   ShopifyServiceTest,
+  TenantAgentOverridesServiceTest,
   TransactionRunnerPassthrough,
 } from "@support-agent/services";
 import {
@@ -80,6 +81,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     ] as ReadonlyArray<LLMDecision>),
     ShopifyServiceTest({}),
     PlatformMailServiceTest({}),
+    TenantAgentOverridesServiceTest(),
     Layer.succeed(ApprovalLinkConfig, {
       baseUrl: "https://api.test.example",
       signingKey: "test-signing-key",

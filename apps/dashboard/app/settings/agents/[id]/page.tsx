@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, RotateCcw } from "lucide-react";
+
+import { fetchModelCatalog } from "@support-agent/providers";
 
 import { findAgent, findTool, effectivePermission } from "@/lib/catalog";
 import { permissionVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  ModelCombobox,
+  type ModelOption,
+} from "@/components/ui/model-combobox";
 import {
   Table,
   TableBody,
@@ -14,9 +22,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getTenantId } from "@/lib/tenant";
+import {
+  loadAgentOverrides,
+  resolveTenantLlmCredential,
+} from "@/lib/llm-runtime";
+import { AgentId, TenantId } from "@support-agent/agent-core";
+
+import {
+  clearAgentModelAction,
+  setAgentModelAction,
+} from "./actions";
 
 interface Props {
   readonly params: Promise<{ readonly id: string }>;
+  readonly searchParams?: Promise<
+    Readonly<Record<string, string | string[] | undefined>>
+  >;
 }
 
 const Row = ({
@@ -37,10 +59,51 @@ const Row = ({
 const modeVariant = (mode: string): "info" | "secondary" =>
   mode === "primary" ? "info" : "secondary";
 
-export default async function AgentDetailPage({ params }: Props) {
+const PROVIDER_LABEL: Readonly<Record<string, string>> = {
+  openrouter: "OpenRouter",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+};
+
+export default async function AgentDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
   const agent = findAgent(id);
   if (!agent) notFound();
+
+  const sp = (await searchParams) ?? {};
+  const modelBanner = Array.isArray(sp["model"]) ? sp["model"][0] : sp["model"];
+
+  const tenantIdRaw = await getTenantId();
+  const tenantId = TenantId(tenantIdRaw);
+  const [credential, overrides] = await Promise.all([
+    resolveTenantLlmCredential(tenantId),
+    loadAgentOverrides(tenantId),
+  ]);
+  const override = overrides.get(AgentId(agent.id)) ?? null;
+  const effectiveModel = override ?? agent.model;
+
+  let catalog: ReadonlyArray<ModelOption> = [];
+  let catalogError: string | null = null;
+  if (credential) {
+    const result = await fetchModelCatalog({
+      provider: credential.provider,
+      apiKey: credential.apiKey,
+      ...(credential.baseURL !== undefined
+        ? { baseURL: credential.baseURL }
+        : {}),
+    });
+    catalog = result.entries;
+    catalogError = result.error ?? null;
+  }
+
+  // Surface a sticky banner if the user has an override that isn't in the
+  // current provider's catalog (probably switched providers). We still let
+  // them keep it — clearing requires an explicit click — but they should
+  // know the picker won't help them re-select it.
+  const overrideMissingFromCatalog =
+    override !== null &&
+    credential !== null &&
+    !catalog.some((o) => o.id === override);
 
   return (
     <div className="space-y-6">
@@ -63,12 +126,42 @@ export default async function AgentDetailPage({ params }: Props) {
         <p className="mt-3 text-sm">{agent.description}</p>
       </div>
 
+      {modelBanner === "updated" ? (
+        <Alert variant="success">
+          <AlertDescription>Model updated.</AlertDescription>
+        </Alert>
+      ) : null}
+      {modelBanner === "reset" ? (
+        <Alert variant="success">
+          <AlertDescription>
+            Model reset to the agent default.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Card>
-        <CardContent className="p-6">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Model</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-2">
-            <Row label="Model">
+            <Row label="Effective model">
               <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                {agent.provider}:{agent.model}
+                {effectiveModel}
+              </code>
+              {override ? (
+                <Badge variant="info" className="ml-2">
+                  override
+                </Badge>
+              ) : (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  agent default
+                </span>
+              )}
+            </Row>
+            <Row label="Agent default">
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                {agent.model}
               </code>
             </Row>
             {agent.fallback ? (
@@ -83,6 +176,91 @@ export default async function AgentDetailPage({ params }: Props) {
               <Row label="Temperature">{agent.temperature}</Row>
             ) : null}
           </dl>
+
+          {!credential ? (
+            <Alert variant="warning">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>No LLM provider connected</AlertTitle>
+              <AlertDescription>
+                Connect a provider on{" "}
+                <Link
+                  href="/settings/llm"
+                  className="font-medium text-primary hover:underline"
+                >
+                  Settings → LLM provider
+                </Link>{" "}
+                before picking per-agent models. The picker shows models from
+                the connected provider only.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {credential && catalogError ? (
+            <Alert variant="warning">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Model catalog unavailable</AlertTitle>
+              <AlertDescription>
+                Couldn&apos;t fetch the model list from{" "}
+                {PROVIDER_LABEL[credential.provider] ?? credential.provider}:{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {catalogError}
+                </code>
+                . The agent will keep using the current effective model.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {overrideMissingFromCatalog ? (
+            <Alert variant="warning">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Override not in current catalog</AlertTitle>
+              <AlertDescription>
+                The override{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {override}
+                </code>{" "}
+                isn&apos;t in the connected provider&apos;s catalog —
+                probably because the provider was switched. Pick a new model
+                below, or reset to the agent default.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {credential ? (
+            <form
+              action={setAgentModelAction}
+              className="flex items-start gap-2"
+            >
+              <input type="hidden" name="agentId" value={agent.id} />
+              <div className="flex-1">
+                <ModelCombobox
+                  name="model"
+                  value={override ?? ""}
+                  defaultModel={agent.model}
+                  options={catalog}
+                  disabled={catalog.length === 0}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Models from{" "}
+                  {PROVIDER_LABEL[credential.provider] ?? credential.provider}.
+                  {catalog.length > 0
+                    ? ` ${catalog.length} models available.`
+                    : ""}
+                </p>
+              </div>
+              <Button type="submit">Save</Button>
+            </form>
+          ) : null}
+
+          {override ? (
+            <form action={clearAgentModelAction}>
+              <input type="hidden" name="agentId" value={agent.id} />
+              <Button type="submit" variant="outline" size="sm">
+                <RotateCcw className="size-3.5" aria-hidden />
+                Reset to default
+              </Button>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
 

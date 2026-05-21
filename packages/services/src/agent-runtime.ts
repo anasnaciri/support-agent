@@ -25,6 +25,10 @@ import { TransactionRunner } from "./transaction-runner.js";
 import { PlatformMailService } from "./platform-mail.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
 import { signApprovalToken } from "./approval-tokens.js";
+import {
+  TenantAgentOverridesService,
+  type AgentOverride,
+} from "./tenant-agent-overrides.js";
 
 // ============================================================
 // Helpers
@@ -208,6 +212,26 @@ export const AgentRuntimeDefault = Layer.effect(
     const tx = yield* TransactionRunner;
     const mail = yield* PlatformMailService;
     const linkConfig = yield* ApprovalLinkConfig;
+    const overrides = yield* TenantAgentOverridesService;
+
+    /**
+     * Apply per-tenant per-agent overrides on top of the in-code
+     * AgentConfig. Today only `model` is overridable; future fields
+     * (temperature, prompt suffix, …) plug in here. Returns the same
+     * object reference when no override applies, so the hot path doesn't
+     * allocate.
+     */
+    const applyOverride = (
+      agent: AgentConfig,
+      overrideMap: ReadonlyMap<AgentConfig["id"], AgentOverride>,
+    ): AgentConfig => {
+      const o = overrideMap.get(agent.id);
+      if (!o) return agent;
+      if (o.model && o.model !== agent.model) {
+        return { ...agent, model: o.model };
+      }
+      return agent;
+    };
 
     const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
@@ -430,7 +454,21 @@ export const AgentRuntimeDefault = Layer.effect(
         }
 
         // 3. Run the workflow loop.
-        let agent: AgentConfig = yield* registry.resolve(working.currentAgentId);
+        // Load per-tenant overrides once per tick. A handoff later in the
+        // same tick reuses this map — overrides don't change mid-tick.
+        const overrideMap = yield* overrides
+          .getForTenant(working.tenantId)
+          .pipe(
+            Effect.catchAll(() =>
+              Effect.succeed(
+                new Map() as ReadonlyMap<AgentConfig["id"], AgentOverride>,
+              ),
+            ),
+          );
+        let agent: AgentConfig = applyOverride(
+          yield* registry.resolve(working.currentAgentId),
+          overrideMap,
+        );
         const messages: ChatMessage[] = buildInitialMessages(
           event,
           working.subject,
@@ -530,7 +568,10 @@ export const AgentRuntimeDefault = Layer.effect(
           }
 
           if (decision.type === "handoff") {
-            agent = yield* registry.resolve(decision.targetAgent);
+            agent = applyOverride(
+              yield* registry.resolve(decision.targetAgent),
+              overrideMap,
+            );
             current = yield* cases.update(current.id, {
               currentAgentId: decision.targetAgent,
             });
@@ -626,7 +667,10 @@ export const AgentRuntimeDefault = Layer.effect(
             }
 
             const targetAgentId = makeAgentId(target as string);
-            const targetAgent = yield* registry.resolve(targetAgentId);
+            const targetAgent = applyOverride(
+              yield* registry.resolve(targetAgentId),
+              overrideMap,
+            );
             current = yield* tx.run(
               Effect.gen(function* () {
                 const updated = yield* cases.update(current.id, {

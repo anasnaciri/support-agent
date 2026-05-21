@@ -50,6 +50,13 @@
       "when": 1779321519617,
       "tag": "0006_byok_llm_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779326225757,
+      "tag": "0007_tenant_agent_overrides",
+      "breakpoints": true
     }
   ]
 }

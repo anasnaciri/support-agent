@@ -40,6 +40,7 @@ import {
   LLMServiceScripted,
   PlatformMailServiceTest,
   ShopifyServiceTest,
+  TenantAgentOverridesServiceTest,
   TransactionRunnerPassthrough,
   makeConversationServiceTest,
   makePlatformMailServiceTest,
@@ -57,6 +58,7 @@ const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
   ttlMs: 60_000,
 });
 const platformMailNoop = PlatformMailServiceTest({});
+const tenantOverridesEmpty = TenantAgentOverridesServiceTest();
 import { Effect as Eff } from "effect";
 
 // ------------------------------------------------------------
@@ -105,6 +107,7 @@ const tickEnv = Layer.mergeAll(
   ShopifyServiceTest({}),
   approvalLinkLayer,
   platformMailNoop,
+  tenantOverridesEmpty,
 );
 
 const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(tickEnv));
@@ -349,6 +352,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ConversationServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -492,6 +496,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -619,6 +624,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 
@@ -676,6 +682,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -783,6 +790,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -865,6 +873,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       }),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1027,6 +1036,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ConversationServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1218,6 +1228,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       convoTest.layer,
       mailTest.layer,
       approvalLinkLayer,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1420,6 +1431,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       convoTest.layer,
       mailTest.layer,
       approvalLinkLayer,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1508,6 +1520,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       ShopifyServiceTest({}),
       approvalLinkLayer,
       platformMailNoop,
+      tenantOverridesEmpty,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1560,5 +1573,117 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
     if (out.type === "HumanTakeoverRequired") {
       expect(out.reason).toBe("llm_credential_missing");
     }
+  });
+});
+
+// Per-tenant per-agent model override: the runtime should send the
+// override model to the LLM instead of the agent's hardcoded
+// `AgentConfig.model`. We capture the request shape with
+// LLMServiceFromFn so we can assert the override propagated.
+describe("AgentRuntime — per-tenant per-agent model override", () => {
+  it("substitutes AgentConfig.model with the tenant override at LLM call time", async () => {
+    const captured: { model: string | null } = { model: null };
+
+    const overrideTenant = TenantId("tenant-override-acme");
+    const overrideLayer = TenantAgentOverridesServiceTest([
+      {
+        tenantId: overrideTenant,
+        agentId: supportTriage.id,
+        model: "anthropic/claude-opus-4-7",
+        updatedAt: new Date(),
+      },
+    ]);
+
+    const captureLlm = LLMServiceFromFn((req) => {
+      captured.model = req.model;
+      return Eff.succeed<LLMDecision>({
+        type: "final_message",
+        text: "ok",
+      });
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+      ]),
+      PermissionServiceDefault,
+      captureLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      overrideLayer,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(AgentRuntime, (runtime) =>
+          runtime.handleEvent(ticketCreated("hello", "tenant-override-acme")),
+        ),
+        layer,
+      ),
+    );
+
+    expect(captured.model).toBe("anthropic/claude-opus-4-7");
+    // Sanity: the agent's hardcoded model is NOT what we sent.
+    expect(captured.model).not.toBe(supportTriage.model);
+  });
+
+  it("falls through to AgentConfig.model when no override exists for the agent", async () => {
+    const captured: { model: string | null } = { model: null };
+
+    const captureLlm = LLMServiceFromFn((req) => {
+      captured.model = req.model;
+      return Eff.succeed<LLMDecision>({
+        type: "final_message",
+        text: "ok",
+      });
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+      ]),
+      PermissionServiceDefault,
+      captureLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(AgentRuntime, (runtime) =>
+          runtime.handleEvent(ticketCreated("hello", "tenant-no-override")),
+        ),
+        layer,
+      ),
+    );
+
+    expect(captured.model).toBe(supportTriage.model);
   });
 });

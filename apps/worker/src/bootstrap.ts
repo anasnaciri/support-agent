@@ -41,6 +41,7 @@ import {
   DbClient,
   DbClientLive,
   LLMCredentialResolverLive,
+  TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
@@ -154,6 +155,7 @@ export const buildWorker = async (
     AuditLogServiceLive,
     ApprovalServiceLive,
     TransactionRunnerLive,
+    TenantAgentOverridesServiceLive,
   );
 
   // LLM — depends on LLMCredentialResolver. In production each tenant

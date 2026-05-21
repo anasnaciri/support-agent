@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -263,6 +264,34 @@ export type ConnectorConnectionRow =
   typeof connectorConnections.$inferSelect;
 export type ConnectorConnectionInsert =
   typeof connectorConnections.$inferInsert;
+
+// Per-tenant per-agent overrides. Today only `model` is overridable, but
+// the table is structured to grow (temperature, maxTurns, prompt suffix,
+// …) without another migration. `agent_id` is text (no FK) because agent
+// configs live in code; this row carries a string that maps to
+// AgentConfig.id at runtime. Composite PK on (tenant_id, agent_id) makes
+// upserts race-safe.
+export const tenantAgentOverrides = pgTable(
+  "tenant_agent_overrides",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
+    model: text("model"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.agentId] }),
+  ],
+);
+
+export type TenantAgentOverrideRow =
+  typeof tenantAgentOverrides.$inferSelect;
+export type TenantAgentOverrideInsert =
+  typeof tenantAgentOverrides.$inferInsert;
 
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;
