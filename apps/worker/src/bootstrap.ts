@@ -40,6 +40,7 @@ import {
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  LLMCredentialResolverLive,
   TenantRepositoryLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
@@ -47,6 +48,7 @@ import { parseKey } from "@support-agent/services";
 import {
   GmailConversationLive,
   LLMConfigFromEnv,
+  LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
   PlatformMailServiceLive,
   ResendConfigFromEnv,
@@ -114,9 +116,20 @@ export const buildWorker = async (
 ): Promise<WorkerBootstrap> => {
   const databaseUrl = requireEnv("DATABASE_URL");
 
-  // OPENROUTER_API_KEY is required: support-triage needs the LLM. Crashing
-  // here is better than discovering it on the first message.
-  requireEnv("OPENROUTER_API_KEY");
+  // BYOK: in production the LLM credential is per-tenant, read from
+  // `connector_connections` via LLMCredentialResolverLive — that requires
+  // CREDENTIAL_ENCRYPTION_KEY. In single-tenant dev we fall back to the
+  // OPENROUTER_API_KEY env layer (LLMCredentialResolverFromLLMConfig) so
+  // the worker still boots without a DB-backed key. One of the two MUST be
+  // set; otherwise crash here rather than discovering it on the first
+  // message.
+  const credKeyB64 = process.env["CREDENTIAL_ENCRYPTION_KEY"];
+  const hasDevOpenrouter = Boolean(process.env["OPENROUTER_API_KEY"]);
+  if (!credKeyB64 && !hasDevOpenrouter) {
+    throw new Error(
+      "BYOK: set CREDENTIAL_ENCRYPTION_KEY (production, per-tenant keys from connector_connections) or OPENROUTER_API_KEY (single-tenant dev)",
+    );
+  }
 
   // Pick the Shopify credential source:
   //   - If CREDENTIAL_ENCRYPTION_KEY is set, read tokens from
@@ -124,7 +137,6 @@ export const buildWorker = async (
   //   - Otherwise fall back to SHOPIFY_TEST_* env vars (dev / single-tenant).
   // `requireShopify` only gates the env-fallback variant — when we're on
   // the connector-backed path we don't expect SHOPIFY_TEST_* to be set.
-  const credKeyB64 = process.env["CREDENTIAL_ENCRYPTION_KEY"];
   if (!credKeyB64 && opts.requireShopify) {
     requireEnv("SHOPIFY_TEST_SHOP_DOMAIN");
     requireEnv("SHOPIFY_TEST_ACCESS_TOKEN");
@@ -144,8 +156,19 @@ export const buildWorker = async (
     TransactionRunnerLive,
   );
 
-  // LLM — depends on LLMConfig.
-  const llm = LLMServiceLive.pipe(Layer.provide(LLMConfigFromEnv));
+  // LLM — depends on LLMCredentialResolver. In production each tenant
+  // brings their own provider + key (resolver consults the same
+  // ConnectorCredentialStoreLive that Shopify/Gmail OAuth writes to).
+  // In single-tenant dev we adapt OPENROUTER_API_KEY to a resolver that
+  // returns the same credential for every tenant.
+  const llmResolver = credKeyB64
+    ? LLMCredentialResolverLive.pipe(
+        Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+      )
+    : LLMCredentialResolverFromLLMConfig.pipe(
+        Layer.provide(LLMConfigFromEnv),
+      );
+  const llm = LLMServiceLive.pipe(Layer.provide(llmResolver));
 
   // Shopify — depends on ShopifyHttp + ShopifyCredentialStore. When the
   // encryption key is present, resolve credentials from the DB-backed

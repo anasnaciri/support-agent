@@ -1,6 +1,10 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { AgentId, type LLMDecision } from "@support-agent/agent-core";
+import {
+  AgentId,
+  TenantId,
+  type LLMDecision,
+} from "@support-agent/agent-core";
 import {
   LLMService,
   LLMServiceFromFn,
@@ -8,6 +12,7 @@ import {
 } from "../src/llm-service.js";
 
 const baseReq = {
+  tenantId: TenantId("00000000-0000-0000-0000-000000000001"),
   model: "google/gemini-3.1-flash-lite",
   system: "test system",
   messages: [],

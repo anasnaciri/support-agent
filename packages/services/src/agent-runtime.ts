@@ -439,15 +439,61 @@ export const AgentRuntimeDefault = Layer.effect(
 
         for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
           const schemas = yield* tools.schemasFor(agent.tools);
-          const decision: LLMDecision = yield* llm.runToolCalling({
-            model: agent.model,
-            system: agent.promptTemplate,
-            messages,
-            tools: schemas,
-            ...(agent.temperature !== undefined
-              ? { temperature: agent.temperature }
-              : {}),
-          });
+          // BYOK: surface missing/revoked per-tenant LLM credentials as
+          // human_takeover instead of a generic Failed. Other LLM errors
+          // continue to bubble up to the outer catchAllCause.
+          const decisionEither = yield* llm
+            .runToolCalling({
+              tenantId: current.tenantId,
+              model: agent.model,
+              system: agent.promptTemplate,
+              messages,
+              tools: schemas,
+              ...(agent.temperature !== undefined
+                ? { temperature: agent.temperature }
+                : {}),
+            })
+            .pipe(Effect.either);
+          if (decisionEither._tag === "Left") {
+            const err = decisionEither.left;
+            if (
+              err._tag === "LLMCredentialMissing" ||
+              err._tag === "LLMCredentialRevoked"
+            ) {
+              const reason =
+                err._tag === "LLMCredentialMissing"
+                  ? "llm_credential_missing"
+                  : "llm_credential_revoked";
+              current = yield* tx.run(
+                Effect.gen(function* () {
+                  const updated = yield* cases.transitionStatus(
+                    current.id,
+                    "human_takeover",
+                    { reason },
+                  );
+                  yield* audit.record({
+                    tenantId: updated.tenantId,
+                    caseId: updated.id,
+                    actor: { type: "system", id: "agent-runtime" },
+                    action: "case.escalated_to_human",
+                    details: {
+                      reason,
+                      ...(err._tag === "LLMCredentialRevoked"
+                        ? { provider: err.provider }
+                        : {}),
+                    },
+                  });
+                  return updated;
+                }),
+              );
+              return {
+                type: "HumanTakeoverRequired",
+                reason,
+              } as const;
+            }
+            return yield* Effect.fail(err);
+          }
+          const decision: LLMDecision = decisionEither.right;
 
           yield* audit.record({
             tenantId: current.tenantId,

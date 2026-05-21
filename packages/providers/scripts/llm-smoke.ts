@@ -14,7 +14,12 @@
  */
 
 import { Effect, Layer } from "effect";
-import { LLMConfig, LLMService } from "@support-agent/services";
+import { TenantId } from "@support-agent/agent-core";
+import {
+  LLMCredentialResolverTest,
+  LLMService,
+  type LLMCredential,
+} from "@support-agent/services";
 import { LLMServiceLive } from "../src/llm-service-live.js";
 
 const apiKey = process.env["OPENROUTER_API_KEY"];
@@ -28,11 +33,12 @@ const userPrompt =
   process.env["OPENROUTER_SMOKE_PROMPT"] ??
   "Say 'hello from support-agent' and nothing else.";
 
-const cfg = Layer.succeed(
-  LLMConfig,
-  LLMConfig.of({ apiKey, siteName: "support-agent-cli-smoke" }),
+const smokeTenant = TenantId("00000000-0000-0000-0000-000000000001");
+const cred: LLMCredential = { provider: "openrouter", apiKey };
+const resolverLayer = LLMCredentialResolverTest(
+  new Map([[smokeTenant, cred]]),
 );
-const live = LLMServiceLive.pipe(Layer.provide(cfg));
+const live = LLMServiceLive.pipe(Layer.provide(resolverLayer));
 
 console.log(`[smoke] model=${model}`);
 console.log(`[smoke] prompt=${userPrompt}`);
@@ -40,6 +46,7 @@ console.log(`[smoke] prompt=${userPrompt}`);
 const program = Effect.gen(function* () {
   const llm = yield* LLMService;
   return yield* llm.runToolCalling({
+    tenantId: smokeTenant,
     model,
     system: "You are a terse assistant.",
     messages: [{ role: "user", content: userPrompt }],

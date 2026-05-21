@@ -9,6 +9,7 @@ export * from "./approval-service.js";
 export * from "./approval-decision.js";
 export * from "./llm-service.js";
 export * from "./llm-config.js";
+export * from "./llm-credential-resolver.js";
 export * from "./connector-credential-store.js";
 export * from "./shopify-credentials.js";
 export * from "./shopify-service.js";

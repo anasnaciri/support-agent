@@ -1,4 +1,4 @@
-import type { AgentId } from "./ids.js";
+import type { AgentId, TenantId } from "./ids.js";
 import type { OutboundMessageDraft, SupplierEscalationPayload } from "./payloads.js";
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -28,6 +28,12 @@ export type ChatMessage =
     };
 
 export interface ToolCallingRequest {
+  /**
+   * BYOK: the live LLMService consults LLMCredentialResolver(tenantId) to
+   * pick the per-tenant API key + provider on every call. Test layers ignore
+   * this field — they don't need credentials.
+   */
+  readonly tenantId: TenantId;
   readonly model: string;
   readonly system: string;
   readonly messages: ReadonlyArray<ChatMessage>;

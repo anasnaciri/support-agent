@@ -234,7 +234,7 @@ export const connectorConnections = pgTable(
     ),
     check(
       "connector_connections_provider_check",
-      sql`${t.provider} IN ('shopify','gmail','outlook')`,
+      sql`${t.provider} IN ('shopify','gmail','outlook','openrouter','anthropic','openai')`,
     ),
     uniqueIndex("connector_connections_tenant_provider_shop_idx").on(
       t.tenantId,
@@ -244,6 +244,15 @@ export const connectorConnections = pgTable(
     uniqueIndex("connector_connections_active_shopify_shop_unique")
       .on(t.provider, t.shopDomain)
       .where(sql`${t.provider} = 'shopify' AND ${t.status} = 'active'`),
+    // BYOK: at most one active LLM provider per tenant. The provider field
+    // names the chosen one (openrouter/anthropic/openai); only one of those
+    // three rows may carry status='active' at a time, so a tenant can't
+    // accidentally have two routing destinations live.
+    uniqueIndex("connector_connections_active_llm_per_tenant_unique")
+      .on(t.tenantId)
+      .where(
+        sql`${t.provider} IN ('openrouter','anthropic','openai') AND ${t.status} = 'active'`,
+      ),
     index("connector_connections_active_idx")
       .on(t.tenantId, t.provider)
       .where(sql`${t.status} = 'active'`),

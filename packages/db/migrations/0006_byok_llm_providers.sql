@@ -1,0 +1,3 @@
+ALTER TABLE "connector_connections" DROP CONSTRAINT "connector_connections_provider_check";--> statement-breakpoint
+CREATE UNIQUE INDEX "connector_connections_active_llm_per_tenant_unique" ON "connector_connections" USING btree ("tenant_id") WHERE "connector_connections"."provider" IN ('openrouter','anthropic','openai') AND "connector_connections"."status" = 'active';--> statement-breakpoint
+ALTER TABLE "connector_connections" ADD CONSTRAINT "connector_connections_provider_check" CHECK ("connector_connections"."provider" IN ('shopify','gmail','outlook','openrouter','anthropic','openai'));

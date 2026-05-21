@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bot, Plug, ShieldCheck } from "lucide-react";
+import { Bot, KeyRound, Plug, ShieldCheck } from "lucide-react";
 
 import { agents, tools } from "@/lib/catalog";
 import {
@@ -29,12 +29,20 @@ const TILES = [
     title: "Integrations",
     description: "Shopify and Gmail connection status for your tenant.",
   },
+  {
+    href: "/settings/llm",
+    icon: KeyRound,
+    title: "LLM provider",
+    description:
+      "Bring your own OpenRouter, Anthropic, or OpenAI key. Required for any agent run.",
+  },
 ] as const;
 
 export default function SettingsLanding() {
   const valueFor = (href: string): string => {
     if (href === "/settings/agents") return String(agents.length);
     if (href === "/settings/permissions") return String(tools.length);
+    if (href === "/settings/llm") return "BYOK";
     return "—";
   };
 

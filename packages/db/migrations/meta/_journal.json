@@ -43,6 +43,13 @@
       "when": 1779129600000,
       "tag": "0005_shopify_active_shop_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779321519617,
+      "tag": "0006_byok_llm_providers",
+      "breakpoints": true
     }
   ]
 }

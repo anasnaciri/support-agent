@@ -1,7 +1,11 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import type { ToolCallingRequest } from "@support-agent/agent-core";
-import { LLMConfig, LLMService } from "@support-agent/services";
+import { TenantId, type ToolCallingRequest } from "@support-agent/agent-core";
+import {
+  LLMCredentialResolverTest,
+  LLMService,
+  type LLMCredential,
+} from "@support-agent/services";
 import { LLMServiceLive } from "../src/llm-service-live.js";
 
 // Real-call smoke test. Hits OpenRouter end-to-end through `LLMServiceLive`
@@ -19,19 +23,21 @@ const SMOKE_MODEL =
   process.env["OPENROUTER_SMOKE_MODEL"] ?? "google/gemini-3.1-flash-lite";
 
 describeIfKey("LLMServiceLive — real OpenRouter smoke test", () => {
-  const cfg = Layer.succeed(
-    LLMConfig,
-    LLMConfig.of({
-      apiKey: apiKey!,
-      siteName: "support-agent-smoke-test",
-    }),
+  const smokeTenant = TenantId("00000000-0000-0000-0000-000000000001");
+  const cred: LLMCredential = {
+    provider: "openrouter",
+    apiKey: apiKey!,
+  };
+  const resolverLayer = LLMCredentialResolverTest(
+    new Map([[smokeTenant, cred]]),
   );
-  const live = LLMServiceLive.pipe(Layer.provide(cfg));
+  const live = LLMServiceLive.pipe(Layer.provide(resolverLayer));
 
   it(
     "returns a final_message decision from a real model call",
     async () => {
       const req: ToolCallingRequest = {
+        tenantId: smokeTenant,
         model: SMOKE_MODEL,
         system: "You are a terse assistant. Reply with at most 5 words.",
         messages: [
@@ -62,6 +68,7 @@ describeIfKey("LLMServiceLive — real OpenRouter smoke test", () => {
     "returns a tool_call decision when the model is asked to use a tool",
     async () => {
       const req: ToolCallingRequest = {
+        tenantId: smokeTenant,
         model: SMOKE_MODEL,
         system:
           "When the user asks about an order, you MUST call the lookup_order tool. Do not answer in text.",

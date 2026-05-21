@@ -16,7 +16,13 @@ import {
  * a new connector means widening this union AND the schema CHECK
  * constraint together, so they can't drift.
  */
-export type ConnectorProvider = "shopify" | "gmail" | "outlook";
+export type ConnectorProvider =
+  | "shopify"
+  | "gmail"
+  | "outlook"
+  | "openrouter"
+  | "anthropic"
+  | "openai";
 
 export interface ConnectorConnection {
   readonly tenantId: TenantId;

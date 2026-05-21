@@ -5,10 +5,17 @@ import {
   NetworkError,
   ProviderUnavailable,
   SafetyBlocked,
+  TenantId,
   type ChatMessage,
   type ToolCallingRequest,
 } from "@support-agent/agent-core";
-import { LLMConfig, LLMService } from "@support-agent/services";
+import {
+  LLMCredentialResolverTest,
+  LLMService,
+  type LLMCredential,
+} from "@support-agent/services";
+
+const testTenantId = TenantId("00000000-0000-0000-0000-000000000001");
 
 // ---------- Module mock ------------------------------------------------------
 // Vitest hoists vi.mock above imports, so the `generateText` we import inside
@@ -35,6 +42,29 @@ vi.mock("@openrouter/ai-sdk-provider", () => ({
       __chat: modelId,
       __providerOpts: opts,
       __chatSettings: settings,
+      __providerKind: "openrouter",
+    });
+    return provider;
+  },
+}));
+
+vi.mock("@ai-sdk/anthropic", () => ({
+  createAnthropic: (opts: unknown) => {
+    const provider = (modelId: string) => ({
+      __chat: modelId,
+      __providerOpts: opts,
+      __providerKind: "anthropic",
+    });
+    return provider;
+  },
+}));
+
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: (opts: unknown) => {
+    const provider = (modelId: string) => ({
+      __chat: modelId,
+      __providerOpts: opts,
+      __providerKind: "openai",
     });
     return provider;
   },
@@ -45,17 +75,22 @@ const { LLMServiceLive } = await import("../src/llm-service-live.js");
 
 // ---------- Helpers ----------------------------------------------------------
 
-const cfgLayer = Layer.succeed(
-  LLMConfig,
-  LLMConfig.of({ apiKey: "test-key", siteName: "support-agent-test" }),
+const defaultCred: LLMCredential = {
+  provider: "openrouter",
+  apiKey: "test-key",
+};
+
+const resolverLayer = LLMCredentialResolverTest(
+  new Map([[testTenantId, defaultCred]]),
 );
 
 const runWith = <A, E>(eff: Effect.Effect<A, E, LLMService>) =>
   Effect.runPromiseExit(
-    Effect.provide(eff, LLMServiceLive.pipe(Layer.provide(cfgLayer))),
+    Effect.provide(eff, LLMServiceLive.pipe(Layer.provide(resolverLayer))),
   );
 
 const baseRequest: ToolCallingRequest = {
+  tenantId: testTenantId,
   model: "google/gemini-3.1-flash-lite",
   system: "you are a test",
   messages: [
@@ -221,6 +256,7 @@ describe("LLMServiceLive — decision mapping", () => {
 //     `provider: { only: ["anthropic"], allow_fallbacks: false }`.
 describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => {
   const anthropicRequest: ToolCallingRequest = {
+    tenantId: testTenantId,
     model: "anthropic/claude-haiku-4.5",
     system: "you are claude",
     messages: [
@@ -362,8 +398,9 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
       "shopify.get_order",
     ]);
     // No provider routing pin for non-Anthropic — `chatSettings` is
-    // either undefined or an empty object.
-    expect(arg.model.__chatSettings).toEqual({});
+    // undefined because we call `provider.chat(model)` with no second
+    // argument for non-Anthropic models.
+    expect(arg.model.__chatSettings).toBeUndefined();
   });
 });
 
@@ -431,5 +468,113 @@ describe("LLMServiceLive — error mapping", () => {
     expect(exit._tag).toBe("Success");
     if (exit._tag !== "Success") return;
     expect(exit.value).toBeInstanceOf(NetworkError);
+  });
+});
+
+// BYOK: the live layer reads the per-tenant credential from
+// LLMCredentialResolver and picks the matching AI SDK adapter
+// (OpenRouter / Anthropic / OpenAI). The mocks above stamp a
+// `__providerKind` field onto the returned model handle so we can assert
+// which adapter was actually used.
+describe("LLMServiceLive — per-provider adapter selection (BYOK)", () => {
+  const tenantOpenRouter = TenantId("00000000-0000-0000-0000-0000000000a1");
+  const tenantAnthropic = TenantId("00000000-0000-0000-0000-0000000000a2");
+  const tenantOpenAI = TenantId("00000000-0000-0000-0000-0000000000a3");
+
+  const layer = LLMServiceLive.pipe(
+    Layer.provide(
+      LLMCredentialResolverTest(
+        new Map<TenantId, LLMCredential>([
+          [tenantOpenRouter, { provider: "openrouter", apiKey: "or-key" }],
+          [tenantAnthropic, { provider: "anthropic", apiKey: "ant-key" }],
+          [tenantOpenAI, { provider: "openai", apiKey: "oa-key" }],
+        ]),
+      ),
+    ),
+  );
+
+  const minimalReq = (
+    tid: TenantId,
+    model: string,
+  ): ToolCallingRequest => ({
+    tenantId: tid,
+    model,
+    system: "test",
+    messages: [{ role: "user", content: "hi" }],
+    tools: [],
+  });
+
+  it("dispatches to the OpenRouter adapter for an openrouter-keyed tenant", async () => {
+    generateText.mockReset();
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(LLMService, (s) =>
+          s.runToolCalling(
+            minimalReq(tenantOpenRouter, "google/gemini-3.1-flash-lite"),
+          ),
+        ),
+        layer,
+      ),
+    );
+    const args = generateText.mock.calls[0]?.[0] as {
+      model: { __providerKind?: string };
+    };
+    expect(args.model.__providerKind).toBe("openrouter");
+  });
+
+  it("dispatches to the native Anthropic adapter for an anthropic-keyed tenant", async () => {
+    generateText.mockReset();
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(LLMService, (s) =>
+          s.runToolCalling(minimalReq(tenantAnthropic, "claude-haiku-4.5")),
+        ),
+        layer,
+      ),
+    );
+    const args = generateText.mock.calls[0]?.[0] as {
+      model: { __providerKind?: string; __chat?: string };
+    };
+    expect(args.model.__providerKind).toBe("anthropic");
+    expect(args.model.__chat).toBe("claude-haiku-4.5");
+  });
+
+  it("dispatches to the native OpenAI adapter for an openai-keyed tenant", async () => {
+    generateText.mockReset();
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(LLMService, (s) =>
+          s.runToolCalling(minimalReq(tenantOpenAI, "gpt-4o-mini")),
+        ),
+        layer,
+      ),
+    );
+    const args = generateText.mock.calls[0]?.[0] as {
+      model: { __providerKind?: string; __chat?: string };
+    };
+    expect(args.model.__providerKind).toBe("openai");
+    expect(args.model.__chat).toBe("gpt-4o-mini");
+  });
+
+  it("hard-fails with LLMCredentialMissing for a tenant with no key", async () => {
+    const missingTenant = TenantId("00000000-0000-0000-0000-00000000ffff");
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(LLMService, (s) =>
+          s
+            .runToolCalling(minimalReq(missingTenant, "anything"))
+            .pipe(Effect.catchAll((err) => Effect.succeed(err))),
+        ),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect((exit.value as { _tag: string })._tag).toBe(
+      "LLMCredentialMissing",
+    );
   });
 });

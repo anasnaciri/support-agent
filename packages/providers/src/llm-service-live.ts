@@ -1,6 +1,8 @@
 import { Effect, Layer } from "effect";
-import { generateText, jsonSchema, type ModelMessage } from "ai";
+import { generateText, jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
   ContextTooLarge,
   InvalidToolCall,
@@ -13,7 +15,13 @@ import {
   type ToolCallingRequest,
   type ToolSchema,
 } from "@support-agent/agent-core";
-import { LLMConfig, LLMService } from "@support-agent/services";
+import {
+  LLMConfig,
+  LLMCredentialResolver,
+  LLMService,
+  type LLMCredential,
+  type LLMProvider,
+} from "@support-agent/services";
 
 // ============================================================
 // Anthropic tool-name sanitization
@@ -29,8 +37,11 @@ import { LLMConfig, LLMService } from "@support-agent/services";
 // — `AgentRuntime`, `ToolRegistry`, audit log, prompts — keeps the dotted
 // names unchanged.
 
-const needsToolNameSanitization = (model: string): boolean =>
-  model.startsWith("anthropic/");
+const needsToolNameSanitization = (
+  provider: LLMProvider,
+  model: string,
+): boolean =>
+  provider === "anthropic" || model.startsWith("anthropic/");
 
 const sanitizeToolName = (name: string): string => name.replace(/\./g, "_");
 
@@ -121,7 +132,7 @@ const toToolSet = (
 // Internal: errors → LLMError
 // ============================================================
 
-const mapError = (cause: unknown): LLMError => {
+const mapError = (cause: unknown, providerName: LLMProvider): LLMError => {
   // Diagnostic: emit the raw error so the underlying message isn't lost
   // when we wrap it in a tagged error whose toString is generic. Cheap +
   // single line; leave on for now — we will swap this for a proper
@@ -144,7 +155,6 @@ const mapError = (cause: unknown): LLMError => {
       msg.includes("context_length") ||
       msg.includes("maximum context")
     ) {
-      // OpenRouter doesn't always report tokens; surface 0/0 if unknown.
       return new ContextTooLarge({ tokens: 0, limit: 0 });
     }
     if (
@@ -155,7 +165,7 @@ const mapError = (cause: unknown): LLMError => {
       return new SafetyBlocked({ reason: cause.message });
     }
     if (status === 429 || (status !== undefined && status >= 500)) {
-      return new ProviderUnavailable({ provider: "openrouter" });
+      return new ProviderUnavailable({ provider: providerName });
     }
     if (msg.includes("invalid tool") || msg.includes("tool_use")) {
       return new InvalidToolCall({ tool: "unknown", issue: cause.message });
@@ -166,107 +176,175 @@ const mapError = (cause: unknown): LLMError => {
 };
 
 // ============================================================
+// Adapter cache + factory
+// ============================================================
+
+/**
+ * A "chat factory" is the function returned by an AI SDK provider that
+ * yields a `LanguageModel` for a given model id. Each provider's adapter
+ * has a slightly different second-argument shape (OpenRouter accepts
+ * routing settings, Anthropic and OpenAI don't), so we capture the
+ * provider-specific call signature here.
+ */
+type ChatFactory = (req: ToolCallingRequest) => LanguageModel;
+
+const buildOpenRouterFactory = (cred: LLMCredential): ChatFactory => {
+  const provider = createOpenRouter({
+    apiKey: cred.apiKey,
+    ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
+  });
+  // OpenRouter routes requests for Anthropic models across multiple
+  // backends (Anthropic native, Amazon Bedrock, Google Vertex). Bedrock
+  // enforces a stricter tool-name regex (`^[a-zA-Z0-9_-]{1,128}$`) that
+  // rejects the dots in our tool names. Pin Anthropic models to the
+  // native Anthropic endpoint so the tool schema is accepted. Other
+  // providers (google/*, openai/*, etc.) use OpenRouter's default routing.
+  return (req) =>
+    req.model.startsWith("anthropic/")
+      ? provider.chat(req.model, {
+          provider: {
+            only: ["anthropic"],
+            allow_fallbacks: false,
+          },
+        })
+      : provider.chat(req.model);
+};
+
+const buildAnthropicFactory = (cred: LLMCredential): ChatFactory => {
+  const provider = createAnthropic({
+    apiKey: cred.apiKey,
+    ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
+  });
+  return (req) => provider(req.model);
+};
+
+const buildOpenAIFactory = (cred: LLMCredential): ChatFactory => {
+  const provider = createOpenAI({
+    apiKey: cred.apiKey,
+    ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
+  });
+  return (req) => provider(req.model);
+};
+
+const buildFactory = (cred: LLMCredential): ChatFactory => {
+  switch (cred.provider) {
+    case "openrouter":
+      return buildOpenRouterFactory(cred);
+    case "anthropic":
+      return buildAnthropicFactory(cred);
+    case "openai":
+      return buildOpenAIFactory(cred);
+  }
+};
+
+const cacheKey = (cred: LLMCredential): string =>
+  `${cred.provider}\x00${cred.apiKey}\x00${cred.baseURL ?? ""}`;
+
+// ============================================================
 // Live Layer
 // ============================================================
 
 /**
- * Live LLMService backed by the Vercel AI SDK + OpenRouter.
+ * Live LLMService backed by the Vercel AI SDK. BYOK: every call resolves
+ * the tenant's per-provider credential via `LLMCredentialResolver`, builds
+ * (or reuses) the matching AI SDK adapter, and dispatches `generateText`
+ * in single-step mode. We drive the tool-call/result loop ourselves in
+ * `AgentRuntime`, so the SDK does one model call per invocation.
  *
- * Depends on `LLMConfig`. Each `runToolCalling` call maps the
- * `ToolCallingRequest` onto `generateText` in single-step mode (we drive
- * the tool-call/result loop ourselves in `AgentRuntime`, so the SDK does
- * one model call per invocation and we read the first decision out).
+ * The adapter cache is keyed by `(provider, apiKey, baseURL)` — one entry
+ * per active tenant in steady state. Cache stays in the Layer's closure
+ * for the lifetime of the worker; rotating a key writes a new cache entry
+ * on the next call and the old one becomes orphan (acceptable: APIs reject
+ * a rotated key, and the orphan entry is small).
  */
 export const LLMServiceLive = Layer.effect(
   LLMService,
   Effect.gen(function* () {
-    const cfg = yield* LLMConfig;
+    const resolver = yield* LLMCredentialResolver;
+    const cache = new Map<string, ChatFactory>();
 
-    const provider = createOpenRouter({
-      apiKey: cfg.apiKey,
-      ...(cfg.baseURL !== undefined ? { baseURL: cfg.baseURL } : {}),
-      ...(cfg.siteUrl !== undefined ? { appUrl: cfg.siteUrl } : {}),
-      ...(cfg.siteName !== undefined ? { appName: cfg.siteName } : {}),
-    });
-
-    // OpenRouter routes requests for Anthropic models across multiple
-    // backends (Anthropic native, Amazon Bedrock, Google Vertex). Bedrock
-    // enforces a stricter tool-name regex (`^[a-zA-Z0-9_-]{1,128}$`) that
-    // rejects the dots in our tool names (`case.update_context` etc).
-    // Pin Anthropic models to the native Anthropic endpoint so the tool
-    // schema is accepted. Other providers (google/*, openai/*, etc.) use
-    // OpenRouter's default routing.
-    const chatSettingsFor = (model: string) =>
-      model.startsWith("anthropic/")
-        ? {
-            provider: {
-              only: ["anthropic"],
-              allow_fallbacks: false,
-            },
-          }
-        : {};
+    const factoryFor = (cred: LLMCredential): ChatFactory => {
+      const key = cacheKey(cred);
+      const existing = cache.get(key);
+      if (existing) return existing;
+      const built = buildFactory(cred);
+      cache.set(key, built);
+      return built;
+    };
 
     return LLMService.of({
-      runToolCalling: (req: ToolCallingRequest) => {
-        const sanitize = needsToolNameSanitization(req.model);
-        const reverseMap = sanitize
-          ? buildReverseToolNameMap(req.tools)
-          : new Map<string, string>();
-        return Effect.tryPromise({
-          try: () =>
-            generateText({
-              model: provider.chat(req.model, chatSettingsFor(req.model)),
-              system: req.system,
-              messages: toModelMessages(req.messages, sanitize),
-              tools: toToolSet(req.tools, sanitize),
-              ...(req.temperature !== undefined
-                ? { temperature: req.temperature }
-                : {}),
-              ...(req.maxTokens !== undefined
-                ? { maxOutputTokens: req.maxTokens }
-                : {}),
-            }),
-          catch: (cause) => mapError(cause),
-        }).pipe(
-          Effect.flatMap((result): Effect.Effect<LLMDecision, LLMError> => {
-            const call = result.toolCalls[0];
-            if (call) {
-              return Effect.succeed({
-                type: "tool_call",
-                callId: call.toolCallId,
-                tool: sanitize
-                  ? desanitize(call.toolName, reverseMap)
-                  : call.toolName,
-                input: call.input,
-              });
-            }
-            return Effect.succeed({
-              type: "final_message",
-              text: result.text,
-            });
-          }),
-        );
-      },
+      runToolCalling: (req: ToolCallingRequest) =>
+        Effect.gen(function* () {
+          const cred = yield* resolver.resolve(req.tenantId).pipe(
+            // The resolver can fail with a DB error (Postgres unreachable,
+            // for instance). LLMService.runToolCalling's error union is
+            // `LLMError`, so map the DB error to NetworkError — same way an
+            // OpenRouter outage would surface.
+            Effect.catchTag("ConnectorStoreDbError", (e) =>
+              Effect.fail(new NetworkError({ cause: e.cause })),
+            ),
+          );
+          const sanitize = needsToolNameSanitization(cred.provider, req.model);
+          const reverseMap = sanitize
+            ? buildReverseToolNameMap(req.tools)
+            : new Map<string, string>();
+          const factory = factoryFor(cred);
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              generateText({
+                model: factory(req),
+                system: req.system,
+                messages: toModelMessages(req.messages, sanitize),
+                tools: toToolSet(req.tools, sanitize),
+                ...(req.temperature !== undefined
+                  ? { temperature: req.temperature }
+                  : {}),
+                ...(req.maxTokens !== undefined
+                  ? { maxOutputTokens: req.maxTokens }
+                  : {}),
+              }),
+            catch: (cause) => mapError(cause, cred.provider),
+          });
+          const call = result.toolCalls[0];
+          if (call) {
+            return {
+              type: "tool_call",
+              callId: call.toolCallId,
+              tool: sanitize
+                ? desanitize(call.toolName, reverseMap)
+                : call.toolName,
+              input: call.input,
+            } satisfies LLMDecision;
+          }
+          return {
+            type: "final_message",
+            text: result.text,
+          } satisfies LLMDecision;
+        }),
     });
   }),
 );
 
 // ============================================================
-// LLMConfig from process.env
+// Dev-only: LLMConfig → single-tenant LLMCredentialResolver adapter
 // ============================================================
+//
+// Pre-BYOK, `LLMServiceLive` depended directly on `LLMConfig` and the worker
+// bootstrap supplied an `OPENROUTER_API_KEY` from process.env. After BYOK
+// the production path resolves credentials per tenant via the
+// `LLMCredentialResolver` consulted by `LLMServiceLive`. This factory keeps
+// single-tenant dev workflows working: provide it with an `LLMConfig` and
+// it builds a resolver that returns the same OpenRouter credential for
+// every tenantId. **Do not wire this in production** — tenants must bring
+// their own keys (master-plan §20).
 
-/**
- * Reads OpenRouter credentials from `process.env`. Fails the Layer build
- * if `OPENROUTER_API_KEY` is missing — the worker should crash on startup
- * rather than discover it at first-LLM-call.
- */
 export const LLMConfigFromEnv = Layer.effect(
   LLMConfig,
   Effect.sync(() => {
     const apiKey = process.env["OPENROUTER_API_KEY"];
     if (!apiKey) {
       throw new Error(
-        "OPENROUTER_API_KEY is not set — required to build LLMServiceLive",
+        "OPENROUTER_API_KEY is not set — required to build LLMConfigFromEnv (dev only)",
       );
     }
     const baseURL = process.env["OPENROUTER_BASE_URL"];
@@ -277,6 +355,27 @@ export const LLMConfigFromEnv = Layer.effect(
       ...(baseURL ? { baseURL } : {}),
       ...(siteUrl ? { siteUrl } : {}),
       ...(siteName ? { siteName } : {}),
+    });
+  }),
+);
+
+/**
+ * Dev-only adapter: read `LLMConfig` and serve the same OpenRouter
+ * credential for any tenant. Use only for single-tenant dev. Production
+ * worker bootstrap should provide `LLMCredentialResolverLive` over
+ * `ConnectorCredentialStoreLive` instead.
+ */
+export const LLMCredentialResolverFromLLMConfig = Layer.effect(
+  LLMCredentialResolver,
+  Effect.gen(function* () {
+    const cfg = yield* LLMConfig;
+    return LLMCredentialResolver.of({
+      resolve: () =>
+        Effect.succeed({
+          provider: "openrouter" as const,
+          apiKey: cfg.apiKey,
+          ...(cfg.baseURL !== undefined ? { baseURL: cfg.baseURL } : {}),
+        }),
     });
   }),
 );

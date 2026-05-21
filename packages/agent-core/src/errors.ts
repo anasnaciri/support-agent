@@ -85,12 +85,27 @@ export type ShopifyError =
   | ShopifyAuthMissing
   | NetworkError;
 
+export class LLMCredentialMissing extends Data.TaggedError(
+  "LLMCredentialMissing",
+)<{
+  readonly tenantId: TenantId;
+}> {}
+
+export class LLMCredentialRevoked extends Data.TaggedError(
+  "LLMCredentialRevoked",
+)<{
+  readonly tenantId: TenantId;
+  readonly provider: string;
+}> {}
+
 export type LLMError =
   | ProviderUnavailable
   | ContextTooLarge
   | InvalidToolCall
   | SafetyBlocked
-  | NetworkError;
+  | NetworkError
+  | LLMCredentialMissing
+  | LLMCredentialRevoked;
 
 export type ToolError =
   | PermissionDenied
