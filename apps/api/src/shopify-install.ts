@@ -108,6 +108,13 @@ export interface InstallUrlOptions {
   readonly clientId: string;
   readonly redirectUri: string;
   readonly state: string;
+  /**
+   * Access scopes requested at install time. Passed as the `scope=`
+   * query param (comma-separated, per Shopify's spec). When provided
+   * this overrides the Partner Dashboard's default scope list.
+   * Empty / undefined falls back to whatever the dashboard has set.
+   */
+  readonly scopes?: ReadonlyArray<string>;
   /** Optional. Defaults to "per-user=false" (offline access mode). */
   readonly grantOptions?: "per-user";
 }
@@ -122,6 +129,12 @@ export const buildInstallUrl = (opts: InstallUrlOptions): string => {
     redirect_uri: opts.redirectUri,
     state: opts.state,
   });
+  if (opts.scopes && opts.scopes.length > 0) {
+    // Shopify expects scopes as a single comma-separated string under
+    // `scope=`. URLSearchParams URL-encodes commas, which Shopify
+    // accepts — no need to bypass encoding here.
+    params.set("scope", opts.scopes.join(","));
+  }
   if (opts.grantOptions !== undefined) {
     params.set("grant_options[]", opts.grantOptions);
   }

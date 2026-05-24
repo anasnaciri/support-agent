@@ -40,6 +40,35 @@ const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
 
 const SUPPORTED_PROVIDERS = ["shopify", "gmail"] as const;
 
+/**
+ * Shopify scopes that unlock specific agent capabilities. Surfaced on
+ * the Shopify card so operators see at a glance whether the merchant
+ * has granted enough access for the runtime to do its work. Keep this
+ * list aligned with `DEFAULT_SHOPIFY_SCOPES` in apps/api/src/bootstrap.ts
+ * and with each tool's actual scope requirement.
+ */
+const SHOPIFY_CAPABILITY_SCOPES: ReadonlyArray<{
+  readonly scope: string;
+  readonly capability: string;
+  readonly tools: string;
+}> = [
+  {
+    scope: "read_orders",
+    capability: "Read orders & fulfillment",
+    tools: "shopify.get_order",
+  },
+  {
+    scope: "read_customers",
+    capability: "Read customers",
+    tools: "shopify.get_customer",
+  },
+  {
+    scope: "write_orders",
+    capability: "Issue refunds",
+    tools: "refund.create",
+  },
+];
+
 const ShopifyIcon = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -270,7 +299,87 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   </p>
                 )}
 
+                {/* Per-capability scope grid for Shopify. Surfaces the
+                    "this scope unlocks this tool" mapping inline so the
+                    operator sees if the merchant needs to re-OAuth to
+                    pick up a newly-added capability (e.g. write_orders
+                    for refund.create). Only renders when there's an
+                    active connection — no sense showing capability
+                    state for a missing install. */}
+                {p === "shopify" && row && tone === "active" ? (
+                  <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-foreground">
+                      Granted capabilities
+                    </p>
+                    <ul className="space-y-1 text-xs">
+                      {SHOPIFY_CAPABILITY_SCOPES.map((cap) => {
+                        const granted = row.scopes.includes(cap.scope);
+                        return (
+                          <li
+                            key={cap.scope}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                aria-hidden
+                                className={
+                                  granted
+                                    ? "inline-block size-1.5 rounded-full bg-primary"
+                                    : "inline-block size-1.5 rounded-full bg-destructive"
+                                }
+                              />
+                              <span className="text-foreground">
+                                {cap.capability}
+                              </span>
+                              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                                {cap.scope}
+                              </code>
+                            </span>
+                            <span className="text-muted-foreground">
+                              {cap.tools}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {SHOPIFY_CAPABILITY_SCOPES.some(
+                      (c) => !row.scopes.includes(c.scope),
+                    ) ? (
+                      <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
+                        Missing a capability? Click <strong>Reinstall</strong>{" "}
+                        below — Shopify shows the merchant an &ldquo;update
+                        permissions&rdquo; prompt without losing the existing
+                        connection.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap gap-2">
+                  {/* Reinstall path: active Shopify row but scope set
+                      is missing something. We don't gate this on the
+                      capability flag — operators can always reinstall
+                      to refresh scopes. Renders ONLY when the install
+                      is active (the existing showConnect path handles
+                      missing / revoked). */}
+                  {p === "shopify" &&
+                  row &&
+                  tone === "active" &&
+                  apiBaseUrl &&
+                  SHOPIFY_CAPABILITY_SCOPES.some(
+                    (c) => !row.scopes.includes(c.scope),
+                  ) ? (
+                    <Button variant="outline" asChild>
+                      <a
+                        href={`${apiBaseUrl}/shopify/install?tenant=${encodeURIComponent(
+                          tenantId,
+                        )}`}
+                      >
+                        Reinstall to update scopes
+                      </a>
+                    </Button>
+                  ) : null}
+
                   {showConnect ? (
                     <>
                       {p === "shopify" ? (
