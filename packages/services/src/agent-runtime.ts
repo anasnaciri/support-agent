@@ -533,12 +533,30 @@ export const AgentRuntimeDefault = Layer.effect(
           }
           const decision: LLMDecision = decisionEither.right;
 
+          // Stamp the LLM token usage (when the provider reported it)
+          // into the audit row. The dashboard case detail rolls these
+          // up across `llm.decision` rows to surface per-case totals;
+          // a future Phase 6 cost dashboard turns tokens into USD.
+          // Test layers (Scripted, FromFn) leave `usage` undefined →
+          // we just don't include the field; existing tests that assert
+          // exact details shapes still pass.
+          const usageDetails = decision.usage
+            ? {
+                model: decision.usage.model,
+                inputTokens: decision.usage.inputTokens,
+                outputTokens: decision.usage.outputTokens,
+              }
+            : null;
           yield* audit.record({
             tenantId: current.tenantId,
             caseId: current.id,
             actor: { type: "agent", id: agent.id },
             action: "llm.decision",
-            details: { turn, decisionType: decision.type },
+            details: {
+              turn,
+              decisionType: decision.type,
+              ...(usageDetails ? { usage: usageDetails } : {}),
+            },
           });
 
           if (decision.type === "final_message") {

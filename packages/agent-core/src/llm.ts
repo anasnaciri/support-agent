@@ -42,6 +42,23 @@ export interface ToolCallingRequest {
   readonly temperature?: number;
 }
 
+/**
+ * Token usage for one LLM call. Populated by the Live LLMService from
+ * the AI SDK's `result.usage`. Test layers (Scripted, FromFn) leave it
+ * undefined — token bookkeeping doesn't need to be exercised in unit
+ * tests. The runtime stamps it into the `llm.decision` audit row's
+ * `details` so the case detail page can roll up totals on read.
+ *
+ * Cost in dollars is deferred (Phase 6 cost dashboard work): translating
+ * tokens to USD needs a per-model pricing table that varies by provider.
+ * Tokens-as-units gets us the structural data; conversion is downstream.
+ */
+export interface LLMUsage {
+  readonly model: string;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
 export type LLMDecision =
   | {
       readonly type: "tool_call";
@@ -49,22 +66,27 @@ export type LLMDecision =
       readonly tool: string;
       readonly input: unknown;
       readonly reasoning?: string;
+      readonly usage?: LLMUsage;
     }
   | {
       readonly type: "final_message";
       readonly text: string;
       readonly reasoning?: string;
+      readonly usage?: LLMUsage;
     }
   | {
       readonly type: "handoff";
       readonly targetAgent: AgentId;
       readonly reason: string;
+      readonly usage?: LLMUsage;
     }
   | {
       readonly type: "wait_for_customer";
       readonly message: OutboundMessageDraft;
+      readonly usage?: LLMUsage;
     }
   | {
       readonly type: "escalate_supplier";
       readonly payload: SupplierEscalationPayload;
+      readonly usage?: LLMUsage;
     };

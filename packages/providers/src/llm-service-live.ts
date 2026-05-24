@@ -305,6 +305,32 @@ export const LLMServiceLive = Layer.effect(
               }),
             catch: (cause) => mapError(cause, cred.provider),
           });
+          // Capture token usage from the AI SDK when present so the
+          // runtime can stamp it into the `llm.decision` audit row.
+          // Providers differ in which usage fields they populate; we
+          // accept either the new (`inputTokens`/`outputTokens`) or the
+          // older (`promptTokens`/`completionTokens`) shape. When the
+          // SDK didn't report usage at all we OMIT the field — keeps
+          // the decision shape backwards-compatible with tests that
+          // mock `generateText` without a `usage` block.
+          const rawUsage = (result as { usage?: unknown }).usage;
+          const u =
+            rawUsage && typeof rawUsage === "object"
+              ? (rawUsage as Record<string, unknown>)
+              : null;
+          const numOrNull = (v: unknown): number | null =>
+            typeof v === "number" && Number.isFinite(v) ? v : null;
+          const usage = u
+            ? {
+                model: req.model,
+                inputTokens:
+                  numOrNull(u["inputTokens"]) ??
+                  numOrNull(u["promptTokens"]),
+                outputTokens:
+                  numOrNull(u["outputTokens"]) ??
+                  numOrNull(u["completionTokens"]),
+              }
+            : null;
           const call = result.toolCalls[0];
           if (call) {
             return {
@@ -314,11 +340,13 @@ export const LLMServiceLive = Layer.effect(
                 ? desanitize(call.toolName, reverseMap)
                 : call.toolName,
               input: call.input,
+              ...(usage ? { usage } : {}),
             } satisfies LLMDecision;
           }
           return {
             type: "final_message",
             text: result.text,
+            ...(usage ? { usage } : {}),
           } satisfies LLMDecision;
         }),
     });

@@ -242,6 +242,62 @@ describe("LLMServiceLive — decision mapping", () => {
       text: "Your order shipped Tuesday.",
     });
   });
+
+  it("attaches token usage on the decision when the SDK reports it", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "ok",
+      usage: { inputTokens: 123, outputTokens: 45, totalTokens: 168 },
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.type).toBe("final_message");
+    if (exit.value.type === "final_message") {
+      expect(exit.value.usage).toEqual({
+        model: baseRequest.model,
+        inputTokens: 123,
+        outputTokens: 45,
+      });
+    }
+  });
+
+  it("falls back to legacy promptTokens / completionTokens field names", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "ok",
+      usage: { promptTokens: 50, completionTokens: 20 },
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    if (exit.value.type === "final_message") {
+      expect(exit.value.usage?.inputTokens).toBe(50);
+      expect(exit.value.usage?.outputTokens).toBe(20);
+    }
+  });
+
+  it("omits usage from the decision when the SDK didn't report any", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "ok",
+      // no `usage` key
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    // Backwards-compat assertion: the existing decision shape is unchanged.
+    expect(exit.value).toEqual({
+      type: "final_message",
+      text: "ok",
+    });
+  });
 });
 
 // Regression tests for the Anthropic-specific fixes that landed during

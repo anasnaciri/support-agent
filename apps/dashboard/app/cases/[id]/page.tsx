@@ -152,6 +152,35 @@ const actorLabel = (entry: AuditLogRow): string => {
   return entry.actorId ?? "System";
 };
 
+/**
+ * Sum input + output tokens across every `llm.decision` audit row on
+ * the case. Each row's `details.usage` is populated by `LLMServiceLive`
+ * via the Vercel AI SDK; test layers don't populate it (so old or
+ * scripted-test cases roll up to zero — which is what we want).
+ * Returns null when no usage data is present, so the UI can decide
+ * whether to render the rollup at all.
+ */
+const sumCaseTokens = (
+  entries: ReadonlyArray<AuditLogRow>,
+): { input: number; output: number; total: number } | null => {
+  let input = 0;
+  let output = 0;
+  let saw = false;
+  for (const e of entries) {
+    if (e.action !== "llm.decision") continue;
+    const usage = detailRecord(e.details)?.["usage"];
+    const u = detailRecord(usage);
+    if (!u) continue;
+    saw = true;
+    const i = u["inputTokens"];
+    const o = u["outputTokens"];
+    if (typeof i === "number") input += i;
+    if (typeof o === "number") output += o;
+  }
+  if (!saw) return null;
+  return { input, output, total: input + output };
+};
+
 type SimplifiedTimelineItem =
   | {
       readonly kind: "email";
@@ -243,6 +272,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const tokenRollup = sumCaseTokens(entries);
   const timelineMode = sp.timeline === "simplified" ? "simplified" : "full";
   const summaryText =
     caseRow.summary ??
@@ -317,6 +347,19 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             opened{" "}
             {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
           </span>
+          {tokenRollup ? (
+            <>
+              <span>·</span>
+              <span
+                title={`${tokenRollup.input.toLocaleString()} input + ${tokenRollup.output.toLocaleString()} output`}
+              >
+                tokens:{" "}
+                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                  {tokenRollup.total.toLocaleString()}
+                </code>
+              </span>
+            </>
+          ) : null}
         </div>
       </div>
 
