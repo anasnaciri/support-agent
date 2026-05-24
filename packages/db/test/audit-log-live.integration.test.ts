@@ -6,6 +6,7 @@ import { CaseId, TenantId } from "@support-agent/agent-core";
 import { AuditLogService } from "@support-agent/services";
 import {
   AuditLogServiceLive,
+  AuditLogServiceLiveRedacted,
   DbClient,
   DbClientLive,
   auditLog,
@@ -86,5 +87,51 @@ describeIfDb("AuditLogService (Live, integration)", () => {
     for (const entry of result.rest) {
       expect(entry.id).toBeGreaterThan(result.cursor);
     }
+  });
+
+  it("AuditLogServiceLiveRedacted scrubs PII fields on insert", async () => {
+    const redactedCaseId = randomUUID();
+    const redactedLayer = Layer.provide(
+      AuditLogServiceLiveRedacted,
+      DbClientLive({ databaseUrl: databaseUrl! }),
+    );
+    const inserted = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const log = yield* AuditLogService;
+          return yield* log.record({
+            tenantId: TenantId(tenantId),
+            caseId: CaseId(redactedCaseId),
+            actor: { type: "agent", id: "refund-review-agent" },
+            action: "case.resolved",
+            details: {
+              tool: "conversation.reply",
+              ok: true,
+              finalMessage: "Hi Alice, refund issued to alice@example.com",
+              from: { email: "buyer@example.com", phone: "+1 415 555 0100" },
+              notes: "Customer +14155550100 follow-up",
+            },
+          });
+        }),
+        redactedLayer,
+      ).pipe(Effect.scoped),
+    );
+    const details = inserted.details as {
+      readonly tool: string;
+      readonly ok: boolean;
+      readonly finalMessage: string;
+      readonly from: { readonly email: string; readonly phone: string };
+      readonly notes: string;
+    };
+    // Structural fields preserved.
+    expect(details.tool).toBe("conversation.reply");
+    expect(details.ok).toBe(true);
+    // PII-key strings replaced with [redacted].
+    expect(details.finalMessage).toBe("[redacted]");
+    expect(details.from.email).toBe("[redacted]");
+    expect(details.from.phone).toBe("[redacted]");
+    // Free-text strings have email + phone patterns scrubbed.
+    expect(details.notes).not.toContain("4155550100");
+    expect(details.notes).toContain("[redacted]");
   });
 });

@@ -26,6 +26,7 @@ import { Effect } from "effect";
 import {
   ApprovalServiceLive,
   AuditLogServiceLive,
+  AuditLogServiceLiveRedacted,
   CaseRepositoryLive,
   ConnectorCredentialStoreLive,
   DbClient,
@@ -140,10 +141,21 @@ export const buildWorker = async (
   // DbClient is the root dep; everything db-related provides over it.
   const dbLayer = DbClientLive({ databaseUrl });
 
+  // PII redaction toggle for audit_log inserts. Default OFF for full
+  // debug fidelity in dev; production deployments set
+  // AUDIT_LOG_REDACT_PII=1 to scrub known-PII fields (emails, phones,
+  // address blocks, customer-facing message bodies) at write time.
+  // Old rows persisted before the flag flipped stay as-is — we don't
+  // backfill historical redaction.
+  const redactAuditPii = process.env["AUDIT_LOG_REDACT_PII"] === "1";
+  const auditLogLayer = redactAuditPii
+    ? AuditLogServiceLiveRedacted
+    : AuditLogServiceLive;
+
   // Repos + tx runner — all depend on DbClient.
   const repos = Layer.mergeAll(
     CaseRepositoryLive,
-    AuditLogServiceLive,
+    auditLogLayer,
     ApprovalServiceLive,
     TransactionRunnerLive,
     TenantAgentOverridesServiceLive,
