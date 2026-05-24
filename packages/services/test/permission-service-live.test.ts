@@ -235,6 +235,7 @@ const runCheck = async (
         new TenantSettings({
           notificationEmail: null,
           refundPolicy: policyForTenant,
+          retentionDays: 730,
         }),
       ],
     ]),

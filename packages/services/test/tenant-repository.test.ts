@@ -17,6 +17,7 @@ describe("TenantRepositoryTest", () => {
     const settings = new TenantSettings({
       notificationEmail: "ops@example.com",
       refundPolicy: defaultRefundPolicy,
+      retentionDays: 730,
     });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, settings]]),
@@ -53,6 +54,7 @@ describe("TenantRepositoryTest", () => {
     const initial = new TenantSettings({
       notificationEmail: "ops@example.com",
       refundPolicy: defaultRefundPolicy,
+      retentionDays: 730,
     });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, initial]]),

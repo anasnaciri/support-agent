@@ -49,6 +49,18 @@ export const defaultRefundPolicy: RefundPolicy = {
   currencyCode: "USD",
 };
 
+/**
+ * Default retention for resolved cases. 24 months from `resolved_at`
+ * matches the privacy-policy default in `docs/shopify-pcd.md` §7. The
+ * retention sweep cron deletes resolved cases (and their cascaded
+ * `case_state_transitions` / `audit_log` rows) past this window.
+ *
+ * Merchants can shorten this per-tenant via the dashboard; we don't let
+ * them lengthen it past the platform-wide regulatory ceiling (today the
+ * dashboard form caps at this default).
+ */
+export const DEFAULT_RETENTION_DAYS = 730;
+
 export class TenantSettings extends Data.Class<{
   /** Email the platform sends approval / system mail to. */
   readonly notificationEmail: string | null;
@@ -59,6 +71,12 @@ export class TenantSettings extends Data.Class<{
    * matching block (or has malformed values).
    */
   readonly refundPolicy: RefundPolicy;
+  /**
+   * Days of retention for resolved cases (counted from `resolved_at`).
+   * The retention sweep cron deletes anything older. Defaults to
+   * `DEFAULT_RETENTION_DAYS` when the tenant has no value set.
+   */
+  readonly retentionDays: number;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -128,6 +146,7 @@ export const TenantRepositoryTest = (
           new TenantSettings({
             notificationEmail: prev.notificationEmail,
             refundPolicy: policy,
+            retentionDays: prev.retentionDays,
           }),
         );
         return Effect.void;

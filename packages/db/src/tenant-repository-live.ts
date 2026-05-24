@@ -2,6 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   defaultRefundPolicy,
+  DEFAULT_RETENTION_DAYS,
   TenantNotFound,
   TenantRepository,
   TenantRepositoryDbError,
@@ -78,6 +79,7 @@ export const TenantRepositoryLive = Layer.effect(
             | {
                 readonly notificationEmail?: unknown;
                 readonly refundPolicy?: unknown;
+                readonly retentionDays?: unknown;
               }
             | null;
           const notificationEmail =
@@ -85,7 +87,21 @@ export const TenantRepositoryLive = Layer.effect(
               ? settings.notificationEmail
               : null;
           const refundPolicy = decodeRefundPolicy(settings?.refundPolicy);
-          return new TenantSettings({ notificationEmail, refundPolicy });
+          // Defensive decode: must be a positive integer. Reject zero
+          // (would delete every resolved case instantly) and negative
+          // values (nonsensical).
+          const rawDays = settings?.retentionDays;
+          const retentionDays =
+            typeof rawDays === "number" &&
+            Number.isInteger(rawDays) &&
+            rawDays > 0
+              ? rawDays
+              : DEFAULT_RETENTION_DAYS;
+          return new TenantSettings({
+            notificationEmail,
+            refundPolicy,
+            retentionDays,
+          });
         }),
 
       setRefundPolicy: (tenantId, policy) =>

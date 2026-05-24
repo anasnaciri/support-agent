@@ -1960,6 +1960,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         denyAboveMinorUnits: deny,
         currencyCode: "USD",
       },
+      retentionDays: 730,
     });
 
   // Shopify connection seeded with write_orders so the scope precheck

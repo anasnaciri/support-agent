@@ -11,6 +11,10 @@ import {
   GMAIL_WATCH_RENEWAL_QUEUE,
   registerGmailWatchRenewal,
 } from "./gmail-watch-renewal-schedule.js";
+import {
+  RETENTION_SWEEP_QUEUE,
+  registerRetentionSweep,
+} from "./retention-sweep-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -85,6 +89,15 @@ const main = async (): Promise<void> => {
       `[worker] scheduled gmail-watch-renewal cron on queue=${GMAIL_WATCH_RENEWAL_QUEUE}`,
     );
   }
+
+  // Daily retention sweep: deletes resolved cases (and their audit /
+  // approval rows) past each tenant's configured retention window.
+  // Always registered — every tenant benefits regardless of which
+  // connectors are wired up.
+  await registerRetentionSweep({ boss, runtimeLayer });
+  console.log(
+    `[worker] scheduled retention-sweep cron on queue=${RETENTION_SWEEP_QUEUE}`,
+  );
 
   const onShutdown = async (signal: NodeJS.Signals) => {
     console.log(`[worker] received ${signal}, shutting down`);

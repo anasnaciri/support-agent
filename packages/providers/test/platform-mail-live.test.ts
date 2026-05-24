@@ -5,6 +5,7 @@ import {
   TenantId,
 } from "@support-agent/agent-core";
 import {
+  DEFAULT_RETENTION_DAYS,
   PlatformMailSendFailed,
   PlatformMailService,
   PlatformMailUnconfigured,
@@ -59,6 +60,7 @@ const tenantRepoWith = (
           new TenantSettings({
             notificationEmail,
             refundPolicy: defaultRefundPolicy,
+            retentionDays: DEFAULT_RETENTION_DAYS,
           }),
         ),
       setRefundPolicy: () => Effect.void,
