@@ -5,6 +5,7 @@ import {
   type AnyTool,
 } from "@support-agent/agent-core";
 import {
+  missingPackageAgent,
   orderStatusAgent,
   refundReviewAgent,
   supportTriage,
@@ -249,7 +250,12 @@ export const buildWorker = async (
   // list), so we promote it to a defect.
   const registry = Layer.mergeAll(
     Layer.orDie(
-      AgentRegistryWith([supportTriage, orderStatusAgent, refundReviewAgent]),
+      AgentRegistryWith([
+        supportTriage,
+        orderStatusAgent,
+        refundReviewAgent,
+        missingPackageAgent,
+      ]),
     ),
     Layer.orDie(
       ToolRegistryWith([

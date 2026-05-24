@@ -43,6 +43,7 @@ export const supportTriage: AgentConfig = {
     "Turn 2: If the conversation now contains a successful `case.update_context` tool result, decide:",
     "  - If `classification` is `where_is_order` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"order-status-agent\"` and a one-sentence `reason`. The specialist will look up the order and reply.",
     "  - If `classification` is `refund_request` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"refund-review-agent\"` and a one-sentence `reason`. The specialist will look up the order and draft a reply for human approval.",
+    "  - If `classification` is `missing_package` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"missing-package-agent\"` and a one-sentence `reason`. The specialist will look up the order + fulfillment and draft a reply matching the package state.",
     "  - Otherwise, respond with plain text only (NO tool call). Reply with one short sentence confirming the triage and stop. Example: \"Triaged as refund_request — no order id identified yet.\"",
     "",
     "Hard rules:",
@@ -59,7 +60,11 @@ export const supportTriage: AgentConfig = {
   // status and context updates.
   tools: ["case.update_context", "agent.handoff"],
   permissionOverrides: {},
-  handoffs: [AgentId("order-status-agent"), AgentId("refund-review-agent")],
+  handoffs: [
+    AgentId("order-status-agent"),
+    AgentId("refund-review-agent"),
+    AgentId("missing-package-agent"),
+  ],
   maxTurnsPerTick: 4,
   temperature: 0,
 };

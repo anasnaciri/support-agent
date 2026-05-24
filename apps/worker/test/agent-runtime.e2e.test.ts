@@ -13,6 +13,7 @@ import {
   type ShopifyOrder,
 } from "@support-agent/agent-core";
 import {
+  missingPackageAgent,
   orderStatusAgent,
   refundReviewAgent,
   supportTriage,
@@ -1131,6 +1132,184 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "tool.invoked",
       "llm.decision",
     ]);
+  });
+
+  // ----------------------------------------------------------------
+  // Triage → missing-package-agent → shopify.get_order → draft a
+  // conversation.reply matching the fulfillment state → pause for
+  // approval. Same shape as the refund-review handoff test above, but
+  // exercises the missing-package decision rule + handoff entry.
+  // ----------------------------------------------------------------
+  it("hands off to missing-package-agent, drafts a conversation.reply, and pauses for approval", async () => {
+    const orderId = OrderId("gid://shopify/Order/88888");
+    // Fixture: order is marked delivered. This is BRANCH A in the
+    // prompt — agent should ask the customer to verify (porch /
+    // neighbor / household) before committing to reship or refund.
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#3001",
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/666"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "42.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Coffee Beans 1kg",
+          quantity: 1,
+          sku: "BEAN-01",
+          variantTitle: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "delivered",
+          trackingCompany: "UPS",
+          trackingNumbers: ["1Z999"],
+          trackingUrls: ["https://wwwapps.ups.com/tracking?t=1Z999"],
+          estimatedDeliveryAt: new Date("2026-05-21T00:00:00.000Z"),
+          deliveredAt: new Date("2026-05-22T15:00:00.000Z"),
+          createdAt: new Date("2026-05-19T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-22T15:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-05-19T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T15:00:00.000Z"),
+    };
+
+    const missingPackageScript: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "missing_package",
+          identifiedOrderId: orderId,
+          notes: "customer says package never arrived",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "missing-package-agent",
+          reason: "specialist owns missing_package",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-missing",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "Thanks for reaching out about order #3001. UPS marked it delivered on 2026-05-22 — could you check with neighbors or anyone in your household, and confirm the shipping address? If those come up empty we can open a carrier claim.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "missing-package-reply-test-1",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, missingPackageAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        shopifyGetCustomer as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(missingPackageScript),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvalsSvc = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Package never arrived",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-missing" as never,
+              messageId: "msg-mp1",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Package never arrived",
+              bodyText: `My order ${orderId} shows delivered but I never got it.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, pending };
+        }),
+        layer,
+      ),
+    );
+
+    // Runtime parks waiting on the conversation.reply approval.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.fetched.currentAgentId).toBe(missingPackageAgent.id);
+
+    // Pending approval ties to the right tool + agent + case.
+    expect(out.pending).toHaveLength(1);
+    const approval = out.pending[0]!;
+    expect(approval.tool).toBe("conversation.reply");
+    expect(approval.agentId).toBe(missingPackageAgent.id);
+    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.status).toBe("pending");
+    const proposed = approval.proposedInput as {
+      readonly threadId: string;
+      readonly draftId: string;
+    };
+    expect(proposed.threadId).toBe("thread-missing");
+    expect(proposed.draftId).toBe("missing-package-reply-test-1");
   });
 
   // ----------------------------------------------------------------

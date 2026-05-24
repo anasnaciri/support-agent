@@ -14,6 +14,8 @@ describe("support-triage agent config", () => {
     expect(supportTriage.tools).toContain("case.update_context");
     expect(supportTriage.tools).toContain("agent.handoff");
     expect(supportTriage.handoffs).toContain("order-status-agent");
+    expect(supportTriage.handoffs).toContain("refund-review-agent");
+    expect(supportTriage.handoffs).toContain("missing-package-agent");
     expect(supportTriage.maxTurnsPerTick).toBeGreaterThan(0);
     expect(supportTriage.promptTemplate.length).toBeGreaterThan(50);
   });
