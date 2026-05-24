@@ -1,7 +1,6 @@
 import { Layer } from "effect";
 import {
   AgentRegistryWith,
-  PermissionServiceDefault,
   ToolRegistryWith,
   type AnyTool,
 } from "@support-agent/agent-core";
@@ -19,11 +18,13 @@ import {
   conversationReply,
   shopifyGetCustomer,
   shopifyGetOrder,
+  shopifyRefundCreate,
 } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
   ApprovalLinkConfig,
   ConversationServiceTest,
+  PermissionServiceLive,
   PlatformMailServiceTest,
   type AgentRuntime,
   type ApprovalService,
@@ -233,10 +234,19 @@ export const buildWorker = async (
         )
       : ConversationServiceTest({});
 
-  // In-memory registries + permission policy. AgentRegistryWith /
-  // ToolRegistryWith can fail with AgentAlreadyRegistered /
-  // ToolAlreadyRegistered during Layer build — that would be a programmer
-  // error (we control the input list), so we promote it to a defect.
+  // Permission policy with the conditional refund threshold layered on.
+  // Live impl consults `TenantRepository` to read each tenant's
+  // `refundPolicy` block. Default `PermissionServiceDefault` is the
+  // pure-static fallback used in unit tests; production wants the Live
+  // layer so the per-tenant threshold actually applies.
+  const permissions = PermissionServiceLive.pipe(
+    Layer.provide(TenantRepositoryLive),
+  );
+
+  // In-memory registries. AgentRegistryWith / ToolRegistryWith can fail
+  // with AgentAlreadyRegistered / ToolAlreadyRegistered during Layer
+  // build — that would be a programmer error (we control the input
+  // list), so we promote it to a defect.
   const registry = Layer.mergeAll(
     Layer.orDie(
       AgentRegistryWith([supportTriage, orderStatusAgent, refundReviewAgent]),
@@ -247,13 +257,14 @@ export const buildWorker = async (
         caseUpdateStatus as AnyTool,
         shopifyGetOrder as AnyTool,
         shopifyGetCustomer as AnyTool,
+        shopifyRefundCreate as AnyTool,
         conversationFetchThread as AnyTool,
         conversationReply as AnyTool,
         conversationAskCustomer as AnyTool,
         agentHandoff as AnyTool,
       ]),
     ),
-    PermissionServiceDefault,
+    permissions,
   );
 
   // env = everything the AgentRuntime AND the tool bodies need, except

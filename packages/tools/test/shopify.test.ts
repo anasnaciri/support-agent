@@ -5,15 +5,21 @@ import {
   CaseId,
   CustomerId,
   OrderId,
+  RefundFailed,
   ShopifyAuthMissing,
   TenantId,
   ToolOutputInvalid,
   type ShopifyCustomer,
+  type ShopifyError,
   type ShopifyOrder,
   type ToolContext,
 } from "@support-agent/agent-core";
 import { ShopifyServiceTest } from "@support-agent/services";
-import { shopifyGetCustomer, shopifyGetOrder } from "../src/index.js";
+import {
+  shopifyGetCustomer,
+  shopifyGetOrder,
+  shopifyRefundCreate,
+} from "../src/index.js";
 
 const tenantId = TenantId("t1");
 const baseCtx = (caseId: string): ToolContext => ({
@@ -366,5 +372,103 @@ describe("shopify.get_customer tool", () => {
         expect(err.issues).toEqual(["CustomerNotFound"]);
       }
     }
+  });
+});
+
+describe("refund.create tool", () => {
+  it("returns a flattened refund payload on success", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyRefundCreate.execute(
+          {
+            orderId: "gid://shopify/Order/12345",
+            amount: { amount: "29.99", currencyCode: "USD" },
+            reason: "Customer-requested refund",
+            notifyCustomer: true,
+          } as never,
+          baseCtx("c-refund-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["orderId"]).toBe("gid://shopify/Order/12345");
+    expect((result["amount"] as Record<string, unknown>)["amount"]).toBe(
+      "29.99",
+    );
+    expect((result["amount"] as Record<string, unknown>)["currencyCode"]).toBe(
+      "USD",
+    );
+    expect(result["note"]).toBe("Customer-requested refund");
+    // The default Test impl returns a deterministic id; we just assert
+    // the field is present and non-empty.
+    expect(typeof result["id"]).toBe("string");
+    expect((result["id"] as string).length).toBeGreaterThan(0);
+    // createdAt is an ISO string.
+    expect(typeof result["createdAt"]).toBe("string");
+  });
+
+  it("maps RefundFailed to ToolOutputInvalid with the tag in issues", async () => {
+    const env = ShopifyServiceTest({
+      refundOrder: () =>
+        Effect.fail(
+          new RefundFailed({
+            orderId: "gid://shopify/Order/12345",
+            code: "NO_REFUNDABLE_TRANSACTION",
+            message: "No refundable SALE/CAPTURE transaction found on the order",
+          }),
+        ) as Effect.Effect<never, ShopifyError>,
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyRefundCreate.execute(
+          {
+            orderId: "gid://shopify/Order/12345",
+            amount: { amount: "50.00", currencyCode: "USD" },
+          } as never,
+          baseCtx("c-refund-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("refund.create");
+        expect(err.issues).toEqual(["RefundFailed"]);
+      }
+    }
+  });
+
+  it("idempotencyKey hashes orderId + amount + currency", () => {
+    expect(
+      shopifyRefundCreate.idempotencyKey!({
+        orderId: "gid://shopify/Order/12345",
+        amount: { amount: "29.99", currencyCode: "USD" },
+      } as never),
+    ).toBe("refund:gid://shopify/Order/12345:29.99:USD");
+    // Different amount → different key.
+    expect(
+      shopifyRefundCreate.idempotencyKey!({
+        orderId: "gid://shopify/Order/12345",
+        amount: { amount: "30.00", currencyCode: "USD" },
+      } as never),
+    ).not.toBe(
+      shopifyRefundCreate.idempotencyKey!({
+        orderId: "gid://shopify/Order/12345",
+        amount: { amount: "29.99", currencyCode: "USD" },
+      } as never),
+    );
+  });
+
+  it("declares the right risk + sideEffectClass + defaultPermission", () => {
+    expect(shopifyRefundCreate.risk).toBe("money");
+    expect(shopifyRefundCreate.sideEffectClass).toBe("financial");
+    expect(shopifyRefundCreate.defaultPermission).toBe("ask");
   });
 });

@@ -6,6 +6,12 @@ import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
 import {
+  clampPage,
+  DEFAULT_PAGE_SIZE,
+  parsePageNumber,
+  parsePageSize,
+} from "@/lib/pagination";
+import {
   approvalStatusVariant,
   riskVariant,
 } from "@/lib/status-variants";
@@ -14,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { TablePagination } from "@/components/TablePagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Table,
@@ -33,6 +40,8 @@ interface SearchParams {
     readonly risk?: string;
     readonly tool?: string;
     readonly agent?: string;
+    readonly page?: string;
+    readonly limit?: string;
   }>;
 }
 
@@ -90,6 +99,8 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   const riskFilter = sp.risk ?? "";
   const toolFilter = sp.tool ?? "";
   const agentFilter = sp.agent ?? "";
+  const pageSize = parsePageSize(sp.limit);
+  const requestedPage = parsePageNumber(sp.page);
 
   const whereParts: SQL[] = [eq(approvals.tenantId, tenantId)];
   if (statusFilter !== "any") {
@@ -99,7 +110,7 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   if (toolFilter) whereParts.push(eq(approvals.tool, toolFilter));
   if (agentFilter) whereParts.push(eq(approvals.agentId, agentFilter));
 
-  const [toolFacets, agentFacets, rows] = await Promise.all([
+  const [toolFacets, agentFacets, counts, matchingCounts] = await Promise.all([
     db()
       .selectDistinct({ tool: approvals.tool })
       .from(approvals)
@@ -112,29 +123,36 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
       .orderBy(approvals.agentId),
     db()
       .select({
-        id: approvals.id,
-        caseId: approvals.caseId,
-        agentId: approvals.agentId,
-        tool: approvals.tool,
         status: approvals.status,
-        riskLevel: approvals.riskLevel,
-        createdAt: approvals.createdAt,
-        decidedAt: approvals.decidedAt,
+        count: sql<number>`count(*)::int`,
       })
       .from(approvals)
-      .where(and(...whereParts))
-      .orderBy(desc(approvals.createdAt))
-      .limit(100),
+      .where(eq(approvals.tenantId, tenantId))
+      .groupBy(approvals.status),
+    db()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(approvals)
+      .where(and(...whereParts)),
   ]);
 
-  const counts = await db()
+  const totalRows = matchingCounts[0]?.count ?? 0;
+  const page = clampPage(requestedPage, totalRows, pageSize);
+  const rows = await db()
     .select({
+      id: approvals.id,
+      caseId: approvals.caseId,
+      agentId: approvals.agentId,
+      tool: approvals.tool,
       status: approvals.status,
-      count: sql<number>`count(*)::int`,
+      riskLevel: approvals.riskLevel,
+      createdAt: approvals.createdAt,
+      decidedAt: approvals.decidedAt,
     })
     .from(approvals)
-    .where(eq(approvals.tenantId, tenantId))
-    .groupBy(approvals.status);
+    .where(and(...whereParts))
+    .orderBy(desc(approvals.createdAt), desc(approvals.id))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
 
   const countOf = (s: string): number =>
     counts.find((c) => c.status === s)?.count ?? 0;
@@ -144,6 +162,13 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
     !toolFilter &&
     !agentFilter &&
     statusFilter === "pending";
+
+  const paginationParams: ReadonlyArray<readonly [string, string]> = [
+    ["status", statusFilter !== "pending" ? statusFilter : ""],
+    ["risk", riskFilter],
+    ["tool", toolFilter],
+    ["agent", agentFilter],
+  ];
 
   return (
     <div className="space-y-6">
@@ -168,6 +193,9 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
             method="get"
             className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
           >
+            {pageSize !== DEFAULT_PAGE_SIZE ? (
+              <input type="hidden" name="limit" value={pageSize} />
+            ) : null}
             <div className="space-y-1.5">
               <Label
                 htmlFor="status"
@@ -250,11 +278,6 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">
-        Showing {rows.length} of{" "}
-        {statusFilter === "any" ? "any status" : statusFilter}.
-      </p>
-
       <Card>
         <Table>
           <TableHeader>
@@ -326,6 +349,14 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
           </TableBody>
         </Table>
       </Card>
+
+      <TablePagination
+        pathname="/approvals"
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        hiddenParams={paginationParams}
+      />
     </div>
   );
 }

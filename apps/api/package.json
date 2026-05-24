@@ -6,9 +6,10 @@
   "main": "./dist/server.js",
   "scripts": {
     "build": "tsc -b",
+    "build:deps": "pnpm --filter '@support-agent/api...' build",
     "clean": "tsc -b --clean",
     "start": "node dist/server.js",
-    "start:dev": "tsx src/server.ts"
+    "start:dev": "pnpm run build:deps && node --env-file=../../.env.local --import tsx src/server.ts"
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",

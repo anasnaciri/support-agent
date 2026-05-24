@@ -6,6 +6,7 @@ import {
   NetworkError,
   OrderId,
   OrderNotFound,
+  RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
   TenantId,
@@ -495,6 +496,222 @@ describe("ShopifyServiceLive — error mapping", () => {
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error: unknown }).error;
       expect(err).toBeInstanceOf(NetworkError);
+    }
+  });
+});
+
+// ============================================================
+// refundOrder
+// ============================================================
+
+describe("ShopifyServiceLive — refundOrder", () => {
+  const orderGid = "gid://shopify/Order/77777";
+
+  const txPayload = (currencyCode = "USD") => ({
+    data: {
+      order: {
+        currencyCode,
+        transactions: [
+          // First entry intentionally ineligible — verifies the picker
+          // skips non-SUCCESS / non-SALE rows instead of just grabbing
+          // transactions[0].
+          {
+            id: "gid://shopify/OrderTransaction/9",
+            kind: "AUTHORIZATION",
+            status: "SUCCESS",
+            gateway: "manual",
+            parentTransaction: null,
+            amountSet: {
+              shopMoney: { amount: "29.99", currencyCode },
+            },
+          },
+          {
+            id: "gid://shopify/OrderTransaction/10",
+            kind: "SALE",
+            status: "SUCCESS",
+            gateway: "shopify_payments",
+            parentTransaction: null,
+            amountSet: {
+              shopMoney: { amount: "29.99", currencyCode },
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  const refundOkPayload = {
+    data: {
+      refundCreate: {
+        refund: {
+          id: "gid://shopify/Refund/abc",
+          createdAt: "2026-05-21T12:00:00.000Z",
+          note: "Customer-requested refund",
+          totalRefundedSet: {
+            shopMoney: { amount: "20.00", currencyCode: "USD" },
+          },
+        },
+        userErrors: [],
+      },
+    },
+  };
+
+  const callRefund = (
+    layer: Layer.Layer<ShopifyService>,
+    amount = "20.00",
+    currencyCode = "USD",
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.refundOrder(tenantId, {
+            orderId: OrderId(orderGid),
+            amount: { amount, currencyCode },
+            note: "Customer-requested refund",
+            notifyCustomer: true,
+            idempotencyKey: "call-1",
+          }),
+        ),
+        layer,
+      ),
+    );
+
+  it("happy path: fetches transactions, calls refundCreate, maps the result", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, txPayload()),
+        () => respond(200, refundOkPayload),
+      ]),
+    );
+    const exit = await callRefund(layer);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(captures.length).toBe(2);
+
+    // Second call is the refundCreate mutation. Inspect the body to
+    // confirm the parent transaction id + gateway were threaded
+    // through and `kind: "REFUND"` was set.
+    const body = JSON.parse(captures[1]!.body) as {
+      variables: { input: Record<string, unknown> };
+    };
+    const input = body.variables.input;
+    expect(input["orderId"]).toBe(orderGid);
+    expect(input["note"]).toBe("Customer-requested refund");
+    expect(input["notify"]).toBe(true);
+    const tx0 = (input["transactions"] as ReadonlyArray<Record<string, unknown>>)[0]!;
+    expect(tx0["parentId"]).toBe("gid://shopify/OrderTransaction/10");
+    expect(tx0["gateway"]).toBe("shopify_payments");
+    expect(tx0["kind"]).toBe("REFUND");
+    expect(tx0["amount"]).toBe("20.00");
+
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.id).toBe("gid://shopify/Refund/abc");
+      expect(exit.value.amount).toEqual({
+        amount: "20.00",
+        currencyCode: "USD",
+      });
+    }
+  });
+
+  it("currency mismatch → RefundFailed (no mutation called)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, txPayload("EUR"))]),
+    );
+    const exit = await callRefund(layer, "20.00", "USD");
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(captures.length).toBe(1); // mutation NOT called
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(RefundFailed);
+      if (err instanceof RefundFailed) {
+        expect(err.code).toBe("CURRENCY_MISMATCH");
+      }
+    }
+  });
+
+  it("no refundable transaction → RefundFailed NO_REFUNDABLE_TRANSACTION", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              order: {
+                currencyCode: "USD",
+                // Only PENDING + VOIDED — neither qualifies.
+                transactions: [
+                  {
+                    id: "gid://shopify/OrderTransaction/11",
+                    kind: "SALE",
+                    status: "PENDING",
+                    gateway: "shopify_payments",
+                    parentTransaction: null,
+                    amountSet: {
+                      shopMoney: { amount: "29.99", currencyCode: "USD" },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const exit = await callRefund(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(RefundFailed);
+      if (err instanceof RefundFailed) {
+        expect(err.code).toBe("NO_REFUNDABLE_TRANSACTION");
+      }
+    }
+  });
+
+  it("userErrors in refundCreate → RefundFailed with code + message", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, txPayload()),
+        () =>
+          respond(200, {
+            data: {
+              refundCreate: {
+                refund: null,
+                userErrors: [
+                  {
+                    field: ["transactions"],
+                    message: "Refund amount exceeds remaining refundable amount",
+                    code: "TRANSACTION_AMOUNT_EXCEEDED",
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const exit = await callRefund(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(RefundFailed);
+      if (err instanceof RefundFailed) {
+        expect(err.code).toBe("TRANSACTION_AMOUNT_EXCEEDED");
+        expect(err.message).toContain("exceeds");
+      }
+    }
+  });
+
+  it("unknown order → OrderNotFound (consistent with getOrder)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, { data: { order: null } })]),
+    );
+    const exit = await callRefund(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderNotFound);
     }
   });
 });

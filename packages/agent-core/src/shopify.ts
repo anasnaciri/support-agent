@@ -96,3 +96,17 @@ export type ShopifyCustomer = {
   readonly defaultAddress: ShopifyAddress | null;
   readonly createdAt: Date;
 };
+
+/**
+ * Result of a successful `refundCreate` mutation. Surfaces just the
+ * fields the agent / dashboard need to confirm the refund landed —
+ * Shopify's `Refund` type has many more, but most are derivable from
+ * a follow-up `getOrder` if the operator wants them.
+ */
+export type ShopifyRefund = {
+  readonly id: string;
+  readonly orderId: OrderId;
+  readonly amount: ShopifyMoney;
+  readonly note: string | null;
+  readonly createdAt: Date;
+};

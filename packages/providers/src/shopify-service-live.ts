@@ -11,12 +11,14 @@ import {
   type ShopifyLineItem,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyRefund,
   type TenantId,
   CustomerId as makeCustomerId,
   CustomerNotFound,
   NetworkError,
   OrderId as makeOrderId,
   OrderNotFound,
+  RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
 } from "@support-agent/agent-core";
@@ -24,6 +26,7 @@ import {
   ShopifyCredentialStore,
   ShopifyService,
   type ShopifyCredentials,
+  type RefundOrderInput,
 } from "@support-agent/services";
 
 // ============================================================
@@ -443,6 +446,85 @@ const GET_FULFILLMENT_QUERY = `
   }
 `;
 
+// Used by refundOrder to find a parent transaction to refund against.
+// `kind` of SALE or CAPTURE with status SUCCESS is what we can refund;
+// we pick the first one we find. `maximumRefundableV2` tells us how
+// much is left to refund on that transaction, which we use to surface
+// a sharper error than "Shopify said no" when the request exceeds it.
+const GET_ORDER_TRANSACTIONS_QUERY = `
+  query GetOrderTransactions($id: ID!) {
+    order(id: $id) {
+      currencyCode
+      transactions {
+        id
+        kind
+        status
+        gateway
+        parentTransaction { id }
+        amountSet { shopMoney { amount currencyCode } }
+      }
+    }
+  }
+`;
+
+const REFUND_CREATE_MUTATION = `
+  mutation RefundCreate($input: RefundInput!) {
+    refundCreate(input: $input) {
+      refund {
+        id
+        createdAt
+        note
+        totalRefundedSet { shopMoney { amount currencyCode } }
+      }
+      userErrors { field message code }
+    }
+  }
+`;
+
+type GqlTransaction = {
+  readonly id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly gateway: string | null;
+  readonly parentTransaction: { readonly id: string } | null;
+  readonly amountSet: { readonly shopMoney: GqlMoney };
+};
+
+type RefundCreatePayload = {
+  readonly refundCreate: {
+    readonly refund: {
+      readonly id: string;
+      readonly createdAt: string;
+      readonly note: string | null;
+      readonly totalRefundedSet: { readonly shopMoney: GqlMoney };
+    } | null;
+    readonly userErrors: ReadonlyArray<{
+      readonly field: ReadonlyArray<string> | null;
+      readonly message: string;
+      readonly code: string | null;
+    }>;
+  };
+};
+
+// Pick the transaction we'll refund against. Shopify refunds attach
+// to a parent SALE/CAPTURE that's in SUCCESS state. We pick the first
+// one and call it good — multi-transaction refund splits (e.g. gift
+// card + credit card on the same order) are a v2 concern.
+const pickParentTransaction = (
+  txs: ReadonlyArray<GqlTransaction>,
+): GqlTransaction | null => {
+  for (const t of txs) {
+    if (
+      (t.kind === "SALE" || t.kind === "CAPTURE") &&
+      t.status === "SUCCESS" &&
+      t.gateway
+    ) {
+      return t;
+    }
+  }
+  return null;
+};
+
 // ============================================================
 // Live Layer
 // ============================================================
@@ -543,6 +625,124 @@ export const ShopifyServiceLive = Layer.effect(
                 : Effect.fail(new OrderNotFound({ orderId })),
             ),
           ),
+        ),
+
+      refundOrder: (tenantId, input: RefundOrderInput) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            // Step 1: fetch transactions so we can pick a parent to
+            // refund against. Shopify requires `transactions[]` with
+            // `kind: REFUND`, `parentId`, and `gateway` to be present
+            // for the money to actually move. Without these the refund
+            // is just a recorded ledger entry — not what merchants want
+            // when they say "refund this order".
+            const orderGidStr = orderGid(input.orderId);
+            const txData = yield* runQuery<{
+              order: {
+                readonly currencyCode: string;
+                readonly transactions: ReadonlyArray<GqlTransaction>;
+              } | null;
+            }>(http, creds, tenantId, GET_ORDER_TRANSACTIONS_QUERY, {
+              id: orderGidStr,
+            });
+
+            if (!txData.order) {
+              return yield* Effect.fail(
+                new OrderNotFound({ orderId: input.orderId }),
+              );
+            }
+
+            // Defensive: refunds in a different currency than the order
+            // would silently get reinterpreted by Shopify. Fail loudly
+            // so the operator notices the mismatch before money moves.
+            if (
+              txData.order.currencyCode.toUpperCase() !==
+              input.amount.currencyCode.toUpperCase()
+            ) {
+              return yield* Effect.fail(
+                new RefundFailed({
+                  orderId: input.orderId,
+                  code: "CURRENCY_MISMATCH",
+                  message: `Order is in ${txData.order.currencyCode}, refund requested in ${input.amount.currencyCode}`,
+                }),
+              );
+            }
+
+            const parent = pickParentTransaction(txData.order.transactions);
+            if (!parent) {
+              return yield* Effect.fail(
+                new RefundFailed({
+                  orderId: input.orderId,
+                  code: "NO_REFUNDABLE_TRANSACTION",
+                  message:
+                    "No refundable SALE/CAPTURE transaction found on the order",
+                }),
+              );
+            }
+
+            // Step 2: build the RefundInput. `transactions[].parentId`
+            // points at the original sale; `kind: "REFUND"` flips it
+            // from a charge to a refund; `gateway` must match the parent
+            // (Shopify rejects mismatched gateways).
+            const refundInput = {
+              orderId: orderGidStr,
+              note: input.note,
+              notify: input.notifyCustomer,
+              transactions: [
+                {
+                  orderId: orderGidStr,
+                  parentId: parent.id,
+                  amount: input.amount.amount,
+                  gateway: parent.gateway,
+                  kind: "REFUND",
+                },
+              ],
+            };
+
+            const refundData = yield* runQuery<RefundCreatePayload>(
+              http,
+              creds,
+              tenantId,
+              REFUND_CREATE_MUTATION,
+              { input: refundInput },
+            );
+
+            // Step 3: map the result. `userErrors` is Shopify's
+            // structured rejection channel — if present we map to
+            // RefundFailed regardless of HTTP status. A null `refund`
+            // with empty userErrors is a defensive case (shouldn't
+            // happen but covers the schema): treat as a refundFailed
+            // with a generic message.
+            const payload = refundData.refundCreate;
+            const firstError = payload.userErrors[0];
+            if (firstError) {
+              return yield* Effect.fail(
+                new RefundFailed({
+                  orderId: input.orderId,
+                  code: firstError.code ?? null,
+                  message: firstError.message,
+                }),
+              );
+            }
+            if (!payload.refund) {
+              return yield* Effect.fail(
+                new RefundFailed({
+                  orderId: input.orderId,
+                  code: null,
+                  message: "refundCreate returned no refund and no userErrors",
+                }),
+              );
+            }
+            const refund = payload.refund;
+            const result: ShopifyRefund = {
+              id: refund.id,
+              orderId: input.orderId,
+              amount: mapMoney(refund.totalRefundedSet.shopMoney),
+              note: refund.note,
+              createdAt: new Date(refund.createdAt),
+            };
+            return result;
+          }),
         ),
     });
   }),

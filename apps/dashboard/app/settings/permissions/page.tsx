@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 
 import { agents, tools, effectivePermission } from "@/lib/catalog";
 import { permissionVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
   Table,
   TableBody,
@@ -17,13 +17,7 @@ import {
 export default function PermissionsMatrixPage() {
   return (
     <div className="space-y-6">
-      <Link
-        href="/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Settings
-      </Link>
+      <SettingsBreadcrumb current="Tool permissions" />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">

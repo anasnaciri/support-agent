@@ -2,6 +2,7 @@ export * from "./case/update-status.js";
 export * from "./case/update-context.js";
 export * from "./shopify/get-order.js";
 export * from "./shopify/get-customer.js";
+export * from "./shopify/refund.js";
 export * from "./agent/handoff.js";
 export * from "./conversation/fetch-thread.js";
 export * from "./conversation/reply.js";

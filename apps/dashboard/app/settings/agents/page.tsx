@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 
 import { AgentId, TenantId } from "@support-agent/agent-core";
 import { agents } from "@/lib/catalog";
@@ -7,6 +6,7 @@ import { getTenantId } from "@/lib/tenant";
 import { loadAgentOverrides } from "@/lib/llm-runtime";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
   Table,
   TableBody,
@@ -24,13 +24,7 @@ export default async function AgentsListPage() {
   const overrides = await loadAgentOverrides(TenantId(tenantIdRaw));
   return (
     <div className="space-y-6">
-      <Link
-        href="/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Settings
-      </Link>
+      <SettingsBreadcrumb current="Agents" />
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
         <p className="mt-1 text-sm text-muted-foreground">

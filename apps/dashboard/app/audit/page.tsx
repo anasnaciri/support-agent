@@ -1,9 +1,14 @@
 import Link from "next/link";
-import { and, desc, eq, like, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, like, sql, type SQL } from "drizzle-orm";
 import { auditLog } from "@support-agent/db";
-import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { db } from "@/lib/db";
+import {
+  clampPage,
+  DEFAULT_PAGE_SIZE,
+  parsePageNumber,
+  parsePageSize,
+} from "@/lib/pagination";
 import { getTenantId } from "@/lib/tenant";
 import { actorVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { TablePagination } from "@/components/TablePagination";
 import {
   Table,
   TableBody,
@@ -36,8 +42,6 @@ const ACTOR_FILTERS = [
   { label: "Agent", value: "agent" },
   { label: "User (manager)", value: "user" },
 ] as const;
-
-const PAGE_SIZE = 100;
 
 const formatDetails = (details: unknown): string => {
   if (!details || typeof details !== "object") return "";
@@ -67,25 +71,18 @@ interface SearchParams {
   readonly searchParams: Promise<{
     readonly action?: string;
     readonly actor?: string;
-    readonly after?: string;
+    readonly page?: string;
+    readonly limit?: string;
   }>;
 }
-
-const safeBigInt = (s: string): bigint | null => {
-  try {
-    if (!/^\d+$/u.test(s)) return null;
-    return BigInt(s);
-  } catch {
-    return null;
-  }
-};
 
 export default async function AuditLogPage({ searchParams }: SearchParams) {
   const tenantId = await getTenantId();
   const sp = await searchParams;
   const actionFilter = sp.action ?? "";
   const actorFilter = sp.actor ?? "";
-  const after = sp.after ? safeBigInt(sp.after) : null;
+  const pageSize = parsePageSize(sp.limit);
+  const requestedPage = parsePageNumber(sp.page);
 
   const whereParts: SQL[] = [eq(auditLog.tenantId, tenantId)];
   if (actionFilter) {
@@ -94,10 +91,14 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
   if (actorFilter) {
     whereParts.push(eq(auditLog.actorType, actorFilter));
   }
-  if (after !== null) {
-    whereParts.push(lt(auditLog.id, after));
-  }
 
+  const [countRow] = await db()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(auditLog)
+    .where(and(...whereParts));
+
+  const totalRows = countRow?.count ?? 0;
+  const page = clampPage(requestedPage, totalRows, pageSize);
   const rows = await db()
     .select({
       id: auditLog.id,
@@ -111,24 +112,13 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
     .from(auditLog)
     .where(and(...whereParts))
     .orderBy(desc(auditLog.id))
-    .limit(PAGE_SIZE);
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
 
-  const lastRow = rows[rows.length - 1];
-  const hasMore = rows.length === PAGE_SIZE && lastRow !== undefined;
-  const olderQuery = (() => {
-    const qs = new URLSearchParams();
-    if (actionFilter) qs.set("action", actionFilter);
-    if (actorFilter) qs.set("actor", actorFilter);
-    if (lastRow) qs.set("after", lastRow.id.toString());
-    return qs.toString();
-  })();
-
-  const resetQuery = (() => {
-    const qs = new URLSearchParams();
-    if (actionFilter) qs.set("action", actionFilter);
-    if (actorFilter) qs.set("actor", actorFilter);
-    return qs.toString();
-  })();
+  const paginationParams: ReadonlyArray<readonly [string, string]> = [
+    ["action", actionFilter],
+    ["actor", actorFilter],
+  ];
 
   return (
     <div className="space-y-6">
@@ -143,8 +133,11 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
         <CardContent className="p-4">
           <form
             method="get"
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto] lg:items-end"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] lg:items-end"
           >
+            {pageSize !== DEFAULT_PAGE_SIZE ? (
+              <input type="hidden" name="limit" value={pageSize} />
+            ) : null}
             <div className="space-y-1.5">
               <Label
                 htmlFor="action"
@@ -180,14 +173,6 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
               </NativeSelect>
             </div>
             <Button type="submit">Apply</Button>
-            {after !== null ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/audit?${resetQuery}`}>
-                  <ArrowLeft className="size-3.5" />
-                  Back to newest
-                </Link>
-              </Button>
-            ) : null}
           </form>
         </CardContent>
       </Card>
@@ -261,18 +246,13 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
         </Table>
       </Card>
 
-      {hasMore ? (
-        <div>
-          <Button asChild variant="outline">
-            <Link href={`/audit?${olderQuery}`}>
-              Older
-              <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
-        </div>
-      ) : (
-        <p className="text-sm italic text-muted-foreground">End of log.</p>
-      )}
+      <TablePagination
+        pathname="/audit"
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+        hiddenParams={paginationParams}
+      />
     </div>
   );
 }

@@ -5,11 +5,32 @@ import {
   type ShopifyCustomer,
   type ShopifyError,
   type ShopifyFulfillment,
+  type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyRefund,
   type TenantId,
   CustomerNotFound,
   OrderNotFound,
+  RefundFailed,
 } from "@support-agent/agent-core";
+
+/**
+ * Input for `ShopifyService.refundOrder`. We deliberately keep the
+ * shape narrow for v1: amount-only refunds against the order's primary
+ * refundable transaction. Line-item refunds (where you specify which
+ * SKUs/quantities to return) are a follow-up — they need quantity
+ * math, restocking decisions, and shipping refund logic that aren't
+ * worth coupling into this MVP. `idempotencyKey` lets the runtime
+ * dedupe retries; the Live impl threads it into the mutation's
+ * `clientMutationId`-style header pattern.
+ */
+export interface RefundOrderInput {
+  readonly orderId: OrderId;
+  readonly amount: ShopifyMoney;
+  readonly note: string | null;
+  readonly notifyCustomer: boolean;
+  readonly idempotencyKey: string | null;
+}
 
 /**
  * The provider-agnostic interface for Shopify queries. Every method
@@ -52,6 +73,20 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       orderId: OrderId,
     ) => Effect.Effect<ReadonlyArray<ShopifyFulfillment>, ShopifyError>;
+
+    /**
+     * Issue a refund against an order. Money risk — every caller goes
+     * through `PermissionService` first (the `refund.create` tool is
+     * `defaultPermission: "ask"` and the runtime adds a conditional
+     * threshold on top). Maps `refundCreate.userErrors` → `RefundFailed`;
+     * structural failures (auth, network, rate limit) reuse the existing
+     * `ShopifyError` tags so the tool boundary sees a consistent error
+     * surface.
+     */
+    readonly refundOrder: (
+      tenantId: TenantId,
+      input: RefundOrderInput,
+    ) => Effect.Effect<ShopifyRefund, ShopifyError>;
   }
 >() {}
 
@@ -73,6 +108,16 @@ export interface ShopifyTestFixtures {
     OrderId,
     ReadonlyArray<ShopifyFulfillment>
   >;
+  /**
+   * Optional override for `refundOrder`. When unset the default Test
+   * impl synthesises a `ShopifyRefund` from the input — useful for
+   * happy-path tests where the exact refund id doesn't matter. Tests
+   * that need to assert the input shape or simulate failures override
+   * this and inspect / throw from inside.
+   */
+  readonly refundOrder?: (
+    input: RefundOrderInput,
+  ) => Effect.Effect<ShopifyRefund, ShopifyError>;
 }
 
 /**
@@ -109,5 +154,23 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
       },
       getFulfillment: (_tenantId, orderId) =>
         Effect.succeed(fixtures.fulfillments?.get(orderId) ?? []),
+      refundOrder: (_tenantId, input) => {
+        if (fixtures.refundOrder) {
+          return fixtures.refundOrder(input);
+        }
+        // Default: synthesise a deterministic refund. Tests that care
+        // about the exact id should override; tests that just need a
+        // "refund happened" signal can read the synthesised id.
+        const synthId = `gid://shopify/Refund/test-${
+          input.idempotencyKey ?? input.orderId
+        }`;
+        return Effect.succeed<ShopifyRefund>({
+          id: synthId,
+          orderId: input.orderId,
+          amount: input.amount,
+          note: input.note,
+          createdAt: new Date(0),
+        });
+      },
     }),
   );

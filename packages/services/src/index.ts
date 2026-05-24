@@ -4,6 +4,7 @@ export * from "./crypto.js";
 export * from "./approval-tokens.js";
 export * from "./case-repository.js";
 export * from "./tenant-repository.js";
+export * from "./permission-service-live.js";
 export * from "./audit-log.js";
 export * from "./approval-service.js";
 export * from "./approval-decision.js";

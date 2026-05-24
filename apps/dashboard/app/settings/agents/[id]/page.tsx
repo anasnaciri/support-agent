@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 
 import { fetchModelCatalog } from "@support-agent/providers";
 
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
   ModelCombobox,
   type ModelOption,
@@ -107,13 +108,10 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/settings/agents"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Agents
-      </Link>
+      <SettingsBreadcrumb
+        items={[{ href: "/settings/agents", label: "Agents" }]}
+        current={agent.name}
+      />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">{agent.name}</h1>

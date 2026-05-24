@@ -11,6 +11,7 @@ import {
   TenantNotFound,
   TenantRepository,
   TenantSettings,
+  defaultRefundPolicy,
 } from "@support-agent/services";
 import {
   PlatformMailServiceLive,
@@ -54,7 +55,13 @@ const tenantRepoWith = (
     TenantRepository,
     TenantRepository.of({
       getSettings: () =>
-        Effect.succeed(new TenantSettings({ notificationEmail })),
+        Effect.succeed(
+          new TenantSettings({
+            notificationEmail,
+            refundPolicy: defaultRefundPolicy,
+          }),
+        ),
+      setRefundPolicy: () => Effect.void,
     }),
   );
 
@@ -63,6 +70,7 @@ const tenantRepoMissing = (): Layer.Layer<TenantRepository> =>
     TenantRepository,
     TenantRepository.of({
       getSettings: () => Effect.fail(new TenantNotFound({ tenantId })),
+      setRefundPolicy: () => Effect.fail(new TenantNotFound({ tenantId })),
     }),
   );
 

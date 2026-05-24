@@ -16,9 +16,49 @@ import type { TenantId } from "@support-agent/agent-core";
 // `providers` free of Postgres/db dependencies. Tags in services let
 // `providers` consume tenant data without crossing the layer rule.
 
+/**
+ * Per-tenant policy for the `refund.create` tool. Thresholds are stored
+ * in minor units (cents, pence, ...) so the comparison is integer-clean
+ * regardless of decimal formatting. `currencyCode` declares the currency
+ * the thresholds apply to; refunds in another currency fall back to
+ * `ask` defensively (a future widen can support per-currency thresholds).
+ *
+ * Zones:
+ *   - amountMinorUnits ≤ askAboveMinorUnits        → allow (agent auto-runs)
+ *   - askAboveMinorUnits < amountMinorUnits ≤ denyAboveMinorUnits → ask
+ *   - amountMinorUnits > denyAboveMinorUnits       → deny (escalate)
+ *
+ * Defaults are conservative — see `defaultRefundPolicy` below.
+ */
+export interface RefundPolicy {
+  readonly askAboveMinorUnits: number;
+  readonly denyAboveMinorUnits: number;
+  readonly currencyCode: string;
+}
+
+/**
+ * Hard fallback used when a tenant has never configured a refund policy.
+ * Picks ISO USD and a conservative $0 ask threshold so every refund is
+ * gated by default — operators must explicitly raise the threshold to
+ * give the agent autonomy. Better to over-ask on day 1 than auto-refund
+ * something the merchant didn't intend.
+ */
+export const defaultRefundPolicy: RefundPolicy = {
+  askAboveMinorUnits: 0,
+  denyAboveMinorUnits: 50_000, // $500 hard cap
+  currencyCode: "USD",
+};
+
 export class TenantSettings extends Data.Class<{
   /** Email the platform sends approval / system mail to. */
   readonly notificationEmail: string | null;
+  /**
+   * Conditional thresholds for `refund.create`. Configurable per-tenant
+   * via the dashboard `/settings/refund-policy` page. Always populated —
+   * we fall back to `defaultRefundPolicy` when the JSONB column has no
+   * matching block (or has malformed values).
+   */
+  readonly refundPolicy: RefundPolicy;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -40,6 +80,15 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly getSettings: (
       tenantId: TenantId,
     ) => Effect.Effect<TenantSettings, TenantRepositoryError>;
+    /**
+     * Replace the tenant's refund policy. Writes the new block into the
+     * `tenants.settings` JSONB column without touching unrelated fields
+     * (deep-merge semantics enforced by the Live impl).
+     */
+    readonly setRefundPolicy: (
+      tenantId: TenantId,
+      policy: RefundPolicy,
+    ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
 
@@ -53,15 +102,36 @@ export interface TenantRepositoryTestFixtures {
 
 export const TenantRepositoryTest = (
   fixtures: TenantRepositoryTestFixtures = {},
-): Layer.Layer<TenantRepository> =>
-  Layer.succeed(
+): Layer.Layer<TenantRepository> => {
+  // Mutable copy so setRefundPolicy is observable in tests.
+  const store = new Map<TenantId, TenantSettings>(
+    fixtures.settingsByTenant
+      ? Array.from(fixtures.settingsByTenant.entries())
+      : [],
+  );
+  return Layer.succeed(
     TenantRepository,
     TenantRepository.of({
       getSettings: (tenantId) => {
-        const hit = fixtures.settingsByTenant?.get(tenantId);
+        const hit = store.get(tenantId);
         return hit
           ? Effect.succeed(hit)
           : Effect.fail(new TenantNotFound({ tenantId }));
       },
+      setRefundPolicy: (tenantId, policy) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            notificationEmail: prev.notificationEmail,
+            refundPolicy: policy,
+          }),
+        );
+        return Effect.void;
+      },
     }),
   );
+};

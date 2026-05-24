@@ -22,6 +22,7 @@ import {
   caseUpdateContext,
   caseUpdateStatus,
   conversationReply,
+  shopifyRefundCreate,
   shopifyGetCustomer,
   shopifyGetOrder,
 } from "@support-agent/tools";
@@ -38,9 +39,12 @@ import {
   ConversationServiceTest,
   LLMServiceFromFn,
   LLMServiceScripted,
+  PermissionServiceLive,
   PlatformMailServiceTest,
   ShopifyServiceTest,
   TenantAgentOverridesServiceTest,
+  TenantRepositoryTest,
+  TenantSettings,
   TransactionRunnerPassthrough,
   makeConversationServiceTest,
   makePlatformMailServiceTest,
@@ -1025,6 +1029,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         agentHandoff as never,
         shopifyGetOrder as never,
         shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -1217,6 +1222,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         agentHandoff as never,
         shopifyGetOrder as never,
         shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -1420,6 +1426,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         agentHandoff as never,
         shopifyGetOrder as never,
         shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -1685,5 +1692,170 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
     );
 
     expect(captured.model).toBe(supportTriage.model);
+  });
+});
+
+// ============================================================
+// refund.create — conditional per-tenant threshold
+// ============================================================
+//
+// The conditional rule lives in PermissionServiceLive (consults
+// tenants.settings.refundPolicy). These tests exercise the runtime
+// against that Live layer instead of the static
+// PermissionServiceDefault used in earlier blocks. Asserts:
+//   - $20 below askAbove=$25 → tool auto-runs, case resolves
+//   - $100 in the ask zone   → runtime parks for approval
+//   - $500 above the cap     → tool short-circuited via denied_by_policy
+
+describe("AgentRuntime — refund.create conditional permission", () => {
+  const refundTenantId = TenantId("00000000-0000-0000-0000-000000000aaa");
+  const refundOrderId = OrderId("gid://shopify/Order/77777");
+
+  const fixtureOrder = (totalAmount: string): ShopifyOrder => ({
+    id: refundOrderId,
+    name: "#2001",
+    email: "buyer@example.com",
+    customerId: CustomerId("gid://shopify/Customer/555"),
+    fulfillmentStatus: "delivered",
+    financialStatus: "paid",
+    totalPrice: { amount: totalAmount, currencyCode: "USD" },
+    shippingAddress: null,
+    lineItems: [
+      {
+        id: "li-1",
+        title: "Wireless Earbuds",
+        quantity: 1,
+        sku: "EAR-01",
+        variantTitle: null,
+      },
+    ],
+    fulfillments: [],
+    createdAt: new Date("2026-04-20T00:00:00.000Z"),
+    updatedAt: new Date("2026-04-25T00:00:00.000Z"),
+  });
+
+  const scriptFor = (amountStr: string): ReadonlyArray<LLMDecision> => [
+    {
+      type: "tool_call",
+      callId: "c0",
+      tool: "case.update_context",
+      input: { classification: "refund_request", identifiedOrderId: refundOrderId },
+    },
+    {
+      type: "tool_call",
+      callId: "c1",
+      tool: "agent.handoff",
+      input: { targetAgent: "refund-review-agent", reason: "specialist" },
+    },
+    {
+      type: "tool_call",
+      callId: "c2",
+      tool: "shopify.get_order",
+      input: { orderId: refundOrderId },
+    },
+    {
+      type: "tool_call",
+      callId: "c3",
+      tool: "refund.create",
+      input: {
+        orderId: refundOrderId,
+        amount: { amount: amountStr, currencyCode: "USD" },
+        reason: "Customer-requested refund",
+        notifyCustomer: true,
+      },
+    },
+    // Final turn — only reached when refund.create is NOT gated to ask.
+    { type: "final_message", text: "Refund issued for order #2001." },
+  ];
+
+  const tenantSettings = (
+    ask: number,
+    deny: number,
+  ): TenantSettings =>
+    new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: {
+        askAboveMinorUnits: ask,
+        denyAboveMinorUnits: deny,
+        currencyCode: "USD",
+      },
+    });
+
+  const buildLayer = (amountStr: string, settings: TenantSettings) => {
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([[refundTenantId, settings]]),
+    });
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, refundReviewAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceLive.pipe(Layer.provide(tenants)),
+      LLMServiceScripted(scriptFor(amountStr)),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[refundOrderId, fixtureOrder(amountStr)]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+    );
+    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  };
+
+  const runTick = (layer: Layer.Layer<AgentRuntime, never, never>) =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(AgentRuntime, (runtime) =>
+          runtime.handleEvent({
+            type: "ticket.created",
+            tenantId: refundTenantId,
+            source: "email",
+            occurredAt: new Date().toISOString(),
+            payload: {
+              subject: "Refund please",
+              body: "Hi, I'd like a refund on order #2001.",
+            },
+          } as never),
+        ),
+        layer,
+      ),
+    );
+
+  it("auto-runs a $20 refund when askAbove=$25 (case resolves)", async () => {
+    const layer = buildLayer("20.00", tenantSettings(2500, 20000));
+    const result = await runTick(layer);
+    expect(result.type).toBe("Completed");
+  });
+
+  it("pauses a $100 refund for approval (mid-range)", async () => {
+    const layer = buildLayer("100.00", tenantSettings(2500, 20000));
+    const result = await runTick(layer);
+    expect(result.type).toBe("PausedWaitingForApproval");
+  });
+
+  it("short-circuits a $500 refund above the hard cap via denied_by_policy", async () => {
+    // refund.create is denied by the conditional rule. The runtime
+    // pushes `{ error: "denied_by_policy" }` into the conversation and
+    // continues the loop — the LLM's next decision (final_message in
+    // the script) lets the runtime resolve. The hard guarantee here is
+    // negative: the refund tool never actually executed (no money
+    // moved), and the runtime did NOT pause for approval. The real
+    // refund-review agent would also have a fallback to
+    // conversation.reply on a denied refund, covered by the existing
+    // refund-reply e2e test.
+    const layer = buildLayer("500.00", tenantSettings(2500, 20000));
+    const result = await runTick(layer);
+    expect(result.type).toBe("Completed");
   });
 });

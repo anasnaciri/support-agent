@@ -1,12 +1,18 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { cases } from "@support-agent/db";
 
 import { db } from "@/lib/db";
+import {
+  clampPage,
+  parsePageNumber,
+  parsePageSize,
+} from "@/lib/pagination";
 import { getTenantId } from "@/lib/tenant";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { TablePagination } from "@/components/TablePagination";
 import {
   Table,
   TableBody,
@@ -16,8 +22,26 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-export default async function CasesPage() {
+interface SearchParams {
+  readonly searchParams: Promise<{
+    readonly page?: string;
+    readonly limit?: string;
+  }>;
+}
+
+export default async function CasesPage({ searchParams }: SearchParams) {
   const tenantId = await getTenantId();
+  const sp = await searchParams;
+  const pageSize = parsePageSize(sp.limit);
+  const requestedPage = parsePageNumber(sp.page);
+
+  const [countRow] = await db()
+    .select({ count: sql<number>`count(*)::int` })
+    .from(cases)
+    .where(eq(cases.tenantId, tenantId));
+
+  const totalRows = countRow?.count ?? 0;
+  const page = clampPage(requestedPage, totalRows, pageSize);
   const rows = await db()
     .select({
       id: cases.id,
@@ -30,17 +54,19 @@ export default async function CasesPage() {
     })
     .from(cases)
     .where(eq(cases.tenantId, tenantId))
-    .orderBy(desc(cases.updatedAt))
-    .limit(100);
+    .orderBy(desc(cases.updatedAt), desc(cases.id))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Cases</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Last 100 by activity.
+          Newest activity first. Showing up to {pageSize} per page.
         </p>
       </div>
+
       <Card>
         <Table>
           <TableHeader>
@@ -96,6 +122,13 @@ export default async function CasesPage() {
           </TableBody>
         </Table>
       </Card>
+
+      <TablePagination
+        pathname="/cases"
+        page={page}
+        pageSize={pageSize}
+        totalRows={totalRows}
+      />
     </div>
   );
 }

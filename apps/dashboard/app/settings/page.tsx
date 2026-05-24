@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bot, KeyRound, Plug, ShieldCheck } from "lucide-react";
+import { Banknote, Bot, KeyRound, Plug, ShieldCheck } from "lucide-react";
 
 import { agents, tools } from "@/lib/catalog";
 import {
@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 const TILES = [
   {
@@ -36,6 +37,13 @@ const TILES = [
     description:
       "Bring your own OpenRouter, Anthropic, or OpenAI key. Required for any agent run.",
   },
+  {
+    href: "/settings/refund-policy",
+    icon: Banknote,
+    title: "Refund policy",
+    description:
+      "Amount thresholds that gate refund.create — auto-allow small refunds, ask on mid-range, deny above the cap.",
+  },
 ] as const;
 
 export default function SettingsLanding() {
@@ -43,11 +51,14 @@ export default function SettingsLanding() {
     if (href === "/settings/agents") return String(agents.length);
     if (href === "/settings/permissions") return String(tools.length);
     if (href === "/settings/llm") return "BYOK";
+    if (href === "/settings/refund-policy") return "$";
     return "—";
   };
 
   return (
     <div className="space-y-6">
+      <SettingsBreadcrumb current="Settings" />
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">

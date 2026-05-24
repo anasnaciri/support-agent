@@ -10,6 +10,20 @@ export class CustomerNotFound extends Data.TaggedError("CustomerNotFound")<{
   readonly query: string;
 }> {}
 
+/**
+ * Shopify refused to create the refund. Common causes (from
+ * `refundCreate.userErrors[].code`): no refundable transactions on the
+ * order, amount exceeds the refundable maximum, currency mismatch with
+ * the order, order already fully refunded. The `code` field is
+ * Shopify's machine-readable hint when present; `message` is always
+ * populated and surfaces to the operator via the audit log.
+ */
+export class RefundFailed extends Data.TaggedError("RefundFailed")<{
+  readonly orderId: string;
+  readonly code: string | null;
+  readonly message: string;
+}> {}
+
 export class ShopifyRateLimited extends Data.TaggedError("ShopifyRateLimited")<{
   readonly retryAfterMs: number;
 }> {}
@@ -80,6 +94,7 @@ export type ConnectorStoreError =
 export type ShopifyError =
   | OrderNotFound
   | CustomerNotFound
+  | RefundFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing

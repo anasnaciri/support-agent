@@ -1,0 +1,202 @@
+import { Effect, Layer } from "effect";
+import { Banknote } from "lucide-react";
+
+import { DbClientLive, TenantRepositoryLive } from "@support-agent/db";
+import {
+  TenantRepository,
+  defaultRefundPolicy,
+  type RefundPolicy,
+} from "@support-agent/services";
+import { TenantId } from "@support-agent/agent-core";
+import { getTenantId } from "@/lib/tenant";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
+
+import { saveRefundPolicyAction } from "./actions";
+
+const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
+
+const tenantRepoLayer = () => {
+  const databaseUrl = process.env["DATABASE_URL"];
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const db = DbClientLive({ databaseUrl });
+  return TenantRepositoryLive.pipe(Layer.provide(db));
+};
+
+const loadPolicy = async (tenantId: string): Promise<RefundPolicy> => {
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo.getSettings(TenantId(tenantId)).pipe(
+          Effect.catchAll(() =>
+            Effect.succeed({
+              notificationEmail: null,
+              refundPolicy: defaultRefundPolicy,
+            } as const),
+          ),
+        );
+        return settings.refundPolicy;
+      }),
+      tenantRepoLayer(),
+    ).pipe(Effect.scoped),
+  );
+};
+
+interface PageProps {
+  readonly searchParams?: Promise<
+    Readonly<Record<string, string | string[] | undefined>>
+  >;
+}
+
+export default async function RefundPolicyPage({ searchParams }: PageProps) {
+  const tenantId = await getTenantId();
+  const policy = await loadPolicy(tenantId);
+  const params = (await searchParams) ?? {};
+
+  const savedBanner =
+    (Array.isArray(params["saved"]) ? params["saved"][0] : params["saved"]) ===
+    "1";
+  const errorRaw = Array.isArray(params["error"])
+    ? params["error"][0]
+    : params["error"];
+
+  return (
+    <div className="space-y-6">
+      <SettingsBreadcrumb current="Refund policy" />
+
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Refund policy</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Per-tenant amount thresholds for the{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+            refund.create
+          </code>{" "}
+          tool. Refunds at or below the <strong>ask threshold</strong> auto-run.
+          Refunds between the two thresholds pause for human approval. Refunds
+          above the <strong>deny threshold</strong> are blocked and the agent
+          falls back to drafting a reply.
+        </p>
+      </div>
+
+      {savedBanner ? (
+        <Alert variant="success">
+          <AlertDescription>Refund policy saved.</AlertDescription>
+        </Alert>
+      ) : null}
+      {errorRaw === "bad_currency" ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            Currency must be a 3-letter ISO code (USD, EUR, GBP, …).
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {errorRaw === "bad_amount" ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            Both thresholds must be non-negative decimals with at most two
+            digits after the decimal point.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {errorRaw === "bad_order" ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            The ask threshold must not exceed the deny threshold.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Banknote className="size-4" aria-hidden />
+            Thresholds
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <form action={saveRefundPolicyAction} className="space-y-4">
+            <div className="grid gap-2 sm:max-w-xs">
+              <Label htmlFor="currencyCode">Currency</Label>
+              <Input
+                id="currencyCode"
+                name="currencyCode"
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                maxLength={3}
+                defaultValue={policy.currencyCode}
+                required
+                aria-describedby="currency-hint"
+              />
+              <p id="currency-hint" className="text-xs text-muted-foreground">
+                ISO 4217. Refunds in other currencies always pause for approval.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 sm:max-w-lg">
+              <div className="grid gap-2">
+                <Label htmlFor="askAbove">Ask above</Label>
+                <Input
+                  id="askAbove"
+                  name="askAbove"
+                  type="text"
+                  inputMode="decimal"
+                  defaultValue={minorToMajor(policy.askAboveMinorUnits)}
+                  required
+                  aria-describedby="ask-hint"
+                />
+                <p id="ask-hint" className="text-xs text-muted-foreground">
+                  Refunds at or below this amount auto-run.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="denyAbove">Deny above</Label>
+                <Input
+                  id="denyAbove"
+                  name="denyAbove"
+                  type="text"
+                  inputMode="decimal"
+                  defaultValue={minorToMajor(policy.denyAboveMinorUnits)}
+                  required
+                  aria-describedby="deny-hint"
+                />
+                <p id="deny-hint" className="text-xs text-muted-foreground">
+                  Hard cap. Refunds above this never run, even with approval.
+                </p>
+              </div>
+            </div>
+
+            <Button type="submit">Save</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
+        <p className="mb-2 font-medium text-foreground">Current zones</p>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>
+            <strong className="text-foreground">Allow:</strong> 0 &ndash;{" "}
+            {minorToMajor(policy.askAboveMinorUnits)} {policy.currencyCode}{" "}
+            &mdash; auto-runs.
+          </li>
+          <li>
+            <strong className="text-foreground">Ask:</strong>{" "}
+            {minorToMajor(policy.askAboveMinorUnits)} &ndash;{" "}
+            {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
+            &mdash; pauses for approval.
+          </li>
+          <li>
+            <strong className="text-foreground">Deny:</strong> &gt;{" "}
+            {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
+            &mdash; falls back to a drafted reply.
+          </li>
+        </ul>
+      </div>
+    </div>
+  );
+}

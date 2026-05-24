@@ -25,7 +25,10 @@ export default async function RootLayout({
 
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body className="min-h-screen bg-sidebar text-foreground antialiased">
+      <body
+        className="min-h-screen bg-sidebar text-foreground antialiased"
+        suppressHydrationWarning
+      >
         <SidebarShell email={user?.email ?? null} defaultOpen={defaultOpen}>
           {children}
         </SidebarShell>

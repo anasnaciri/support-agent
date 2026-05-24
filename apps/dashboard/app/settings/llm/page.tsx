@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { eq, desc } from "drizzle-orm";
-import { AlertTriangle, ArrowLeft, KeyRound } from "lucide-react";
+import { AlertTriangle, KeyRound } from "lucide-react";
 
 import { connectorConnections } from "@support-agent/db";
 import { db } from "@/lib/db";
@@ -15,6 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { connectLlmAction, revokeLlmAction } from "./actions";
 
@@ -107,13 +108,7 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Settings
-      </Link>
+      <SettingsBreadcrumb current="LLM provider" />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">LLM provider</h1>

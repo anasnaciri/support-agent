@@ -1,0 +1,150 @@
+import { Effect, Layer } from "effect";
+import {
+  PermissionService,
+  type Permission,
+} from "@support-agent/agent-core";
+import {
+  TenantRepository,
+  defaultRefundPolicy,
+  type RefundPolicy,
+} from "./tenant-repository.js";
+
+/**
+ * Live `PermissionService` that layers per-tenant conditional rules on
+ * top of the static (agent-override → tool-default) decision in the
+ * Default layer.
+ *
+ * Today the only conditional rule is for `refund.create`: the tool's
+ * `defaultPermission` is `ask`, and the tenant's `refundPolicy`
+ * thresholds further split that into `allow` (below `askAbove`) or
+ * `deny` (above `denyAbove`). Everything else falls through to the
+ * static decision.
+ *
+ * The conditional rule applies AFTER the static decision so it can
+ * only LOWER the permission level (from ask → allow for safe small
+ * refunds) or RAISE it (from ask → deny for refunds that exceed the
+ * hard cap). It never elevates a tool's static decision past the
+ * tenant's hard cap.
+ *
+ * Decision pipeline (master-plan §9):
+ *   1. agent.permissionOverrides[tool] ?? tool.defaultPermission   (static)
+ *   2. apply tenant-level conditional rules                        (this layer)
+ *   3. return Permission
+ *
+ * Live impl lives in `packages/services` rather than `packages/db`
+ * because the only external Tag it depends on is TenantRepository
+ * (another services Tag). The DB hop is satisfied by whoever provides
+ * `TenantRepositoryLive` (= `packages/db`) — this layer stays
+ * provider-neutral.
+ */
+const REFUND_TOOL = "refund.create";
+
+/**
+ * Parse `amount` from a `refund.create` payload into minor units
+ * (cents, pence, …). Returns null when the payload doesn't match the
+ * expected shape — defensive against malformed LLM output. The minor-
+ * units conversion uses `Math.round` on `amount * 100` which is the
+ * standard pattern for 2-decimal currencies; non-2-decimal currencies
+ * (JPY, KRW) would skew slightly but we don't yet declare per-currency
+ * exponents.
+ */
+export const parseRefundAmount = (
+  payload: unknown,
+): { amountMinorUnits: number; currencyCode: string } | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const amt = p["amount"];
+  if (!amt || typeof amt !== "object") return null;
+  const a = amt as Record<string, unknown>;
+  const value = a["amount"];
+  const ccy = a["currencyCode"];
+  if (typeof value !== "string" || typeof ccy !== "string") return null;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return {
+    amountMinorUnits: Math.round(parsed * 100),
+    currencyCode: ccy.toUpperCase(),
+  };
+};
+
+/**
+ * Apply the refund-policy decision to an already-statically-decided
+ * permission. Pure — exported so it can be unit-tested without an
+ * Effect runtime. The static permission is the input; the output may
+ * be the same value or upgraded (ask → allow) / downgraded (ask → deny).
+ */
+export const applyRefundPolicy = (
+  staticPermission: Permission,
+  policy: RefundPolicy,
+  amount: { amountMinorUnits: number; currencyCode: string } | null,
+): Permission => {
+  // Malformed payload: stay at the static decision. The tool's input
+  // schema will reject the call anyway, but if it somehow slipped
+  // through (e.g. raw permission check on unparsed input), be safe.
+  if (!amount) return staticPermission;
+
+  // Currency mismatch: tenant only declared a policy for their own
+  // currency. We can't compare cleanly — fall back to `ask` so a
+  // human reviews the cross-currency refund. Never auto-allow.
+  if (amount.currencyCode !== policy.currencyCode.toUpperCase()) {
+    return staticPermission === "deny" ? "deny" : "ask";
+  }
+
+  // Above the hard cap → deny, regardless of the static decision.
+  if (amount.amountMinorUnits > policy.denyAboveMinorUnits) {
+    return "deny";
+  }
+
+  // Below or at the ask-threshold → take the looser of (allow, static).
+  // We only soften the static decision when it was already `ask`; if
+  // the agent or tool wanted `deny`, we don't override it.
+  if (amount.amountMinorUnits <= policy.askAboveMinorUnits) {
+    return staticPermission === "ask" ? "allow" : staticPermission;
+  }
+
+  // Between thresholds → ask. If the static decision was `deny` we
+  // keep `deny` (we never relax `deny`); otherwise `ask`.
+  return staticPermission === "deny" ? "deny" : "ask";
+};
+
+export const PermissionServiceLive = Layer.effect(
+  PermissionService,
+  Effect.gen(function* () {
+    const tenants = yield* TenantRepository;
+
+    return PermissionService.of({
+      check: ({ tenantId, agent, tool, payload }) =>
+        Effect.gen(function* () {
+          // Step 1: static rule.
+          const override = agent.permissionOverrides[tool.name];
+          const staticPermission: Permission = override ?? tool.defaultPermission;
+
+          // Step 2: conditional rule for refund.create. Other tools
+          // short-circuit here so we don't pay a DB hop on every
+          // permission check.
+          if (tool.name !== REFUND_TOOL) return staticPermission;
+
+          // Read the tenant's refund policy. On DB failure (which
+          // SHOULD be rare and indicates infra is broken) we
+          // defensively fall back to the conservative default —
+          // `askAbove=0` means every refund needs approval, which is
+          // safer than silently allowing.
+          const settings = yield* tenants.getSettings(tenantId).pipe(
+            Effect.catchAll(() =>
+              Effect.succeed({
+                notificationEmail: null,
+                refundPolicy: defaultRefundPolicy,
+              } as const),
+            ),
+          );
+
+          const amount = parseRefundAmount(payload);
+          return applyRefundPolicy(
+            staticPermission,
+            settings.refundPolicy,
+            amount,
+          );
+        }),
+    });
+  }),
+);

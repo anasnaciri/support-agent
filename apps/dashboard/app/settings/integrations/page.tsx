@@ -1,7 +1,7 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import Link from "next/link";
 import { eq, desc } from "drizzle-orm";
-import { ArrowLeft, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import { connectorConnections } from "@support-agent/db";
 import { db } from "@/lib/db";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
   Table,
   TableBody,
@@ -168,13 +169,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Settings
-      </Link>
+      <SettingsBreadcrumb current="Integrations" />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Integrations</h1>
