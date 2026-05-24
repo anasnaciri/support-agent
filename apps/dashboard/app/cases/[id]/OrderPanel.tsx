@@ -2,7 +2,7 @@ import type {
   ShopifyOrder,
   ShopifyFulfillment,
 } from "@support-agent/agent-core";
-import { Package } from "lucide-react";
+import { ExternalLink, Package } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,33 @@ import { Badge } from "@/components/ui/badge";
 interface Props {
   readonly order: ShopifyOrder | null;
   readonly orderHint: string | null;
+  /**
+   * Tenant's active Shopify shop domain (e.g. `acme.myshopify.com`). When
+   * present, the order name renders as a link to the merchant's Shopify
+   * admin order page. Null when the tenant has no active Shopify
+   * connection — the panel still renders, just without the deep link.
+   */
+  readonly shopDomain: string | null;
 }
+
+/**
+ * Build the merchant-admin URL for an order. Shopify admin URLs use the
+ * numeric internal id, not the merchant-facing `#1001` name. ShopifyOrder
+ * always carries either a `gid://shopify/Order/<n>` GID (set after a
+ * `shopify.get_order` tool call) or a bare numeric string — extract the
+ * numeric tail from either and append. Returns null if neither shape
+ * matches (defensive — should never happen for orders fetched through
+ * `ShopifyService`).
+ */
+const shopifyAdminOrderUrl = (
+  shopDomain: string,
+  orderId: string,
+): string | null => {
+  const numericFromGid = /^gid:\/\/shopify\/Order\/(\d+)$/.exec(orderId);
+  const numericTail = numericFromGid?.[1] ?? (/^\d+$/.test(orderId) ? orderId : null);
+  if (!numericTail) return null;
+  return `https://${shopDomain}/admin/orders/${numericTail}`;
+};
 
 const formatAddress = (
   addr: ShopifyOrder["shippingAddress"],
@@ -89,7 +115,7 @@ const financialBadgeVariant = (
   }
 };
 
-export const OrderPanel = ({ order, orderHint }: Props) => {
+export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
   if (!order && !orderHint) {
     return (
       <Card>
@@ -133,6 +159,7 @@ export const OrderPanel = ({ order, orderHint }: Props) => {
   const fulfillment = latestFulfillment(order.fulfillments);
   const shipTo = formatAddress(order.shippingAddress);
   const total = order.totalPrice;
+  const adminUrl = shopDomain ? shopifyAdminOrderUrl(shopDomain, order.id) : null;
 
   return (
     <Card>
@@ -140,7 +167,21 @@ export const OrderPanel = ({ order, orderHint }: Props) => {
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
-            Order {order.name}
+            <span>Order </span>
+            {adminUrl ? (
+              <a
+                href={adminUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 normal-case tracking-normal text-primary hover:underline"
+                title="Open in Shopify admin"
+              >
+                {order.name}
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
+            ) : (
+              <span className="normal-case tracking-normal">{order.name}</span>
+            )}
           </CardTitle>
           {order.fulfillmentStatus ? (
             <Badge variant={fulfillmentBadgeVariant(order.fulfillmentStatus)}>

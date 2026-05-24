@@ -1,5 +1,6 @@
 import "server-only";
 import { Effect } from "effect";
+import { and, eq } from "drizzle-orm";
 import {
   CustomerId,
   OrderId,
@@ -8,6 +9,8 @@ import {
   type ShopifyOrder,
 } from "@support-agent/agent-core";
 import { ShopifyService } from "@support-agent/services";
+import { connectorConnections } from "@support-agent/db";
+import { db } from "./db";
 import { runShopify } from "./shopify-runtime";
 
 // Surface for case-detail panels. Reads the IDs the agent stamped onto
@@ -53,6 +56,31 @@ export const fetchOrderForCase = async (
       return yield* shopify.getOrder(tenantId, OrderId(raw));
     }),
   );
+};
+
+/**
+ * Returns the shop domain of the tenant's active Shopify connection,
+ * or null if there isn't one. Used by the case detail page to build
+ * deep links into the merchant's Shopify admin (orders, customers,
+ * etc.). One row per tenant in practice — `connector_connections`
+ * carries one active Shopify row per tenant (the install flow revokes
+ * any prior active row before writing the new one).
+ */
+export const fetchShopifyShopDomain = async (
+  tenantId: TenantId,
+): Promise<string | null> => {
+  const rows = await db()
+    .select({ shopDomain: connectorConnections.shopDomain })
+    .from(connectorConnections)
+    .where(
+      and(
+        eq(connectorConnections.tenantId, tenantId),
+        eq(connectorConnections.provider, "shopify"),
+        eq(connectorConnections.status, "active"),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.shopDomain ?? null;
 };
 
 export const fetchCustomerForCase = async (

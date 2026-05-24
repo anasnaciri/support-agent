@@ -12,7 +12,11 @@ import { TenantId } from "@support-agent/agent-core";
 
 import { db } from "@/lib/db";
 import { getTenantId } from "@/lib/tenant";
-import { fetchCustomerForCase, fetchOrderForCase } from "@/lib/shopify";
+import {
+  fetchCustomerForCase,
+  fetchOrderForCase,
+  fetchShopifyShopDomain,
+} from "@/lib/shopify";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -218,20 +222,22 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       ? (context["identifiedOrderId"] as string)
       : null;
 
-  const [entries, customer, order, allApprovals] = await Promise.all([
-    d
-      .select()
-      .from(auditLog)
-      .where(and(eq(auditLog.caseId, id), eq(auditLog.tenantId, tenantId)))
-      .orderBy(asc(auditLog.id)),
-    fetchCustomerForCase(TenantId(tenantId), context),
-    fetchOrderForCase(TenantId(tenantId), context),
-    d
-      .select()
-      .from(approvals)
-      .where(and(eq(approvals.caseId, id), eq(approvals.tenantId, tenantId)))
-      .orderBy(asc(approvals.createdAt)),
-  ]);
+  const [entries, customer, order, allApprovals, shopDomain] =
+    await Promise.all([
+      d
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.caseId, id), eq(auditLog.tenantId, tenantId)))
+        .orderBy(asc(auditLog.id)),
+      fetchCustomerForCase(TenantId(tenantId), context),
+      fetchOrderForCase(TenantId(tenantId), context),
+      d
+        .select()
+        .from(approvals)
+        .where(and(eq(approvals.caseId, id), eq(approvals.tenantId, tenantId)))
+        .orderBy(asc(approvals.createdAt)),
+      fetchShopifyShopDomain(TenantId(tenantId)),
+    ]);
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const pendingApprovals = allApprovals
@@ -324,7 +330,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
       <div className="grid gap-4 md:grid-cols-2">
         <CustomerPanel customer={customer} customerEmail={customerEmail} />
-        <OrderPanel order={order} orderHint={orderHint} />
+        <OrderPanel
+          order={order}
+          orderHint={orderHint}
+          shopDomain={shopDomain}
+        />
       </div>
 
       <div>
