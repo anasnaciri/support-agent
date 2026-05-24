@@ -1,6 +1,7 @@
 import "server-only";
 import type { AgentConfig, Tool, Permission } from "@support-agent/agent-core";
 import {
+  missingPackageAgent,
   orderStatusAgent,
   refundReviewAgent,
   supportTriage,
@@ -14,6 +15,7 @@ import {
   conversationReply,
   shopifyGetCustomer,
   shopifyGetOrder,
+  shopifyRefundCreate,
 } from "@support-agent/tools";
 
 // Read-only inventory of every AgentConfig + Tool registered in the
@@ -31,6 +33,7 @@ export const agents: ReadonlyArray<AgentConfig> = [
   supportTriage,
   orderStatusAgent,
   refundReviewAgent,
+  missingPackageAgent,
 ];
 
 export const tools: ReadonlyArray<Tool<unknown, unknown>> = [
@@ -42,6 +45,7 @@ export const tools: ReadonlyArray<Tool<unknown, unknown>> = [
   conversationAskCustomer,
   shopifyGetOrder,
   shopifyGetCustomer,
+  shopifyRefundCreate,
 ] as ReadonlyArray<Tool<unknown, unknown>>;
 
 export const findAgent = (id: string): AgentConfig | null =>
