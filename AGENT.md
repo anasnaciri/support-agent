@@ -57,3 +57,34 @@ From master-plan §16 (dependency rule) and §20 (never moves earlier):
 - Prefer editing existing files over adding new ones.
 - Stack picks are locked. Don't propose alternatives unless one is actively broken.
 - If `pnpm build` fails, fix it before doing anything else.
+
+## TDD
+
+Follow test-driven development for every feature, bug fix, or behavior change:
+
+1. **Red** — write a failing test that captures the new behavior or reproduces the bug. Run it and confirm it fails for the right reason.
+2. **Green** — write the smallest amount of production code to make the test pass.
+3. **Refactor** — clean up implementation and tests with the suite green. Re-run tests after each change.
+
+Rules:
+- No production code without a failing test that requires it.
+- Tests live alongside the code they exercise, in the same package.
+- If a bug slips through, the first commit of the fix is a failing regression test.
+- Don't disable, skip, or weaken tests to make a build pass. Fix the cause.
+
+## Commits
+
+After completing every feature, fix, or self-contained task, write a commit using [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <subject>
+
+<body — optional, explains the why>
+```
+
+- **Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`, `perf`, `style`
+- **Scope:** package or area, e.g. `agent-core`, `tools`, `dashboard`, `worker`, `shopify`
+- **Subject:** imperative, lowercase, no trailing period, ≤72 chars
+- **Breaking changes:** add `!` after the type/scope (`feat(api)!: …`) and a `BREAKING CHANGE:` footer
+- One logical change per commit. If you find yourself writing "and" in the subject, split it.
+- Match the style of recent commits in `git log` — the convention is already in use in this repo.

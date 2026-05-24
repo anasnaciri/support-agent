@@ -2,12 +2,18 @@ import { Effect, Layer } from "effect";
 import {
   PermissionService,
   type Permission,
+  type AnyTool,
+  type TenantId,
 } from "@support-agent/agent-core";
 import {
   TenantRepository,
   defaultRefundPolicy,
   type RefundPolicy,
 } from "./tenant-repository.js";
+import {
+  ConnectorCredentialStore,
+  type ConnectorConnection,
+} from "./connector-credential-store.js";
 
 /**
  * Live `PermissionService` that layers per-tenant conditional rules on
@@ -107,10 +113,50 @@ export const applyRefundPolicy = (
   return staticPermission === "deny" ? "deny" : "ask";
 };
 
+/**
+ * Connector scope precheck. When a tool declares
+ * `requiredConnectorScopes`, the active connection for that provider
+ * MUST carry every listed scope or we deny — better to surface the
+ * missing scope as a permission denial than to fire the API call and
+ * crash on a 401/403 from the provider. The check looks for ANY active
+ * connection on the named provider (Shopify can have multiple shops
+ * per tenant in theory; today we treat the first active one as
+ * authoritative). A revoked / missing connection ⇒ deny.
+ *
+ * Pure helper — exported so it can be unit-tested without a runtime.
+ */
+export const checkRequiredScopes = (
+  tool: AnyTool,
+  connections: ReadonlyArray<ConnectorConnection>,
+): "ok" | "missing" => {
+  const req = tool.requiredConnectorScopes;
+  if (!req) return "ok";
+  const active = connections.find(
+    (c) => c.provider === req.provider && c.status === "active",
+  );
+  if (!active) return "missing";
+  for (const s of req.scopes) {
+    if (!active.scopes.includes(s)) return "missing";
+  }
+  return "ok";
+};
+
 export const PermissionServiceLive = Layer.effect(
   PermissionService,
   Effect.gen(function* () {
     const tenants = yield* TenantRepository;
+    const connectors = yield* ConnectorCredentialStore;
+
+    // Defensive read of all active connections for a tenant. DB errors
+    // collapse to an empty list — any tool with declared scopes will
+    // then fail the check and deny, which is the safer fallback (no
+    // tool runs against a connector we can't verify).
+    const loadConnections = (
+      tenantId: TenantId,
+    ): Effect.Effect<ReadonlyArray<ConnectorConnection>> =>
+      connectors
+        .listForTenant(tenantId)
+        .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<ConnectorConnection>)));
 
     return PermissionService.of({
       check: ({ tenantId, agent, tool, payload }) =>
@@ -119,9 +165,22 @@ export const PermissionServiceLive = Layer.effect(
           const override = agent.permissionOverrides[tool.name];
           const staticPermission: Permission = override ?? tool.defaultPermission;
 
-          // Step 2: conditional rule for refund.create. Other tools
-          // short-circuit here so we don't pay a DB hop on every
-          // permission check.
+          // Step 2: connector scope precheck. Runs for every tool that
+          // declares `requiredConnectorScopes` — today that's just
+          // refund.create (`write_orders`). When the merchant hasn't
+          // granted the scope, we deny outright; the agent's fallback
+          // path (e.g. refund-review-agent → PATH B draft a reply)
+          // picks up the structured denial.
+          if (tool.requiredConnectorScopes) {
+            const conns = yield* loadConnections(tenantId);
+            if (checkRequiredScopes(tool, conns) === "missing") {
+              return "deny";
+            }
+          }
+
+          // Step 3: conditional refund-amount threshold. Other tools
+          // short-circuit here so we don't pay the tenant-settings DB
+          // hop on every permission check.
           if (tool.name !== REFUND_TOOL) return staticPermission;
 
           // Read the tenant's refund policy. On DB failure (which

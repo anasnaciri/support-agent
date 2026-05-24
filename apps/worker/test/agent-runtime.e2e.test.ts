@@ -37,6 +37,7 @@ import {
   AuditLogServiceTest,
   CaseRepository,
   CaseRepositoryTest,
+  ConnectorCredentialStoreTest,
   ConversationServiceTest,
   LLMServiceFromFn,
   LLMServiceScripted,
@@ -49,6 +50,7 @@ import {
   TransactionRunnerPassthrough,
   makeConversationServiceTest,
   makePlatformMailServiceTest,
+  type ConnectorConnection,
 } from "@support-agent/services";
 import { UserId } from "@support-agent/agent-core";
 
@@ -1960,10 +1962,35 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       },
     });
 
-  const buildLayer = (amountStr: string, settings: TenantSettings) => {
+  // Shopify connection seeded with write_orders so the scope precheck
+  // doesn't pre-empt the threshold logic these tests exist to exercise.
+  // The dedicated scope-precheck test below uses an alt fixture that
+  // strips the scope.
+  const connectionsWithWriteOrders: ReadonlyArray<ConnectorConnection> = [
+    {
+      tenantId: refundTenantId,
+      provider: "shopify",
+      shopDomain: "test-shop.myshopify.com",
+      accessToken: "shpat_test",
+      refreshToken: null,
+      tokenExpiresAt: null,
+      metadata: {},
+      scopes: ["read_orders", "read_customers", "write_orders"],
+      apiVersion: "2026-04",
+      installedAt: new Date(),
+      status: "active",
+    },
+  ];
+
+  const buildLayer = (
+    amountStr: string,
+    settings: TenantSettings,
+    connections: ReadonlyArray<ConnectorConnection> = connectionsWithWriteOrders,
+  ) => {
     const tenants = TenantRepositoryTest({
       settingsByTenant: new Map([[refundTenantId, settings]]),
     });
+    const connectors = ConnectorCredentialStoreTest(connections);
     const env = Layer.mergeAll(
       CaseRepositoryTest,
       AuditLogServiceTest,
@@ -1978,7 +2005,9 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         shopifyRefundCreate as never,
         conversationReply as never,
       ]),
-      PermissionServiceLive.pipe(Layer.provide(tenants)),
+      PermissionServiceLive.pipe(
+        Layer.provide(Layer.mergeAll(tenants, connectors)),
+      ),
       LLMServiceScripted(scriptFor(amountStr)),
       TransactionRunnerPassthrough,
       ShopifyServiceTest({
@@ -2034,6 +2063,30 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     // conversation.reply on a denied refund, covered by the existing
     // refund-reply e2e test.
     const layer = buildLayer("500.00", tenantSettings(2500, 20000));
+    const result = await runTick(layer);
+    expect(result.type).toBe("Completed");
+  });
+
+  it("denies refund.create when the Shopify connection lacks write_orders", async () => {
+    // Scope precheck pre-empts the threshold logic. A $5 refund that
+    // would normally auto-allow gets denied because the active Shopify
+    // row only carries `read_orders`/`read_customers`. The runtime
+    // pushes `denied_by_policy` into the conversation; the LLM's next
+    // decision (final_message in the script) lets the runtime resolve
+    // — proving the tool never ran (no Shopify API call, no money
+    // moved). In production the refund-review-agent would fall back to
+    // PATH B (draft a reply) here.
+    const readOnlyConnections: ReadonlyArray<ConnectorConnection> = [
+      {
+        ...connectionsWithWriteOrders[0]!,
+        scopes: ["read_orders", "read_customers"],
+      },
+    ];
+    const layer = buildLayer(
+      "5.00",
+      tenantSettings(2500, 20000),
+      readOnlyConnections,
+    );
     const result = await runTick(layer);
     expect(result.type).toBe("Completed");
   });

@@ -8,6 +8,7 @@ import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
   ApprovalLinkConfig,
+  ConnectorCredentialStore,
   ConversationServiceTest,
   PermissionServiceLive,
   PlatformMailServiceTest,
@@ -15,10 +16,12 @@ import {
   type ApprovalService,
   type AuditLogService,
   type CaseRepository,
+  type ConnectorConnection,
   type ConversationService,
   type ShopifyService,
   type TransactionRunner,
 } from "@support-agent/services";
+import { Effect } from "effect";
 import {
   ApprovalServiceLive,
   AuditLogServiceLive,
@@ -219,13 +222,61 @@ export const buildWorker = async (
         )
       : ConversationServiceTest({});
 
-  // Permission policy with the conditional refund threshold layered on.
-  // Live impl consults `TenantRepository` to read each tenant's
-  // `refundPolicy` block. Default `PermissionServiceDefault` is the
+  // Permission policy with the conditional refund threshold + the
+  // connector scope precheck layered on. Live impl consults
+  // `TenantRepository` for `refundPolicy` and `ConnectorCredentialStore`
+  // for granted scopes. Default `PermissionServiceDefault` is the
   // pure-static fallback used in unit tests; production wants the Live
-  // layer so the per-tenant threshold actually applies.
+  // layer.
+  //
+  // In single-tenant dev mode (no CREDENTIAL_ENCRYPTION_KEY), there's
+  // no DB-backed connector store — the Shopify token comes straight
+  // from env. We feed a synthetic permissive connector row so the
+  // scope precheck doesn't deny everything in that mode; the dev's
+  // env-supplied token already implicitly carries whatever scopes the
+  // merchant granted, and we trust the operator who set the env.
+  const connectorStoreForPermissions = credKeyB64
+    ? ConnectorCredentialStoreLive(parseKey(credKeyB64))
+    : Layer.succeed(
+        ConnectorCredentialStore,
+        ConnectorCredentialStore.of({
+          // Permission-only stub: returns a synthetic "Shopify with all
+          // scopes" row for any tenant query, so the scope precheck
+          // doesn't deny refund.create in single-tenant dev. The other
+          // methods are never called by PermissionServiceLive — wire
+          // them to fail loudly if anything else reaches for this Tag
+          // in dev mode (which would indicate the bootstrap missed a
+          // Layer slot).
+          listForTenant: (tenantId) =>
+            Effect.succeed([
+              {
+                tenantId,
+                provider: "shopify",
+                shopDomain: "dev",
+                accessToken: "dev",
+                refreshToken: null,
+                tokenExpiresAt: null,
+                metadata: {},
+                scopes: ["read_orders", "read_customers", "write_orders"],
+                apiVersion: null,
+                installedAt: new Date(),
+                status: "active",
+              } satisfies ConnectorConnection,
+            ]),
+          get: () => Effect.die("dev-mode connector store: get() not wired"),
+          put: () => Effect.die("dev-mode connector store: put() not wired"),
+          revoke: () =>
+            Effect.die("dev-mode connector store: revoke() not wired"),
+          patchTokens: () =>
+            Effect.die("dev-mode connector store: patchTokens() not wired"),
+          patchMetadata: () =>
+            Effect.die("dev-mode connector store: patchMetadata() not wired"),
+        }),
+      );
   const permissions = PermissionServiceLive.pipe(
-    Layer.provide(TenantRepositoryLive),
+    Layer.provide(
+      Layer.mergeAll(TenantRepositoryLive, connectorStoreForPermissions),
+    ),
   );
 
   // In-memory registries. AgentRegistryWith / ToolRegistryWith can fail

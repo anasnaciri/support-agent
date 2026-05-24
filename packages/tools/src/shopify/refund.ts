@@ -42,6 +42,16 @@ export const shopifyRefundCreate = defineTool({
   risk: "money",
   defaultPermission: "ask",
   sideEffectClass: "financial",
+  // Shopify gates the `refundCreate` mutation behind `write_orders`.
+  // Declaring it here lets `PermissionService` deny the call before
+  // execute when the merchant hasn't granted that scope — the refund-
+  // review-agent then falls back to PATH B (draft a reply for human
+  // approval) instead of attempting the call and crashing on a 403
+  // from Shopify mid-flight.
+  requiredConnectorScopes: {
+    provider: "shopify",
+    scopes: ["write_orders"],
+  },
   // Bind retries together. (caseId, callId) is the primary dedup at the
   // runtime layer; this is a secondary safety net for re-emissions from
   // the LLM (same input, fresh callId) — Shopify itself doesn't surface
