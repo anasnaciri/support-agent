@@ -2,25 +2,9 @@ import { Layer } from "effect";
 import {
   AgentRegistryWith,
   ToolRegistryWith,
-  type AnyTool,
 } from "@support-agent/agent-core";
-import {
-  missingPackageAgent,
-  orderStatusAgent,
-  refundReviewAgent,
-  supportTriage,
-} from "@support-agent/agents";
-import {
-  agentHandoff,
-  caseUpdateContext,
-  caseUpdateStatus,
-  conversationAskCustomer,
-  conversationFetchThread,
-  conversationReply,
-  shopifyGetCustomer,
-  shopifyGetOrder,
-  shopifyRefundCreate,
-} from "@support-agent/tools";
+import { ALL_AGENTS } from "@support-agent/agents";
+import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
   ApprovalLinkConfig,
@@ -247,29 +231,13 @@ export const buildWorker = async (
   // In-memory registries. AgentRegistryWith / ToolRegistryWith can fail
   // with AgentAlreadyRegistered / ToolAlreadyRegistered during Layer
   // build — that would be a programmer error (we control the input
-  // list), so we promote it to a defect.
+  // list), so we promote it to a defect. The agent + tool lists come
+  // from `ALL_AGENTS` / `ALL_TOOLS`: single source of truth, shared
+  // with the dashboard's settings catalog. New agent? Add it to
+  // `packages/agents/src/index.ts:ALL_AGENTS` exactly once.
   const registry = Layer.mergeAll(
-    Layer.orDie(
-      AgentRegistryWith([
-        supportTriage,
-        orderStatusAgent,
-        refundReviewAgent,
-        missingPackageAgent,
-      ]),
-    ),
-    Layer.orDie(
-      ToolRegistryWith([
-        caseUpdateContext as AnyTool,
-        caseUpdateStatus as AnyTool,
-        shopifyGetOrder as AnyTool,
-        shopifyGetCustomer as AnyTool,
-        shopifyRefundCreate as AnyTool,
-        conversationFetchThread as AnyTool,
-        conversationReply as AnyTool,
-        conversationAskCustomer as AnyTool,
-        agentHandoff as AnyTool,
-      ]),
-    ),
+    Layer.orDie(AgentRegistryWith(ALL_AGENTS)),
+    Layer.orDie(ToolRegistryWith(ALL_TOOLS)),
     permissions,
   );
 
