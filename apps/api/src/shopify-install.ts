@@ -108,17 +108,18 @@ export interface InstallUrlOptions {
   readonly clientId: string;
   readonly redirectUri: string;
   readonly state: string;
-  /**
-   * Access scopes requested at install time. Passed as the `scope=`
-   * query param (comma-separated, per Shopify's spec). When provided
-   * this overrides the Partner Dashboard's default scope list.
-   * Empty / undefined falls back to whatever the dashboard has set.
-   */
-  readonly scopes?: ReadonlyArray<string>;
   /** Optional. Defaults to "per-user=false" (offline access mode). */
   readonly grantOptions?: "per-user";
 }
 
+/**
+ * Build the OAuth authorize URL for the dashboard-initiated install
+ * flow. Scopes are NOT passed as a query param — Shopify reads them
+ * from the Partner Dashboard's "Required access scopes" config, which
+ * is the single source of truth. Editing the dashboard config
+ * auto-prompts existing merchants to update permissions on their next
+ * install visit; no need to coordinate a re-install separately.
+ */
 export const buildInstallUrl = (opts: InstallUrlOptions): string => {
   const shop = normalizeShopDomain(opts.shop);
   if (!shop) {
@@ -129,12 +130,6 @@ export const buildInstallUrl = (opts: InstallUrlOptions): string => {
     redirect_uri: opts.redirectUri,
     state: opts.state,
   });
-  if (opts.scopes && opts.scopes.length > 0) {
-    // Shopify expects scopes as a single comma-separated string under
-    // `scope=`. URLSearchParams URL-encodes commas, which Shopify
-    // accepts — no need to bypass encoding here.
-    params.set("scope", opts.scopes.join(","));
-  }
   if (opts.grantOptions !== undefined) {
     params.set("grant_options[]", opts.grantOptions);
   }

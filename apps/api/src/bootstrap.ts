@@ -22,55 +22,33 @@ export interface ShopifyAppConfig {
   readonly clientSecret: string;
   readonly callbackUrl: string;
   readonly apiVersion: string;
-  /**
-   * Access scopes requested at install time. Threaded into the
-   * `scope=` query param on the install URL. When non-empty this
-   * OVERRIDES whatever scope list is configured in the Partner
-   * Dashboard for this install. Driving from env lets the operator
-   * widen / narrow scopes without a Partner Dashboard edit + redeploy
-   * cycle — e.g. flip on `write_orders` for refund autonomy.
-   *
-   * Default: `read_orders,read_customers,write_orders` — the minimum
-   * needed to (a) read the customer + their orders for triage and
-   * (b) issue refunds via `refund.create`. Drop `write_orders` for a
-   * read-only deployment.
-   */
-  readonly scopes: ReadonlyArray<string>;
 }
 
 /**
- * The full scope set we use today. Keep in sync with the runtime tool
- * surface — every `risk: "money"` or `risk: "write"` tool depends on
- * one of these scopes being granted by the merchant.
+ * The scope set our runtime expects the merchant to grant. This is
+ * NOT what we request at install time — that lives in the Shopify
+ * Partner Dashboard ("Required access scopes"), which is the binding
+ * source of truth. When you edit the dashboard config, Shopify
+ * auto-prompts existing merchants to update permissions on their next
+ * visit; we don't need to coordinate a "go reinstall" message.
  *
- *   - `read_orders`      → shopify.get_order, shopify.findOrderByName
- *   - `read_customers`   → shopify.get_customer, shopify.searchByEmail
- *   - `write_orders`     → refund.create (and future order-edit tools)
+ * This list serves two read-only purposes in code:
+ *   1. The integrations page renders it as a capability grid against
+ *      `connector_connections.scopes` (the actually-granted set,
+ *      returned in the OAuth callback). Lets the operator see at a
+ *      glance whether the merchant has granted enough access.
+ *   2. Documentation for which tool needs which scope:
+ *      - `read_orders`      → shopify.get_order, shopify.findOrderByName
+ *      - `read_customers`   → shopify.get_customer, shopify.searchByEmail
+ *      - `write_orders`     → refund.create (and future order-edit tools)
+ *
+ * Keep aligned with the Partner Dashboard config.
  */
 export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_orders",
   "read_customers",
   "write_orders",
 ];
-
-/**
- * Parse a comma-separated scope env var into a deduped + sorted array.
- * Returns the default set when the input is null/undefined/empty.
- * Whitespace tolerant — `"read_orders, write_orders"` works.
- */
-export const parseShopifyScopes = (
-  raw: string | undefined,
-): ReadonlyArray<string> => {
-  if (raw === undefined || raw === null) return DEFAULT_SHOPIFY_SCOPES;
-  const cleaned = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (cleaned.length === 0) return DEFAULT_SHOPIFY_SCOPES;
-  // Dedupe + stable sort so the install URL is deterministic across
-  // restarts and the persisted `scopes` array can be string-compared.
-  return Array.from(new Set(cleaned)).sort();
-};
 
 export interface GoogleAppConfig {
   readonly clientId: string;
@@ -162,7 +140,6 @@ export const loadApiConfig = (): ApiConfig => {
       clientSecret: requireEnv("SHOPIFY_APP_CLIENT_SECRET"),
       callbackUrl,
       apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2026-04",
-      scopes: parseShopifyScopes(process.env["SHOPIFY_SCOPES"]),
     },
     approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
     google: googleConfigured

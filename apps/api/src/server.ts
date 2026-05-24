@@ -252,7 +252,6 @@ const handleShopifyInstall = async (
     clientId: cfg.shopify.clientId,
     redirectUri: cfg.shopify.callbackUrl,
     state,
-    scopes: cfg.shopify.scopes,
   });
   sendRedirectWithHeaders(res, installUrl, {
     "Set-Cookie": clearShopifyInstallCookie(
