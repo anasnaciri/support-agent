@@ -29,6 +29,10 @@ import {
   TenantAgentOverridesService,
   type AgentOverride,
 } from "./tenant-agent-overrides.js";
+import {
+  TenantRepository,
+  type TenantSettings,
+} from "./tenant-repository.js";
 
 // ============================================================
 // Helpers
@@ -90,6 +94,38 @@ const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
       // change specialist lands, swap this for findByOrderId.)
       return null;
   }
+};
+
+/**
+ * Build the system prompt the runtime hands to the LLM each turn.
+ *
+ * Today the prompt is just `agent.promptTemplate`, optionally with a
+ * `[Supplier escalation sheet: ...]` header appended when:
+ *   1. The agent declares `supplier.add_sheet_row` in its tools array, AND
+ *   2. The tenant has configured a `supplierEscalationSheet` in settings.
+ *
+ * Missing-package-agent's BRANCH A is the first user of this header — its
+ * prompt checks for the bracketed line and conditionally calls
+ * `supplier.add_sheet_row` before drafting the customer reply. Agents
+ * that don't use the tool never see the header even when the tenant has
+ * a sheet configured, so the prompt context stays minimal per agent.
+ *
+ * Pure helper — exported so a tiny unit test can pin the formatting
+ * without spinning up the full runtime.
+ */
+export const buildSystemPrompt = (
+  agent: Pick<AgentConfig, "tools" | "promptTemplate">,
+  tenantSettings: TenantSettings | null,
+): string => {
+  const sheet = tenantSettings?.supplierEscalationSheet ?? null;
+  const usesSheetTool = agent.tools.some(
+    (t) => (t as string) === "supplier.add_sheet_row",
+  );
+  if (!sheet || !usesSheetTool) {
+    return agent.promptTemplate;
+  }
+  const header = `[Supplier escalation sheet: spreadsheetId=${sheet.spreadsheetId}, range=${sheet.range}]`;
+  return `${agent.promptTemplate}\n\n${header}`;
 };
 
 const buildInitialMessages = (
@@ -213,6 +249,7 @@ export const AgentRuntimeDefault = Layer.effect(
     const mail = yield* PlatformMailService;
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
+    const tenantRepo = yield* TenantRepository;
 
     /**
      * Apply per-tenant per-agent overrides on top of the in-code
@@ -465,6 +502,14 @@ export const AgentRuntimeDefault = Layer.effect(
               ),
             ),
           );
+        // Load tenant settings once per tick — `buildSystemPrompt` reads
+        // `supplierEscalationSheet` to optionally append the supplier
+        // header to the agent prompt. DB failures fall back to `null`
+        // so the runtime continues with the bare agent prompt rather
+        // than crashing on a settings-table issue.
+        const tenantSettings: TenantSettings | null = yield* tenantRepo
+          .getSettings(working.tenantId)
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
         let agent: AgentConfig = applyOverride(
           yield* registry.resolve(working.currentAgentId),
           overrideMap,
@@ -484,7 +529,7 @@ export const AgentRuntimeDefault = Layer.effect(
             .runToolCalling({
               tenantId: current.tenantId,
               model: agent.model,
-              system: agent.promptTemplate,
+              system: buildSystemPrompt(agent, tenantSettings),
               messages,
               tools: schemas,
               ...(agent.temperature !== undefined

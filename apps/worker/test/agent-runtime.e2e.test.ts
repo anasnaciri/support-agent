@@ -26,6 +26,7 @@ import {
   shopifyRefundCreate,
   shopifyGetCustomer,
   shopifyGetOrder,
+  supplierAddSheetRow,
 } from "@support-agent/tools";
 import {
   AgentRuntime,
@@ -39,10 +40,12 @@ import {
   CaseRepositoryTest,
   ConnectorCredentialStoreTest,
   ConversationServiceTest,
+  defaultRefundPolicy,
   LLMServiceFromFn,
   LLMServiceScripted,
   PermissionServiceLive,
   PlatformMailServiceTest,
+  SheetsServiceTest,
   ShopifyServiceTest,
   TenantAgentOverridesServiceTest,
   TenantRepositoryTest,
@@ -66,6 +69,22 @@ const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
 });
 const platformMailNoop = PlatformMailServiceTest({});
 const tenantOverridesEmpty = TenantAgentOverridesServiceTest();
+// Default tenant settings used by every e2e flow that doesn't care
+// about the values. `supplierEscalationSheet: null` keeps the runtime's
+// `buildSystemPrompt` from injecting the supplier header into agents
+// that don't exercise it. Tests that need a non-null sheet override
+// this layer locally.
+const defaultTenantSettings = new TenantSettings({
+  notificationEmail: null,
+  refundPolicy: defaultRefundPolicy,
+  retentionDays: 730,
+  supplierEscalationSheet: null,
+});
+const tenantRepoDefault = TenantRepositoryTest({
+  settingsByTenant: new Map([
+    [TenantId("tenant-acme"), defaultTenantSettings],
+  ]),
+});
 import { Effect as Eff } from "effect";
 
 // ------------------------------------------------------------
@@ -115,6 +134,7 @@ const tickEnv = Layer.mergeAll(
   approvalLinkLayer,
   platformMailNoop,
   tenantOverridesEmpty,
+  tenantRepoDefault,
 );
 
 const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(tickEnv));
@@ -360,6 +380,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -504,6 +525,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -632,6 +654,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 
@@ -690,6 +713,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -798,6 +822,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -881,6 +906,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1045,6 +1071,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1237,6 +1264,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         shopifyGetOrder as never,
         shopifyGetCustomer as never,
         conversationReply as never,
+        // missing-package-agent declares supplier.add_sheet_row in its
+        // tools array (BRANCH A optionally calls it). The runtime's
+        // `schemasFor` validates every declared tool is registered, so
+        // we register it here even though this script's BRANCH-A flow
+        // skips it (no supplierEscalationSheet configured in this test).
+        supplierAddSheetRow as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(missingPackageScript),
@@ -1248,6 +1281,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1312,6 +1346,221 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     };
     expect(proposed.threadId).toBe("thread-missing");
     expect(proposed.draftId).toBe("missing-package-reply-test-1");
+  });
+
+  // ----------------------------------------------------------------
+  // BRANCH A with supplierEscalationSheet configured: the runtime
+  // injects the `[Supplier escalation sheet: ...]` header into the
+  // missing-package-agent's system prompt; the agent calls
+  // `supplier.add_sheet_row` BEFORE the customer reply.
+  // ----------------------------------------------------------------
+  it("missing-package BRANCH A with supplier sheet configured: calls supplier.add_sheet_row before conversation.reply", async () => {
+    const orderId = OrderId("gid://shopify/Order/77777");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#4001",
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/777"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "55.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Coffee Beans 1kg",
+          quantity: 1,
+          sku: "BEAN-01",
+          variantTitle: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "delivered",
+          trackingCompany: "UPS",
+          trackingNumbers: ["1Z888"],
+          trackingUrls: ["https://wwwapps.ups.com/tracking?t=1Z888"],
+          estimatedDeliveryAt: new Date("2026-05-21T00:00:00.000Z"),
+          deliveredAt: new Date("2026-05-22T15:00:00.000Z"),
+          createdAt: new Date("2026-05-19T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-22T15:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-05-19T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T15:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "missing_package",
+          identifiedOrderId: orderId,
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "missing-package-agent",
+          reason: "specialist owns missing_package",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "supplier.add_sheet_row",
+        input: {
+          spreadsheetId: "sheet-warehouse",
+          range: "Escalations!A:F",
+          values: [
+            "case-xyz",
+            "buyer@example.com",
+            "#4001",
+            "1Z888",
+            "2026-05-22T15:00:00.000Z",
+            "2026-05-24T00:00:00.000Z",
+          ],
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c4",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-missing-with-sheet",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "Thanks for reaching out about order #4001. UPS marked it delivered on 2026-05-22 — could you check neighbors / porch / household members?",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "missing-package-reply-with-sheet-1",
+        },
+      },
+    ];
+
+    // Tenant has a sheet configured → runtime should inject the header
+    // → agent should emit the supplier.add_sheet_row tool call.
+    const tenantsWithSheet = TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [
+          TenantId("tenant-acme"),
+          new TenantSettings({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            retentionDays: 730,
+            supplierEscalationSheet: {
+              spreadsheetId: "sheet-warehouse",
+              range: "Escalations!A:F",
+              description: "warehouse ops",
+            },
+          }),
+        ],
+      ]),
+    });
+
+    // SheetsServiceTest returns a deterministic happy result so the
+    // tool.invoked audit row records a successful write.
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, missingPackageAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        shopifyGetCustomer as never,
+        conversationReply as never,
+        supplierAddSheetRow as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      SheetsServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantsWithSheet,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const approvalsSvc = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Package never arrived",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-missing-with-sheet" as never,
+              messageId: "msg-mp-sheet",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Package never arrived",
+              bodyText: `My order ${orderId} shows delivered but I never got it.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const auditEntries = yield* audit.forCase(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, auditEntries, pending };
+        }),
+        layer,
+      ),
+    );
+
+    // Runtime parks waiting on the conversation.reply approval.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+
+    // supplier.add_sheet_row ran (auto-allowed via agent override), then
+    // conversation.reply parked for approval (defaultPermission ask).
+    const toolInvocations = out.auditEntries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as { tool?: string }).tool);
+    expect(toolInvocations).toContain("supplier.add_sheet_row");
+    // conversation.reply at the ask stage short-circuits BEFORE execute,
+    // so there's no tool.invoked row for it — the approval row carries it.
+    expect(toolInvocations).not.toContain("conversation.reply");
+
+    // The pending approval is for conversation.reply.
+    expect(out.pending).toHaveLength(1);
+    expect(out.pending[0]!.tool).toBe("conversation.reply");
   });
 
   // ----------------------------------------------------------------
@@ -1416,6 +1665,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       mailTest.layer,
       approvalLinkLayer,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1620,6 +1870,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       mailTest.layer,
       approvalLinkLayer,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1709,6 +1960,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1808,6 +2060,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       approvalLinkLayer,
       platformMailNoop,
       overrideLayer,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1857,6 +2110,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     const layer = Layer.merge(
       AgentRuntimeDefault.pipe(Layer.provide(env)),
@@ -1961,6 +2215,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         currencyCode: "USD",
       },
       retentionDays: 730,
+      supplierEscalationSheet: null,
     });
 
   // Shopify connection seeded with write_orders so the scope precheck
@@ -2018,6 +2273,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
+      tenantRepoDefault,
     );
     return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
   };

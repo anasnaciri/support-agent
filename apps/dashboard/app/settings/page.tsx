@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { Banknote, Bot, KeyRound, Plug, ShieldCheck } from "lucide-react";
+import {
+  Banknote,
+  Bot,
+  ClipboardList,
+  KeyRound,
+  Plug,
+  ShieldCheck,
+} from "lucide-react";
 
 import { agents, tools } from "@/lib/catalog";
 import {
@@ -44,6 +51,13 @@ const TILES = [
     description:
       "Amount thresholds that gate refund.create — auto-allow small refunds, ask on mid-range, deny above the cap.",
   },
+  {
+    href: "/settings/supplier-escalation",
+    icon: ClipboardList,
+    title: "Supplier escalation",
+    description:
+      "Google Sheet target for the missing-package agent. Leave unset to skip the sheet write entirely.",
+  },
 ] as const;
 
 export default function SettingsLanding() {
@@ -52,6 +66,7 @@ export default function SettingsLanding() {
     if (href === "/settings/permissions") return String(tools.length);
     if (href === "/settings/llm") return "BYOK";
     if (href === "/settings/refund-policy") return "$";
+    if (href === "/settings/supplier-escalation") return "📋";
     return "—";
   };
 

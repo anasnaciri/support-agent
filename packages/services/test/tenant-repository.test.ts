@@ -18,6 +18,7 @@ describe("TenantRepositoryTest", () => {
       notificationEmail: "ops@example.com",
       refundPolicy: defaultRefundPolicy,
       retentionDays: 730,
+      supplierEscalationSheet: null,
     });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, settings]]),
@@ -55,6 +56,7 @@ describe("TenantRepositoryTest", () => {
       notificationEmail: "ops@example.com",
       refundPolicy: defaultRefundPolicy,
       retentionDays: 730,
+      supplierEscalationSheet: null,
     });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, initial]]),
@@ -85,6 +87,84 @@ describe("TenantRepositoryTest", () => {
         Effect.gen(function* () {
           const repo = yield* TenantRepository;
           yield* repo.setRefundPolicy(tenantId, defaultRefundPolicy);
+        }),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(TenantNotFound);
+    }
+  });
+
+  it("setSupplierEscalationSheet stores the sheet target (preserves siblings)", async () => {
+    const initial = new TenantSettings({
+      notificationEmail: "ops@example.com",
+      refundPolicy: defaultRefundPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+    });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setSupplierEscalationSheet(tenantId, {
+            spreadsheetId: "abc123",
+            range: "Escalations!A:F",
+            description: "warehouse ops",
+          });
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.notificationEmail).toBe("ops@example.com");
+    expect(got.refundPolicy).toEqual(defaultRefundPolicy);
+    expect(got.supplierEscalationSheet).toEqual({
+      spreadsheetId: "abc123",
+      range: "Escalations!A:F",
+      description: "warehouse ops",
+    });
+  });
+
+  it("setSupplierEscalationSheet clears the sheet when passed null", async () => {
+    const initial = new TenantSettings({
+      notificationEmail: "ops@example.com",
+      refundPolicy: defaultRefundPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: {
+        spreadsheetId: "abc123",
+        range: "Escalations!A:F",
+        description: null,
+      },
+    });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setSupplierEscalationSheet(tenantId, null);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.supplierEscalationSheet).toBeNull();
+  });
+
+  it("setSupplierEscalationSheet fails when the tenant is absent (TenantNotFound)", async () => {
+    const layer = TenantRepositoryTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setSupplierEscalationSheet(tenantId, null);
         }),
         layer,
       ),

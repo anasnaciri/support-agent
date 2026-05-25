@@ -61,9 +61,11 @@ const tenantRepoWith = (
             notificationEmail,
             refundPolicy: defaultRefundPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
+            supplierEscalationSheet: null,
           }),
         ),
       setRefundPolicy: () => Effect.void,
+      setSupplierEscalationSheet: () => Effect.void,
     }),
   );
 

@@ -50,13 +50,22 @@ export const missingPackageAgent: AgentConfig = {
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
     "",
-    "Turn 2 (the conversation now has a successful `shopify.get_order` tool result): call `conversation.reply` ONCE. Pick ONE of these three branches based on the order's `fulfillmentStatus` and `fulfillments[]`:",
+    "Turn 2 (the conversation now has a successful `shopify.get_order` tool result): pick ONE of these three branches based on the order's `fulfillmentStatus` and `fulfillments[]`. BRANCH A may emit TWO tool calls in sequence (supplier escalation, then reply); branches B and C emit ONE tool call (the reply only).",
     "",
-    "  BRANCH A — Marked delivered (fulfillmentStatus is `delivered`, OR any fulfillment has a non-null `deliveredAt`). Before assuming the package was lost, ask the customer to verify the common explanations: check porch / mailbox / building lobby, ask household members, check with immediate neighbors, confirm the shipping address matches what they expected. Reference the carrier + tracking number + delivered date from the tool result so they can re-check. Tell them if those checks come up empty we can open a carrier claim and discuss reshipment / refund — but don't commit to either yet.",
+    "  BRANCH A — Marked delivered (fulfillmentStatus is `delivered`, OR any fulfillment has a non-null `deliveredAt`).",
+    "    BRANCH A — sheet escalation step (CONDITIONAL): If a line of the form `[Supplier escalation sheet: spreadsheetId=<id>, range=<range>]` is present at the END of the system prompt, call `supplier.add_sheet_row` ONCE before drafting the customer reply. Use that exact `spreadsheetId` and `range`, and pass `values` = `[caseId, customerEmail, orderName, trackingNumber, deliveredAtIso, todayIso]` where:",
+    "      • caseId — the case id from the system context.",
+    "      • customerEmail — the order's `email` (or the original `from` if that's empty).",
+    "      • orderName — the order's `name` (e.g. `#1001`).",
+    "      • trackingNumber — the first non-null tracking number across `fulfillments[]`, or empty string if none.",
+    "      • deliveredAtIso — the `deliveredAt` (ISO string) of the fulfillment marked delivered, or empty string if none.",
+    "      • todayIso — the current date/time as ISO 8601.",
+    "    If the `[Supplier escalation sheet: ...]` line is NOT present at the end of the system prompt, SKIP this step entirely and go straight to `conversation.reply` below. Never invent a spreadsheetId or range — only use the values from the header.",
+    "    BRANCH A — customer reply step: call `conversation.reply` ONCE. Before assuming the package was lost, ask the customer to verify the common explanations: check porch / mailbox / building lobby, ask household members, check with immediate neighbors, confirm the shipping address matches what they expected. Reference the carrier + tracking number + delivered date from the tool result so they can re-check. Tell them if those checks come up empty we can open a carrier claim and discuss reshipment / refund — but don't commit to either yet.",
     "",
-    "  BRANCH B — Stuck in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). Acknowledge the delay, summarise the carrier + tracking number + most recent estimated delivery date from the tool result, and explain that we'll escalate with the carrier directly. Set expectations: 1-2 business days for the carrier to respond. Invite the customer to share any extra context (notes left for the carrier, neighborhood patterns).",
+    "  BRANCH B — Stuck in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). Call `conversation.reply` ONCE — do NOT call `supplier.add_sheet_row` for this branch (carrier delay isn't a warehouse issue). Acknowledge the delay, summarise the carrier + tracking number + most recent estimated delivery date from the tool result, and explain that we'll escalate with the carrier directly. Set expectations: 1-2 business days for the carrier to respond. Invite the customer to share any extra context (notes left for the carrier, neighborhood patterns).",
     "",
-    "  BRANCH C — Never shipped (fulfillmentStatus is `unfulfilled` OR the order has no fulfillments at all). This is a fulfillment-side breakdown, NOT a carrier issue — apologise directly, summarise what they ordered (use the lineItems + total from the tool result), and offer two options: (1) we cancel + refund now, or (2) we fast-track the shipment and confirm new ETA within 1 business day. Ask which they'd prefer.",
+    "  BRANCH C — Never shipped (fulfillmentStatus is `unfulfilled` OR the order has no fulfillments at all). Call `conversation.reply` ONCE — do NOT call `supplier.add_sheet_row` for this branch (the merchant already sees unfulfilled orders directly in Shopify). This is a fulfillment-side breakdown, NOT a carrier issue — apologise directly, summarise what they ordered (use the lineItems + total from the tool result), and offer two options: (1) we cancel + refund now, or (2) we fast-track the shipment and confirm new ETA within 1 business day. Ask which they'd prefer.",
     "",
     "  Use the `[Thread context: ...]` header in the original customer message to fill `threadId` and the `to[0].email` value. Other fields:",
     "    - `to[0].name`: null unless the order's `customer.firstName`+`customer.lastName` is set, in which case `\"<first> <last>\"`.",
@@ -69,12 +78,14 @@ export const missingPackageAgent: AgentConfig = {
     "Turn 3 (the conversation has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the draft was prepared and which branch was picked. Example: \"Draft missing-package reply prepared (branch A: marked delivered); awaiting human approval.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, or `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.add_sheet_row`, or `conversation.reply`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
+    "- Never call `supplier.add_sheet_row` more than once per case. Only call it inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present.",
     "- Never call `refund.create` — refunds for missing packages go through the refund-review-agent after the customer confirms they want one.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
     "- If `shopify.get_order` returns an `OrderNotFound`-style error, do NOT retry. Skip `conversation.reply` and respond with plain text apologising that the order id could not be located and asking the customer to confirm it.",
+    "- If `supplier.add_sheet_row` returns an error, do NOT retry — proceed directly to `conversation.reply` (the customer reply matters more than the warehouse log row; an operator can replay the escalation manually).",
     "- Treat a successful `conversation.reply` as terminal. Do not call any other action after it.",
   ].join("\n"),
   // shopify.get_customer is listed but optional — the customer-ID stamp
@@ -85,10 +96,20 @@ export const missingPackageAgent: AgentConfig = {
     "shopify.get_order",
     "shopify.get_customer",
     "case.update_context",
+    "supplier.add_sheet_row",
     "conversation.reply",
   ],
-  permissionOverrides: {},
+  permissionOverrides: {
+    // The reply is still operator-gated (ask); the supplier-sheet write
+    // is internal — auto-allow so BRANCH A doesn't block on a second
+    // approval. The Tool's defaultPermission is `ask`; this override
+    // downgrades to `allow` only inside this agent's context.
+    "supplier.add_sheet_row": "allow",
+  },
   handoffs: [],
-  maxTurnsPerTick: 6,
+  // 6 turns covered shopify.get_order → conversation.reply with slack.
+  // BRANCH A now emits a possible 3rd tool (supplier.add_sheet_row) so
+  // give the agent +1 to keep tail slack.
+  maxTurnsPerTick: 7,
   temperature: 0,
 };

@@ -32,6 +32,7 @@ import {
   CaseRepositoryLive,
   DbClient,
   DbClientLive,
+  TenantRepositoryLive,
   TransactionRunnerLive,
   auditLog,
   cases,
@@ -82,6 +83,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     ShopifyServiceTest({}),
     PlatformMailServiceTest({}),
     TenantAgentOverridesServiceTest(),
+    TenantRepositoryLive,
     Layer.succeed(ApprovalLinkConfig, {
       baseUrl: "https://api.test.example",
       signingKey: "test-signing-key",

@@ -61,6 +61,29 @@ export const defaultRefundPolicy: RefundPolicy = {
  */
 export const DEFAULT_RETENTION_DAYS = 730;
 
+/**
+ * Per-tenant target for warehouse / supplier escalation rows written
+ * by the `supplier.add_sheet_row` tool. When unset (`null`), agents
+ * that would otherwise escalate skip the sheet write and go straight
+ * to their customer reply — the prompt is written to be robust to
+ * missing config.
+ *
+ * `range` is an A1 reference that includes the sheet name (e.g.
+ * `Escalations!A:F`). 17track's append semantics inside Google Sheets
+ * append below the last non-empty row inside the column span.
+ *
+ * `description` is operator-visible context surfaced on the dashboard
+ * settings page; it never reaches the agent prompt or the sheet itself.
+ */
+export interface SupplierEscalationSheet {
+  readonly spreadsheetId: string;
+  readonly range: string;
+  readonly description: string | null;
+}
+
+export const defaultSupplierEscalationSheet: SupplierEscalationSheet | null =
+  null;
+
 export class TenantSettings extends Data.Class<{
   /** Email the platform sends approval / system mail to. */
   readonly notificationEmail: string | null;
@@ -77,6 +100,13 @@ export class TenantSettings extends Data.Class<{
    * `DEFAULT_RETENTION_DAYS` when the tenant has no value set.
    */
   readonly retentionDays: number;
+  /**
+   * Optional Google Sheet target for `supplier.add_sheet_row`. When
+   * null the agent runtime omits the supplier-escalation header from
+   * the system prompt and the missing-package-agent's BRANCH A skips
+   * its sheet-write step entirely.
+   */
+  readonly supplierEscalationSheet: SupplierEscalationSheet | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -106,6 +136,16 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setRefundPolicy: (
       tenantId: TenantId,
       policy: RefundPolicy,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Set (or clear) the tenant's supplier-escalation sheet target.
+     * Passing `null` clears the field so the agent's BRANCH A skips
+     * its sheet-write step. Same deep-merge semantics as
+     * `setRefundPolicy` — unrelated settings columns are preserved.
+     */
+    readonly setSupplierEscalationSheet: (
+      tenantId: TenantId,
+      sheet: SupplierEscalationSheet | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -147,6 +187,23 @@ export const TenantRepositoryTest = (
             notificationEmail: prev.notificationEmail,
             refundPolicy: policy,
             retentionDays: prev.retentionDays,
+            supplierEscalationSheet: prev.supplierEscalationSheet,
+          }),
+        );
+        return Effect.void;
+      },
+      setSupplierEscalationSheet: (tenantId, sheet) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            notificationEmail: prev.notificationEmail,
+            refundPolicy: prev.refundPolicy,
+            retentionDays: prev.retentionDays,
+            supplierEscalationSheet: sheet,
           }),
         );
         return Effect.void;

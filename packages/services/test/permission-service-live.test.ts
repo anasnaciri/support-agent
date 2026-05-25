@@ -237,6 +237,7 @@ const runCheck = async (
           notificationEmail: null,
           refundPolicy: policyForTenant,
           retentionDays: 730,
+          supplierEscalationSheet: null,
         }),
       ],
     ]),

@@ -18,17 +18,28 @@ describe("missing-package-agent config", () => {
       "shopify.get_order",
       "shopify.get_customer",
       "case.update_context",
+      "supplier.add_sheet_row",
       "conversation.reply",
     ]);
     expect(missingPackageAgent.tools).not.toContain("refund.create");
     expect(missingPackageAgent.tools).not.toContain("agent.handoff");
     expect(missingPackageAgent.handoffs).toEqual([]);
     expect(missingPackageAgent.maxTurnsPerTick).toBeGreaterThan(1);
+    // The supplier-sheet write is auto-allowed inside this agent — the
+    // reply still needs an operator approval, but the warehouse log row
+    // shouldn't pause the case for a second approval.
+    expect(missingPackageAgent.permissionOverrides["supplier.add_sheet_row"]).toBe(
+      "allow",
+    );
     // Prompt must describe the three decision branches so the model
     // picks the right one based on fulfillment state.
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH A");
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH B");
     expect(missingPackageAgent.promptTemplate).toContain("BRANCH C");
+    // BRANCH A guards the supplier-sheet write on the runtime header.
+    expect(missingPackageAgent.promptTemplate).toContain(
+      "[Supplier escalation sheet:",
+    );
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {
