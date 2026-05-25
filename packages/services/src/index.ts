@@ -16,6 +16,7 @@ export * from "./tenant-agent-overrides.js";
 export * from "./connector-credential-store.js";
 export * from "./shopify-credentials.js";
 export * from "./shopify-service.js";
+export * from "./sheets-service.js";
 export * from "./conversation-service.js";
 export * from "./platform-mail.js";
 export * from "./approval-link-config.js";

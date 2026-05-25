@@ -235,7 +235,7 @@ export const connectorConnections = pgTable(
     ),
     check(
       "connector_connections_provider_check",
-      sql`${t.provider} IN ('shopify','gmail','outlook','openrouter','anthropic','openai')`,
+      sql`${t.provider} IN ('shopify','gmail','google_sheets','outlook','openrouter','anthropic','openai')`,
     ),
     uniqueIndex("connector_connections_tenant_provider_shop_idx").on(
       t.tenantId,

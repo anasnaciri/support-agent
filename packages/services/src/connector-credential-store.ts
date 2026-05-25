@@ -19,6 +19,7 @@ import {
 export type ConnectorProvider =
   | "shopify"
   | "gmail"
+  | "google_sheets"
   | "outlook"
   | "openrouter"
   | "anthropic"

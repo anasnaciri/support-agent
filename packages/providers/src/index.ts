@@ -5,5 +5,7 @@ export * from "./gmail-http.js";
 export * from "./gmail-token.js";
 export * from "./gmail-watch.js";
 export * from "./gmail-conversation-live.js";
+export * from "./sheets-http.js";
+export * from "./sheets-service-live.js";
 export * from "./platform-mail-live.js";
 export * from "./models-catalog.js";

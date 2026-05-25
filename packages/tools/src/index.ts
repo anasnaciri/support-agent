@@ -8,6 +8,7 @@ import { agentHandoff } from "./agent/handoff.js";
 import { conversationFetchThread } from "./conversation/fetch-thread.js";
 import { conversationReply } from "./conversation/reply.js";
 import { conversationAskCustomer } from "./conversation/ask-customer.js";
+import { supplierAddSheetRow } from "./supplier/add-sheet-row.js";
 
 export * from "./case/update-status.js";
 export * from "./case/update-context.js";
@@ -18,6 +19,7 @@ export * from "./agent/handoff.js";
 export * from "./conversation/fetch-thread.js";
 export * from "./conversation/reply.js";
 export * from "./conversation/ask-customer.js";
+export * from "./supplier/add-sheet-row.js";
 
 /**
  * Canonical list of every tool the platform ships with. Same pattern
@@ -45,4 +47,5 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   shopifyGetOrder as AnyTool,
   shopifyGetCustomer as AnyTool,
   shopifyRefundCreate as AnyTool,
+  supplierAddSheetRow as AnyTool,
 ];

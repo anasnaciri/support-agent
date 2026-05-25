@@ -37,7 +37,13 @@ import {
   redactCustomer,
   redactShop,
 } from "./compliance-redaction.js";
-import { buildGoogleAuthorizeUrl } from "./google-install.js";
+import {
+  buildGoogleAuthorizeUrl,
+  isGoogleOAuthProvider,
+  signGoogleInstallState,
+  verifyGoogleInstallState,
+  type GoogleOAuthProvider,
+} from "./google-install.js";
 import {
   exchangeCodeForGoogleToken,
   fetchGoogleUserEmail,
@@ -856,13 +862,14 @@ const handleShopRedact = async (
 // ============================================================
 
 /**
- * GET /google/install?tenant=<uuid>[&loginHint=<email>]
+ * GET /google/install?tenant=<uuid>[&provider=gmail|google_sheets][&loginHint=<email>]
  *
  * Mirror of the Shopify install entrypoint. We sign the tenant into the
- * OAuth `state` so the callback can recover it and rejecting tampered
- * states. Unlike Shopify, Google has no platform-driven install initiation
- * — every install starts from our own dashboard / link, so there's no
- * Shopify-style HMAC fallback for a tenant-less call.
+ * OAuth `state` with the Google connector kind so the shared callback can
+ * recover both and reject tampered states. Unlike Shopify, Google has no
+ * platform-driven install initiation — every install starts from our own
+ * dashboard / link, so there's no Shopify-style HMAC fallback for a
+ * tenant-less call.
  */
 const handleGoogleInstall = (
   cfg: ApiConfig,
@@ -879,12 +886,24 @@ const handleGoogleInstall = (
     sendJson(res, 400, { error: "missing_tenant" });
     return;
   }
-  const state = signState(cfg.stateSigningKey, tenant);
+  const providerParam = params["provider"] ?? params["connector"] ?? "gmail";
+  if (!isGoogleOAuthProvider(providerParam)) {
+    sendJson(res, 400, {
+      error: "unsupported_google_provider",
+      provider: providerParam,
+    });
+    return;
+  }
+  const state = signGoogleInstallState(cfg.stateSigningKey, {
+    tenantId: tenant,
+    provider: providerParam,
+  });
   const loginHint = params["login_hint"] ?? params["loginHint"];
   const authorizeUrl = buildGoogleAuthorizeUrl({
     clientId: cfg.google.clientId,
     redirectUri: cfg.google.callbackUrl,
     state,
+    provider: providerParam,
     ...(loginHint ? { loginHint } : {}),
   });
   sendRedirect(res, authorizeUrl);
@@ -894,16 +913,16 @@ const handleGoogleInstall = (
  * GET /google/auth/callback?code=&state=
  *
  * Order of operations:
- *   1. Verify signed state → tenantId.
+ *   1. Verify signed state → tenantId + Google connector provider.
  *   2. Exchange code for `{ accessToken, refreshToken, expiresIn }`.
  *      Google only hands back a refresh token on first consent (we set
  *      `prompt=consent` to force it on every install).
- *   3. Fetch the OIDC `userinfo.email` so we know which mailbox the
- *      tokens authorize — it becomes the `shopDomain` discriminator.
+ *   3. Fetch the OIDC `userinfo.email` so we know which Google account
+ *      the tokens authorize — it becomes the `shopDomain` discriminator.
  *   4. Persist via `ConnectorCredentialStore.put`.
- *   5. Register a `users.watch` so Gmail starts pushing notifications to
- *      our Pub/Sub topic. Store the returned `historyId` + lease expiry
- *      in the connector's metadata blob.
+ *   5. For Gmail only, register a `users.watch` so Gmail starts pushing
+ *      notifications to our Pub/Sub topic. Store the returned `historyId`
+ *      + lease expiry in the connector's metadata blob.
  *
  * If steps 1-4 succeed but 5 fails, we still 200 — the credentials are
  * saved and a re-install (or a scheduled watch-refresh) can recover.
@@ -934,12 +953,26 @@ const handleGoogleCallback = async (
     sendJson(res, 400, { error: "missing_required_param" });
     return;
   }
-  const decoded = verifyState(cfg.stateSigningKey, state);
+  const decoded =
+    verifyGoogleInstallState(cfg.stateSigningKey, state) ??
+    (() => {
+      // Backwards-compatible with Gmail installs that were already in
+      // progress before Google state started carrying the provider.
+      const legacy = verifyState(cfg.stateSigningKey, state);
+      return legacy
+        ? {
+            tenantId: legacy.tenantId,
+            provider: "gmail" as GoogleOAuthProvider,
+            nonce: legacy.nonce,
+          }
+        : null;
+    })();
   if (!decoded) {
     sendJson(res, 401, { error: "state_verification_failed" });
     return;
   }
   const tenantId = decoded.tenantId;
+  const provider = decoded.provider;
 
   let token;
   try {
@@ -987,7 +1020,7 @@ const handleGoogleCallback = async (
         const store = yield* ConnectorCredentialStore;
         return yield* store.put({
           tenantId: TenantId(tenantId),
-          provider: "gmail",
+          provider,
           shopDomain: email,
           accessToken: token.accessToken,
           refreshToken: token.refreshToken,
@@ -1009,24 +1042,26 @@ const handleGoogleCallback = async (
   // Register the Gmail watch. Soft-fails by design — see the comment on
   // this route. A re-install or operator-driven re-registration recovers.
   let watch: { historyId: string; expiresAt: Date } | null = null;
-  try {
-    watch = await startGmailWatch({
-      accessToken: token.accessToken,
-      topicName: cfg.google.pubsubTopic,
-    });
-  } catch (cause) {
-    // eslint-disable-next-line no-console
-    console.error("[google callback] watch registration failed:", cause);
+  if (provider === "gmail" && cfg.google.pubsubTopic) {
+    try {
+      watch = await startGmailWatch({
+        accessToken: token.accessToken,
+        topicName: cfg.google.pubsubTopic,
+      });
+    } catch (cause) {
+      // eslint-disable-next-line no-console
+      console.error("[google callback] watch registration failed:", cause);
+    }
   }
 
-  if (watch) {
+  if (provider === "gmail" && watch) {
     const patchExit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.gen(function* () {
           const store = yield* ConnectorCredentialStore;
           return yield* store.patchMetadata({
             tenantId: TenantId(tenantId),
-            provider: "gmail",
+            provider,
             shopDomain: email,
             metadata: {
               historyId: watch.historyId,
@@ -1054,13 +1089,15 @@ const handleGoogleCallback = async (
     sendJson(res, 200, {
       ok: true,
       tenantId,
+      provider,
       email,
       scopes: token.scope,
       watchRegistered: !!watch,
     });
     return;
   }
-  sendRedirect(res, `/installed?email=${encodeURIComponent(email)}`);
+  const installedQs = new URLSearchParams({ email, provider });
+  sendRedirect(res, `/installed?${installedQs.toString()}`);
 };
 
 // ============================================================
@@ -1094,6 +1131,10 @@ const handleGmailWebhook = async (
 ): Promise<void> => {
   if (!cfg.google) {
     sendJson(res, 503, { error: "google_oauth_not_configured" });
+    return;
+  }
+  if (!cfg.google.pushToken) {
+    sendJson(res, 503, { error: "gmail_webhook_not_configured" });
     return;
   }
 

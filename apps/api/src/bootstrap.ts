@@ -56,17 +56,17 @@ export interface GoogleAppConfig {
   readonly callbackUrl: string;
   /**
    * Fully-qualified Pub/Sub topic the Gmail watch publishes to, e.g.
-   * `projects/<gcp-project>/topics/gmail-inbox`. Required at install time
-   * because the OAuth callback registers a `users.watch` on this topic.
+   * `projects/<gcp-project>/topics/gmail-inbox`. Null when Google OAuth is
+   * configured for non-Gmail connectors only.
    */
-  readonly pubsubTopic: string;
+  readonly pubsubTopic: string | null;
   /**
    * Shared secret the Pub/Sub push subscription must include in the
    * webhook URL query (`?token=…`). Without this, anyone hitting our
    * `/webhooks/conversations/gmail` endpoint can replay
    * mailbox-update notifications. Generate with `randomBytes(32).hex`.
    */
-  readonly pushToken: string;
+  readonly pushToken: string | null;
 }
 
 export interface ApiConfig {
@@ -77,9 +77,8 @@ export interface ApiConfig {
   readonly shopify: ShopifyAppConfig;
   /**
    * `null` when Google OAuth env vars are unset — the API still boots and
-   * Shopify routes work; `/google/*` and `/webhooks/conversations/gmail/*`
-   * respond 503 in that case. Dev convenience: a single-tenant dev box
-   * doesn't have to provision Google credentials to test Shopify.
+   * Shopify routes work; `/google/*` responds 503 in that case. Gmail
+   * webhooks additionally require `GMAIL_PUSH_TOKEN`.
    */
   readonly google: GoogleAppConfig | null;
   /**
@@ -120,11 +119,7 @@ export const loadApiConfig = (): ApiConfig => {
   const googlePubsubTopic = process.env["GMAIL_PUBSUB_TOPIC"];
   const googlePushToken = process.env["GMAIL_PUSH_TOKEN"];
   const googleConfigured =
-    !!googleClientId &&
-    !!googleClientSecret &&
-    !!googleCallbackUrl &&
-    !!googlePubsubTopic &&
-    !!googlePushToken;
+    !!googleClientId && !!googleClientSecret && !!googleCallbackUrl;
   if (googleConfigured && !googleCallbackUrl.startsWith("https://") && !allowHttp) {
     throw new Error(
       `GOOGLE_OAUTH_CALLBACK_URL must use https:// (got ${googleCallbackUrl}). Google rejects http callbacks except for http://localhost loopback installs.`,
@@ -147,8 +142,8 @@ export const loadApiConfig = (): ApiConfig => {
           clientId: googleClientId,
           clientSecret: googleClientSecret,
           callbackUrl: googleCallbackUrl,
-          pubsubTopic: googlePubsubTopic,
-          pushToken: googlePushToken,
+          pubsubTopic: googlePubsubTopic ?? null,
+          pushToken: googlePushToken ?? null,
         }
       : null,
   };

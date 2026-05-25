@@ -57,6 +57,13 @@
       "when": 1779326225757,
       "tag": "0007_tenant_agent_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779651527264,
+      "tag": "0008_slippery_korath",
+      "breakpoints": true
     }
   ]
 }

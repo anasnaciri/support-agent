@@ -24,7 +24,7 @@ const baseEnv = (overrides: Record<string, string> = {}) => ({
   SHOPIFY_APP_CLIENT_ID: "cid",
   SHOPIFY_APP_CLIENT_SECRET: "cs",
   SHOPIFY_APP_CALLBACK_URL:
-    "https://api.support-agent.nacirianas.com/shopify/auth/callback",
+    "https://support-agent-api.nacirianas.com/shopify/auth/callback",
   ...overrides,
 });
 
@@ -45,7 +45,7 @@ describe("loadApiConfig — HTTPS callback enforcement", () => {
     });
     const cfg = loadApiConfig();
     expect(cfg.shopify.callbackUrl).toBe(
-      "https://api.support-agent.nacirianas.com/shopify/auth/callback",
+      "https://support-agent-api.nacirianas.com/shopify/auth/callback",
     );
   });
 
@@ -84,5 +84,45 @@ describe("loadApiConfig — HTTPS callback enforcement", () => {
     });
     const cfg = loadApiConfig();
     expect(cfg.shopify.callbackUrl).toBe("http://example.test/cb");
+  });
+
+  it("enables Google OAuth without requiring Gmail Pub/Sub env", () => {
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      ...baseEnv({
+        GOOGLE_OAUTH_CLIENT_ID: "google-cid",
+        GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+        GOOGLE_OAUTH_CALLBACK_URL:
+          "https://support-agent-api.nacirianas.com/google/auth/callback",
+      }),
+    });
+    const cfg = loadApiConfig();
+    expect(cfg.google).toEqual({
+      clientId: "google-cid",
+      clientSecret: "google-secret",
+      callbackUrl:
+        "https://support-agent-api.nacirianas.com/google/auth/callback",
+      pubsubTopic: null,
+      pushToken: null,
+    });
+  });
+
+  it("threads optional Gmail Pub/Sub env into Google config", () => {
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      ...baseEnv({
+        GOOGLE_OAUTH_CLIENT_ID: "google-cid",
+        GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+        GOOGLE_OAUTH_CALLBACK_URL:
+          "https://support-agent-api.nacirianas.com/google/auth/callback",
+        GMAIL_PUBSUB_TOPIC: "projects/p/topics/gmail-inbox",
+        GMAIL_PUSH_TOKEN: "push-token",
+      }),
+    });
+    const cfg = loadApiConfig();
+    expect(cfg.google?.pubsubTopic).toBe("projects/p/topics/gmail-inbox");
+    expect(cfg.google?.pushToken).toBe("push-token");
   });
 });

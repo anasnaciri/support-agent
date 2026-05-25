@@ -122,9 +122,53 @@ export type LLMError =
   | LLMCredentialMissing
   | LLMCredentialRevoked;
 
+/**
+ * Google Sheets connector errors. Same shape pattern as `ShopifyError` —
+ * the Live impl maps HTTP failures into these tagged variants so the
+ * tool / runtime boundary sees a stable error surface regardless of the
+ * underlying transport.
+ *
+ *   - `SheetsAuthMissing`: no `google_sheets` row in `connector_connections`
+ *     (the tenant never connected Sheets) OR the row exists but has no
+ *     refresh token. Maps to `case → human_takeover` upstream.
+ *   - `SheetsAuthFailed`: token refresh returned 401/403 (refresh token
+ *     revoked from the merchant's Google account, or scopes withdrawn).
+ *     Distinguished from `*Missing` so we can prompt the operator to
+ *     reconnect rather than first-time-connect.
+ *   - `SheetsNotFound`: the `spreadsheetId` or `range` doesn't resolve.
+ *     Either the merchant pasted the wrong id or the sheet was deleted.
+ *   - `SheetsAppendFailed`: catch-all write failure (rate limit, invalid
+ *     range, malformed values) with the API message surfaced verbatim.
+ */
+export class SheetsAuthMissing extends Data.TaggedError("SheetsAuthMissing")<{
+  readonly tenantId: TenantId;
+}> {}
+
+export class SheetsAuthFailed extends Data.TaggedError("SheetsAuthFailed")<{
+  readonly tenantId: TenantId;
+}> {}
+
+export class SheetsNotFound extends Data.TaggedError("SheetsNotFound")<{
+  readonly spreadsheetId: string;
+  readonly range: string;
+}> {}
+
+export class SheetsAppendFailed extends Data.TaggedError("SheetsAppendFailed")<{
+  readonly spreadsheetId: string;
+  readonly message: string;
+}> {}
+
+export type SheetsError =
+  | SheetsAuthMissing
+  | SheetsAuthFailed
+  | SheetsNotFound
+  | SheetsAppendFailed
+  | NetworkError;
+
 export type ToolError =
   | PermissionDenied
   | ToolOutputInvalid
   | NetworkError
   | LLMError
-  | ShopifyError;
+  | ShopifyError
+  | SheetsError;

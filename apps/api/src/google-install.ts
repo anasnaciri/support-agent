@@ -4,9 +4,10 @@
 //
 // Mirrors `shopify-install.ts`: the install / callback HTTP handlers in
 // `server.ts` delegate every signature + URL-shaping decision here so
-// they stay unit-testable without a server. State signing is shared with
-// Shopify (`shopify-install.ts:signState/verifyState`) — the HMAC scheme
-// is provider-neutral.
+// they stay unit-testable without a server. Google state also carries the
+// connector provider because Gmail and Sheets share the OAuth callback.
+
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // ------------------------------------------------------------
 // Scopes (the only Google-OAuth strings this app uses)
@@ -28,6 +29,112 @@ export const GOOGLE_GMAIL_SCOPES: ReadonlyArray<string> = [
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
+export const GOOGLE_SHEETS_SCOPES: ReadonlyArray<string> = [
+  // Read/write spreadsheets through the Sheets API.
+  "https://www.googleapis.com/auth/spreadsheets",
+  // Surface the connected Google account on the connection record.
+  "https://www.googleapis.com/auth/userinfo.email",
+];
+
+export type GoogleOAuthProvider = "gmail" | "google_sheets";
+
+export const GOOGLE_OAUTH_SCOPES: Readonly<
+  Record<GoogleOAuthProvider, ReadonlyArray<string>>
+> = {
+  gmail: GOOGLE_GMAIL_SCOPES,
+  google_sheets: GOOGLE_SHEETS_SCOPES,
+};
+
+export const isGoogleOAuthProvider = (
+  value: string | undefined,
+): value is GoogleOAuthProvider =>
+  value === "gmail" || value === "google_sheets";
+
+export const googleScopesForProvider = (
+  provider: GoogleOAuthProvider,
+): ReadonlyArray<string> => GOOGLE_OAUTH_SCOPES[provider];
+
+// ------------------------------------------------------------
+// State signing
+// ------------------------------------------------------------
+
+const b64url = (b: Buffer): string => b.toString("base64url");
+const fromB64url = (s: string): Buffer => Buffer.from(s, "base64url");
+
+export interface GoogleInstallStatePayload {
+  readonly tenantId: string;
+  readonly provider: GoogleOAuthProvider;
+  readonly nonce: string;
+}
+
+export const signGoogleInstallState = (
+  signingKey: string,
+  input: {
+    readonly tenantId: string;
+    readonly provider: GoogleOAuthProvider;
+    readonly nonce?: string;
+  },
+): string => {
+  const payload = JSON.stringify({
+    tenantId: input.tenantId,
+    provider: input.provider,
+    nonce: input.nonce ?? b64url(randomBytes(16)),
+  });
+  const encodedPayload = b64url(Buffer.from(payload, "utf8"));
+  const sig = createHmac("sha256", signingKey).update(payload).digest();
+  return `${encodedPayload}.${b64url(sig)}`;
+};
+
+export const verifyGoogleInstallState = (
+  signingKey: string,
+  state: string,
+): GoogleInstallStatePayload | null => {
+  const parts = state.split(".");
+  if (parts.length !== 2) return null;
+  const [encodedPayload, encodedSig] = parts;
+  if (!encodedPayload || !encodedSig) return null;
+
+  let payloadBytes: Buffer;
+  let sig: Buffer;
+  try {
+    payloadBytes = fromB64url(encodedPayload);
+    sig = fromB64url(encodedSig);
+  } catch {
+    return null;
+  }
+
+  const payload = payloadBytes.toString("utf8");
+  const expected = createHmac("sha256", signingKey).update(payload).digest();
+  if (expected.length !== sig.length) return null;
+  if (!timingSafeEqual(expected, sig)) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate["tenantId"] !== "string" || !candidate["tenantId"]) {
+    return null;
+  }
+  if (
+    typeof candidate["provider"] !== "string" ||
+    !isGoogleOAuthProvider(candidate["provider"])
+  ) {
+    return null;
+  }
+  if (typeof candidate["nonce"] !== "string" || !candidate["nonce"]) {
+    return null;
+  }
+  return {
+    tenantId: candidate["tenantId"],
+    provider: candidate["provider"],
+    nonce: candidate["nonce"],
+  };
+};
+
 // ------------------------------------------------------------
 // Authorize URL builder
 // ------------------------------------------------------------
@@ -36,6 +143,8 @@ export interface GoogleInstallUrlOptions {
   readonly clientId: string;
   readonly redirectUri: string;
   readonly state: string;
+  /** Defaults to Gmail for backwards-compatible callers. */
+  readonly provider?: GoogleOAuthProvider;
   /** Defaults to the full Gmail scope set above. */
   readonly scopes?: ReadonlyArray<string>;
   /**
@@ -52,7 +161,8 @@ export interface GoogleInstallUrlOptions {
 export const buildGoogleAuthorizeUrl = (
   opts: GoogleInstallUrlOptions,
 ): string => {
-  const scopes = opts.scopes ?? GOOGLE_GMAIL_SCOPES;
+  const scopes =
+    opts.scopes ?? googleScopesForProvider(opts.provider ?? "gmail");
   const params = new URLSearchParams({
     client_id: opts.clientId,
     redirect_uri: opts.redirectUri,

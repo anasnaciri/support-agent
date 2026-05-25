@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   GOOGLE_GMAIL_SCOPES,
+  GOOGLE_SHEETS_SCOPES,
   buildGoogleAuthorizeUrl,
+  signGoogleInstallState,
+  verifyGoogleInstallState,
 } from "../src/google-install.js";
 
 describe("buildGoogleAuthorizeUrl", () => {
@@ -51,5 +54,45 @@ describe("buildGoogleAuthorizeUrl", () => {
       }),
     );
     expect(url.searchParams.get("login_hint")).toBe("support@merchant.com");
+  });
+
+  it("can emit the Google Sheets scope set", () => {
+    const url = new URL(
+      buildGoogleAuthorizeUrl({
+        clientId: "cid",
+        redirectUri: "https://example.com/cb",
+        state: "abc",
+        provider: "google_sheets",
+      }),
+    );
+    const scopeParam = url.searchParams.get("scope") ?? "";
+    for (const scope of GOOGLE_SHEETS_SCOPES) {
+      expect(scopeParam).toContain(scope);
+    }
+    expect(scopeParam).not.toContain("https://www.googleapis.com/auth/gmail.");
+  });
+});
+
+describe("Google install state", () => {
+  it("round-trips tenant and provider", () => {
+    const state = signGoogleInstallState("secret", {
+      tenantId: "tenant-1",
+      provider: "google_sheets",
+      nonce: "nonce-1",
+    });
+    expect(verifyGoogleInstallState("secret", state)).toEqual({
+      tenantId: "tenant-1",
+      provider: "google_sheets",
+      nonce: "nonce-1",
+    });
+  });
+
+  it("rejects tampered state", () => {
+    const state = signGoogleInstallState("secret", {
+      tenantId: "tenant-1",
+      provider: "gmail",
+      nonce: "nonce-1",
+    });
+    expect(verifyGoogleInstallState("wrong-secret", state)).toBeNull();
   });
 });

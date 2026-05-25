@@ -19,8 +19,10 @@ import {
   type ConnectorConnection,
   type ConversationService,
   type ShopifyService,
+  type SheetsService,
   type TenantRepository,
   type TransactionRunner,
+  SheetsServiceTest,
 } from "@support-agent/services";
 import { Effect } from "effect";
 import {
@@ -48,6 +50,7 @@ import {
   ShopifyCredentialStoreFromEnv,
   ShopifyHttpLive,
   ShopifyServiceLive,
+  SheetsServiceLive,
 } from "@support-agent/providers";
 import { makeQueue, type PgBoss } from "./queue.js";
 
@@ -70,6 +73,7 @@ export interface WorkerBootstrap {
     | AuditLogService
     | ApprovalService
     | ShopifyService
+    | SheetsService
     | ConversationService
     | TenantRepository
     | TransactionRunner
@@ -242,6 +246,22 @@ export const buildWorker = async (
         )
       : ConversationServiceTest({});
 
+  // Sheets connector. Same gating as Gmail: when CREDENTIAL_ENCRYPTION_KEY
+  // + Google OAuth env are set, swap in the Live layer that resolves
+  // per-tenant tokens from `connector_connections`. Otherwise fall back
+  // to an in-memory Test layer so the worker still boots — the
+  // `supplier.add_sheet_row` tool will fail with `SheetsNotFound` if
+  // invoked, but the rest of the runtime is unaffected.
+  const sheets =
+    credKeyB64 && googleClientId && googleClientSecret
+      ? SheetsServiceLive({
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+        }).pipe(
+          Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+        )
+      : SheetsServiceTest({});
+
   // Permission policy with the conditional refund threshold + the
   // connector scope precheck layered on. Live impl consults
   // `TenantRepository` for `refundPolicy` and `ConnectorCredentialStore`
@@ -322,6 +342,7 @@ export const buildWorker = async (
     registry,
     llm,
     shopify,
+    sheets,
     conversation,
     mail,
     approvalLinkLayer,

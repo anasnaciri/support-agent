@@ -22,11 +22,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { disconnectGmailAction } from "./actions";
+import {
+  disconnectGmailAction,
+  disconnectGoogleSheetsAction,
+} from "./actions";
 
 const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   shopify: "Shopify",
   gmail: "Gmail",
+  google_sheets: "Google Sheets",
   outlook: "Outlook",
 };
 
@@ -35,10 +39,12 @@ const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Powers order, customer, and fulfillment lookups for the agent. Installed via the managed Shopify app.",
   gmail:
     "Inbound customer threads + outbound replies on this connection. Installed via Google OAuth.",
+  google_sheets:
+    "Spreadsheet read/write access for Sheets-backed workflows. Installed via Google OAuth.",
   outlook: "Microsoft 365 mailbox connector (not yet implemented).",
 };
 
-const SUPPORTED_PROVIDERS = ["shopify", "gmail"] as const;
+const SUPPORTED_PROVIDERS = ["shopify", "gmail", "google_sheets"] as const;
 
 /**
  * Shopify scopes that unlock specific agent capabilities. Surfaced on
@@ -137,9 +143,30 @@ const GmailIcon = () => (
   </svg>
 );
 
+const GoogleSheetsIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 32 32"
+    className="size-5 shrink-0"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path
+      d="M19 2H8.5A2.5 2.5 0 0 0 6 4.5v23A2.5 2.5 0 0 0 8.5 30h15a2.5 2.5 0 0 0 2.5-2.5V9l-7-7Z"
+      fill="#0F9D58"
+    />
+    <path d="M19 2v5.5A1.5 1.5 0 0 0 20.5 9H26l-7-7Z" fill="#87CEAC" />
+    <path
+      d="M10 13.5A1.5 1.5 0 0 1 11.5 12h9a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5h-9a1.5 1.5 0 0 1-1.5-1.5v-9Zm2 1.5v2h3v-2h-3Zm5 0v2h3v-2h-3Zm-5 4v3h3v-3h-3Zm5 0v3h3v-3h-3Z"
+      fill="white"
+    />
+  </svg>
+);
+
 const PROVIDER_ICONS = {
   shopify: ShopifyIcon,
   gmail: GmailIcon,
+  google_sheets: GoogleSheetsIcon,
 } satisfies Readonly<
   Record<(typeof SUPPORTED_PROVIDERS)[number], typeof ShopifyIcon>
 >;
@@ -172,6 +199,10 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const gmailParam = params["gmail"];
   const gmailBanner =
     (Array.isArray(gmailParam) ? gmailParam[0] : gmailParam) === "disconnected";
+  const sheetsParam = params["sheets"];
+  const sheetsBanner =
+    (Array.isArray(sheetsParam) ? sheetsParam[0] : sheetsParam) ===
+    "disconnected";
   const apiBaseUrl = getApiBaseUrl();
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
@@ -231,6 +262,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
         </Alert>
       ) : null}
 
+      {sheetsBanner ? (
+        <Alert variant="success">
+          <AlertDescription>Google Sheets disconnected.</AlertDescription>
+        </Alert>
+      ) : null}
+
       {!apiBaseUrl ? (
         <Alert variant="warning">
           <AlertTriangle className="size-4" />
@@ -261,7 +298,13 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               ? "active"
               : "revoked";
           const showConnect = !!apiBaseUrl && tone !== "active";
-          const showDisconnect = p === "gmail" && tone === "active";
+          const disconnectAction =
+            p === "gmail"
+              ? disconnectGmailAction
+              : p === "google_sheets"
+                ? disconnectGoogleSheetsAction
+                : null;
+          const showDisconnect = !!disconnectAction && tone === "active";
 
           return (
             <Card key={p}>
@@ -413,13 +456,31 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                           </a>
                         </Button>
                       ) : null}
+                      {p === "google_sheets" ? (
+                        <Button asChild>
+                          <a
+                            href={
+                              `${apiBaseUrl}/google/install?tenant=${encodeURIComponent(
+                                tenantId,
+                              )}&provider=google_sheets` +
+                              (loginHint
+                                ? `&login_hint=${encodeURIComponent(loginHint)}`
+                                : "")
+                            }
+                          >
+                            {tone === "missing"
+                              ? "Connect Sheets"
+                              : "Reconnect Sheets"}
+                          </a>
+                        </Button>
+                      ) : null}
                     </>
                   ) : null}
 
-                  {showDisconnect ? (
-                    <form action={disconnectGmailAction}>
+                  {showDisconnect && disconnectAction ? (
+                    <form action={disconnectAction}>
                       <Button type="submit" variant="outline">
-                        Disconnect Gmail
+                        Disconnect {label}
                       </Button>
                     </form>
                   ) : null}
@@ -440,7 +501,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Provider</TableHead>
-                  <TableHead>Shop</TableHead>
+                  <TableHead>Account / shop</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Scopes</TableHead>
                   <TableHead>Installed</TableHead>

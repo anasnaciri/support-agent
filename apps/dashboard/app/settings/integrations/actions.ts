@@ -26,7 +26,9 @@ const connectorStoreLayer = () => {
   );
 };
 
-export const disconnectGmailAction = async (): Promise<void> => {
+const disconnectProvider = async (
+  provider: "gmail" | "google_sheets",
+): Promise<void> => {
   const tenantId = await getTenantId();
   const tid = TenantId(tenantId);
 
@@ -35,13 +37,11 @@ export const disconnectGmailAction = async (): Promise<void> => {
       Effect.gen(function* () {
         const store = yield* ConnectorCredentialStore;
         const rows = yield* store.listForTenant(tid);
-        const activeGmailRows = rows.filter(
-          (row) => row.provider === "gmail" && row.status === "active",
+        const activeRows = rows.filter(
+          (row) => row.provider === provider && row.status === "active",
         );
         yield* Effect.all(
-          activeGmailRows.map((row) =>
-            store.revoke(tid, "gmail", row.shopDomain),
-          ),
+          activeRows.map((row) => store.revoke(tid, provider, row.shopDomain)),
           { concurrency: 1 },
         );
       }),
@@ -50,5 +50,14 @@ export const disconnectGmailAction = async (): Promise<void> => {
   );
 
   revalidatePath("/settings/integrations");
+};
+
+export const disconnectGmailAction = async (): Promise<void> => {
+  await disconnectProvider("gmail");
   redirect("/settings/integrations?gmail=disconnected");
+};
+
+export const disconnectGoogleSheetsAction = async (): Promise<void> => {
+  await disconnectProvider("google_sheets");
+  redirect("/settings/integrations?sheets=disconnected");
 };
