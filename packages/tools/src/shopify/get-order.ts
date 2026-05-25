@@ -66,6 +66,10 @@ export const shopifyGetOrder = defineTool({
   risk: "read",
   defaultPermission: "allow",
   sideEffectClass: "none",
+  requiredConnectorScopes: {
+    provider: "shopify",
+    scopes: ["read_orders"],
+  },
   execute: (input, ctx) =>
     Effect.gen(function* () {
       const shopify = yield* ShopifyService;

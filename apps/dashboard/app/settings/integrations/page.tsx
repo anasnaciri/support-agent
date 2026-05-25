@@ -4,7 +4,9 @@ import { eq, desc } from "drizzle-orm";
 import { AlertTriangle } from "lucide-react";
 
 import { connectorConnections } from "@support-agent/db";
+import { isConnectorScopeGranted } from "@support-agent/services";
 import { db } from "@/lib/db";
+import { capabilitiesForProvider } from "@/lib/catalog";
 import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
@@ -47,33 +49,11 @@ const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
 const SUPPORTED_PROVIDERS = ["shopify", "gmail", "google_sheets"] as const;
 
 /**
- * Shopify scopes that unlock specific agent capabilities. Surfaced on
- * the Shopify card so operators see at a glance whether the merchant
- * has granted enough access for the runtime to do its work. Keep this
- * list aligned with `DEFAULT_SHOPIFY_SCOPES` in apps/api/src/bootstrap.ts
- * and with each tool's actual scope requirement.
+ * Capabilities surfaced on a connector card are derived from each tool's
+ * `requiredConnectorScopes` declaration via `capabilitiesForProvider`.
+ * No hardcoded list — adding a new tool that declares a new scope
+ * automatically surfaces it as a new capability row here.
  */
-const SHOPIFY_CAPABILITY_SCOPES: ReadonlyArray<{
-  readonly scope: string;
-  readonly capability: string;
-  readonly tools: string;
-}> = [
-  {
-    scope: "read_orders",
-    capability: "Read orders & fulfillment",
-    tools: "shopify.get_order",
-  },
-  {
-    scope: "read_customers",
-    capability: "Read customers",
-    tools: "shopify.get_customer",
-  },
-  {
-    scope: "write_orders",
-    capability: "Issue refunds",
-    tools: "refund.create",
-  },
-];
 
 const ShopifyIcon = () => (
   <svg
@@ -305,6 +285,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                 ? disconnectGoogleSheetsAction
                 : null;
           const showDisconnect = !!disconnectAction && tone === "active";
+          const capabilities = capabilitiesForProvider(p);
 
           return (
             <Card key={p}>
@@ -342,21 +323,26 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   </p>
                 )}
 
-                {/* Per-capability scope grid for Shopify. Surfaces the
+                {/* Per-capability scope grid, derived from each tool's
+                    `requiredConnectorScopes` declaration. Surfaces the
                     "this scope unlocks this tool" mapping inline so the
                     operator sees if the merchant needs to re-OAuth to
-                    pick up a newly-added capability (e.g. write_orders
-                    for refund.create). Only renders when there's an
-                    active connection — no sense showing capability
-                    state for a missing install. */}
-                {p === "shopify" && row && tone === "active" ? (
+                    pick up a newly-added capability. Only renders when
+                    there's an active connection AND at least one tool
+                    declares scopes for this provider — no sense showing
+                    an empty grid. */}
+                {row && tone === "active" && capabilities.length > 0 ? (
                   <div className="space-y-2 rounded-md border bg-muted/30 p-3">
                     <p className="text-xs font-medium text-foreground">
                       Granted capabilities
                     </p>
                     <ul className="space-y-1 text-xs">
-                      {SHOPIFY_CAPABILITY_SCOPES.map((cap) => {
-                        const granted = row.scopes.includes(cap.scope);
+                      {capabilities.map((cap) => {
+                        const granted = isConnectorScopeGranted(
+                          p,
+                          cap.scope,
+                          row.scopes,
+                        );
                         return (
                           <li
                             key={cap.scope}
@@ -371,9 +357,6 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                                     : "inline-block size-1.5 rounded-full bg-destructive"
                                 }
                               />
-                              <span className="text-foreground">
-                                {cap.capability}
-                              </span>
                               <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
                                 {cap.scope}
                               </code>
@@ -385,14 +368,14 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                         );
                       })}
                     </ul>
-                    {SHOPIFY_CAPABILITY_SCOPES.some(
-                      (c) => !row.scopes.includes(c.scope),
+                    {capabilities.some(
+                      (c) => !isConnectorScopeGranted(p, c.scope, row.scopes),
                     ) ? (
                       <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
                         Missing a capability? Click <strong>Reinstall</strong>{" "}
-                        below — Shopify shows the merchant an &ldquo;update
-                        permissions&rdquo; prompt without losing the existing
-                        connection.
+                        {p === "shopify"
+                          ? "below — Shopify shows the merchant an “update permissions” prompt without losing the existing connection."
+                          : "below to re-run the OAuth grant with the latest scope set."}
                       </p>
                     ) : null}
                   </div>
@@ -409,8 +392,8 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   row &&
                   tone === "active" &&
                   apiBaseUrl &&
-                  SHOPIFY_CAPABILITY_SCOPES.some(
-                    (c) => !row.scopes.includes(c.scope),
+                  capabilities.some(
+                    (c) => !isConnectorScopeGranted(p, c.scope, row.scopes),
                   ) ? (
                     <Button variant="outline" asChild>
                       <a

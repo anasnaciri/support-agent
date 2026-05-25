@@ -48,6 +48,10 @@ export const shopifyGetCustomer = defineTool({
   risk: "read",
   defaultPermission: "allow",
   sideEffectClass: "none",
+  requiredConnectorScopes: {
+    provider: "shopify",
+    scopes: ["read_customers"],
+  },
   execute: (input, ctx) =>
     Effect.gen(function* () {
       const hasId =

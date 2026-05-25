@@ -36,3 +36,44 @@ export const effectivePermission = (
   if (!tool) return null;
   return agent.permissionOverrides[toolName] ?? tool.defaultPermission;
 };
+
+/**
+ * One row of the per-provider capability grid rendered on
+ * `/settings/integrations`. Derived from the tools' own
+ * `requiredConnectorScopes` declarations — adding a new tool that
+ * declares a new scope automatically surfaces it as a new capability,
+ * with no edits to the dashboard.
+ */
+export interface ConnectorCapability {
+  /** Raw scope string (matches what Shopify / Google echo back on OAuth). */
+  readonly scope: string;
+  /** Comma-separated tool names that need this scope. */
+  readonly tools: string;
+}
+
+/**
+ * Distinct `requiredConnectorScopes` entries declared across `ALL_TOOLS`
+ * for the named provider, grouped by scope and tagged with the tools
+ * that need each. Stable order: alphabetical by scope so the grid
+ * doesn't reshuffle between renders.
+ */
+export const capabilitiesForProvider = (
+  provider: string,
+): ReadonlyArray<ConnectorCapability> => {
+  const byScope = new Map<string, string[]>();
+  for (const t of tools) {
+    const req = t.requiredConnectorScopes;
+    if (!req || req.provider !== provider) continue;
+    for (const s of req.scopes) {
+      const bucket = byScope.get(s) ?? [];
+      bucket.push(t.name);
+      byScope.set(s, bucket);
+    }
+  }
+  return [...byScope.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([scope, toolNames]) => ({
+      scope,
+      tools: toolNames.join(", "),
+    }));
+};

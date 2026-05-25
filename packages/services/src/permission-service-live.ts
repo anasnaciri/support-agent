@@ -114,6 +114,35 @@ export const applyRefundPolicy = (
 };
 
 /**
+ * Whether `required` is covered by the `granted` scope list for a given
+ * provider. Pure helper — exported so the dashboard's integrations grid
+ * uses the same rule as the runtime check.
+ *
+ * Provider-specific hierarchy rules applied:
+ *
+ *   - **Shopify**: every `write_X` access scope implicitly covers the
+ *     corresponding `read_X` scope. Shopify's OAuth callback omits
+ *     `read_X` from the granted list when `write_X` was requested, so
+ *     a literal `includes` check mis-reports `read_orders` as missing
+ *     on a connection that has `write_orders`. See
+ *     https://shopify.dev/docs/api/usage/access-scopes.
+ *
+ * Other providers (Gmail, Google Sheets, Outlook, LLM providers): no
+ * implicit hierarchy — literal match only.
+ */
+export const isConnectorScopeGranted = (
+  provider: string,
+  required: string,
+  granted: ReadonlyArray<string>,
+): boolean => {
+  if (granted.includes(required)) return true;
+  if (provider === "shopify" && required.startsWith("read_")) {
+    return granted.includes(`write_${required.slice("read_".length)}`);
+  }
+  return false;
+};
+
+/**
  * Connector scope precheck. When a tool declares
  * `requiredConnectorScopes`, the active connection for that provider
  * MUST carry every listed scope or we deny — better to surface the
@@ -124,6 +153,8 @@ export const applyRefundPolicy = (
  * authoritative). A revoked / missing connection ⇒ deny.
  *
  * Pure helper — exported so it can be unit-tested without a runtime.
+ * Applies `isConnectorScopeGranted` so provider-specific hierarchies
+ * (e.g. Shopify's `write_X` covers `read_X`) are honored.
  */
 export const checkRequiredScopes = (
   tool: AnyTool,
@@ -136,7 +167,8 @@ export const checkRequiredScopes = (
   );
   if (!active) return "missing";
   for (const s of req.scopes) {
-    if (!active.scopes.includes(s)) return "missing";
+    if (!isConnectorScopeGranted(req.provider, s, active.scopes))
+      return "missing";
   }
   return "ok";
 };

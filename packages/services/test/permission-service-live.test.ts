@@ -12,6 +12,7 @@ import { Schema } from "effect";
 import {
   applyRefundPolicy,
   checkRequiredScopes,
+  isConnectorScopeGranted,
   ConnectorCredentialStoreTest,
   defaultRefundPolicy,
   parseRefundAmount,
@@ -451,5 +452,64 @@ describe("checkRequiredScopes", () => {
         { ...connection, scopes: ["read_orders"] }, // no write_orders
       ]),
     ).toBe("missing");
+  });
+
+  it("honors Shopify's write_X → read_X hierarchy when checking required scopes", () => {
+    // A tool requiring read_orders should be satisfied by a connection
+    // that holds write_orders — Shopify's OAuth callback omits read_orders
+    // from the granted list when write_orders was requested.
+    const readOrderTool: AnyTool = {
+      ...tool,
+      requiredConnectorScopes: {
+        provider: "shopify",
+        scopes: ["read_orders"],
+      },
+    } as never;
+    expect(
+      checkRequiredScopes(readOrderTool, [
+        { ...connection, scopes: ["write_orders"] },
+      ]),
+    ).toBe("ok");
+  });
+});
+
+describe("isConnectorScopeGranted", () => {
+  it("literal match wins for any provider", () => {
+    expect(isConnectorScopeGranted("shopify", "read_orders", ["read_orders"]))
+      .toBe(true);
+    expect(
+      isConnectorScopeGranted(
+        "google_sheets",
+        "https://www.googleapis.com/auth/spreadsheets",
+        ["https://www.googleapis.com/auth/spreadsheets"],
+      ),
+    ).toBe(true);
+  });
+
+  it("Shopify write_X covers read_X", () => {
+    expect(isConnectorScopeGranted("shopify", "read_orders", ["write_orders"]))
+      .toBe(true);
+    expect(
+      isConnectorScopeGranted("shopify", "read_customers", ["write_customers"]),
+    ).toBe(true);
+    expect(
+      isConnectorScopeGranted("shopify", "read_products", [
+        "read_customers",
+        "write_orders",
+      ]),
+    ).toBe(false);
+  });
+
+  it("hierarchy does NOT apply outside Shopify", () => {
+    // Hypothetical: a Gmail "write_x" doesn't imply a "read_x" scope —
+    // Google scopes are URL-style and don't share the prefix convention.
+    expect(isConnectorScopeGranted("gmail", "read_orders", ["write_orders"]))
+      .toBe(false);
+  });
+
+  it("hierarchy does NOT apply when the required scope isn't a read_ prefix", () => {
+    expect(
+      isConnectorScopeGranted("shopify", "write_orders", ["read_orders"]),
+    ).toBe(false);
   });
 });
