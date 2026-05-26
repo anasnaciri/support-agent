@@ -1,6 +1,6 @@
 import type { ApprovalRow } from "@support-agent/db";
 import Link from "next/link";
-import { ClipboardCheck } from "lucide-react";
+import { ClipboardCheck, Lightbulb } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -12,13 +12,42 @@ import { Separator } from "@/components/ui/separator";
 import { riskVariant } from "@/lib/status-variants";
 
 import { approveAction, rejectAction } from "../../approvals/[id]/actions";
+import type { RefundRecommendationSummary } from "./page";
 
 interface Props {
   readonly approval: ApprovalRow;
   readonly returnTo: string;
+  /**
+   * Latest `refund.recommend` tool output for this case, when present.
+   * Surfaces the structured assessment above the editable reply body so
+   * the operator sees what the agent thought before approving the prose.
+   */
+  readonly refundRecommendation?: RefundRecommendationSummary | null;
 }
 
-export const ApprovalCard = ({ approval, returnTo }: Props) => {
+const RECOMMENDATION_LABEL: Readonly<
+  Record<RefundRecommendationSummary["recommendation"], string>
+> = {
+  full_refund: "Full refund",
+  partial_refund: "Partial refund",
+  deny: "Deny",
+  investigate: "Investigate",
+};
+
+const recommendationVariant = (
+  r: RefundRecommendationSummary["recommendation"],
+): "success" | "warning" | "destructive" | "outline" => {
+  if (r === "full_refund") return "success";
+  if (r === "partial_refund") return "outline";
+  if (r === "investigate") return "warning";
+  return "destructive";
+};
+
+export const ApprovalCard = ({
+  approval,
+  returnTo,
+  refundRecommendation,
+}: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
       ? (approval.proposedInput as Record<string, unknown>)
@@ -57,6 +86,47 @@ export const ApprovalCard = ({ approval, returnTo }: Props) => {
       <CardContent className="space-y-4 pt-0">
         {approval.reasoning ? (
           <p className="text-sm">{approval.reasoning}</p>
+        ) : null}
+
+        {refundRecommendation ? (
+          <div className="rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <Lightbulb className="size-4 text-primary" aria-hidden />
+              <span className="font-medium">Agent recommendation</span>
+              <Badge
+                variant={recommendationVariant(
+                  refundRecommendation.recommendation,
+                )}
+                className="text-xs"
+              >
+                {RECOMMENDATION_LABEL[refundRecommendation.recommendation]}
+              </Badge>
+              {refundRecommendation.amount ? (
+                <span className="font-mono text-xs text-muted-foreground">
+                  {refundRecommendation.amount.amount}{" "}
+                  {refundRecommendation.amount.currencyCode}
+                </span>
+              ) : null}
+            </div>
+            {refundRecommendation.reasoning ? (
+              <p className="text-muted-foreground">
+                {refundRecommendation.reasoning}
+              </p>
+            ) : null}
+            {refundRecommendation.riskFlags.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {refundRecommendation.riskFlags.map((f) => (
+                  <Badge
+                    key={f}
+                    variant="outline"
+                    className="font-mono text-[10px] uppercase tracking-wider"
+                  >
+                    {f}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {editableBodyText !== null ? (

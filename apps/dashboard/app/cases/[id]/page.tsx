@@ -160,6 +160,61 @@ const actorLabel = (entry: AuditLogRow): string => {
  * Returns null when no usage data is present, so the UI can decide
  * whether to render the rollup at all.
  */
+export interface RefundRecommendationSummary {
+  readonly recommendation: "full_refund" | "partial_refund" | "deny" | "investigate";
+  readonly amount: { readonly amount: string; readonly currencyCode: string } | null;
+  readonly reasoning: string;
+  readonly riskFlags: ReadonlyArray<string>;
+}
+
+/**
+ * Pull the most recent `refund.recommend` tool.invoked entry from the
+ * audit log and return its structured output for rendering on the
+ * approval card. Returns null when there's no recommendation row.
+ */
+const extractRefundRecommendation = (
+  entries: ReadonlyArray<AuditLogRow>,
+): RefundRecommendationSummary | null => {
+  // Walk newest → oldest so re-runs surface the latest recommendation.
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.action !== "tool.invoked") continue;
+    const details = detailRecord(e.details);
+    if (!details || details["tool"] !== "refund.recommend") continue;
+    const output = detailRecord(details["output"]);
+    if (!output) continue;
+    const rec = output["recommendation"];
+    if (
+      rec !== "full_refund" &&
+      rec !== "partial_refund" &&
+      rec !== "deny" &&
+      rec !== "investigate"
+    ) {
+      continue;
+    }
+    const reasoning =
+      typeof output["reasoning"] === "string"
+        ? (output["reasoning"] as string)
+        : "";
+    const flagsRaw = output["riskFlags"];
+    const riskFlags = Array.isArray(flagsRaw)
+      ? flagsRaw.filter((f): f is string => typeof f === "string")
+      : [];
+    const amountRaw = detailRecord(output["amount"]);
+    const amount =
+      amountRaw &&
+      typeof amountRaw["amount"] === "string" &&
+      typeof amountRaw["currencyCode"] === "string"
+        ? {
+            amount: amountRaw["amount"] as string,
+            currencyCode: amountRaw["currencyCode"] as string,
+          }
+        : null;
+    return { recommendation: rec, amount, reasoning, riskFlags };
+  }
+  return null;
+};
+
 const sumCaseTokens = (
   entries: ReadonlyArray<AuditLogRow>,
 ): { input: number; output: number; total: number } | null => {
@@ -368,6 +423,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           key={a.id}
           approval={a}
           returnTo={`/cases/${caseRow.id}`}
+          refundRecommendation={extractRefundRecommendation(entries)}
         />
       ))}
 

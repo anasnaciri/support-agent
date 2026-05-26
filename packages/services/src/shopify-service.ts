@@ -87,8 +87,48 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       input: RefundOrderInput,
     ) => Effect.Effect<ShopifyRefund, ShopifyError>;
+
+    /**
+     * Aggregate refund history for a single customer. Used by
+     * `refund.recommend` to compute risk flags (first_order /
+     * frequent_refunder / new_customer / high_ltv).
+     *
+     * Reads the customer's recent orders (limit 50 — wide enough to
+     * pick up power-users, narrow enough to stay a single GraphQL
+     * request) and aggregates client-side:
+     *   - `ordersCount`: total orders seen on the customer record.
+     *   - `refundedOrdersCount`: how many of those carry at least one
+     *     `refunds[]` entry.
+     *   - `totalRefundedAmount`: sum across all refunds, currency taken
+     *     from the first refund. Currency mismatch across orders is rare
+     *     in practice; we report the first currency for the flag math.
+     *   - `firstOrderAt`: minimum `createdAt` across the orders read.
+     *
+     * Returns zeros (and `firstOrderAt: null`) when the customer has
+     * no orders. `CustomerNotFound` when the id is unknown.
+     */
+    readonly getCustomerRefundHistory: (
+      tenantId: TenantId,
+      customerId: CustomerId,
+    ) => Effect.Effect<CustomerRefundHistory, ShopifyError>;
   }
 >() {}
+
+/**
+ * Aggregated refund history for a single customer.
+ *
+ * `totalRefundedAmount` is `null` when the customer has no refunds —
+ * we never invent a currency for them; on the Live path it's derived
+ * from the actual refund records (so it matches the store's currency).
+ * Callers that compute risk flags from a refund total must handle null
+ * as "no refunds to consider".
+ */
+export interface CustomerRefundHistory {
+  readonly ordersCount: number;
+  readonly refundedOrdersCount: number;
+  readonly totalRefundedAmount: ShopifyMoney | null;
+  readonly firstOrderAt: Date | null;
+}
 
 // ============================================================
 // Test layer — in-memory fixtures
@@ -118,6 +158,16 @@ export interface ShopifyTestFixtures {
   readonly refundOrder?: (
     input: RefundOrderInput,
   ) => Effect.Effect<ShopifyRefund, ShopifyError>;
+  /**
+   * Per-customer refund-history fixture. Tests that exercise
+   * `refund.recommend` seed this with a known aggregate so the risk-flag
+   * math is deterministic. When a customerId isn't in the map, the
+   * default Test impl returns zeros (and `firstOrderAt: null`).
+   */
+  readonly customerRefundHistory?: ReadonlyMap<
+    CustomerId,
+    CustomerRefundHistory
+  >;
 }
 
 /**
@@ -170,6 +220,18 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           amount: input.amount,
           note: input.note,
           createdAt: new Date(0),
+        });
+      },
+      getCustomerRefundHistory: (_tenantId, customerId) => {
+        const hit = fixtures.customerRefundHistory?.get(customerId);
+        if (hit) return Effect.succeed(hit);
+        // Default: brand-new customer with no orders → no refunds → no
+        // currency to report (we don't invent USD here).
+        return Effect.succeed<CustomerRefundHistory>({
+          ordersCount: 0,
+          refundedOrdersCount: 0,
+          totalRefundedAmount: null,
+          firstOrderAt: null,
         });
       },
     }),

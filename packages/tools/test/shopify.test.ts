@@ -19,7 +19,16 @@ import {
   shopifyGetCustomer,
   shopifyGetOrder,
   shopifyRefundCreate,
+  shopifyRefundRecommend,
+  computeRefundRecommendation,
 } from "../src/index.js";
+import {
+  TenantRepositoryTest,
+  TenantSettings,
+  defaultRefundPolicy,
+  type CustomerRefundHistory,
+  type RefundPolicy,
+} from "@support-agent/services";
 
 const tenantId = TenantId("t1");
 const baseCtx = (caseId: string): ToolContext => ({
@@ -470,5 +479,287 @@ describe("refund.create tool", () => {
     expect(shopifyRefundCreate.risk).toBe("money");
     expect(shopifyRefundCreate.sideEffectClass).toBe("financial");
     expect(shopifyRefundCreate.defaultPermission).toBe("ask");
+  });
+});
+
+describe("refund.recommend — pure logic", () => {
+  const emptyHistory: CustomerRefundHistory = {
+    ordersCount: 0,
+    refundedOrdersCount: 0,
+    totalRefundedAmount: null,
+    firstOrderAt: null,
+  };
+  const policy: RefundPolicy = {
+    askAboveMinorUnits: 2_500, // $25
+    denyAboveMinorUnits: 50_000, // $500
+    currencyCode: "USD",
+  };
+  const now = new Date("2026-05-26T00:00:00.000Z");
+
+  const mkOrder = (
+    overrides: Partial<ShopifyOrder> = {},
+  ): ShopifyOrder => ({
+    ...buildOrder("gid://shopify/Order/777"),
+    ...overrides,
+  });
+
+  it("deny when the order is already fully refunded", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({ financialStatus: "refunded" }),
+      policy,
+      history: emptyHistory,
+      now,
+    });
+    expect(d.recommendation).toBe("deny");
+    expect(d.amount).toBeNull();
+    expect(d.reasoning).toContain("already fully refunded");
+  });
+
+  it("deny when the package was delivered > 30 days ago (return window expired)", () => {
+    const longAgo = new Date("2025-12-01T00:00:00.000Z");
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        fulfillmentStatus: "delivered",
+        fulfillments: [
+          {
+            ...buildOrder("x").fulfillments[0]!,
+            deliveredAt: longAgo,
+          },
+        ],
+      }),
+      policy,
+      history: emptyHistory,
+      now,
+    });
+    expect(d.recommendation).toBe("deny");
+    expect(d.reasoning).toContain("Return window expired");
+  });
+
+  it("full_refund when paid, within window, amount under askAbove", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "19.99", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: emptyHistory,
+      now,
+    });
+    expect(d.recommendation).toBe("full_refund");
+    expect(d.amount).toEqual({ amount: "19.99", currencyCode: "USD" });
+    expect(d.riskFlags).toEqual([]);
+  });
+
+  it("investigate when amount exceeds the hard cap (denyAbove)", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "999.99", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: emptyHistory,
+      now,
+    });
+    expect(d.recommendation).toBe("investigate");
+    expect(d.amount).toEqual({ amount: "999.99", currencyCode: "USD" });
+    expect(d.reasoning).toContain("hard cap");
+  });
+
+  it("investigate when the order currency differs from policy currency (no FX)", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "20.00", currencyCode: "EUR" },
+        fulfillments: [],
+      }),
+      policy, // USD policy
+      history: emptyHistory,
+      now,
+    });
+    expect(d.recommendation).toBe("investigate");
+    expect(d.amount).toEqual({ amount: "20.00", currencyCode: "EUR" });
+    expect(d.reasoning).toContain("differs from policy currency");
+  });
+
+  it("flags first_order when customer has ordersCount === 1", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "20.00", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: {
+        ordersCount: 1,
+        refundedOrdersCount: 0,
+        totalRefundedAmount: null,
+        firstOrderAt: now,
+      },
+      now,
+    });
+    expect(d.recommendation).toBe("full_refund");
+    expect(d.riskFlags).toContain("first_order");
+    expect(d.riskFlags).toContain("new_customer");
+  });
+
+  it("flags frequent_refunder when > 30% of past orders had refunds", () => {
+    const d = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "20.00", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: {
+        ordersCount: 5,
+        refundedOrdersCount: 3, // 60%
+        totalRefundedAmount: { amount: "150.00", currencyCode: "USD" },
+        firstOrderAt: new Date("2024-01-01T00:00:00.000Z"),
+      },
+      now,
+    });
+    expect(d.recommendation).toBe("full_refund");
+    expect(d.riskFlags).toContain("frequent_refunder");
+    expect(d.riskFlags).not.toContain("new_customer");
+  });
+
+  it("flags high_ltv only when refund-history currency matches the policy currency", () => {
+    // Match → flag fires.
+    const matched = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "20.00", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: {
+        ordersCount: 10,
+        refundedOrdersCount: 2,
+        totalRefundedAmount: { amount: "1200.00", currencyCode: "USD" },
+        firstOrderAt: new Date("2023-01-01T00:00:00.000Z"),
+      },
+      now,
+    });
+    expect(matched.riskFlags).toContain("high_ltv");
+
+    // Mismatch → flag does NOT fire (we don't invent an FX rate).
+    const mismatched = computeRefundRecommendation({
+      order: mkOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "20.00", currencyCode: "USD" },
+        fulfillments: [],
+      }),
+      policy,
+      history: {
+        ordersCount: 10,
+        refundedOrdersCount: 2,
+        totalRefundedAmount: { amount: "1200.00", currencyCode: "EUR" },
+        firstOrderAt: new Date("2023-01-01T00:00:00.000Z"),
+      },
+      now,
+    });
+    expect(mismatched.riskFlags).not.toContain("high_ltv");
+  });
+});
+
+describe("refund.recommend — tool wire-up", () => {
+  const refundTenantId = TenantId("tenant-rec-1");
+  const refundCtx: ToolContext = {
+    tenantId: refundTenantId,
+    caseId: CaseId("c-rec-1"),
+    agentId: AgentId("refund-review-agent"),
+    callId: "call_1",
+    attemptNumber: 1,
+  };
+  const orderGid = OrderId("gid://shopify/Order/999");
+  const fixtureOrder = (overrides: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
+    ...buildOrder("gid://shopify/Order/999"),
+    id: orderGid,
+    financialStatus: "paid",
+    totalPrice: { amount: "19.99", currencyCode: "USD" },
+    fulfillments: [],
+    ...overrides,
+  });
+
+  const buildEnv = (order: ShopifyOrder, history?: CustomerRefundHistory) => {
+    const shopify = ShopifyServiceTest({
+      orders: new Map([[order.id, order]]),
+      ...(history && order.customerId
+        ? { customerRefundHistory: new Map([[order.customerId, history]]) }
+        : {}),
+    });
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [
+          refundTenantId,
+          new TenantSettings({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            retentionDays: 730,
+            supplierEscalationSheet: null,
+          }),
+        ],
+      ]),
+    });
+    return Layer.mergeAll(shopify, tenants);
+  };
+
+  it("happy path returns the discriminated recommendation + amount + risk flags", async () => {
+    const env = buildEnv(
+      fixtureOrder({
+        financialStatus: "paid",
+        totalPrice: { amount: "19.99", currencyCode: "USD" },
+      }),
+      {
+        ordersCount: 1,
+        refundedOrdersCount: 0,
+        totalRefundedAmount: null,
+        firstOrderAt: new Date(),
+      },
+    );
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyRefundRecommend.execute(
+          { orderId: orderGid } as never,
+          refundCtx,
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(["full_refund", "investigate"]).toContain(result["recommendation"]);
+    expect(result["amount"]).toEqual({ amount: "19.99", currencyCode: "USD" });
+    expect(Array.isArray(result["riskFlags"])).toBe(true);
+  });
+
+  it("falls back to zero history when customer lookup fails", async () => {
+    // Order has a customerId, but the Test layer has no history fixture
+    // for that id → default impl returns the zero history → tool still
+    // succeeds.
+    const env = buildEnv(fixtureOrder());
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyRefundRecommend.execute(
+          { orderId: orderGid } as never,
+          refundCtx,
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it("declares the read-only surface (no scopes / risk read / allow)", () => {
+    expect(shopifyRefundRecommend.name).toBe("refund.recommend");
+    expect(shopifyRefundRecommend.risk).toBe("read");
+    expect(shopifyRefundRecommend.defaultPermission).toBe("allow");
+    expect(shopifyRefundRecommend.sideEffectClass).toBe("none");
+    expect(shopifyRefundRecommend.requiredConnectorScopes).toBeUndefined();
   });
 });

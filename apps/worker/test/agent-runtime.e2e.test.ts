@@ -24,6 +24,7 @@ import {
   caseUpdateStatus,
   conversationReply,
   shopifyRefundCreate,
+  shopifyRefundRecommend,
   shopifyGetCustomer,
   shopifyGetOrder,
   supplierAddSheetRow,
@@ -1396,6 +1397,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -1498,6 +1500,180 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "tool.invoked",
       "llm.decision",
     ]);
+  });
+
+  // ----------------------------------------------------------------
+  // Refund-review PATH B with `refund.recommend` in the chain. The
+  // recommendation runs BEFORE conversation.reply (so the operator
+  // approving the draft sees the structured assessment alongside).
+  // Asserts both tool.invoked rows in order.
+  // ----------------------------------------------------------------
+  it("refund-review PATH B calls refund.recommend before conversation.reply", async () => {
+    const orderId = OrderId("gid://shopify/Order/88001");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#8001",
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/555"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      // $20 — inside the default policy's ask zone.
+      totalPrice: { amount: "20.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Mug",
+          quantity: 1,
+          sku: "MUG-01",
+          variantTitle: null,
+        },
+      ],
+      fulfillments: [],
+      createdAt: new Date("2026-05-20T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-21T00:00:00.000Z"),
+    };
+
+    // Script: triage classifies + hands off → refund-review fetches
+    // the order → calls refund.recommend → drafts conversation.reply
+    // → reply parks for approval.
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "refund_request",
+          identifiedOrderId: orderId,
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "refund-review-agent",
+          reason: "refund_request",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "refund.recommend",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c4",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-refund-b",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "Thanks for your refund request on order #8001. Based on the order state, we'd like to offer a full refund — pending confirmation from our team.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "refund-reply-8001",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, refundReviewAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        trackingLookup as never,
+        shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Refund for #8001",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-refund-b" as never,
+              messageId: "msg-8001",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Refund for #8001",
+              bodyText: `I'd like a refund on order ${orderId}.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const entries = yield* audit.forCase(created.id);
+          return { result, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+
+    // Both refund.recommend AND shopify.get_order ran (auto-allow); the
+    // gated conversation.reply parked for approval.
+    const tools = out.entries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as Record<string, unknown>)["tool"]);
+    expect(tools).toContain("shopify.get_order");
+    expect(tools).toContain("refund.recommend");
+    // conversation.reply parked — no tool.invoked row for it.
+    expect(tools).not.toContain("conversation.reply");
+
+    // The refund.recommend audit row carries the recommendation in details.
+    const recommendEntry = out.entries.find(
+      (e) =>
+        e.action === "tool.invoked" &&
+        (e.details as Record<string, unknown>)["tool"] === "refund.recommend",
+    );
+    expect(recommendEntry).toBeDefined();
   });
 
   // ----------------------------------------------------------------
@@ -1993,6 +2169,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -2199,6 +2376,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -2604,6 +2782,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
         conversationReply as never,
       ]),
       PermissionServiceLive.pipe(

@@ -25,6 +25,7 @@ import {
 import {
   ShopifyCredentialStore,
   ShopifyService,
+  type CustomerRefundHistory,
   type ShopifyCredentials,
   type RefundOrderInput,
 } from "@support-agent/services";
@@ -429,6 +430,36 @@ const SEARCH_ORDER_BY_NAME_QUERY = `
   }
 `;
 
+// Aggregate refund history for a customer. Wide enough to catch power
+// users (first 50 orders); narrow enough that one HTTP request covers
+// the aggregation client-side. Each order is shallowly hydrated — we
+// only need `createdAt` for the first-order timestamp and `refunds[]`
+// to count + sum.
+const GET_CUSTOMER_REFUND_HISTORY_QUERY = `
+  query GetCustomerRefundHistory($id: ID!) {
+    customer(id: $id) {
+      id
+      ordersCount {
+        count
+      }
+      orders(first: 50, sortKey: CREATED_AT) {
+        edges {
+          node {
+            id
+            createdAt
+            refunds {
+              id
+              totalRefundedSet {
+                shopMoney { amount currencyCode }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 const GET_FULFILLMENT_QUERY = `
   query GetFulfillments($id: ID!) {
     order(id: $id) {
@@ -743,6 +774,88 @@ export const ShopifyServiceLive = Layer.effect(
             };
             return result;
           }),
+        ),
+
+      getCustomerRefundHistory: (tenantId, customerId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{
+            customer: {
+              ordersCount?: { count?: number };
+              orders: {
+                edges: ReadonlyArray<{
+                  node: {
+                    id: string;
+                    createdAt: string;
+                    refunds: ReadonlyArray<{
+                      id: string;
+                      totalRefundedSet?: {
+                        shopMoney: { amount: string; currencyCode: string };
+                      };
+                    }>;
+                  };
+                }>;
+              };
+            } | null;
+          }>(http, creds, tenantId, GET_CUSTOMER_REFUND_HISTORY_QUERY, {
+            id: customerGid(customerId),
+          }).pipe(
+            Effect.flatMap((data) => {
+              if (!data.customer) {
+                return Effect.fail(new CustomerNotFound({ query: customerId }));
+              }
+              const edges = data.customer.orders.edges;
+              // Walk all orders once: count refunded orders, sum refund
+              // amounts, and find the earliest createdAt. The currency
+              // is taken from the FIRST refund we see — never invented.
+              // Customers whose refunds span multiple currencies are
+              // rare in practice; the flag math only needs a single
+              // representative currency to compare against the policy.
+              let refundedOrdersCount = 0;
+              let firstOrderAtMs = Number.POSITIVE_INFINITY;
+              let sumCents = 0;
+              let refundCurrency: string | null = null;
+              for (const { node } of edges) {
+                const created = new Date(node.createdAt).getTime();
+                if (Number.isFinite(created) && created < firstOrderAtMs) {
+                  firstOrderAtMs = created;
+                }
+                if (node.refunds.length > 0) {
+                  refundedOrdersCount += 1;
+                  for (const r of node.refunds) {
+                    const money = r.totalRefundedSet?.shopMoney;
+                    if (!money) continue;
+                    const amount = Number.parseFloat(money.amount);
+                    if (Number.isFinite(amount)) {
+                      sumCents += Math.round(amount * 100);
+                    }
+                    if (refundCurrency === null) {
+                      refundCurrency = money.currencyCode;
+                    }
+                  }
+                }
+              }
+              const result: CustomerRefundHistory = {
+                // Prefer the API-reported total when available — it
+                // covers orders beyond the first 50; otherwise fall
+                // back to the edge count.
+                ordersCount:
+                  data.customer.ordersCount?.count ?? edges.length,
+                refundedOrdersCount,
+                totalRefundedAmount:
+                  refundCurrency !== null
+                    ? {
+                        amount: (sumCents / 100).toFixed(2),
+                        currencyCode: refundCurrency,
+                      }
+                    : null,
+                firstOrderAt:
+                  firstOrderAtMs === Number.POSITIVE_INFINITY
+                    ? null
+                    : new Date(firstOrderAtMs),
+              };
+              return Effect.succeed(result);
+            }),
+          ),
         ),
     });
   }),
