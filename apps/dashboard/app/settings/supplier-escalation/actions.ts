@@ -7,6 +7,7 @@ import { DbClientLive, TenantRepositoryLive } from "@support-agent/db";
 import { TenantRepository } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import { getTenantId } from "@/lib/tenant";
+import { extractGoogleSheetsSpreadsheetId } from "./sheet-url";
 
 const tenantRepoLayer = () => {
   const databaseUrl = process.env["DATABASE_URL"];
@@ -28,18 +29,22 @@ export const saveSupplierEscalationAction = async (
   const tenantId = await getTenantId();
   const tid = TenantId(tenantId);
 
-  const spreadsheetIdRaw = formData.get("spreadsheetId");
+  const sheetUrlRaw =
+    formData.get("sheetUrl") ?? formData.get("spreadsheetId");
   const rangeRaw = formData.get("range");
   const descriptionRaw = formData.get("description");
 
-  const spreadsheetId =
-    typeof spreadsheetIdRaw === "string" ? spreadsheetIdRaw.trim() : "";
+  const sheetUrl = typeof sheetUrlRaw === "string" ? sheetUrlRaw.trim() : "";
+  const spreadsheetId = extractGoogleSheetsSpreadsheetId(sheetUrl);
   const range = typeof rangeRaw === "string" ? rangeRaw.trim() : "";
   const description =
     typeof descriptionRaw === "string" ? descriptionRaw.trim() : "";
 
-  if (spreadsheetId.length === 0) {
-    redirect("/settings/supplier-escalation?error=missing_spreadsheet_id");
+  if (sheetUrl.length === 0) {
+    redirect("/settings/supplier-escalation?error=missing_sheet_url");
+  }
+  if (!spreadsheetId) {
+    redirect("/settings/supplier-escalation?error=bad_sheet_url");
   }
   if (!RANGE_RE.test(range)) {
     redirect("/settings/supplier-escalation?error=bad_range");

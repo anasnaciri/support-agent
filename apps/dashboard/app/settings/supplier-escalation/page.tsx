@@ -23,6 +23,7 @@ import {
   clearSupplierEscalationAction,
   saveSupplierEscalationAction,
 } from "./actions";
+import { googleSheetsUrlForSpreadsheetId } from "./sheet-url";
 
 const tenantRepoLayer = () => {
   const databaseUrl = process.env["DATABASE_URL"];
@@ -67,6 +68,9 @@ export default async function SupplierEscalationPage({
 }: PageProps) {
   const tenantId = await getTenantId();
   const sheet = await loadSheet(tenantId);
+  const sheetUrl = sheet
+    ? googleSheetsUrlForSpreadsheetId(sheet.spreadsheetId)
+    : "";
   const params = (await searchParams) ?? {};
 
   const savedBanner =
@@ -121,10 +125,20 @@ export default async function SupplierEscalationPage({
           </AlertDescription>
         </Alert>
       ) : null}
-      {errorRaw === "missing_spreadsheet_id" ? (
+      {errorRaw === "missing_sheet_url" ||
+      errorRaw === "missing_spreadsheet_id" ? (
+        <Alert variant="warning">
+          <AlertDescription>Google Sheets URL is required.</AlertDescription>
+        </Alert>
+      ) : null}
+      {errorRaw === "bad_sheet_url" ? (
         <Alert variant="warning">
           <AlertDescription>
-            Spreadsheet ID is required.
+            Paste the URL from a Google Sheet, for example{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+              https://docs.google.com/spreadsheets/d/.../edit
+            </code>
+            .
           </AlertDescription>
         </Alert>
       ) : null}
@@ -150,23 +164,24 @@ export default async function SupplierEscalationPage({
         <CardContent className="pt-0">
           <form action={saveSupplierEscalationAction} className="space-y-4">
             <div className="grid gap-2 sm:max-w-2xl">
-              <Label htmlFor="spreadsheetId">Spreadsheet ID</Label>
+              <Label htmlFor="sheetUrl">Google Sheets URL</Label>
               <Input
-                id="spreadsheetId"
-                name="spreadsheetId"
+                id="sheetUrl"
+                name="sheetUrl"
                 type="text"
-                inputMode="text"
+                inputMode="url"
                 autoComplete="off"
-                defaultValue={sheet?.spreadsheetId ?? ""}
-                placeholder="1AbC...xYz"
+                defaultValue={sheetUrl}
+                placeholder="https://docs.google.com/spreadsheets/d/.../edit"
                 required
-                aria-describedby="spreadsheet-hint"
+                aria-describedby="sheet-url-hint"
               />
               <p
-                id="spreadsheet-hint"
+                id="sheet-url-hint"
                 className="text-xs text-muted-foreground"
               >
-                Find it in the Sheet URL: <code>docs.google.com/spreadsheets/d/<strong>{"<this part>"}</strong>/edit</code>.
+                Open the Google Sheet and paste the link from the browser
+                address bar. The platform extracts the sheet ID automatically.
               </p>
             </div>
 
