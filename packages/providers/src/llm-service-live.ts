@@ -323,6 +323,7 @@ export const LLMServiceLive = Layer.effect(
           const usage = u
             ? {
                 model: req.model,
+                provider: cred.provider,
                 inputTokens:
                   numOrNull(u["inputTokens"]) ??
                   numOrNull(u["promptTokens"]),

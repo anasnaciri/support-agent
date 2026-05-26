@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   Banknote,
+  BarChart3,
   Bot,
   ClipboardList,
   KeyRound,
@@ -52,6 +53,13 @@ const TILES = [
       "Amount thresholds that gate refund.create — auto-allow small refunds, ask on mid-range, deny above the cap.",
   },
   {
+    href: "/settings/usage",
+    icon: BarChart3,
+    title: "Usage",
+    description:
+      "Tenant-wide LLM tokens by day and model with estimated OpenRouter spend.",
+  },
+  {
     href: "/settings/supplier-escalation",
     icon: ClipboardList,
     title: "Supplier escalation",
@@ -66,6 +74,7 @@ export default function SettingsLanding() {
     if (href === "/settings/permissions") return String(tools.length);
     if (href === "/settings/llm") return "BYOK";
     if (href === "/settings/refund-policy") return "$";
+    if (href === "/settings/usage") return "LLM";
     if (href === "/settings/supplier-escalation") return "📋";
     return "—";
   };

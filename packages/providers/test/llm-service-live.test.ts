@@ -258,6 +258,7 @@ describe("LLMServiceLive — decision mapping", () => {
     if (exit.value.type === "final_message") {
       expect(exit.value.usage).toEqual({
         model: baseRequest.model,
+        provider: "openrouter",
         inputTokens: 123,
         outputTokens: 45,
       });

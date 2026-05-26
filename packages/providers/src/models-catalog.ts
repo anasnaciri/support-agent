@@ -20,6 +20,10 @@ export interface ModelEntry {
    */
   readonly family: string;
   readonly contextLength?: number;
+  readonly pricing?: {
+    readonly inputUsdPerToken: number;
+    readonly outputUsdPerToken: number;
+  };
 }
 
 export interface CatalogResult {
@@ -118,14 +122,35 @@ const sortAndNormalize = (
 // OpenRouter — public catalog, no auth required
 // ============================================================
 
+interface OpenRouterPricing {
+  readonly prompt?: string;
+  readonly completion?: string;
+}
+
 interface OpenRouterModelResponse {
   readonly data?: ReadonlyArray<{
     readonly id?: string;
     readonly name?: string;
     readonly context_length?: number;
+    readonly pricing?: OpenRouterPricing;
     readonly supported_parameters?: ReadonlyArray<string>;
   }>;
 }
+
+const parseOpenRouterPricing = (
+  pricing: OpenRouterPricing | undefined,
+): ModelEntry["pricing"] | undefined => {
+  if (!pricing) return undefined;
+  const input = Number.parseFloat(String(pricing.prompt ?? ""));
+  const output = Number.parseFloat(String(pricing.completion ?? ""));
+  if (!Number.isFinite(input) || !Number.isFinite(output)) {
+    return undefined;
+  }
+  return {
+    inputUsdPerToken: input,
+    outputUsdPerToken: output,
+  };
+};
 
 export const fetchOpenRouterModels = async (
   opts: { readonly baseURL?: string } = {},
@@ -161,6 +186,7 @@ export const fetchOpenRouterModels = async (
       ) {
         continue;
       }
+      const pricing = parseOpenRouterPricing(m.pricing);
       const entry: ModelEntry = {
         id: m.id,
         name: m.name ?? m.id,
@@ -168,6 +194,7 @@ export const fetchOpenRouterModels = async (
         ...(m.context_length !== undefined
           ? { contextLength: m.context_length }
           : {}),
+        ...(pricing ? { pricing } : {}),
       };
       entries.push(entry);
     }

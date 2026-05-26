@@ -55,6 +55,7 @@ export interface ToolCallingRequest {
  */
 export interface LLMUsage {
   readonly model: string;
+  readonly provider?: "openrouter" | "anthropic" | "openai";
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
 }

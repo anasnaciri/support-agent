@@ -38,6 +38,10 @@ describe("models-catalog", () => {
               name: "Claude Opus 4.7",
               context_length: 200_000,
               supported_parameters: ["tools", "temperature"],
+              pricing: {
+                prompt: "0.000003",
+                completion: "0.000015",
+              },
             },
             {
               id: "google/gemini-2.5-flash",
@@ -62,6 +66,10 @@ describe("models-catalog", () => {
       expect(families).toEqual(["Claude", "Gemini", "GPT"]);
       // First entry by sort order is Claude → 200K context.
       expect(result.entries[0]?.contextLength).toBe(200_000);
+      expect(result.entries[0]?.pricing).toEqual({
+        inputUsdPerToken: 0.000003,
+        outputUsdPerToken: 0.000015,
+      });
     });
 
     it("filters out models that do not support tool calling", async () => {

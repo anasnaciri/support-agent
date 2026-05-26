@@ -585,12 +585,15 @@ export const AgentRuntimeDefault = Layer.effect(
           // Test layers (Scripted, FromFn) leave `usage` undefined →
           // we just don't include the field; existing tests that assert
           // exact details shapes still pass.
-          const usageDetails = decision.usage
-            ? {
-                model: decision.usage.model,
-                inputTokens: decision.usage.inputTokens,
-                outputTokens: decision.usage.outputTokens,
-              }
+              const usageDetails = decision.usage
+                ? {
+                    model: decision.usage.model,
+                    ...(decision.usage.provider
+                      ? { provider: decision.usage.provider }
+                      : {}),
+                    inputTokens: decision.usage.inputTokens,
+                    outputTokens: decision.usage.outputTokens,
+                  }
             : null;
           yield* audit.record({
             tenantId: current.tenantId,
