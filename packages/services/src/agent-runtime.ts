@@ -867,6 +867,10 @@ export const AgentRuntimeDefault = Layer.effect(
           const exec = yield* tx.run(
             Effect.gen(function* () {
               const result = yield* toolEffect.pipe(Effect.either);
+              const outputDetails =
+                tool.name === "refund.recommend" && result._tag === "Right"
+                  ? { output: result.right }
+                  : {};
               yield* audit.record({
                 tenantId: current.tenantId,
                 caseId: current.id,
@@ -876,6 +880,7 @@ export const AgentRuntimeDefault = Layer.effect(
                   tool: tool.name,
                   callId: decision.callId,
                   ok: result._tag === "Right",
+                  ...outputDetails,
                 },
               });
               return result;

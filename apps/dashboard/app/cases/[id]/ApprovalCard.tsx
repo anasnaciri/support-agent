@@ -12,7 +12,11 @@ import { Separator } from "@/components/ui/separator";
 import { riskVariant } from "@/lib/status-variants";
 
 import { approveAction, rejectAction } from "../../approvals/[id]/actions";
-import type { RefundRecommendationSummary } from "./page";
+import {
+  RECOMMENDATION_LABEL,
+  recommendationVariant,
+  type RefundRecommendationSummary,
+} from "./refund-recommendation";
 
 interface Props {
   readonly approval: ApprovalRow;
@@ -24,24 +28,6 @@ interface Props {
    */
   readonly refundRecommendation?: RefundRecommendationSummary | null;
 }
-
-const RECOMMENDATION_LABEL: Readonly<
-  Record<RefundRecommendationSummary["recommendation"], string>
-> = {
-  full_refund: "Full refund",
-  partial_refund: "Partial refund",
-  deny: "Deny",
-  investigate: "Investigate",
-};
-
-const recommendationVariant = (
-  r: RefundRecommendationSummary["recommendation"],
-): "success" | "warning" | "destructive" | "outline" => {
-  if (r === "full_refund") return "success";
-  if (r === "partial_refund") return "outline";
-  if (r === "investigate") return "warning";
-  return "destructive";
-};
 
 export const ApprovalCard = ({
   approval,

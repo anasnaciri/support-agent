@@ -28,6 +28,13 @@ import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { takeOverAction } from "./actions";
+import {
+  RECOMMENDATION_LABEL,
+  extractRefundRecommendation,
+  recommendationVariant,
+  refundRecommendationFromEntry,
+  type RefundRecommendationSummary,
+} from "./refund-recommendation";
 
 interface Params {
   readonly params: Promise<{
@@ -160,61 +167,6 @@ const actorLabel = (entry: AuditLogRow): string => {
  * Returns null when no usage data is present, so the UI can decide
  * whether to render the rollup at all.
  */
-export interface RefundRecommendationSummary {
-  readonly recommendation: "full_refund" | "partial_refund" | "deny" | "investigate";
-  readonly amount: { readonly amount: string; readonly currencyCode: string } | null;
-  readonly reasoning: string;
-  readonly riskFlags: ReadonlyArray<string>;
-}
-
-/**
- * Pull the most recent `refund.recommend` tool.invoked entry from the
- * audit log and return its structured output for rendering on the
- * approval card. Returns null when there's no recommendation row.
- */
-const extractRefundRecommendation = (
-  entries: ReadonlyArray<AuditLogRow>,
-): RefundRecommendationSummary | null => {
-  // Walk newest → oldest so re-runs surface the latest recommendation.
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i]!;
-    if (e.action !== "tool.invoked") continue;
-    const details = detailRecord(e.details);
-    if (!details || details["tool"] !== "refund.recommend") continue;
-    const output = detailRecord(details["output"]);
-    if (!output) continue;
-    const rec = output["recommendation"];
-    if (
-      rec !== "full_refund" &&
-      rec !== "partial_refund" &&
-      rec !== "deny" &&
-      rec !== "investigate"
-    ) {
-      continue;
-    }
-    const reasoning =
-      typeof output["reasoning"] === "string"
-        ? (output["reasoning"] as string)
-        : "";
-    const flagsRaw = output["riskFlags"];
-    const riskFlags = Array.isArray(flagsRaw)
-      ? flagsRaw.filter((f): f is string => typeof f === "string")
-      : [];
-    const amountRaw = detailRecord(output["amount"]);
-    const amount =
-      amountRaw &&
-      typeof amountRaw["amount"] === "string" &&
-      typeof amountRaw["currencyCode"] === "string"
-        ? {
-            amount: amountRaw["amount"] as string,
-            currencyCode: amountRaw["currencyCode"] as string,
-          }
-        : null;
-    return { recommendation: rec, amount, reasoning, riskFlags };
-  }
-  return null;
-};
-
 const sumCaseTokens = (
   entries: ReadonlyArray<AuditLogRow>,
 ): { input: number; output: number; total: number } | null => {
@@ -249,6 +201,12 @@ type SimplifiedTimelineItem =
       readonly id: string;
       readonly approval: ApprovalRow;
       readonly occurredAt: Date;
+    }
+  | {
+      readonly kind: "refundRecommendation";
+      readonly id: string;
+      readonly recommendation: RefundRecommendationSummary;
+      readonly occurredAt: Date;
     };
 
 const simplifiedEmailEvent = (
@@ -282,6 +240,41 @@ const simplifiedEmailEvent = (
 
   return null;
 };
+
+const RefundRecommendationBlock = ({
+  recommendation,
+}: {
+  readonly recommendation: RefundRecommendationSummary;
+}) => (
+  <div className="space-y-2 text-sm">
+    <div className="flex flex-wrap items-center gap-2">
+      <Badge variant={recommendationVariant(recommendation.recommendation)}>
+        {RECOMMENDATION_LABEL[recommendation.recommendation]}
+      </Badge>
+      {recommendation.amount ? (
+        <span className="font-mono text-xs text-muted-foreground">
+          {recommendation.amount.amount} {recommendation.amount.currencyCode}
+        </span>
+      ) : null}
+    </div>
+    {recommendation.reasoning ? (
+      <p className="text-muted-foreground">{recommendation.reasoning}</p>
+    ) : null}
+    {recommendation.riskFlags.length > 0 ? (
+      <div className="flex flex-wrap gap-1.5">
+        {recommendation.riskFlags.map((flag) => (
+          <Badge
+            key={flag}
+            variant="outline"
+            className="font-mono text-[10px] uppercase tracking-wider"
+          >
+            {flag}
+          </Badge>
+        ))}
+      </div>
+    ) : null}
+  </div>
+);
 
 export default async function CaseDetailPage({ params, searchParams }: Params) {
   const { id } = await params;
@@ -345,10 +338,26 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     const search = query.toString();
     return search ? `/cases/${caseRow.id}?${search}` : `/cases/${caseRow.id}`;
   };
-  const simplifiedTimelineItems = [
+  const recommendationTimelineItems: SimplifiedTimelineItem[] = entries.flatMap(
+    (entry) => {
+      const recommendation = refundRecommendationFromEntry(entry);
+      return recommendation
+        ? [
+            {
+              kind: "refundRecommendation" as const,
+              id: `refund-recommendation-${entry.id}`,
+              recommendation,
+              occurredAt: entry.occurredAt,
+            },
+          ]
+        : [];
+    },
+  );
+  const simplifiedTimelineItems: SimplifiedTimelineItem[] = [
     ...entries
       .map((entry) => simplifiedEmailEvent(entry, customerEmail))
       .filter((item): item is SimplifiedTimelineItem => item !== null),
+    ...recommendationTimelineItems,
     ...allApprovals.map((approval) => ({
       kind: "approval" as const,
       id: `approval-${approval.id}`,
@@ -490,6 +499,19 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                             {formatDateTime(item.occurredAt)}
                           </div>
                         </CardContent>
+                      ) : item.kind === "refundRecommendation" ? (
+                        <CardContent className="space-y-3 p-4">
+                          <div className="font-medium text-sm">
+                            Refund recommendation
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Agent assessment ·{" "}
+                            {formatDateTime(item.occurredAt)}
+                          </div>
+                          <RefundRecommendationBlock
+                            recommendation={item.recommendation}
+                          />
+                        </CardContent>
                       ) : (
                         <CardContent className="space-y-3 p-4">
                           <div className="flex flex-wrap items-center gap-2">
@@ -573,17 +595,32 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               >
                 <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
                 <Card>
-                  <CardContent className="space-y-1.5 p-4">
-                    <div className="font-medium text-sm">{e.action}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {e.actorType}:{e.actorId} · {formatDateTime(e.occurredAt)}
-                    </div>
-                    {e.details ? (
-                      <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
-                        {JSON.stringify(e.details, null, 2)}
-                      </pre>
-                    ) : null}
-                  </CardContent>
+                  {refundRecommendationFromEntry(e) ? (
+                    <CardContent className="space-y-3 p-4">
+                      <div className="font-medium text-sm">
+                        Refund recommendation
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {e.actorType}:{e.actorId} · {formatDateTime(e.occurredAt)}
+                      </div>
+                      <RefundRecommendationBlock
+                        recommendation={refundRecommendationFromEntry(e)!}
+                      />
+                    </CardContent>
+                  ) : (
+                    <CardContent className="space-y-1.5 p-4">
+                      <div className="font-medium text-sm">{e.action}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {e.actorType}:{e.actorId} ·{" "}
+                        {formatDateTime(e.occurredAt)}
+                      </div>
+                      {e.details ? (
+                        <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
+                          {JSON.stringify(e.details, null, 2)}
+                        </pre>
+                      ) : null}
+                    </CardContent>
+                  )}
                 </Card>
               </li>
             ))}

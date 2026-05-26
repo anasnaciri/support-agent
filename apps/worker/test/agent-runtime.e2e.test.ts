@@ -1674,6 +1674,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         (e.details as Record<string, unknown>)["tool"] === "refund.recommend",
     );
     expect(recommendEntry).toBeDefined();
+    expect((recommendEntry!.details as Record<string, unknown>)["output"]).toMatchObject({
+      recommendation: "full_refund",
+      amount: { amount: "20.00", currencyCode: "USD" },
+      reasoning: expect.any(String),
+      riskFlags: expect.any(Array),
+    });
   });
 
   // ----------------------------------------------------------------
