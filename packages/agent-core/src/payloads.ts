@@ -74,6 +74,60 @@ export interface TrackingEvent {
   readonly location: string | null;
 }
 
+/**
+ * Normalised state from a tracking provider — discriminated union so
+ * the tool boundary can express both "we have live data" and "we have
+ * no upstream provider configured" without conflating them with an
+ * Effect failure.
+ *
+ * `kind: "live"` — an upstream provider (17track today) returned data.
+ *   `status` is the coarse delivery state derived from the provider's
+ *   carrier-specific events. `lastScan` is the most recent carrier
+ *   event (may be null if the provider hasn't seen any events yet).
+ *
+ * `kind: "no_provider"` — the platform has no upstream provider wired
+ *   up (env unset) OR the active provider doesn't cover this carrier.
+ *   The tool still returns a useful answer: the bare tracking number
+ *   plus a public tracking URL the customer can follow. Agent prompts
+ *   branch on `kind` to decide what to put in the reply.
+ *
+ * `trackingUrl` is always populated. For `live`, it points at the
+ * provider's deep link when available, otherwise a generic public
+ * lookup. For `no_provider`, it points at 17track's public web page
+ * (https://t.17track.net/en#nums=<num>) — that page accepts bare
+ * tracking numbers and auto-detects the carrier client-side.
+ */
+export type TrackingStatus =
+  | "in_transit"
+  | "delivered"
+  | "exception"
+  | "pending"
+  | "unknown";
+
+export interface TrackingScanEvent {
+  readonly occurredAt: Date;
+  readonly location: string | null;
+  readonly description: string;
+}
+
+export type TrackingLookup =
+  | {
+      readonly kind: "live";
+      readonly carrier: string;
+      readonly trackingNumber: string;
+      readonly status: TrackingStatus;
+      readonly lastScan: TrackingScanEvent | null;
+      readonly estimatedDeliveryAt: Date | null;
+      readonly trackingUrl: string;
+    }
+  | {
+      readonly kind: "no_provider";
+      readonly carrier: string;
+      readonly trackingNumber: string;
+      readonly trackingUrl: string;
+      readonly reason: "no_api_key" | "unsupported_carrier";
+    };
+
 export interface ProposedAction {
   readonly tool: string;
   readonly input: unknown;

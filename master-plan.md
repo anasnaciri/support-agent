@@ -1164,7 +1164,7 @@ POST   /cases/:id/retry                           { fromState? }      // re-run 
 POST   /webhooks/conversations/:provider/:tenantId (Gmail/Outlook/helpdesk/message connector callbacks)
 POST   /webhooks/shopify/:tenantId                (orders/customers/fulfillments)
 POST   /webhooks/shopify/compliance               (customers/data_request, customers/redact, shop/redact)
-POST   /webhooks/tracking/:tenantId               (Aftership/Easypost)
+POST   /webhooks/tracking/:tenantId               (Aftership/Easypost — proactive push, not used by 17track which is lookup-only)
 POST   /webhooks/slack/interactive                (Slack approval buttons)
 POST   /webhooks/email/approval                   (signed approval-link clicks)
 ```
@@ -2613,10 +2613,36 @@ Deliverable: policy is real, not theoretical.
 Deliverable: the agent handles three real categories end-to-end.
 
 - Agents: `missing-package-agent`, `damaged-product-agent`, `refund-review-agent`.
-- Tools: `supplier.add_sheet_row` (Google Sheets first-party plugin), `refund.recommend`, `refund.create`.
+- Tools: `supplier.add_sheet_row` (Google Sheets first-party plugin), `refund.recommend`, `refund.create`, `tracking.lookup`.
 - Evidence upload (object storage), photo handling in customer replies.
 - Timer service for follow-ups (`timer.expired` event).
 - Replay/test mode for agents against historical cases.
+
+#### TrackingService — design notes (locked in)
+
+The `TrackingService` Tag exposes one method — `lookup(tenantId, { carrier, trackingNumber })` — returning a normalized status payload. It is **read-only** and used purely on demand by the `tracking.lookup` tool when an agent has a tracking number in scope (typically right after a `shopify.get_order` returns fulfillments with carrier + numbers).
+
+The result is a discriminated union, **not** an Effect failure when the platform has no upstream provider configured:
+
+```ts
+type TrackingLookup =
+  | { kind: "live"; carrier: string; trackingNumber: string;
+      status: "in_transit" | "delivered" | "exception" | "pending" | "unknown";
+      lastScan: { occurredAt: Date; location: string | null; description: string } | null;
+      estimatedDeliveryAt: Date | null;
+      trackingUrl: string; }
+  | { kind: "no_provider"; carrier: string; trackingNumber: string;
+      trackingUrl: string; reason: "no_api_key" | "unsupported_carrier"; };
+```
+
+The `no_provider` branch is the **graceful degrade** path: when no upstream tracking provider is configured (no platform `SEVENTEENTRACK_API_KEY` set, or the carrier isn't covered by the active provider), the tool still returns a useful result — the bare tracking number plus a public tracking URL the customer can click. The agent's prompt has two branches: if `kind: "live"`, summarize the live status; if `kind: "no_provider"`, just include the URL in the reply ("Your tracking number is X — you can follow it here: <url>"). Carrier-side data is a quality improvement, not a hard dependency for the support flow.
+
+Two providers are envisioned, with very different deployment models:
+
+- **17track** — v1 Live impl. **Platform-managed credentials**: a single 17track API key held in env (`SEVENTEENTRACK_API_KEY`) and built into the Layer once at worker bootstrap. The merchant does NOT bring their own key, has no install flow, no `connector_connections` row, no `/settings/integrations` card. Cost rolls up against the platform's 17track subscription, not per-tenant billing. **Lookup-only — no webhook ingestion.** When `SEVENTEENTRACK_API_KEY` is unset, the worker boots with a fallback impl that returns `kind: "no_provider"` for every call — no env-var is *required* for the worker to start or for tests to pass. Proactive workflows (case wakes up on delivery / exception push) are deferred until there's an agent that consumes a `tracking.changed` event.
+- **Aftership / EasyPost** — later, per-tenant BYO credentials (new provider variant in `connector_connections`), `POST /webhooks/tracking/:tenantId` for proactive scan-event ingestion → `tracking.changed` domain event. The webhook path is reserved in §11 routing but stays dead until a proactive agent ships. Routing between 17track and Aftership/EasyPost is per-tenant policy: 17track is the default for every tenant; merchants on enterprise plans can opt into BYO Aftership/EasyPost for direct carrier data.
+
+This split is intentional: the no-onboarding-friction of platform-shared credentials matters more than carrier-direct data for the first tracking-heavy use case (where-is-my-order + missing-package). Master-plan §11 carries the webhook entry only on the Aftership/EasyPost row; the 17track integration has no inbound webhook route.
 
 ### Phase 6 — Provider abstraction in production (Weeks 13–14)
 

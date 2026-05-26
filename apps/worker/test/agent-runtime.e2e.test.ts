@@ -27,6 +27,7 @@ import {
   shopifyGetCustomer,
   shopifyGetOrder,
   supplierAddSheetRow,
+  trackingLookup,
 } from "@support-agent/tools";
 import {
   AgentRuntime,
@@ -48,6 +49,7 @@ import {
   SheetsServiceTest,
   ShopifyServiceTest,
   TenantAgentOverridesServiceTest,
+  TrackingServiceTest,
   TenantRepositoryTest,
   TenantSettings,
   TransactionRunnerPassthrough,
@@ -126,6 +128,7 @@ const tickEnv = Layer.mergeAll(
     caseUpdateContext as never,
     agentHandoff as never,
     shopifyGetOrder as never,
+    trackingLookup as never,
   ]),
   PermissionServiceDefault,
   LLMServiceScripted(triageScript),
@@ -368,6 +371,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         conversationReply as never,
       ]),
       PermissionServiceDefault,
@@ -493,6 +497,335 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(shopifyEntry?.actor.id).toBe(orderStatusAgent.id);
   });
 
+  // ----------------------------------------------------------------
+  // order-status-agent with `tracking.lookup` in the chain. The agent
+  // fetches the order, sees a tracking number, calls tracking.lookup
+  // (which TrackingServiceTest returns a synthetic "live" status for),
+  // stamps the result into case.context via case.update_context, then
+  // drafts the reply for approval.
+  // ----------------------------------------------------------------
+  it("order-status-agent enriches the reply with tracking.lookup + case.update_context when a tracking number is present", async () => {
+    const orderId = OrderId("gid://shopify/Order/77001");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7001",
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/700"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "59.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Coffee Beans",
+          quantity: 1,
+          sku: "BEAN-01",
+          variantTitle: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "in_transit",
+          trackingCompany: "UPS",
+          trackingNumbers: ["1Z777"],
+          trackingUrls: ["https://wwwapps.ups.com/tracking?t=1Z777"],
+          estimatedDeliveryAt: new Date("2026-05-25T00:00:00.000Z"),
+          deliveredAt: null,
+          createdAt: new Date("2026-05-22T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-23T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-05-22T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-23T00:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "where_is_order",
+          identifiedOrderId: orderId,
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "order-status-agent",
+          reason: "specialist owns where_is_order",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "tracking.lookup",
+        input: { trackingNumber: "1Z777", carrier: "UPS" },
+      },
+      {
+        type: "tool_call",
+        callId: "c4",
+        tool: "case.update_context",
+        input: {
+          extra: {
+            liveTrackingStatus: {
+              kind: "live",
+              status: "in_transit",
+            },
+          },
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c5",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-7001",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText:
+            "Order #7001 is in transit with UPS (last scan recorded in TEST). Estimated delivery 2026-05-26.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "order-status-reply-7001",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        trackingLookup as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      // Default TrackingServiceTest returns a deterministic "live"
+      // in_transit status (see services/src/tracking-service.ts).
+      TrackingServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is order #7001?",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-7001" as never,
+              messageId: "msg-7001",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is order #7001?",
+              bodyText: `Where is order ${orderId}?`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const entries = yield* audit.forCase(created.id);
+          return { result, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+
+    // Asserts the full chain was invoked: tracking.lookup ran, then
+    // case.update_context stamped the live status, then conversation.reply
+    // parked for approval (no tool.invoked row for it — ask short-circuits
+    // BEFORE execute).
+    const tools = out.entries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as Record<string, unknown>)["tool"]);
+    expect(tools).toContain("tracking.lookup");
+    expect(tools).toContain("case.update_context");
+    expect(tools).toContain("shopify.get_order");
+    expect(tools).not.toContain("conversation.reply");
+  });
+
+  // ----------------------------------------------------------------
+  // order-status-agent without a tracking number: the prompt branches
+  // explicitly skip tracking.lookup. Just shopify.get_order →
+  // conversation.reply.
+  // ----------------------------------------------------------------
+  it("order-status-agent skips tracking.lookup when the order has no tracking number", async () => {
+    const orderId = OrderId("gid://shopify/Order/77002");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7002",
+      email: "cust2@example.com",
+      customerId: CustomerId("gid://shopify/Customer/702"),
+      fulfillmentStatus: "unfulfilled",
+      financialStatus: "paid",
+      totalPrice: { amount: "29.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        { id: "li-1", title: "T-shirt", quantity: 1, sku: "TS-01", variantTitle: null },
+      ],
+      fulfillments: [], // no tracking number to look up
+      createdAt: new Date("2026-05-22T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-23T00:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "where_is_order",
+          identifiedOrderId: orderId,
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: { targetAgent: "order-status-agent", reason: "where_is_order" },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      // Per the prompt: no tracking number → skip tracking.lookup +
+      // case.update_context → straight to reply.
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-7002",
+          to: [{ name: null, email: "cust2@example.com" }],
+          subject: null,
+          bodyText:
+            "Order #7002 is paid but not yet shipped from our warehouse — you'll get a tracking update by email once it goes out.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "order-status-reply-7002",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        trackingLookup as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      TrackingServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is order #7002?",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-7002" as never,
+              messageId: "msg-7002",
+              from: { name: null, email: "cust2@example.com" },
+              to: [],
+              subject: "Re: Where is order #7002?",
+              bodyText: `Where is order ${orderId}?`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const entries = yield* audit.forCase(created.id);
+          return { result, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    const tools = out.entries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as Record<string, unknown>)["tool"]);
+    expect(tools).toContain("shopify.get_order");
+    expect(tools).not.toContain("tracking.lookup");
+  });
+
   it("audits a rejected handoff (target not in handoffs) and stays on the source agent", async () => {
     const rejectedScript: ReadonlyArray<LLMDecision> = [
       {
@@ -517,6 +850,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(rejectedScript),
@@ -814,6 +1148,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(continueScript),
@@ -896,6 +1231,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(triageScript),
@@ -1057,6 +1393,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
         conversationReply as never,
@@ -1262,6 +1599,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         conversationReply as never,
         // missing-package-agent declares supplier.add_sheet_row in its
@@ -1482,6 +1820,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         conversationReply as never,
         supplierAddSheetRow as never,
@@ -1651,6 +1990,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
         conversationReply as never,
@@ -1856,6 +2196,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
         conversationReply as never,
@@ -1952,6 +2293,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       llmCredentialMissingLayer,
@@ -2052,6 +2394,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       captureLlm,
@@ -2102,6 +2445,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
       ]),
       PermissionServiceDefault,
       captureLlm,
@@ -2257,6 +2601,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        trackingLookup as never,
         shopifyGetCustomer as never,
         shopifyRefundCreate as never,
         conversationReply as never,

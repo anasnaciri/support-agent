@@ -16,6 +16,7 @@ describe("order-status-agent config", () => {
     // It must not be able to hand off or transition status directly.
     expect(orderStatusAgent.tools).toEqual([
       "shopify.get_order",
+      "tracking.lookup",
       "case.update_context",
       "conversation.reply",
     ]);

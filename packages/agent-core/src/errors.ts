@@ -165,10 +165,37 @@ export type SheetsError =
   | SheetsAppendFailed
   | NetworkError;
 
+/**
+ * Errors raised by the `TrackingService` Live implementation. Note that
+ * "no upstream provider configured" is NOT an error — that case maps to
+ * `TrackingLookup.kind === "no_provider"` in the success channel so
+ * agents can branch on it in their prompt without dealing with a typed
+ * failure. The errors below are only for genuine provider problems
+ * (network, upstream 5xx, rate limit).
+ */
+export class TrackingProviderUnavailable extends Data.TaggedError(
+  "TrackingProviderUnavailable",
+)<{
+  readonly trackingNumber: string;
+  readonly message: string;
+}> {}
+
+export class TrackingProviderRateLimited extends Data.TaggedError(
+  "TrackingProviderRateLimited",
+)<{
+  readonly retryAfterMs: number;
+}> {}
+
+export type TrackingError =
+  | TrackingProviderUnavailable
+  | TrackingProviderRateLimited
+  | NetworkError;
+
 export type ToolError =
   | PermissionDenied
   | ToolOutputInvalid
   | NetworkError
   | LLMError
   | ShopifyError
-  | SheetsError;
+  | SheetsError
+  | TrackingError;

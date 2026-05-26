@@ -21,8 +21,11 @@ import {
   type ShopifyService,
   type SheetsService,
   type TenantRepository,
+  type TrackingService,
   type TransactionRunner,
   SheetsServiceTest,
+  TrackingConfig,
+  TrackingServiceNoProvider,
 } from "@support-agent/services";
 import { Effect } from "effect";
 import {
@@ -51,6 +54,7 @@ import {
   ShopifyHttpLive,
   ShopifyServiceLive,
   SheetsServiceLive,
+  TrackingServiceLive,
 } from "@support-agent/providers";
 import { makeQueue, type PgBoss } from "./queue.js";
 
@@ -74,6 +78,7 @@ export interface WorkerBootstrap {
     | ApprovalService
     | ShopifyService
     | SheetsService
+    | TrackingService
     | ConversationService
     | TenantRepository
     | TransactionRunner
@@ -262,6 +267,21 @@ export const buildWorker = async (
         )
       : SheetsServiceTest({});
 
+  // 17track tracking connector. Platform-managed credentials: a single
+  // env var (`SEVENTEENTRACK_API_KEY`) gates the Live layer. When unset
+  // the worker boots cleanly with the NoProvider fallback — every
+  // `tracking.lookup` returns `{ kind: "no_provider" }` so agents fall
+  // back to the public tracking URL in their replies. No per-tenant
+  // connector row, no install flow.
+  const trackingApiKey = process.env["SEVENTEENTRACK_API_KEY"];
+  const tracking = trackingApiKey
+    ? TrackingServiceLive.pipe(
+        Layer.provide(
+          Layer.succeed(TrackingConfig, { apiKey: trackingApiKey }),
+        ),
+      )
+    : TrackingServiceNoProvider;
+
   // Permission policy with the conditional refund threshold + the
   // connector scope precheck layered on. Live impl consults
   // `TenantRepository` for `refundPolicy` and `ConnectorCredentialStore`
@@ -343,6 +363,7 @@ export const buildWorker = async (
     llm,
     shopify,
     sheets,
+    tracking,
     conversation,
     mail,
     approvalLinkLayer,
