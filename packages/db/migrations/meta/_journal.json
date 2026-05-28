@@ -64,6 +64,13 @@
       "when": 1779651527264,
       "tag": "0008_slippery_korath",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779811200000,
+      "tag": "0009_timers",
+      "breakpoints": true
     }
   ]
 }

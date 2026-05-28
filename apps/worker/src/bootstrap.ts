@@ -21,6 +21,7 @@ import {
   type ShopifyService,
   type SheetsService,
   type TenantRepository,
+  type TimerService,
   type TrackingService,
   type TransactionRunner,
   SheetsServiceTest,
@@ -39,6 +40,7 @@ import {
   LLMCredentialResolverLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
+  TimerServiceLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
 import { parseKey } from "@support-agent/services";
@@ -78,6 +80,7 @@ export interface WorkerBootstrap {
     | ApprovalService
     | ShopifyService
     | SheetsService
+    | TimerService
     | TrackingService
     | ConversationService
     | TenantRepository
@@ -168,6 +171,7 @@ export const buildWorker = async (
     ApprovalServiceLive,
     TransactionRunnerLive,
     TenantAgentOverridesServiceLive,
+    TimerServiceLive,
     // Exposed so workers like the retention-sweep cron can read
     // per-tenant settings (`retentionDays`). Other services that need
     // TenantRepository (PlatformMailService, PermissionServiceLive)

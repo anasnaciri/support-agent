@@ -4,7 +4,7 @@ import {
   defineTool,
   ToolOutputInvalid,
 } from "@support-agent/agent-core";
-import { ConversationService } from "@support-agent/services";
+import { ConversationService, TimerService } from "@support-agent/services";
 
 const Participant = Schema.Struct({
   name: Schema.NullOr(Schema.String),
@@ -37,6 +37,12 @@ const Output = Schema.Struct({
   sentAt: Schema.String,
 });
 
+const toToolOutputInvalid = (tag: string) =>
+  new ToolOutputInvalid({
+    tool: "conversation.ask_customer",
+    issues: [tag],
+  });
+
 export const conversationAskCustomer = defineTool({
   name: "conversation.ask_customer",
   description:
@@ -49,6 +55,7 @@ export const conversationAskCustomer = defineTool({
   idempotencyKey: (input) => input.draftId,
   execute: (input, ctx) =>
     Effect.gen(function* () {
+      const remindAfterHours = input.remindAfterHours;
       const convo = yield* ConversationService;
       const sent = yield* convo
         .askCustomer(ctx.tenantId, {
@@ -58,20 +65,24 @@ export const conversationAskCustomer = defineTool({
           bodyText: input.bodyText,
           bodyHtml: input.bodyHtml,
           attachments: input.attachments ?? [],
-          ...(input.remindAfterHours !== undefined
-            ? { remindAfterHours: input.remindAfterHours }
-            : {}),
+          ...(remindAfterHours !== undefined ? { remindAfterHours } : {}),
           draftId: input.draftId,
         })
-        .pipe(
-          Effect.mapError(
-            (e) =>
-              new ToolOutputInvalid({
-                tool: "conversation.ask_customer",
-                issues: [e._tag],
-              }),
-          ),
-        );
+        .pipe(Effect.mapError((e) => toToolOutputInvalid(e._tag)));
+      if (
+        remindAfterHours !== undefined &&
+        Number.isFinite(remindAfterHours) &&
+        remindAfterHours > 0
+      ) {
+        const timers = yield* TimerService;
+        yield* timers
+          .schedule({
+            caseId: ctx.caseId,
+            fireAt: new Date(Date.now() + remindAfterHours * 60 * 60 * 1000),
+            reason: "follow_up",
+          })
+          .pipe(Effect.mapError((e) => toToolOutputInvalid(e._tag)));
+      }
       return {
         id: sent.id,
         threadId: sent.threadId,

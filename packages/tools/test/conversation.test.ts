@@ -1,4 +1,4 @@
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
@@ -12,6 +12,9 @@ import {
 import {
   ConversationServiceTest,
   makeConversationServiceTest,
+  TimerService,
+  TimerServiceDbError,
+  TimerServiceTest,
 } from "@support-agent/services";
 import {
   conversationAskCustomer,
@@ -177,6 +180,82 @@ describe("conversation.ask_customer tool", () => {
     );
     expect(handle.sent).toHaveLength(1);
     expect(handle.sent[0]!.kind).toBe("askCustomer");
+  });
+
+  it("schedules a follow-up timer when remindAfterHours is present", async () => {
+    const { layer: conversationLayer, handle } = makeConversationServiceTest({});
+    const env = Layer.merge(conversationLayer, TimerServiceTest);
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* conversationAskCustomer.execute(
+            {
+              threadId: "thread-1",
+              to: [{ name: null, email: "customer@example.com" }],
+              subject: null,
+              bodyText: "Can you confirm the order number?",
+              bodyHtml: null,
+              remindAfterHours: 2,
+              draftId: "ask-reminder",
+            } as never,
+            baseCtx("c-reminder"),
+          );
+          const timers = yield* TimerService;
+          return yield* timers.fireDue(new Date(Date.now() + 3 * 60 * 60 * 1000));
+        }) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+    const due = result as ReadonlyArray<Record<string, unknown>>;
+    expect(handle.sent).toHaveLength(1);
+    expect(due).toHaveLength(1);
+    expect(due[0]!["caseId"]).toBe(CaseId("c-reminder"));
+    expect(due[0]!["reason"]).toBe("follow_up");
+  });
+
+  it("maps follow-up timer failures to ToolOutputInvalid", async () => {
+    const { layer: conversationLayer } = makeConversationServiceTest({});
+    const timerLayer = Layer.succeed(TimerService, {
+      schedule: () =>
+        Effect.fail(
+          new TimerServiceDbError({
+            operation: "schedule",
+            cause: new Error("db unavailable"),
+          }),
+        ),
+      cancelOpenForCase: () => Effect.succeed(0),
+      fireDue: () => Effect.succeed([]),
+    });
+    const env = Layer.merge(conversationLayer, timerLayer);
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationAskCustomer.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Can you confirm the order number?",
+            bodyHtml: null,
+            remindAfterHours: 2,
+            draftId: "ask-timer-failure",
+          } as never,
+          baseCtx("c-timer-failure"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("conversation.ask_customer");
+        expect(err.issues).toEqual(["TimerServiceDbError"]);
+      }
+    }
   });
 
   it("default permission is `allow` — clarifying questions are routine", () => {

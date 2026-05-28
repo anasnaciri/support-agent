@@ -58,6 +58,7 @@ export type DomainEvent =
   | {
       readonly type: "timer.expired";
       readonly caseId: CaseId;
+      readonly timerId: string;
       readonly reason: "follow_up" | "sla" | "escalation";
     }
   | {

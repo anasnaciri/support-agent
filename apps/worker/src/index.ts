@@ -15,6 +15,10 @@ import {
   RETENTION_SWEEP_QUEUE,
   registerRetentionSweep,
 } from "./retention-sweep-schedule.js";
+import {
+  TIMER_SWEEP_QUEUE,
+  registerTimerSweep,
+} from "./timer-sweep-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -97,6 +101,11 @@ const main = async (): Promise<void> => {
   await registerRetentionSweep({ boss, runtimeLayer });
   console.log(
     `[worker] scheduled retention-sweep cron on queue=${RETENTION_SWEEP_QUEUE}`,
+  );
+
+  await registerTimerSweep({ boss, runtimeLayer });
+  console.log(
+    `[worker] scheduled timer-sweep cron on queue=${TIMER_SWEEP_QUEUE}`,
   );
 
   const onShutdown = async (signal: NodeJS.Signals) => {

@@ -891,6 +891,26 @@ export const AgentRuntimeDefault = Layer.effect(
           );
 
           if (exec._tag === "Right") {
+            if (tool.name === "conversation.ask_customer") {
+              current = yield* tx.run(
+                Effect.gen(function* () {
+                  const updated = yield* cases.transitionStatus(
+                    current.id,
+                    "waiting_for_customer",
+                    { reason: "conversation.ask_customer" },
+                  );
+                  yield* audit.record({
+                    tenantId: updated.tenantId,
+                    caseId: updated.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "case.waiting_for_customer",
+                    details: { tool: tool.name, callId: decision.callId },
+                  });
+                  return updated;
+                }),
+              );
+              return { type: "PausedWaitingForCustomer" } as const;
+            }
             messages.push({
               role: "tool",
               toolCallId: decision.callId,

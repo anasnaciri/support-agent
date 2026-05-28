@@ -293,6 +293,33 @@ export type TenantAgentOverrideRow =
 export type TenantAgentOverrideInsert =
   typeof tenantAgentOverrides.$inferInsert;
 
+export const timers = pgTable(
+  "timers",
+  {
+    id: uuid("id").primaryKey(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    fireAt: timestamp("fire_at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    firedAt: timestamp("fired_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "timers_reason_check",
+      sql`${t.reason} IN ('follow_up','sla','escalation')`,
+    ),
+    index("timers_due_idx")
+      .on(t.fireAt)
+      .where(sql`${t.firedAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+    index("timers_case_idx").on(t.caseId, t.fireAt),
+  ],
+);
+
+export type TimerRow = typeof timers.$inferSelect;
+export type TimerInsert = typeof timers.$inferInsert;
+
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;
 export type CaseRow = typeof cases.$inferSelect;

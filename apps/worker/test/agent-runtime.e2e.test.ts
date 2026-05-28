@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  AgentId,
   AgentRegistryWith,
   CaseId,
   CustomerId,
@@ -8,6 +9,7 @@ import {
   PermissionServiceDefault,
   TenantId,
   ToolRegistryWith,
+  type AgentConfig,
   type DomainEvent,
   type LLMDecision,
   type ShopifyOrder,
@@ -22,6 +24,7 @@ import {
   agentHandoff,
   caseUpdateContext,
   caseUpdateStatus,
+  conversationAskCustomer,
   conversationReply,
   shopifyRefundCreate,
   shopifyRefundRecommend,
@@ -53,6 +56,7 @@ import {
   TrackingServiceTest,
   TenantRepositoryTest,
   TenantSettings,
+  TimerService,
   TransactionRunnerPassthrough,
   makeConversationServiceTest,
   makePlatformMailServiceTest,
@@ -496,6 +500,152 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         (e.details as Record<string, unknown>)["tool"] === "shopify.get_order",
     );
     expect(shopifyEntry?.actor.id).toBe(orderStatusAgent.id);
+  });
+
+  it("runs conversation.ask_customer, schedules a follow-up timer, and pauses for the customer", async () => {
+    const askingAgent: AgentConfig = {
+      id: AgentId("ask-customer-agent"),
+      name: "Ask Customer",
+      description: "Asks a clarifying question and waits for a reply.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Ask the customer for missing information.",
+      tools: ["conversation.ask_customer"],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "ask-0",
+        tool: "conversation.ask_customer",
+        input: {
+          threadId: "thread-x",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText: "Can you describe what was missing from the package?",
+          bodyHtml: null,
+          remindAfterHours: 72,
+          draftId: "ask-customer-thread-x",
+        },
+      },
+    ];
+    const scheduled: Array<{
+      readonly caseId: CaseId;
+      readonly fireAt: Date;
+      readonly reason: string;
+    }> = [];
+    const timerLayer = Layer.succeed(
+      TimerService,
+      TimerService.of({
+        schedule: (input) =>
+          Effect.sync(() => {
+            scheduled.push({
+              caseId: input.caseId,
+              fireAt: input.fireAt,
+              reason: input.reason,
+            });
+            return {
+              id: "timer-ask-1",
+              caseId: input.caseId,
+              fireAt: input.fireAt,
+              reason: input.reason,
+              firedAt: null,
+              cancelledAt: null,
+            };
+          }),
+        cancelOpenForCase: () => Effect.succeed(0),
+        fireDue: () => Effect.succeed([]),
+      }),
+    );
+    const { layer: conversationLayer, handle } =
+      makeConversationServiceTest({});
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([askingAgent]),
+      ToolRegistryWith([conversationAskCustomer as never]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      conversationLayer,
+      timerLayer,
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const horizonMs = 72 * 60 * 60 * 1000;
+    const before = Date.now();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: askingAgent.id,
+            subject: "Need more information",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Need more information",
+              bodyText: "Something is wrong with my order.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+    const after = Date.now();
+
+    expect(out.result.type).toBe("PausedWaitingForCustomer");
+    expect(out.fetched.status).toBe("waiting_for_customer");
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]!.kind).toBe("askCustomer");
+    expect(handle.sent[0]!.input.remindAfterHours).toBe(72);
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]!.caseId).toBe(out.fetched.id);
+    expect(scheduled[0]!.reason).toBe("follow_up");
+    expect(scheduled[0]!.fireAt.getTime()).toBeGreaterThanOrEqual(
+      before + horizonMs - 1_000,
+    );
+    expect(scheduled[0]!.fireAt.getTime()).toBeLessThanOrEqual(
+      after + horizonMs + 1_000,
+    );
+    expect(out.entries.map((e) => e.action)).toEqual([
+      "event.received",
+      "llm.decision",
+      "tool.invoked",
+      "case.waiting_for_customer",
+    ]);
   });
 
   // ----------------------------------------------------------------

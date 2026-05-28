@@ -8,6 +8,7 @@ import {
   cases,
   makeDbClient,
   tenants,
+  timers,
 } from "../src/index.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -26,11 +27,11 @@ describeIfDb("db schema (integration)", () => {
     expect(result[0]).toEqual({ x: 1 });
   });
 
-  it("has all five Phase 1 tables", async () => {
+  it("has core runtime tables", async () => {
     const rows = await client.sql<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name IN ('tenants','cases','case_state_transitions','audit_log','approvals')
+        AND table_name IN ('tenants','cases','case_state_transitions','audit_log','approvals','timers')
       ORDER BY table_name
     `;
     expect(rows.map((r) => r.table_name)).toEqual([
@@ -39,10 +40,11 @@ describeIfDb("db schema (integration)", () => {
       "case_state_transitions",
       "cases",
       "tenants",
+      "timers",
     ]);
   });
 
-  it("insert + read round-trip across all five tables", async () => {
+  it("insert + read round-trip across all six tables", async () => {
     const tenantId = randomUUID();
     const caseId = randomUUID();
     const approvalId = randomUUID();
@@ -79,6 +81,12 @@ describeIfDb("db schema (integration)", () => {
         status: "pending",
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       });
+      await tx.insert(timers).values({
+        id: randomUUID(),
+        caseId,
+        fireAt: new Date(Date.now() + 60 * 60 * 1000),
+        reason: "follow_up",
+      });
     });
 
     const round = await db
@@ -90,6 +98,7 @@ describeIfDb("db schema (integration)", () => {
     // cleanup so the test is rerunnable
     await db.transaction(async (tx) => {
       await tx.delete(approvals).where(sql`${approvals.id} = ${approvalId}`);
+      await tx.delete(timers).where(sql`${timers.caseId} = ${caseId}`);
       await tx.delete(auditLog).where(sql`${auditLog.caseId} = ${caseId}`);
       await tx
         .delete(caseStateTransitions)
