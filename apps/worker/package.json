@@ -9,8 +9,9 @@
     "build:deps": "pnpm --filter '@support-agent/worker...' build",
     "clean": "tsc -b --clean",
     "start": "node dist/index.js",
-    "start:dev": "pnpm run build:deps && node --env-file=../../.env.local --import tsx src/index.ts",
-    "publish:event": "pnpm run build:deps && node --env-file=../../.env.local --import tsx scripts/publish-event.ts"
+    "start:local": "node --env-file=.env.local dist/index.js",
+    "start:dev": "pnpm run build:deps && node --env-file=.env.local --import tsx src/index.ts",
+    "publish:event": "pnpm run build:deps && node --env-file=.env.local --import tsx scripts/publish-event.ts"
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
