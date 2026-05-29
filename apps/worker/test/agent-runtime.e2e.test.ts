@@ -15,6 +15,7 @@ import {
   type ShopifyOrder,
 } from "@support-agent/agent-core";
 import {
+  damagedProductAgent,
   missingPackageAgent,
   orderStatusAgent,
   refundReviewAgent,
@@ -2340,6 +2341,355 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // The pending approval is for conversation.reply.
     expect(out.pending).toHaveLength(1);
     expect(out.pending[0]!.tool).toBe("conversation.reply");
+  });
+
+  // ----------------------------------------------------------------
+  // Triage → damaged-product-agent (BRANCH A, photos present) →
+  // shopify.get_order → conversation.reply (ask, parks for approval).
+  // This exercises the photo-evidence flow: the inbound message
+  // carries image attachments, the runtime projects them as image
+  // parts (verified by an earlier test), and the agent's scripted
+  // decisions match the BRANCH A path (look + fetch + draft).
+  // ----------------------------------------------------------------
+  it("hands off to damaged-product-agent BRANCH A (photos present), drafts a reply, pauses for approval", async () => {
+    const orderId = OrderId("gid://shopify/Order/55555");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#9001",
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/911"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "120.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Glass Vase",
+          quantity: 1,
+          sku: "VASE-01",
+          variantTitle: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "delivered",
+          trackingCompany: "USPS",
+          trackingNumbers: ["9400"],
+          trackingUrls: [],
+          estimatedDeliveryAt: new Date("2026-05-25T00:00:00.000Z"),
+          deliveredAt: new Date("2026-05-26T18:00:00.000Z"),
+          createdAt: new Date("2026-05-23T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-26T18:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-05-23T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-26T18:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      // turn 0 — triage classifies
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "damaged_product",
+          identifiedOrderId: orderId,
+          notes: "vase arrived broken",
+        },
+      },
+      // turn 1 — triage hands off
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "damaged-product-agent",
+          reason: "specialist owns damaged_product",
+        },
+      },
+      // turn 2 — specialist BRANCH A: fetch order
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      // turn 3 — draft customer reply (gated ask)
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-damage",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "I'm sorry the Glass Vase arrived broken — I can see the chip on the rim and the crack down the side from your photos. I'll arrange a replacement shipped today at no charge; please keep or discard the damaged piece, no need to send it back. Reply if you'd prefer a refund of $120.00 instead.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "damaged-product-reply-test-1",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, damagedProductAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        shopifyGetCustomer as never,
+        conversationReply as never,
+        conversationAskCustomer as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvalsSvc = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Vase arrived broken",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-damage" as never,
+              messageId: "msg-dp1",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Vase arrived broken",
+              bodyText: `Hi, my order ${orderId} arrived smashed — photos attached.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [
+                {
+                  filename: "front.jpg",
+                  contentType: "image/jpeg",
+                  storageKey: "test/photo-front.jpg",
+                  sizeBytes: 1234,
+                },
+                {
+                  filename: "side.jpg",
+                  contentType: "image/jpeg",
+                  storageKey: "test/photo-side.jpg",
+                  sizeBytes: 2345,
+                },
+              ],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, pending };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.fetched.currentAgentId).toBe(damagedProductAgent.id);
+
+    // The pending approval is for conversation.reply on the damaged-
+    // product specialist with the drafted reply.
+    expect(out.pending).toHaveLength(1);
+    const approval = out.pending[0]!;
+    expect(approval.tool).toBe("conversation.reply");
+    expect(approval.agentId).toBe(damagedProductAgent.id);
+    expect(approval.caseId).toBe(out.fetched.id);
+    const proposed = approval.proposedInput as {
+      readonly threadId: string;
+      readonly draftId: string;
+    };
+    expect(proposed.threadId).toBe("thread-damage");
+    expect(proposed.draftId).toBe("damaged-product-reply-test-1");
+  });
+
+  // ----------------------------------------------------------------
+  // Damaged-product BRANCH B (no photos): triage → handoff →
+  // conversation.ask_customer (defaultPermission: allow). The case
+  // resolves cleanly on the same tick — ask_customer auto-sends + the
+  // runtime treats the trailing plain-text final_message as the
+  // resolution.
+  // ----------------------------------------------------------------
+  it("hands off to damaged-product-agent BRANCH B (no photos), asks for photos via conversation.ask_customer", async () => {
+    const orderId = OrderId("gid://shopify/Order/55556");
+
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "damaged_product",
+          identifiedOrderId: orderId,
+          notes: "customer reports damage, no photos yet",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "damaged-product-agent",
+          reason: "specialist owns damaged_product",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "conversation.ask_customer",
+        input: {
+          threadId: "thread-damage-2",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "I'm sorry to hear your order arrived damaged. Could you send a couple of clear photos showing the damage from different angles, plus the outer packaging if possible? Once I see them I'll arrange a replacement or refund.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "damaged-product-photo-request-test-1",
+          remindAfterHours: 72,
+        },
+      },
+      {
+        type: "final_message",
+        text: "Asked customer for photos.",
+      },
+    ];
+
+    // conversation.ask_customer schedules a follow-up timer; provide a
+    // no-op TimerService that records what was scheduled.
+    const timerLayer = Layer.succeed(
+      TimerService,
+      TimerService.of({
+        schedule: (input) =>
+          Effect.succeed({
+            id: "timer-dp-1",
+            caseId: input.caseId,
+            fireAt: input.fireAt,
+            reason: input.reason,
+            firedAt: null,
+            cancelledAt: null,
+          }),
+        cancelOpenForCase: () => Effect.succeed(0),
+        fireDue: () => Effect.succeed([]),
+      }),
+    );
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, damagedProductAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        shopifyGetCustomer as never,
+        conversationReply as never,
+        conversationAskCustomer as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      timerLayer,
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Item arrived broken",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-damage-2" as never,
+              messageId: "msg-dp2",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Item arrived broken",
+              bodyText: `Order ${orderId} arrived in pieces — please help.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    // BRANCH B: ask_customer is defaultPermission:"allow" so it runs;
+    // the runtime then transitions the case to waiting_for_customer.
+    expect(["Completed", "PausedWaitingForCustomer"]).toContain(
+      out.result.type,
+    );
+
+    const tools = out.entries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as { tool?: string }).tool);
+    expect(tools).toContain("conversation.ask_customer");
+    // BRANCH B explicitly does NOT draft a refund/replacement reply
+    // (we don't know enough yet) — only the ask runs.
+    expect(tools).not.toContain("conversation.reply");
   });
 
   // ----------------------------------------------------------------
