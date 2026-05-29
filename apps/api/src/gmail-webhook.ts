@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PgBoss } from "pg-boss";
 import { and, eq } from "drizzle-orm";
 import {
+  BlobStorage,
   ConnectorCredentialStore,
   makeEnqueuedWorkflowEvent,
   type ConnectorConnection,
@@ -11,6 +12,7 @@ import {
   TenantId,
   type DomainEvent,
   type InboundMessage,
+  type MessageAttachment,
 } from "@support-agent/agent-core";
 import {
   GmailHttpError,
@@ -18,6 +20,7 @@ import {
   gmailGetProfile,
   gmailListHistory,
   gmailListInboxMessageIds,
+  processGmailImageAttachments,
   refreshGmailToken,
   toInboundMessage,
 } from "@support-agent/providers";
@@ -326,6 +329,26 @@ export const handleGmailPushNotification = async (
 
   const publish = opts.publish ?? defaultPublish;
 
+  // Resolve BlobStorage once per push: image-attachment uploads from
+  // multiple inbound messages share the same store handle. The Tag is
+  // always present in the Layer (Live in production, Test in dev),
+  // so this resolution never fails — but we surface it via Exit so a
+  // mis-bootstrapped Layer would log cleanly instead of crashing.
+  const blobExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        return yield* BlobStorage;
+      }),
+      opts.layer,
+    ),
+  );
+  if (blobExit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error("[gmail webhook] BlobStorage resolve failed:", blobExit.cause);
+    return;
+  }
+  const blob = blobExit.value;
+
   for (const messageId of listed.newMessageIds) {
     try {
       const msg = await gmailGetMessage({
@@ -335,7 +358,18 @@ export const handleGmailPushNotification = async (
       });
       // Skip messages we sent — outbound idempotency is handled upstream.
       if (msg.labelIds.includes("SENT")) continue;
-      const inbound: InboundMessage = toInboundMessage(msg);
+      let attachments: ReadonlyArray<MessageAttachment> = [];
+      if (msg.imageAttachments.length > 0) {
+        attachments = await processGmailImageAttachments({
+          tenantId: TenantId(opts.tenantId),
+          messageId,
+          token: conn.accessToken,
+          imageAttachments: msg.imageAttachments,
+          blob,
+          ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+        });
+      }
+      const inbound: InboundMessage = toInboundMessage(msg, attachments);
       const event: DomainEvent = {
         type: "message.received",
         tenantId: TenantId(opts.tenantId),

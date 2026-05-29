@@ -14,8 +14,10 @@ import {
   type LLMError,
   type ToolCallingRequest,
   type ToolSchema,
+  type UserContentPart,
 } from "@support-agent/agent-core";
 import {
+  BlobStorage,
   LLMConfig,
   LLMCredentialResolver,
   LLMService,
@@ -62,50 +64,117 @@ const desanitize = (
 // Internal: ChatMessage → AI SDK ModelMessage
 // ============================================================
 
+/**
+ * Translate a user-role ChatMessage's `content` (string | parts[]) into
+ * the AI SDK's user-message content shape. Image parts get their bytes
+ * fetched from `BlobStorage` on demand; the SDK accepts `Uint8Array` as
+ * the `image` value when `mediaType` is set. Per-call cache keyed by
+ * `storageKey` so the same attachment referenced twice in one request
+ * isn't fetched twice.
+ *
+ * Errors from `BlobStorage` are mapped to `LLMError` at the boundary so
+ * the runtime sees the same failure surface as a provider outage.
+ */
+const buildUserContent = (
+  content: string | ReadonlyArray<UserContentPart>,
+  blob: typeof BlobStorage.Service,
+  cache: Map<string, Uint8Array>,
+): Effect.Effect<string | Array<{ type: "text"; text: string } | { type: "image"; image: Uint8Array; mediaType: string }>, LLMError> => {
+  if (typeof content === "string") {
+    return Effect.succeed(content);
+  }
+  return Effect.gen(function* () {
+    const out: Array<
+      { type: "text"; text: string } | { type: "image"; image: Uint8Array; mediaType: string }
+    > = [];
+    for (const part of content) {
+      if (part.type === "text") {
+        out.push({ type: "text", text: part.text });
+        continue;
+      }
+      // part.type === "image"
+      const key = part.attachment.storageKey;
+      const cached = cache.get(key);
+      const bytes = cached
+        ? cached
+        : yield* blob.get(key).pipe(
+            Effect.tap((r) =>
+              Effect.sync(() => {
+                cache.set(key, r.bytes);
+              }),
+            ),
+            Effect.map((r) => r.bytes),
+            // BlobStorage errors aren't truly LLM provider issues, but
+            // the runtime only catches LLMError on the LLM boundary.
+            // Surface them as NetworkError with the underlying tagged
+            // error as the cause so the audit log preserves the shape.
+            Effect.catchAll((e) =>
+              Effect.fail(new NetworkError({ cause: e })),
+            ),
+          );
+      out.push({
+        type: "image",
+        image: bytes,
+        mediaType: part.attachment.contentType,
+      });
+    }
+    return out;
+  });
+};
+
 const toModelMessages = (
   messages: ReadonlyArray<ChatMessage>,
   sanitize: boolean,
-): Array<ModelMessage> => {
-  const tn = (n: string): string => (sanitize ? sanitizeToolName(n) : n);
-  return messages.map((m): ModelMessage => {
-    if (m.role === "user") {
-      return { role: "user", content: m.content };
-    }
-    if (m.role === "assistant") {
-      const text = m.content ?? "";
-      const calls = m.toolCalls ?? [];
-      if (calls.length === 0) {
-        return { role: "assistant", content: text };
+  blob: typeof BlobStorage.Service,
+): Effect.Effect<Array<ModelMessage>, LLMError> =>
+  Effect.gen(function* () {
+    const tn = (n: string): string => (sanitize ? sanitizeToolName(n) : n);
+    const imageCache = new Map<string, Uint8Array>();
+    const out: Array<ModelMessage> = [];
+    for (const m of messages) {
+      if (m.role === "user") {
+        const content = yield* buildUserContent(m.content, blob, imageCache);
+        out.push({ role: "user", content: content as never });
+        continue;
       }
-      return {
-        role: "assistant",
+      if (m.role === "assistant") {
+        const text = m.content ?? "";
+        const calls = m.toolCalls ?? [];
+        if (calls.length === 0) {
+          out.push({ role: "assistant", content: text });
+          continue;
+        }
+        out.push({
+          role: "assistant",
+          content: [
+            ...(text.length > 0
+              ? ([{ type: "text" as const, text }] as const)
+              : []),
+            ...calls.map((c) => ({
+              type: "tool-call" as const,
+              toolCallId: c.id,
+              toolName: tn(c.name),
+              input: c.input,
+            })),
+          ],
+        });
+        continue;
+      }
+      // role === "tool"
+      out.push({
+        role: "tool",
         content: [
-          ...(text.length > 0
-            ? ([{ type: "text" as const, text }] as const)
-            : []),
-          ...calls.map((c) => ({
-            type: "tool-call" as const,
-            toolCallId: c.id,
-            toolName: tn(c.name),
-            input: c.input,
-          })),
+          {
+            type: "tool-result",
+            toolCallId: m.toolCallId,
+            toolName: tn(m.toolName),
+            output: { type: "json", value: m.content as never },
+          },
         ],
-      };
+      });
     }
-    // role === "tool"
-    return {
-      role: "tool",
-      content: [
-        {
-          type: "tool-result",
-          toolCallId: m.toolCallId,
-          toolName: tn(m.toolName),
-          output: { type: "json", value: m.content as never },
-        },
-      ],
-    };
+    return out;
   });
-};
 
 // ============================================================
 // Internal: ToolSchema[] → AI SDK ToolSet
@@ -261,6 +330,7 @@ export const LLMServiceLive = Layer.effect(
   LLMService,
   Effect.gen(function* () {
     const resolver = yield* LLMCredentialResolver;
+    const blob = yield* BlobStorage;
     const cache = new Map<string, ChatFactory>();
 
     const factoryFor = (cred: LLMCredential): ChatFactory => {
@@ -289,12 +359,17 @@ export const LLMServiceLive = Layer.effect(
             ? buildReverseToolNameMap(req.tools)
             : new Map<string, string>();
           const factory = factoryFor(cred);
+          const modelMessages = yield* toModelMessages(
+            req.messages,
+            sanitize,
+            blob,
+          );
           const result = yield* Effect.tryPromise({
             try: () =>
               generateText({
                 model: factory(req),
                 system: req.system,
-                messages: toModelMessages(req.messages, sanitize),
+                messages: modelMessages,
                 tools: toToolSet(req.tools, sanitize),
                 ...(req.temperature !== undefined
                   ? { temperature: req.temperature }

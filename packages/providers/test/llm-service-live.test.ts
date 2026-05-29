@@ -10,6 +10,7 @@ import {
   type ToolCallingRequest,
 } from "@support-agent/agent-core";
 import {
+  BlobStorageTest,
   LLMCredentialResolverTest,
   LLMService,
   type LLMCredential,
@@ -83,10 +84,17 @@ const defaultCred: LLMCredential = {
 const resolverLayer = LLMCredentialResolverTest(
   new Map([[testTenantId, defaultCred]]),
 );
+const blobLayerEmpty = BlobStorageTest({});
 
-const runWith = <A, E>(eff: Effect.Effect<A, E, LLMService>) =>
+const runWith = <A, E>(
+  eff: Effect.Effect<A, E, LLMService>,
+  blobLayer: ReturnType<typeof BlobStorageTest> = blobLayerEmpty,
+) =>
   Effect.runPromiseExit(
-    Effect.provide(eff, LLMServiceLive.pipe(Layer.provide(resolverLayer))),
+    Effect.provide(
+      eff,
+      LLMServiceLive.pipe(Layer.provide(Layer.merge(resolverLayer, blobLayer))),
+    ),
   );
 
 const baseRequest: ToolCallingRequest = {
@@ -199,6 +207,97 @@ describe("LLMServiceLive — request mapping", () => {
         },
       ],
     });
+  });
+
+  it("translates user image content parts into AI SDK image parts with bytes + mediaType", async () => {
+    // When the runtime emits a multimodal user message (damaged-product
+    // flow), the LLM service must fetch each image's bytes from
+    // BlobStorage and project to `{ type: "image", image, mediaType }`.
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "looking" });
+    const bytes1 = new Uint8Array([1, 2, 3]);
+    const bytes2 = new Uint8Array([9, 8, 7, 6]);
+    const blobLayer = BlobStorageTest({
+      seed: {
+        "evidence/photo1.jpg": { bytes: bytes1, contentType: "image/jpeg" },
+        "evidence/photo2.png": { bytes: bytes2, contentType: "image/png" },
+      },
+    });
+    const messages: ReadonlyArray<ChatMessage> = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "see attached" },
+          {
+            type: "image",
+            attachment: {
+              filename: "p1.jpg",
+              contentType: "image/jpeg",
+              storageKey: "evidence/photo1.jpg",
+              sizeBytes: 3,
+            },
+          },
+          {
+            type: "image",
+            attachment: {
+              filename: "p2.png",
+              contentType: "image/png",
+              storageKey: "evidence/photo2.png",
+              sizeBytes: 4,
+            },
+          },
+        ],
+      },
+    ];
+    await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s.runToolCalling({ ...baseRequest, messages }),
+      ),
+      blobLayer,
+    );
+    const arg = generateText.mock.calls[0]![0] as {
+      messages: ReadonlyArray<{ role: string; content: unknown }>;
+    };
+    expect(arg.messages[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "see attached" },
+        { type: "image", image: bytes1, mediaType: "image/jpeg" },
+        { type: "image", image: bytes2, mediaType: "image/png" },
+      ],
+    });
+  });
+
+  it("maps a BlobNotFound during image fetch to NetworkError so the runtime can escalate", async () => {
+    const blobLayer = BlobStorageTest({}); // empty store
+    const messages: ReadonlyArray<ChatMessage> = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "see attached" },
+          {
+            type: "image",
+            attachment: {
+              filename: "missing.jpg",
+              contentType: "image/jpeg",
+              storageKey: "evidence/missing.jpg",
+              sizeBytes: 1,
+            },
+          },
+        ],
+      },
+    ];
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s.runToolCalling({ ...baseRequest, messages }),
+      ),
+      blobLayer,
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    if (exit.cause._tag !== "Fail") throw new Error("expected Fail cause");
+    expect(exit.cause.error).toBeInstanceOf(NetworkError);
+    // generateText must NOT have been called — we failed before dispatch.
+    expect(generateText).not.toHaveBeenCalled();
   });
 });
 
@@ -540,12 +639,15 @@ describe("LLMServiceLive — per-provider adapter selection (BYOK)", () => {
 
   const layer = LLMServiceLive.pipe(
     Layer.provide(
-      LLMCredentialResolverTest(
-        new Map<TenantId, LLMCredential>([
-          [tenantOpenRouter, { provider: "openrouter", apiKey: "or-key" }],
-          [tenantAnthropic, { provider: "anthropic", apiKey: "ant-key" }],
-          [tenantOpenAI, { provider: "openai", apiKey: "oa-key" }],
-        ]),
+      Layer.merge(
+        LLMCredentialResolverTest(
+          new Map<TenantId, LLMCredential>([
+            [tenantOpenRouter, { provider: "openrouter", apiKey: "or-key" }],
+            [tenantAnthropic, { provider: "anthropic", apiKey: "ant-key" }],
+            [tenantOpenAI, { provider: "openai", apiKey: "oa-key" }],
+          ]),
+        ),
+        BlobStorageTest({}),
       ),
     ),
   );

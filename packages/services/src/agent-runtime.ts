@@ -128,6 +128,30 @@ export const buildSystemPrompt = (
   return `${agent.promptTemplate}\n\n${header}`;
 };
 
+// Build a user-role ChatMessage from a text body + the inbound message's
+// attachments. When the message carries any image attachments, the
+// content becomes a parts array `[text, ...images]` so the LLM provider
+// boundary can dispatch a multimodal request. Non-image attachments are
+// dropped at this layer today — the runtime/agent surface only has a
+// damaged-product use case for images so far; PDF/audio support lands
+// when a specialist needs it.
+const buildUserMessageFromInbound = (
+  text: string,
+  attachments: ReadonlyArray<import("@support-agent/agent-core").MessageAttachment>,
+): ChatMessage => {
+  const images = attachments.filter((a) => a.contentType.startsWith("image/"));
+  if (images.length === 0) {
+    return { role: "user", content: text };
+  }
+  return {
+    role: "user",
+    content: [
+      { type: "text", text },
+      ...images.map((a) => ({ type: "image" as const, attachment: a })),
+    ],
+  };
+};
+
 const buildInitialMessages = (
   event: DomainEvent,
   caseSubject: string | null,
@@ -143,10 +167,10 @@ const buildInitialMessages = (
   }
   if (event.type === "customer.replied") {
     return [
-      {
-        role: "user",
-        content: event.payload.bodyText ?? "(empty reply)",
-      },
+      buildUserMessageFromInbound(
+        event.payload.bodyText ?? "(empty reply)",
+        event.payload.attachments,
+      ),
     ];
   }
   if (event.type === "message.received") {
@@ -159,12 +183,8 @@ const buildInitialMessages = (
     const subject =
       event.payload.subject ?? caseSubject ?? "(no subject)";
     const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
-    return [
-      {
-        role: "user",
-        content: `${header}\n\nSubject: ${subject}\n\n${event.payload.bodyText}`,
-      },
-    ];
+    const text = `${header}\n\nSubject: ${subject}\n\n${event.payload.bodyText}`;
+    return [buildUserMessageFromInbound(text, event.payload.attachments)];
   }
   // Other events resume an in-flight case; for Phase 1 we don't have message
   // history, so we just signal what woke the case up.

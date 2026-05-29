@@ -17,6 +17,7 @@ export * from "./connector-credential-store.js";
 export * from "./shopify-credentials.js";
 export * from "./shopify-service.js";
 export * from "./sheets-service.js";
+export * from "./blob-storage.js";
 export * from "./tracking-config.js";
 export * from "./tracking-service.js";
 export * from "./tracking-no-provider.js";

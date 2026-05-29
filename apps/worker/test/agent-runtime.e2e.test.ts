@@ -1449,6 +1449,114 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found?.context["shopifyCustomerId"]).toBeUndefined();
   });
 
+  it("projects inbound image attachments into the turn-0 user message as multimodal parts", async () => {
+    // When a customer emails with photos (damaged-product flow), the
+    // runtime must hand them to the LLM as image content parts so the
+    // model can actually look at them. Non-image attachments stay out
+    // of the user message — only `image/*` MIME types make it through.
+    let seenContent: unknown = undefined;
+    const llmFn = LLMServiceFromFn((req) => {
+      seenContent = req.messages[0]?.content;
+      return Eff.succeed({
+        type: "final_message" as const,
+        text: "thanks for the photos, escalating",
+      });
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+      ]),
+      PermissionServiceDefault,
+      llmFn,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const inboundWithPhotos: DomainEvent = {
+      type: "message.received",
+      tenantId: TenantId("tenant-acme"),
+      threadId: "thread-photo" as never,
+      payload: {
+        threadId: "thread-photo" as never,
+        messageId: "msg-photo",
+        from: { name: "Jane", email: "jane@example.com" },
+        to: [{ name: "Support", email: "support@merchant.com" }],
+        subject: "Damaged product",
+        bodyText: "The box arrived crushed — photos attached.",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [
+          {
+            filename: "front.jpg",
+            contentType: "image/jpeg",
+            storageKey: "gmail/tenant-acme/msg-photo/att1.jpg",
+            sizeBytes: 12_345,
+          },
+          {
+            filename: "side.png",
+            contentType: "image/png",
+            storageKey: "gmail/tenant-acme/msg-photo/att2.png",
+            sizeBytes: 8_192,
+          },
+          {
+            filename: "invoice.pdf",
+            contentType: "application/pdf",
+            storageKey: "gmail/tenant-acme/msg-photo/att3.pdf",
+            sizeBytes: 1024,
+          },
+        ],
+      },
+    };
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          yield* runtime.handleEvent(inboundWithPhotos);
+        }),
+        layer,
+      ),
+    );
+
+    // content must be an array of parts: one text + two image parts
+    // (the PDF is filtered out because we don't model file parts yet).
+    expect(Array.isArray(seenContent)).toBe(true);
+    const parts = seenContent as ReadonlyArray<
+      | { type: "text"; text: string }
+      | { type: "image"; attachment: { storageKey: string; contentType: string } }
+    >;
+    expect(parts).toHaveLength(3);
+    expect(parts[0]?.type).toBe("text");
+    expect(parts[1]?.type).toBe("image");
+    expect(parts[2]?.type).toBe("image");
+    if (parts[1]?.type === "image") {
+      expect(parts[1].attachment.storageKey).toBe(
+        "gmail/tenant-acme/msg-photo/att1.jpg",
+      );
+      expect(parts[1].attachment.contentType).toBe("image/jpeg");
+    }
+    if (parts[2]?.type === "image") {
+      expect(parts[2].attachment.storageKey).toBe(
+        "gmail/tenant-acme/msg-photo/att2.png",
+      );
+    }
+  });
+
   // ----------------------------------------------------------------
   // Triage → refund-review-agent → conversation.reply (gated "ask").
   //

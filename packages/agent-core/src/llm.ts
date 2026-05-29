@@ -1,5 +1,9 @@
 import type { AgentId, TenantId } from "./ids.js";
-import type { OutboundMessageDraft, SupplierEscalationPayload } from "./payloads.js";
+import type {
+  MessageAttachment,
+  OutboundMessageDraft,
+  SupplierEscalationPayload,
+} from "./payloads.js";
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -9,8 +13,26 @@ export interface ToolSchema {
   readonly inputSchema: JsonSchema;
 }
 
+/**
+ * Content parts for a multimodal user message. The runtime emits these
+ * when an inbound message carries image attachments — the LLM provider
+ * boundary translates each `image` part into the provider's native
+ * vision payload (Vercel AI SDK `{ type: "image", image, mediaType }`).
+ *
+ * Today only `text` + `image` are modelled. `image` references an
+ * uploaded `MessageAttachment` by storage key + contentType; the
+ * provider layer fetches the bytes from `BlobStorage` on demand so we
+ * don't carry binary blobs through the runtime / audit log.
+ */
+export type UserContentPart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly attachment: MessageAttachment };
+
 export type ChatMessage =
-  | { readonly role: "user"; readonly content: string }
+  | {
+      readonly role: "user";
+      readonly content: string | ReadonlyArray<UserContentPart>;
+    }
   | {
       readonly role: "assistant";
       readonly content: string;

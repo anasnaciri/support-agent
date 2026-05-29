@@ -14,6 +14,7 @@
 import type {
   ConversationMessage,
   InboundMessage,
+  MessageAttachment,
   MessageParticipant,
   ThreadId,
 } from "@support-agent/agent-core";
@@ -173,6 +174,20 @@ const parseReferences = (raw: string | null): ReadonlyArray<string> => {
 const decodeBase64Url = (s: string): string =>
   Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
 
+/**
+ * Base64URL-decode a Gmail attachment body to raw bytes. Used by
+ * `gmailGetAttachment`. Kept separate from the text-decoding helper so
+ * the type is `Uint8Array` rather than `string` — Gmail attachments are
+ * binary blobs, not text.
+ */
+const decodeBase64UrlBytes = (s: string): Uint8Array => {
+  const buf = Buffer.from(
+    s.replace(/-/g, "+").replace(/_/g, "/"),
+    "base64",
+  );
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+};
+
 const encodeBase64Url = (s: string): string =>
   Buffer.from(s, "utf8")
     .toString("base64")
@@ -248,10 +263,67 @@ const firstAddress = (raw: string | null): MessageParticipant | null => {
 // Normalisers
 // ============================================================
 
+/**
+ * Lightweight metadata for an image attachment surfaced from a Gmail
+ * `payload.parts` walk. Doesn't carry bytes — the bytes are fetched on
+ * demand via `gmailGetAttachment`. The caller (webhook handler) is
+ * responsible for uploading to `BlobStorage` and composing the final
+ * `MessageAttachment` shape with `storageKey`.
+ */
+export interface GmailImageAttachmentMetadata {
+  readonly attachmentId: string;
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+}
+
 export interface NormalisedGmailMessage extends ConversationMessage {
   readonly rfcMessageId: string | null;
   readonly references: ReadonlyArray<string>;
+  /**
+   * Image attachments declared in the message payload, with metadata
+   * only. The webhook handler iterates these, fetches each via
+   * `gmailGetAttachment`, uploads to `BlobStorage`, and replaces this
+   * field with `MessageAttachment[]` on the `InboundMessage` it
+   * publishes. Non-image attachments are filtered out at this layer —
+   * the runtime + agents only consume images today.
+   */
+  readonly imageAttachments: ReadonlyArray<GmailImageAttachmentMetadata>;
 }
+
+/**
+ * Pure helper: walk the Gmail message payload tree and collect every
+ * part that (a) has an `attachmentId` and (b) has an `image/*` MIME
+ * type. Recurses through nested multipart bodies (multipart/mixed
+ * → multipart/alternative → text/plain + image/jpeg etc).
+ *
+ * Returns metadata in first-seen order; no caps applied here — the
+ * caller layers its own limits (count, total bytes) over this.
+ */
+export const extractImageAttachments = (
+  payload: RawPart | undefined,
+): ReadonlyArray<GmailImageAttachmentMetadata> => {
+  const out: Array<GmailImageAttachmentMetadata> = [];
+  const walk = (part: RawPart): void => {
+    const mime = part.mimeType ?? "";
+    const attachmentId = part.body?.attachmentId;
+    if (attachmentId && mime.startsWith("image/")) {
+      out.push({
+        attachmentId,
+        filename: part.filename && part.filename.length > 0
+          ? part.filename
+          : `attachment-${attachmentId}`,
+        mimeType: mime,
+        sizeBytes: part.body?.size ?? 0,
+      });
+    }
+    if (part.parts) {
+      for (const child of part.parts) walk(child);
+    }
+  };
+  if (payload) walk(payload);
+  return out;
+};
 
 const normaliseMessage = (
   m: RawMessage,
@@ -286,9 +358,16 @@ const normaliseMessage = (
     bodyText: bodies.text.join("\n").trim(),
     bodyHtml: bodies.html.length > 0 ? bodies.html.join("\n") : null,
     sentAt,
-    attachments: [], // TODO: surface attachment metadata when a tool needs it
+    // `attachments` on the conversation surface is the post-upload
+    // `MessageAttachment[]` (with `storageKey`). At parse time we don't
+    // have storage keys yet — the webhook handler fetches bytes and
+    // uploads to BlobStorage to produce the final array. Leave empty
+    // here; `imageAttachments` below carries the raw metadata the
+    // handler needs.
+    attachments: [],
     rfcMessageId: normaliseRfcMessageId(headerLookup(headers, "Message-ID")),
     references: parseReferences(headerLookup(headers, "References")),
+    imageAttachments: extractImageAttachments(m.payload),
   };
 };
 
@@ -348,7 +427,7 @@ export const gmailGetThread = async (
 
 export const gmailGetMessage = async (
   opts: GmailHttpCallOptions & { readonly messageId: string },
-): Promise<ConversationMessage & { readonly threadId: ThreadId; readonly labelIds: ReadonlyArray<string> }> => {
+): Promise<NormalisedGmailMessage & { readonly labelIds: ReadonlyArray<string> }> => {
   const raw = (await gmailFetch({
     path: `/users/me/messages/${encodeURIComponent(opts.messageId)}?format=full`,
     token: opts.token,
@@ -356,7 +435,40 @@ export const gmailGetMessage = async (
   })) as RawMessage;
   const threadId = makeThreadId(raw.threadId);
   const msg = normaliseMessage(raw, threadId);
-  return { ...msg, threadId, labelIds: raw.labelIds ?? [] };
+  return { ...msg, labelIds: raw.labelIds ?? [] };
+};
+
+interface RawAttachment {
+  readonly data?: string;
+  readonly size?: number;
+  readonly attachmentId?: string;
+}
+
+/**
+ * Fetch an attachment's raw bytes. Gmail returns base64URL-encoded data
+ * in `data`; we decode to a `Uint8Array` so the caller can pipe it
+ * straight into `BlobStorage.put`. The `size` field is purely
+ * advisory — sometimes Gmail under- or over-reports by a few bytes.
+ */
+export const gmailGetAttachment = async (
+  opts: GmailHttpCallOptions & {
+    readonly messageId: string;
+    readonly attachmentId: string;
+  },
+): Promise<{ readonly bytes: Uint8Array; readonly size: number }> => {
+  const raw = (await gmailFetch({
+    path: `/users/me/messages/${encodeURIComponent(opts.messageId)}/attachments/${encodeURIComponent(opts.attachmentId)}`,
+    token: opts.token,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  })) as RawAttachment;
+  if (!raw.data) {
+    throw new GmailHttpError(
+      { kind: "network", status: 200, body: JSON.stringify(raw) },
+      "gmail attachment missing data",
+    );
+  }
+  const bytes = decodeBase64UrlBytes(raw.data);
+  return { bytes, size: raw.size ?? bytes.byteLength };
 };
 
 // ============================================================
@@ -552,6 +664,7 @@ export const gmailSendMessage = async (
 
 export const toInboundMessage = (
   msg: ConversationMessage,
+  attachments?: ReadonlyArray<MessageAttachment>,
 ): InboundMessage => ({
   threadId: msg.threadId,
   messageId: msg.id,
@@ -561,5 +674,5 @@ export const toInboundMessage = (
   bodyText: msg.bodyText,
   bodyHtml: msg.bodyHtml,
   receivedAt: msg.sentAt,
-  attachments: msg.attachments,
+  attachments: attachments ?? msg.attachments,
 });

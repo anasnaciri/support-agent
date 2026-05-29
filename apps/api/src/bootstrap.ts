@@ -1,6 +1,8 @@
 import { Effect, Layer } from "effect";
 import {
   ApprovalService,
+  BlobStorage,
+  BlobStorageTest,
   ConnectorCredentialStore,
   parseKey,
   TransactionRunner,
@@ -12,6 +14,10 @@ import {
   DbClientLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
+import {
+  BlobStorageConfigFromEnv,
+  BlobStorageLive,
+} from "@support-agent/providers";
 
 // ============================================================
 // Env validation
@@ -162,11 +168,23 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
   const tx = TransactionRunnerLive.pipe(Layer.provide(dbLayer));
-  return Layer.mergeAll(store, approvals, tx, dbLayer);
+  // BlobStorage: Live over R2 when R2_* env is set (Gmail webhook
+  // uploads image attachments here so the runtime / LLM can read them
+  // back); in-memory Test layer otherwise — dev + integration tests
+  // that exercise the webhook without R2 still work, they just store
+  // bytes in process memory.
+  const blob = process.env["R2_BUCKET"]
+    ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
+    : BlobStorageTest({});
+  return Layer.mergeAll(store, approvals, tx, dbLayer, blob);
 };
 
 export type ApiLayer = Layer.Layer<
-  ConnectorCredentialStore | ApprovalService | TransactionRunner | DbClient,
+  | ConnectorCredentialStore
+  | ApprovalService
+  | TransactionRunner
+  | DbClient
+  | BlobStorage,
   never,
   never
 >;

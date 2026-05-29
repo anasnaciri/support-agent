@@ -8,6 +8,7 @@ import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
   ApprovalLinkConfig,
+  BlobStorageTest,
   ConnectorCredentialStore,
   ConversationServiceTest,
   PermissionServiceLive,
@@ -15,6 +16,7 @@ import {
   type AgentRuntime,
   type ApprovalService,
   type AuditLogService,
+  type BlobStorage,
   type CaseRepository,
   type ConnectorConnection,
   type ConversationService,
@@ -45,6 +47,8 @@ import {
 } from "@support-agent/db";
 import { parseKey } from "@support-agent/services";
 import {
+  BlobStorageConfigFromEnv,
+  BlobStorageLive,
   GmailConversationLive,
   LLMConfigFromEnv,
   LLMCredentialResolverFromLLMConfig,
@@ -85,6 +89,7 @@ export interface WorkerBootstrap {
     | ConversationService
     | TenantRepository
     | TransactionRunner
+    | BlobStorage
     | DbClient,
     never,
     never
@@ -192,7 +197,21 @@ export const buildWorker = async (
     : LLMCredentialResolverFromLLMConfig.pipe(
         Layer.provide(LLMConfigFromEnv),
       );
-  const llm = LLMServiceLive.pipe(Layer.provide(llmResolver));
+
+  // Object storage. The Gmail webhook uploads image attachments here so
+  // the runtime can hand them to the LLM as multimodal parts. Live R2
+  // when R2_* env is set; otherwise an in-memory Test layer so dev +
+  // CI work without an R2 account. Picked at boot time and shared
+  // between LLMServiceLive (reads back bytes on the LLM boundary) and
+  // any future worker code that uploads from Effect (today only the
+  // Gmail webhook uploads, and that runs in apps/api).
+  const blob = process.env["R2_BUCKET"]
+    ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
+    : BlobStorageTest({});
+
+  const llm = LLMServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(llmResolver, blob)),
+  );
 
   // Shopify — depends on ShopifyHttp + ShopifyCredentialStore. When the
   // encryption key is present, resolve credentials from the DB-backed
@@ -371,6 +390,7 @@ export const buildWorker = async (
     conversation,
     mail,
     approvalLinkLayer,
+    blob,
   );
 
   // Satisfy env's DbClient dependency.

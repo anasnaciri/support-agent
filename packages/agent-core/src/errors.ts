@@ -191,6 +191,31 @@ export type TrackingError =
   | TrackingProviderRateLimited
   | NetworkError;
 
+/**
+ * BlobStorage errors. Backs the `BlobStorage` Tag which abstracts the
+ * platform's binary-blob store (Cloudflare R2 in production, in-memory
+ * test layer in unit tests, local fs in dev when `BLOB_STORAGE_DIR` is
+ * set).
+ *
+ *   - `BlobNotFound`: a `get` / `presignGetUrl` lookup hit no object
+ *     under the supplied key. Distinct from `BlobStorageFailed` so the
+ *     LLM service can treat a missing image attachment as an upstream
+ *     "provider unavailable" rather than a generic network error.
+ *   - `BlobStorageFailed`: catch-all for transport / S3 API failures
+ *     (rate limit, malformed bucket config, auth). The Live impl
+ *     surfaces the underlying cause for diagnostics.
+ */
+export class BlobNotFound extends Data.TaggedError("BlobNotFound")<{
+  readonly key: string;
+}> {}
+
+export class BlobStorageFailed extends Data.TaggedError("BlobStorageFailed")<{
+  readonly key: string | null;
+  readonly cause: unknown;
+}> {}
+
+export type BlobStorageError = BlobNotFound | BlobStorageFailed;
+
 export type ToolError =
   | PermissionDenied
   | ToolOutputInvalid
