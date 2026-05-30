@@ -27,12 +27,35 @@ interface Props {
    * the operator sees what the agent thought before approving the prose.
    */
   readonly refundRecommendation?: RefundRecommendationSummary | null;
+  /**
+   * Damaged-product photo-vs-product cross-check verdict, stamped on the
+   * case context by the damaged-product agent. Surfaced as a badge so
+   * the operator's confidence is calibrated before they approve a
+   * replacement/refund reply (a `mismatch` is a fraud signal worth a
+   * second look).
+   */
+  readonly productMatch?: "match" | "mismatch" | "uncertain" | null;
 }
+
+const PRODUCT_MATCH_LABEL: Record<
+  NonNullable<Props["productMatch"]>,
+  string
+> = {
+  match: "Photos match ordered item",
+  mismatch: "Photos may not match ordered item",
+  uncertain: "Photo match uncertain",
+};
+
+const productMatchVariant = (
+  m: NonNullable<Props["productMatch"]>,
+): "success" | "destructive" | "outline" =>
+  m === "match" ? "success" : m === "mismatch" ? "destructive" : "outline";
 
 export const ApprovalCard = ({
   approval,
   returnTo,
   refundRecommendation,
+  productMatch,
 }: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -72,6 +95,17 @@ export const ApprovalCard = ({
       <CardContent className="space-y-4 pt-0">
         {approval.reasoning ? (
           <p className="text-sm">{approval.reasoning}</p>
+        ) : null}
+
+        {productMatch ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Photo check
+            </span>
+            <Badge variant={productMatchVariant(productMatch)} className="text-xs">
+              {PRODUCT_MATCH_LABEL[productMatch]}
+            </Badge>
+          </div>
         ) : null}
 
         {refundRecommendation ? (

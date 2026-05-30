@@ -6,6 +6,7 @@ import {
   NetworkError,
   OrderId,
   OrderNotFound,
+  ProductNotFound,
   RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
@@ -112,6 +113,7 @@ const ORDER_PAYLOAD = {
             quantity: 2,
             sku: "MUG-01",
             variantTitle: null,
+            product: { id: "gid://shopify/Product/555" },
           },
         ],
       },
@@ -164,6 +166,26 @@ const CUSTOMER_PAYLOAD = {
   },
 };
 
+const PRODUCT_PAYLOAD = {
+  data: {
+    product: {
+      id: "gid://shopify/Product/555",
+      title: "Ceramic Mug",
+      productType: "Drinkware",
+      vendor: "Acme",
+      images: {
+        nodes: [
+          {
+            url: "https://cdn.shopify.com/mug-front.jpg",
+            altText: "Front view",
+          },
+          { url: "https://cdn.shopify.com/mug-side.jpg", altText: null },
+        ],
+      },
+    },
+  },
+};
+
 // ============================================================
 // Tests
 // ============================================================
@@ -191,6 +213,7 @@ describe("ShopifyServiceLive — getOrder", () => {
     expect(order.totalPrice).toEqual({ amount: "29.99", currencyCode: "USD" });
     expect(order.lineItems).toHaveLength(1);
     expect(order.lineItems[0]!.title).toBe("Mug");
+    expect(order.lineItems[0]!.productId).toBe("gid://shopify/Product/555");
     expect(order.fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
 
     // Verify HTTP request was correctly assembled.
@@ -431,6 +454,75 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
     expect(fulfillments).toHaveLength(1);
     expect(fulfillments[0]!.status).toBe("in_transit");
     expect(fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
+  });
+});
+
+describe("ShopifyServiceLive — getProduct", () => {
+  it("queries product(id:) and maps title, type, vendor, images", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, PRODUCT_PAYLOAD)]),
+    );
+    const product = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getProduct(tenantId, "gid://shopify/Product/555"),
+        ),
+        layer,
+      ),
+    );
+    expect(product.id).toBe("gid://shopify/Product/555");
+    expect(product.title).toBe("Ceramic Mug");
+    expect(product.productType).toBe("Drinkware");
+    expect(product.vendor).toBe("Acme");
+    expect(product.images).toHaveLength(2);
+    expect(product.images[0]!.url).toBe(
+      "https://cdn.shopify.com/mug-front.jpg",
+    );
+    expect(product.images[0]!.altText).toBe("Front view");
+    expect(product.images[1]!.altText).toBeNull();
+
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: { id: string };
+    };
+    expect(body.query).toContain("query GetProduct");
+    expect(body.variables.id).toBe("gid://shopify/Product/555");
+  });
+
+  it("wraps a bare numeric id with the product gid prefix", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, PRODUCT_PAYLOAD)]),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) => s.getProduct(tenantId, "555")),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as { variables: { id: string } };
+    expect(body.variables.id).toBe("gid://shopify/Product/555");
+  });
+
+  it("fails ProductNotFound when the response product is null", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, { data: { product: null } })]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getProduct(tenantId, "gid://shopify/Product/999"),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = exit.cause._tag === "Fail" ? exit.cause.error : undefined;
+      expect(err).toBeInstanceOf(ProductNotFound);
+    }
   });
 });
 

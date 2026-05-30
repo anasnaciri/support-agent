@@ -31,6 +31,14 @@ export type ShopifyLineItem = {
   readonly quantity: number;
   readonly sku: string | null;
   readonly variantTitle: string | null;
+  /**
+   * GID of the product this line item was sold from
+   * (`gid://shopify/Product/...`), or null for custom/deleted items.
+   * Surfaced so an agent can pull the product's reference images via
+   * `shopify.get_product` and cross-check them against customer-supplied
+   * photos (the damaged-product product-match check).
+   */
+  readonly productId: string | null;
 };
 
 /**
@@ -83,6 +91,27 @@ export type ShopifyOrder = {
   readonly fulfillments: ReadonlyArray<ShopifyFulfillment>;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+};
+
+export type ShopifyProductImage = {
+  readonly url: string;
+  readonly altText: string | null;
+};
+
+/**
+ * A product as the agent sees it. Intentionally narrow — just enough to
+ * cross-check the depicted item against a customer's damage photos:
+ * the title/type/vendor for textual context and `images[]` for the
+ * reference photos the model compares against. Variants and pricing are
+ * out of scope here (use the order line items for what the customer
+ * actually bought).
+ */
+export type ShopifyProduct = {
+  readonly id: string; // gid://shopify/Product/...
+  readonly title: string;
+  readonly productType: string | null;
+  readonly vendor: string | null;
+  readonly images: ReadonlyArray<ShopifyProductImage>;
 };
 
 export type ShopifyCustomer = {

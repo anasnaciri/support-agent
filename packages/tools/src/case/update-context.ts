@@ -12,6 +12,16 @@ const Input = Schema.Struct({
   identifiedOrderId: Schema.optional(Schema.String),
   identifiedCustomerId: Schema.optional(Schema.String),
   notes: Schema.optional(Schema.String),
+  /**
+   * Outcome of the damaged-product photo-vs-product cross-check:
+   * `match` (the photos depict the ordered item), `mismatch` (they
+   * don't appear to), or `uncertain` (can't tell). Surfaced on the
+   * approval card so the operator's confidence is calibrated before
+   * they approve the reply.
+   */
+  productMatch: Schema.optional(
+    Schema.Literal("match", "mismatch", "uncertain"),
+  ),
   extra: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.Unknown }),
   ),
@@ -53,6 +63,8 @@ export const caseUpdateContext = defineTool({
       if (input.identifiedCustomerId !== undefined)
         patch["identifiedCustomerId"] = input.identifiedCustomerId;
       if (input.notes !== undefined) patch["notes"] = input.notes;
+      if (input.productMatch !== undefined)
+        patch["productMatch"] = input.productMatch;
       if (input.extra !== undefined) Object.assign(patch, input.extra);
 
       const updated = yield* repo

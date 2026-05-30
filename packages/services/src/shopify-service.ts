@@ -7,10 +7,12 @@ import {
   type ShopifyFulfillment,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyProduct,
   type ShopifyRefund,
   type TenantId,
   CustomerNotFound,
   OrderNotFound,
+  ProductNotFound,
   RefundFailed,
 } from "@support-agent/agent-core";
 
@@ -51,6 +53,19 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       customerId: CustomerId,
     ) => Effect.Effect<ShopifyCustomer, ShopifyError>;
+
+    /**
+     * Look up a product by its GID (`gid://shopify/Product/...`) or bare
+     * numeric id. Returns the product's title, type, vendor, and
+     * reference images. Used by `shopify.get_product` so a specialist
+     * (the damaged-product agent) can compare the depicted item against
+     * customer-supplied damage photos. `ProductNotFound` when the id is
+     * unknown. Needs the `read_products` Shopify scope.
+     */
+    readonly getProduct: (
+      tenantId: TenantId,
+      productId: string,
+    ) => Effect.Effect<ShopifyProduct, ShopifyError>;
 
     readonly searchByEmail: (
       tenantId: TenantId,
@@ -139,6 +154,12 @@ export interface ShopifyTestFixtures {
   readonly customers?: ReadonlyMap<CustomerId, ShopifyCustomer>;
   readonly customersByEmail?: ReadonlyMap<string, ShopifyCustomer>;
   /**
+   * Map from product id (GID or bare numeric, exactly as the caller
+   * passes it) to ShopifyProduct. A miss fails with `ProductNotFound`,
+   * matching the Live impl's null-data path.
+   */
+  readonly productsById?: ReadonlyMap<string, ShopifyProduct>;
+  /**
    * Map from order *name* (with or without leading `#`) to ShopifyOrder.
    * Keys are normalized to `#XXXX` on lookup so tests can write either
    * `"#1001"` or `"1001"` in the fixture.
@@ -191,6 +212,12 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         return c
           ? Effect.succeed(c)
           : Effect.fail(new CustomerNotFound({ query: customerId }));
+      },
+      getProduct: (_tenantId, productId) => {
+        const p = fixtures.productsById?.get(productId);
+        return p
+          ? Effect.succeed(p)
+          : Effect.fail(new ProductNotFound({ productId }));
       },
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),

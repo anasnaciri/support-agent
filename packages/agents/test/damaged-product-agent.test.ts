@@ -18,6 +18,7 @@ describe("damaged-product-agent config", () => {
     // confirms.
     expect(damagedProductAgent.tools).toEqual([
       "shopify.get_order",
+      "shopify.get_product",
       "shopify.get_customer",
       "case.update_context",
       "conversation.reply",
@@ -36,6 +37,10 @@ describe("damaged-product-agent config", () => {
     // part — keep a regression on that phrasing.
     expect(damagedProductAgent.promptTemplate).toContain("REPLACEMENT");
     expect(damagedProductAgent.promptTemplate).toContain("REFUND");
+    // BRANCH A now cross-checks the photos against the product's
+    // reference images and records a productMatch verdict.
+    expect(damagedProductAgent.promptTemplate).toContain("shopify.get_product");
+    expect(damagedProductAgent.promptTemplate).toContain("productMatch");
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {

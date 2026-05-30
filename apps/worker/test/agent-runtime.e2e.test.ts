@@ -31,6 +31,7 @@ import {
   shopifyRefundRecommend,
   shopifyGetCustomer,
   shopifyGetOrder,
+  shopifyGetProduct,
   supplierAddSheetRow,
   trackingLookup,
 } from "@support-agent/tools";
@@ -300,6 +301,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "MUG-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [
@@ -674,6 +676,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "BEAN-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [
@@ -856,7 +859,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       totalPrice: { amount: "29.00", currencyCode: "USD" },
       shippingAddress: null,
       lineItems: [
-        { id: "li-1", title: "T-shirt", quantity: 1, sku: "TS-01", variantTitle: null },
+        { id: "li-1", title: "T-shirt", quantity: 1, sku: "TS-01", variantTitle: null, productId: null },
       ],
       fulfillments: [], // no tracking number to look up
       createdAt: new Date("2026-05-22T00:00:00.000Z"),
@@ -1588,6 +1591,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "EAR-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [],
@@ -1786,6 +1790,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "MUG-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [],
@@ -1968,6 +1973,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "BEAN-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [
@@ -2151,6 +2157,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "BEAN-01",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [
@@ -2369,6 +2376,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "VASE-01",
           variantTitle: null,
+          productId: "gid://shopify/Product/777",
         },
       ],
       fulfillments: [
@@ -2417,7 +2425,21 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "shopify.get_order",
         input: { orderId },
       },
-      // turn 3 — draft customer reply (gated ask)
+      // turn 3 — cross-check the photos against the product's images
+      {
+        type: "tool_call",
+        callId: "c3a",
+        tool: "shopify.get_product",
+        input: { productId: "gid://shopify/Product/777" },
+      },
+      // turn 4 — record the match verdict on the case context
+      {
+        type: "tool_call",
+        callId: "c3b",
+        tool: "case.update_context",
+        input: { productMatch: "match" },
+      },
+      // turn 5 — draft customer reply (gated ask)
       {
         type: "tool_call",
         callId: "c3",
@@ -2445,6 +2467,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        shopifyGetProduct as never,
         shopifyGetCustomer as never,
         conversationReply as never,
         conversationAskCustomer as never,
@@ -2454,6 +2477,23 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       TransactionRunnerPassthrough,
       ShopifyServiceTest({
         orders: new Map([[orderId, fixtureOrder]]),
+        productsById: new Map([
+          [
+            "gid://shopify/Product/777",
+            {
+              id: "gid://shopify/Product/777",
+              title: "Glass Vase",
+              productType: "Home",
+              vendor: "Acme",
+              images: [
+                {
+                  url: "https://cdn.shopify.com/vase.jpg",
+                  altText: "Glass Vase",
+                },
+              ],
+            },
+          ],
+        ]),
       }),
       ConversationServiceTest({}),
       approvalLinkLayer,
@@ -2522,6 +2562,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.result.type).toBe("PausedWaitingForApproval");
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.fetched.currentAgentId).toBe(damagedProductAgent.id);
+
+    // The product-match cross-check stamped its verdict on the case
+    // context so the approval card can calibrate operator confidence.
+    expect(out.fetched.context["productMatch"]).toBe("match");
 
     // The pending approval is for conversation.reply on the damaged-
     // product specialist with the drafted reply.
@@ -2619,6 +2663,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         caseUpdateContext as never,
         agentHandoff as never,
         shopifyGetOrder as never,
+        shopifyGetProduct as never,
         shopifyGetCustomer as never,
         conversationReply as never,
         conversationAskCustomer as never,
@@ -2716,6 +2761,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           quantity: 1,
           sku: "HD-7",
           variantTitle: null,
+          productId: null,
         },
       ],
       fulfillments: [],
@@ -3298,6 +3344,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         quantity: 1,
         sku: "EAR-01",
         variantTitle: null,
+        productId: null,
       },
     ],
     fulfillments: [],

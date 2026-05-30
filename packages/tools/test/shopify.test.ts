@@ -12,12 +12,14 @@ import {
   type ShopifyCustomer,
   type ShopifyError,
   type ShopifyOrder,
+  type ShopifyProduct,
   type ToolContext,
 } from "@support-agent/agent-core";
 import { ShopifyServiceTest } from "@support-agent/services";
 import {
   shopifyGetCustomer,
   shopifyGetOrder,
+  shopifyGetProduct,
   shopifyRefundCreate,
   shopifyRefundRecommend,
   computeRefundRecommendation,
@@ -64,6 +66,7 @@ const buildOrder = (id: string): ShopifyOrder => ({
       quantity: 2,
       sku: "MUG-01",
       variantTitle: null,
+      productId: "gid://shopify/Product/555",
     },
   ],
   fulfillments: [
@@ -381,6 +384,78 @@ describe("shopify.get_customer tool", () => {
         expect(err.issues).toEqual(["CustomerNotFound"]);
       }
     }
+  });
+});
+
+describe("shopify.get_product tool", () => {
+  const buildProduct = (id: string): ShopifyProduct => ({
+    id,
+    title: "Ceramic Mug",
+    productType: "Drinkware",
+    vendor: "Acme",
+    images: [
+      { url: "https://cdn.shopify.com/mug-front.jpg", altText: "Front" },
+      { url: "https://cdn.shopify.com/mug-side.jpg", altText: null },
+    ],
+  });
+
+  it("returns a flattened product payload on success", async () => {
+    const productId = "gid://shopify/Product/555";
+    const env = ShopifyServiceTest({
+      productsById: new Map([[productId, buildProduct(productId)]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetProduct.execute(
+          { productId } as never,
+          baseCtx("c-prod-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["id"]).toBe(productId);
+    expect(result["title"]).toBe("Ceramic Mug");
+    expect(result["productType"]).toBe("Drinkware");
+    expect(result["vendor"]).toBe("Acme");
+    const images = result["images"] as ReadonlyArray<Record<string, unknown>>;
+    expect(images).toHaveLength(2);
+    expect(images[0]!["url"]).toBe("https://cdn.shopify.com/mug-front.jpg");
+    expect(images[1]!["altText"]).toBeNull();
+  });
+
+  it("maps ProductNotFound to ToolOutputInvalid", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetProduct.execute(
+          { productId: "gid://shopify/Product/999" } as never,
+          baseCtx("c-prod-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
+      const err = exit.cause.error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.get_product");
+        expect(err.issues).toEqual(["ProductNotFound"]);
+      }
+    }
+  });
+
+  it("declares read risk, allow permission, and read_products scope", () => {
+    expect(shopifyGetProduct.risk).toBe("read");
+    expect(shopifyGetProduct.defaultPermission).toBe("allow");
+    expect(shopifyGetProduct.sideEffectClass).toBe("none");
+    expect(shopifyGetProduct.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["read_products"],
+    });
   });
 });
 

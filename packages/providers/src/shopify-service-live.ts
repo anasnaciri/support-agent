@@ -11,6 +11,8 @@ import {
   type ShopifyLineItem,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyProduct,
+  type ShopifyProductImage,
   type ShopifyRefund,
   type TenantId,
   CustomerId as makeCustomerId,
@@ -18,6 +20,7 @@ import {
   NetworkError,
   OrderId as makeOrderId,
   OrderNotFound,
+  ProductNotFound,
   RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
@@ -170,6 +173,9 @@ const orderGid = (id: OrderId): string =>
 const customerGid = (id: CustomerId): string =>
   id.startsWith("gid://") ? id : `gid://shopify/Customer/${id}`;
 
+const productGid = (id: string): string =>
+  id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`;
+
 // ============================================================
 // Response mappers
 // ============================================================
@@ -302,6 +308,7 @@ type GqlOrder = {
       readonly quantity: number;
       readonly sku: string | null;
       readonly variantTitle: string | null;
+      readonly product: { readonly id: string } | null;
     }>;
   };
   readonly fulfillments: ReadonlyArray<GqlFulfillment>;
@@ -325,6 +332,7 @@ const mapOrder = (o: GqlOrder): ShopifyOrder => ({
       quantity: n.quantity,
       sku: n.sku,
       variantTitle: n.variantTitle,
+      productId: n.product ? n.product.id : null,
     }),
   ),
   fulfillments: o.fulfillments.map(mapFulfillment),
@@ -356,6 +364,29 @@ const mapCustomer = (c: GqlCustomer): ShopifyCustomer => ({
   createdAt: new Date(c.createdAt),
 });
 
+type GqlProduct = {
+  readonly id: string;
+  readonly title: string;
+  readonly productType: string | null;
+  readonly vendor: string | null;
+  readonly images: {
+    readonly nodes: ReadonlyArray<{
+      readonly url: string;
+      readonly altText: string | null;
+    }>;
+  };
+};
+
+const mapProduct = (p: GqlProduct): ShopifyProduct => ({
+  id: p.id,
+  title: p.title,
+  productType: p.productType,
+  vendor: p.vendor,
+  images: p.images.nodes.map(
+    (n): ShopifyProductImage => ({ url: n.url, altText: n.altText }),
+  ),
+});
+
 // ============================================================
 // Queries
 // ============================================================
@@ -372,7 +403,7 @@ const ORDER_FIELDS = `
     name address1 address2 city province country zip phone
   }
   lineItems(first: 50) {
-    nodes { id title quantity sku variantTitle }
+    nodes { id title quantity sku variantTitle product { id } }
   }
   fulfillments(first: 20) {
     id
@@ -411,6 +442,20 @@ const GET_ORDER_QUERY = `
 const GET_CUSTOMER_QUERY = `
   query GetCustomer($id: ID!) {
     customer(id: $id) { ${CUSTOMER_FIELDS} }
+  }
+`;
+
+const GET_PRODUCT_QUERY = `
+  query GetProduct($id: ID!) {
+    product(id: $id) {
+      id
+      title
+      productType
+      vendor
+      images(first: 10) {
+        nodes { url altText }
+      }
+    }
   }
 `;
 
@@ -603,6 +648,23 @@ export const ShopifyServiceLive = Layer.effect(
               data.customer
                 ? Effect.succeed(mapCustomer(data.customer))
                 : Effect.fail(new CustomerNotFound({ query: customerId })),
+            ),
+          ),
+        ),
+
+      getProduct: (tenantId, productId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{ product: GqlProduct | null }>(
+            http,
+            creds,
+            tenantId,
+            GET_PRODUCT_QUERY,
+            { id: productGid(productId) },
+          ).pipe(
+            Effect.flatMap((data) =>
+              data.product
+                ? Effect.succeed(mapProduct(data.product))
+                : Effect.fail(new ProductNotFound({ productId })),
             ),
           ),
         ),

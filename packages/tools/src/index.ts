@@ -3,6 +3,7 @@ import { caseUpdateStatus } from "./case/update-status.js";
 import { caseUpdateContext } from "./case/update-context.js";
 import { shopifyGetOrder } from "./shopify/get-order.js";
 import { shopifyGetCustomer } from "./shopify/get-customer.js";
+import { shopifyGetProduct } from "./shopify/get-product.js";
 import { shopifyRefundCreate } from "./shopify/refund.js";
 import { shopifyRefundRecommend } from "./shopify/recommend-refund.js";
 import { agentHandoff } from "./agent/handoff.js";
@@ -16,6 +17,7 @@ export * from "./case/update-status.js";
 export * from "./case/update-context.js";
 export * from "./shopify/get-order.js";
 export * from "./shopify/get-customer.js";
+export * from "./shopify/get-product.js";
 export * from "./shopify/refund.js";
 export * from "./shopify/recommend-refund.js";
 export * from "./agent/handoff.js";
@@ -50,6 +52,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   conversationAskCustomer as AnyTool,
   shopifyGetOrder as AnyTool,
   shopifyGetCustomer as AnyTool,
+  shopifyGetProduct as AnyTool,
   shopifyRefundCreate as AnyTool,
   shopifyRefundRecommend as AnyTool,
   supplierAddSheetRow as AnyTool,

@@ -52,6 +52,7 @@ const Output = Schema.Struct({
       title: Schema.String,
       quantity: Schema.Number,
       sku: Schema.NullOr(Schema.String),
+      productId: Schema.NullOr(Schema.String),
     }),
   ),
   fulfillments: Schema.Array(Fulfillment),
@@ -139,6 +140,7 @@ export const shopifyGetOrder = defineTool({
           title: li.title,
           quantity: li.quantity,
           sku: li.sku,
+          productId: li.productId,
         })),
         fulfillments: order.fulfillments.map((f) => ({
           id: f.id,

@@ -12,15 +12,22 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  * so the LLM literally sees the images when they're present:
  *
  *   (A) Photos present in the customer's message → fetch the order to
- *       confirm the line items + customer details, then draft a single
+ *       confirm the line items + customer details, then cross-check the
+ *       photos against the ordered product's reference images via
+ *       `shopify.get_product` and stamp a `productMatch` verdict
+ *       (match / mismatch / uncertain) onto the case context so the
+ *       approval card can calibrate operator confidence (a cheap guard
+ *       against generic-broken-item-photo fraud). Then draft a single
  *       customer-facing reply via `conversation.reply` (defaultPermission:
  *       "ask"). The reply proposes either a replacement (when the item
  *       looks restockable + the customer didn't explicitly ask for a
  *       refund) or a refund (when the item is single-use / discontinued
- *       / the customer asked). The operator approves the draft; the
- *       actual `refund.create` call happens later, only if the customer
- *       confirms they want the refund — that's `refund-review-agent`'s
- *       surface, reached via a follow-up triage on the customer's reply.
+ *       / the customer asked); a non-match verdict softens it to ask the
+ *       customer to confirm the item first. The operator approves the
+ *       draft; the actual `refund.create` call happens later, only if the
+ *       customer confirms they want the refund — that's
+ *       `refund-review-agent`'s surface, reached via a follow-up triage
+ *       on the customer's reply.
  *
  *   (B) No photos → ask the customer for them via
  *       `conversation.ask_customer` (defaultPermission: "allow", so this
@@ -59,7 +66,7 @@ export const damagedProductAgent: AgentConfig = {
     "",
     "Turn 1 (no successful tool result yet): decide the branch.",
     "",
-    "  BRANCH A — Photos PRESENT. The customer's message contains one or more image attachments (you can see them as image content parts). Call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
+    "  BRANCH A — Photos PRESENT. The customer's message contains one or more image attachments (you can see them as image content parts). Call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged. (After this you'll verify the photos actually depict the ordered item before drafting a reply — see Turns 2–4.)",
     "",
     "  BRANCH B — Photos ABSENT. The customer's message is text-only. Call `conversation.ask_customer` ONCE asking for clear photos showing the damage from at least two angles, plus a photo of the outer packaging if available. Fields:",
     "    - `threadId`: from the `[Thread context: ...]` header in the original customer message.",
@@ -72,9 +79,21 @@ export const damagedProductAgent: AgentConfig = {
     "    - `draftId`: a stable string of the form `damaged-product-photo-request-<caseId>` — keep the prefix and append a short random suffix per case.",
     "    - `remindAfterHours`: 72 (three business days — if the customer doesn't reply we want to follow up).",
     "",
-    "Turn 2:",
+    "Turn 2 (BRANCH A — verify the photos match the ordered item):",
     "",
-    "  After BRANCH A's `shopify.get_order` succeeded: call `conversation.reply` ONCE. Look at the photos the customer sent and the order's `lineItems` to decide your proposal. Default to a REPLACEMENT when the damaged item is one we presumably still stock and the customer didn't explicitly ask for a refund. Propose a REFUND when the customer explicitly asked for one, the item looks beyond replacement (e.g. one-of-a-kind, customised), or it's a high-value item where the customer is more likely to want the money back. Fields:",
+    "  After `shopify.get_order` succeeded: pick the line item the customer's photos are about (the one whose `title` best fits their damage description; if there's only one line item, use it). Call `shopify.get_product` ONCE with `productId` set to that line item's `productId` field from the `shopify.get_order` result. This returns the product's reference `images` so you can compare them against the customer's photos. If the chosen line item's `productId` is null (no product reference), SKIP `shopify.get_product` and go straight to Turn 3 with `productMatch: \"uncertain\"`.",
+    "",
+    "Turn 3 (BRANCH A — record the match judgment):",
+    "",
+    "  Compare the customer's damage photos against the product reference `images` returned by `shopify.get_product` and call `case.update_context` ONCE setting `productMatch`:",
+    "    - `\"match\"`: the photos clearly depict the same item the customer ordered.",
+    "    - `\"mismatch\"`: the photos depict a different product (common fraud signal — a generic broken-item image that isn't what they bought).",
+    "    - `\"uncertain\"`: you genuinely can't tell (poor photo, generic object, no reference image, or null productId).",
+    "  A `mismatch` does NOT mean deny — it lowers confidence. Never refuse the customer outright on this signal alone. If `shopify.get_product` returned an error, treat it as `\"uncertain\"` and proceed; do NOT retry it.",
+    "",
+    "Turn 4 (BRANCH A — draft the reply):",
+    "",
+    "  Call `conversation.reply` ONCE. Look at the photos the customer sent and the order's `lineItems` to decide your proposal. Default to a REPLACEMENT when the damaged item is one we presumably still stock and the customer didn't explicitly ask for a refund. Propose a REFUND when the customer explicitly asked for one, the item looks beyond replacement (e.g. one-of-a-kind, customised), or it's a high-value item where the customer is more likely to want the money back. When `productMatch` was `\"mismatch\"` or `\"uncertain\"`, SOFTEN the reply: acknowledge that you want to make sure you're looking at the right item, ask the customer to confirm the order number and which item is damaged, and do NOT commit to a firm resolution amount until that's confirmed. Fields:",
     "    - `threadId`: from the `[Thread context: ...]` header.",
     "    - `to[0].email`: the customer's email from the header.",
     "    - `to[0].name`: null unless the order's `customer.firstName`+`customer.lastName` is set, in which case `\"<first> <last>\"`.",
@@ -84,21 +103,24 @@ export const damagedProductAgent: AgentConfig = {
     "    - `inReplyToMessageId`: null.",
     "    - `draftId`: a stable string of the form `damaged-product-reply-<caseId>` — keep the prefix and append a short random suffix per case.",
     "",
-    "Turn 3 (the conversation now has a successful `conversation.reply` OR `conversation.ask_customer` tool result): respond with plain text only (NO tool call). Write one short sentence describing the action taken and which branch you picked. Examples: \"Photos visible — drafted replacement reply for line item <X>; awaiting human approval.\" or \"No photos attached — asked the customer for two-angle photos plus packaging.\"",
+    "Final turn (the conversation now has a successful `conversation.reply` OR `conversation.ask_customer` tool result): respond with plain text only (NO tool call). Write one short sentence describing the action taken and which branch you picked. Examples: \"Photos visible (productMatch=match) — drafted replacement reply for line item <X>; awaiting human approval.\" or \"No photos attached — asked the customer for two-angle photos plus packaging.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, or `conversation.ask_customer`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, or `conversation.ask_customer`.",
     "- Never call `shopify.get_order` more than once per case.",
+    "- Never call `shopify.get_product` more than once per case — check only the single most-relevant line item.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `conversation.ask_customer` more than once per case.",
     "- Never call `refund.create` — refunds for damaged products go through the refund-review-agent after the customer confirms they want one.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
-    "- If `shopify.get_order` returns an `OrderNotFound`-style error, do NOT retry. Skip `conversation.reply` and respond with plain text apologising that the order id could not be located and asking the customer to confirm it.",
+    "- If `shopify.get_order` returns an `OrderNotFound`-style error, do NOT retry. Skip the product-match and `conversation.reply` steps and respond with plain text apologising that the order id could not be located and asking the customer to confirm it.",
+    "- If `shopify.get_product` returns an error, do NOT retry — record `productMatch: \"uncertain\"` via `case.update_context` and continue to the reply.",
     "- If you mistakenly take BRANCH B (asked for photos) when photos were actually present, that's recoverable — the customer will reply with the photos again and we'll land back on BRANCH A. Better to ask twice than to act on no evidence.",
     "- Treat a successful `conversation.reply` or `conversation.ask_customer` as terminal. Do not call any other action after it.",
   ].join("\n"),
   tools: [
     "shopify.get_order",
+    "shopify.get_product",
     "shopify.get_customer",
     "case.update_context",
     "conversation.reply",
@@ -106,9 +128,13 @@ export const damagedProductAgent: AgentConfig = {
   ],
   permissionOverrides: {},
   handoffs: [],
-  // 6 turns: at most case.update_context (preceded by the triage) +
-  // get_order + conversation.reply, with slack for one retry. The
-  // ask-customer branch only needs 3.
-  maxTurnsPerTick: 6,
+  // 9 turns. The turn budget is shared with the triage agent that hands
+  // off into this one (the runtime does not reset the counter on
+  // handoff). BRANCH A's longest path is: triage `case.update_context`
+  // + `agent.handoff` + `shopify.get_order` + `shopify.get_product` +
+  // `case.update_context`(productMatch) + `conversation.reply` + the
+  // terminal plain-text turn = 7, leaving slack for one stray turn. The
+  // ask-customer branch (BRANCH B) only needs 3.
+  maxTurnsPerTick: 9,
   temperature: 0,
 };

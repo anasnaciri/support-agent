@@ -10,6 +10,10 @@ export class CustomerNotFound extends Data.TaggedError("CustomerNotFound")<{
   readonly query: string;
 }> {}
 
+export class ProductNotFound extends Data.TaggedError("ProductNotFound")<{
+  readonly productId: string;
+}> {}
+
 /**
  * Shopify refused to create the refund. Common causes (from
  * `refundCreate.userErrors[].code`): no refundable transactions on the
@@ -94,6 +98,7 @@ export type ConnectorStoreError =
 export type ShopifyError =
   | OrderNotFound
   | CustomerNotFound
+  | ProductNotFound
   | RefundFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed

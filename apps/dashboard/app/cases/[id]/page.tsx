@@ -298,6 +298,12 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     typeof context["identifiedOrderId"] === "string"
       ? (context["identifiedOrderId"] as string)
       : null;
+  const productMatch =
+    context["productMatch"] === "match" ||
+    context["productMatch"] === "mismatch" ||
+    context["productMatch"] === "uncertain"
+      ? context["productMatch"]
+      : null;
 
   const [entries, customer, order, allApprovals, shopDomain] =
     await Promise.all([
@@ -433,6 +439,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           approval={a}
           returnTo={`/cases/${caseRow.id}`}
           refundRecommendation={extractRefundRecommendation(entries)}
+          productMatch={productMatch}
         />
       ))}
 
