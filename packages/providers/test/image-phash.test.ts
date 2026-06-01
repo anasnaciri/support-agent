@@ -36,4 +36,21 @@ describe("computeImagePHash", () => {
     );
     expect(hash).toBeNull();
   });
+
+  it("hashes a real PNG via the default (lazy jimp) decoder — stable + non-null", async () => {
+    // Exercises the dynamic `import("jimp")` path end-to-end: build a real
+    // image buffer, hash it with the default decoder, and confirm it's a
+    // stable bigint.
+    const { Jimp } = await import("jimp");
+    const img = new Jimp({ width: 16, height: 16, color: 0x000000ff });
+    for (let x = 0; x < 16; x += 1) img.setPixelColor(0xffffffff, x, x);
+    const png = await img.getBuffer("image/png");
+
+    const a = await computeImagePHash(new Uint8Array(png));
+    const b = await computeImagePHash(new Uint8Array(png));
+    expect(typeof a).toBe("bigint");
+    expect(a).toBe(b);
+    // Returns null only on undecodable input — a real PNG must decode.
+    expect(a).not.toBeNull();
+  });
 });

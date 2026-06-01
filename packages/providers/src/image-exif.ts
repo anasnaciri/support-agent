@@ -1,4 +1,3 @@
-import exifr from "exifr";
 import type { ExifSummary } from "@support-agent/agent-core";
 
 /**
@@ -35,10 +34,14 @@ const finiteNumber = (value: unknown): number | null =>
 // Real parser: tiff (ifd0 → Make/Model), exif (DateTimeOriginal), and gps
 // with `gps: true` so the GPS IFD is translated into decimal
 // latitude/longitude rather than raw rational arrays.
-const defaultParse: ExifParse = (bytes) =>
-  exifr.parse(bytes, { tiff: true, exif: true, gps: true }) as Promise<
+const defaultParse: ExifParse = async (bytes) => {
+  // Lazily imported (same rationale as jimp in image-phash.ts) so `exifr`
+  // stays out of any bundler's static graph for `@support-agent/providers`.
+  const { default: exifr } = await import("exifr");
+  return exifr.parse(bytes, { tiff: true, exif: true, gps: true }) as Promise<
     Record<string, unknown> | undefined
   >;
+};
 
 /**
  * Build a privacy-conscious {@link ExifSummary} from image bytes. The

@@ -1,4 +1,3 @@
-import { Jimp } from "jimp";
 import { dhashFromLuma } from "@support-agent/agent-core";
 
 /**
@@ -17,6 +16,12 @@ const PHASH_W = 9;
 const PHASH_H = 8;
 
 const jimpDecode: LumaDecoder = async (bytes) => {
+  // Loaded lazily so `jimp` (a heavy, codec-bearing dep that references
+  // node `zlib`/`fs`) stays out of the static module graph — importing
+  // `@support-agent/providers` from a bundler (e.g. the Next dashboard
+  // transpiling this package) must not pull jimp in. Only the worker's
+  // upload path ever reaches here.
+  const { Jimp } = await import("jimp");
   const image = await Jimp.read(Buffer.from(bytes));
   // Downscale to the hash grid and flatten to grayscale; after greyscale()
   // R == G == B, so the red channel is the luma value.
