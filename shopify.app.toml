@@ -1,9 +1,11 @@
-# Shopify app configuration — committed so the app version (scopes, URLs,
-# and mandatory compliance webhooks) is registered with Shopify rather than
-# living only in the Partner Dashboard. Link + push it with the Shopify CLI:
+# Shopify app configuration for our OAuth connector (public app, custom /
+# UNLISTED distribution — "connect your store → approve scopes", NOT an App
+# Store listing). Committed so the app version (scopes, URLs, compliance
+# webhooks) is version-controlled rather than living only in the Partner
+# Dashboard. Link + push it with the Shopify CLI:
 #
 #   shopify app config link      # binds this file to the app, fills client_id
-#   shopify app deploy           # releases this version + runs review checks
+#   shopify app deploy           # releases this app version's config
 #
 # Two values are deployment-specific and MUST be set before linking:
 #   * client_id        — the app's Client ID (Shopify API key) from the
@@ -21,9 +23,10 @@ name = "Support Agent"
 handle = "support-agent"
 application_url = "https://your-app-domain.example/installed"
 
-# Not embedded in Shopify Admin yet — the app uses its own OAuth flow and a
-# standalone connected page (/installed). Flip to `true` only once the App
-# Bridge / session-token embedded entrypoint lands (tracked separately).
+# Not embedded in Shopify Admin — by design. This is an OAuth connector with
+# its own standalone surface (the /installed landing page + the WorkOS-auth
+# dashboard), not an App-Store embedded app. Embedding / App Bridge is only
+# required for listed embedded apps, which this is not. Keep `false`.
 embedded = false
 
 [access_scopes]
@@ -46,9 +49,9 @@ api_version = "2026-04"
   topics = [ "app/uninstalled" ]
   uri = "https://your-app-domain.example/webhooks/shopify/app/uninstalled"
 
-  # Mandatory GDPR/CCPA compliance webhooks. Handlers already exist in
-  # apps/api (HMAC-verified); this block is what registers them with Shopify
-  # and satisfies the App Store review requirement.
+  # GDPR/CCPA compliance webhooks — required of any public app (listed or
+  # not). Handlers already exist in apps/api (HMAC-verified); this block is
+  # what registers them with Shopify.
   [webhooks.privacy_compliance]
   customer_data_request_url = "https://your-app-domain.example/webhooks/shopify/customers/data_request"
   customer_deletion_url = "https://your-app-domain.example/webhooks/shopify/customers/redact"
