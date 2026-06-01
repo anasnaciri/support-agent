@@ -1112,6 +1112,12 @@ CREATE INDEX timers_due_idx ON timers (fire_at) WHERE fired_at IS NULL AND cance
 
 The API is RESTful for resources, command-style for business actions. JSON, OpenAPI-described, tenant-scoped via auth.
 
+### HTTP runtime
+
+`apps/api` may stay on Node's built-in `node:http` while it is only the small webhook/OAuth/approval edge. That shape is production-capable behind a real proxy/load balancer with TLS termination, request-size limits, sane timeouts, and structured logging.
+
+When `apps/api` grows into the resource and command surface below, standardize on **Fastify** rather than continuing to expand the manual router. Fastify is the preferred production framework because it gives route-level hooks, schema validation, OpenAPI generation, lifecycle/error handling, and raw-body control for HMAC-verified webhooks without moving business logic out of Effect services. Keep webhook handlers able to read byte-exact raw bodies before parsing, keep core workflows behind the existing Service Tags, and avoid introducing Express for new API work.
+
 ### Resources (REST)
 
 ```
