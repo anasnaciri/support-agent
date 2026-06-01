@@ -43,6 +43,32 @@ export interface MessageAttachment {
   readonly contentType: string;
   readonly storageKey: string;
   readonly sizeBytes: number;
+  /**
+   * Camera-metadata summary extracted from the image bytes at upload time
+   * (images only; absent for non-image or unprocessed attachments). A
+   * deterministic, no-cost fraud signal for the damaged-product flow:
+   * originals from a phone camera carry EXIF (make/model/timestamp, often
+   * GPS), whereas screenshots, AI-generated images, and heavily-edited
+   * stock photos almost always have it stripped. Never auto-rejects — the
+   * operator sees `hasExif: false` surfaced as a chip and decides.
+   */
+  readonly exif?: ExifSummary;
+}
+
+/**
+ * Minimal, privacy-conscious projection of an image's EXIF block. We keep
+ * only the fields that matter for triage; we never retain the full EXIF
+ * dump. `hasExif` is the headline signal — `false` means no recognisable
+ * camera metadata was present (stripped or never there).
+ */
+export interface ExifSummary {
+  readonly hasExif: boolean;
+  readonly cameraMake: string | null;
+  readonly cameraModel: string | null;
+  /** Original capture time as an ISO-8601 string, when present. */
+  readonly dateTimeOriginal: string | null;
+  /** Decimal lat/lon when the image carried GPS tags. */
+  readonly gps: { readonly lat: number; readonly lon: number } | null;
 }
 
 export interface TicketInput {

@@ -136,6 +136,36 @@ const detailBoolean = (details: unknown, key: string): boolean | null => {
   return typeof value === "boolean" ? value : null;
 };
 
+/**
+ * Defensively parse `context.photoSignals` (stamped by the runtime) into
+ * the shape the ApprovalCard expects. Returns null for absent/malformed
+ * values so a bad row never crashes the case page.
+ */
+const parsePhotoSignals = (
+  value: unknown,
+): {
+  count: number;
+  withExif: number;
+  stripped: number;
+  anyStripped: boolean;
+} | null => {
+  const r = detailRecord(value);
+  if (!r) return null;
+  const count = r["count"];
+  const withExif = r["withExif"];
+  const stripped = r["stripped"];
+  const anyStripped = r["anyStripped"];
+  if (
+    typeof count !== "number" ||
+    typeof withExif !== "number" ||
+    typeof stripped !== "number" ||
+    typeof anyStripped !== "boolean"
+  ) {
+    return null;
+  }
+  return { count, withExif, stripped, anyStripped };
+};
+
 const parsedBody = (value: unknown): string | null => {
   const body = detailRecord(value)?.["bodyText"];
   return typeof body === "string" && body.trim() ? body : null;
@@ -304,6 +334,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     context["productMatch"] === "uncertain"
       ? context["productMatch"]
       : null;
+  const photoSignals = parsePhotoSignals(context["photoSignals"]);
 
   const [entries, customer, order, allApprovals, shopDomain] =
     await Promise.all([
@@ -440,6 +471,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           returnTo={`/cases/${caseRow.id}`}
           refundRecommendation={extractRefundRecommendation(entries)}
           productMatch={productMatch}
+          photoSignals={photoSignals}
         />
       ))}
 

@@ -9,6 +9,7 @@ import {
   gmailGetAttachment,
   type GmailImageAttachmentMetadata,
 } from "./gmail-http.js";
+import { extractImageExif, type ExifParse } from "./image-exif.js";
 
 // ============================================================
 // Limits — per-message
@@ -68,6 +69,10 @@ export interface ProcessGmailImageAttachmentsInput {
   readonly imageAttachments: ReadonlyArray<GmailImageAttachmentMetadata>;
   readonly blob: typeof BlobStorage.Service;
   readonly fetchImpl?: typeof fetch;
+  // Injectable EXIF parser (defaults to the real `exifr`-backed one). The
+  // webhook never passes this; tests do, to assert metadata stamping
+  // without real image bytes.
+  readonly exifParser?: ExifParse;
 }
 
 /**
@@ -150,11 +155,16 @@ export const processGmailImageAttachments = async (
         continue;
       }
       cumulativeBytes += fetched.bytes.byteLength;
+      // EXIF inspection is a no-cost fraud signal for the damaged-product
+      // flow. `extractImageExif` never throws, so a parse failure just
+      // yields `hasExif: false` rather than dropping the attachment.
+      const exif = await extractImageExif(fetched.bytes, input.exifParser);
       out.push({
         filename: meta.filename,
         contentType: meta.mimeType,
         storageKey,
         sizeBytes: fetched.bytes.byteLength,
+        exif,
       });
     } catch (cause) {
       // GmailHttpError + unknown errors both go here. Log + skip — the

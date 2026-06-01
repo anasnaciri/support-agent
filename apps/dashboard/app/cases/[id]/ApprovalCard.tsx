@@ -35,6 +35,19 @@ interface Props {
    * second look).
    */
   readonly productMatch?: "match" | "mismatch" | "uncertain" | null;
+  /**
+   * EXIF rollup across the customer's photo attachments, stamped on the
+   * case context by the runtime at upload time. A `stripped` image (no
+   * camera metadata) is a cheap fraud signal — originals carry camera
+   * EXIF; screenshots, AI-gen, and stock photos usually don't. Surfaced
+   * as a chip; never auto-rejects.
+   */
+  readonly photoSignals?: {
+    readonly count: number;
+    readonly withExif: number;
+    readonly stripped: number;
+    readonly anyStripped: boolean;
+  } | null;
 }
 
 const PRODUCT_MATCH_LABEL: Record<
@@ -56,6 +69,7 @@ export const ApprovalCard = ({
   returnTo,
   refundRecommendation,
   productMatch,
+  photoSignals,
 }: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -104,6 +118,24 @@ export const ApprovalCard = ({
             </span>
             <Badge variant={productMatchVariant(productMatch)} className="text-xs">
               {PRODUCT_MATCH_LABEL[productMatch]}
+            </Badge>
+          </div>
+        ) : null}
+
+        {photoSignals ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Photo EXIF
+            </span>
+            <Badge
+              variant={photoSignals.anyStripped ? "destructive" : "success"}
+              className="text-xs"
+            >
+              {photoSignals.anyStripped
+                ? photoSignals.withExif > 0
+                  ? `${photoSignals.stripped} of ${photoSignals.count} stripped`
+                  : "Camera metadata stripped"
+                : "Camera metadata present"}
             </Badge>
           </div>
         ) : null}

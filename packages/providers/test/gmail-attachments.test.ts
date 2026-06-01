@@ -176,6 +176,8 @@ describe("processGmailImageAttachments", () => {
       ],
       blob,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      // Stripped-image stub so the strict shape assertion stays deterministic.
+      exifParser: () => Promise.resolve(undefined),
     });
 
     expect(result).toHaveLength(2);
@@ -189,6 +191,13 @@ describe("processGmailImageAttachments", () => {
         "image/jpeg",
       ),
       sizeBytes: bytesA.byteLength,
+      exif: {
+        hasExif: false,
+        cameraMake: null,
+        cameraModel: null,
+        dateTimeOriginal: null,
+        gps: null,
+      },
     });
     expect(result[1]?.storageKey.endsWith(".png")).toBe(true);
 
@@ -203,6 +212,47 @@ describe("processGmailImageAttachments", () => {
       ),
     );
     expect(Array.from(got.bytes)).toEqual(Array.from(bytesA));
+  });
+
+  it("stamps the extracted EXIF summary onto each uploaded attachment", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchImpl = vi.fn(async () =>
+      okJson({ data: b64url(bytes), size: bytes.byteLength }),
+    );
+    const blob = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          return yield* BlobStorage;
+        }),
+        BlobStorageTest({}),
+      ),
+    );
+
+    const result = await processGmailImageAttachments({
+      tenantId,
+      messageId: "msg-exif",
+      token: "tok",
+      imageAttachments: [
+        {
+          attachmentId: "A1",
+          filename: "front.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: bytes.byteLength,
+        },
+      ],
+      blob,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      exifParser: () =>
+        Promise.resolve({ Make: "Apple", Model: "iPhone 15" }),
+    });
+
+    expect(result[0]?.exif).toEqual({
+      hasExif: true,
+      cameraMake: "Apple",
+      cameraModel: "iPhone 15",
+      dateTimeOriginal: null,
+      gps: null,
+    });
   });
 
   it("skips an oversized attachment and keeps processing the rest", async () => {

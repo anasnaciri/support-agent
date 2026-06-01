@@ -1527,15 +1527,32 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     };
 
-    await Effect.runPromise(
+    const stampedCase = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
           yield* runtime.handleEvent(inboundWithPhotos);
+          const repo = yield* CaseRepository;
+          return yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "thread-photo" as never,
+          );
         }),
         layer,
       ),
     );
+
+    // The runtime stamps a per-case EXIF rollup onto the context. These
+    // fixture attachments carry no `exif` field → all stripped.
+    const photoSignals = (
+      stampedCase?.context as Record<string, unknown> | undefined
+    )?.["photoSignals"];
+    expect(photoSignals).toEqual({
+      count: 2,
+      withExif: 0,
+      stripped: 2,
+      anyStripped: true,
+    });
 
     // content must be an array of parts: one text + two image parts
     // (the PDF is filtered out because we don't model file parts yet).

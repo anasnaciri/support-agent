@@ -12,6 +12,7 @@ import {
   type LLMDecision,
   type ToolContext,
   type WorkflowResult,
+  summarizePhotoSignals,
   AgentId as makeAgentId,
   TenantId as makeTenantId,
   ThreadId as makeThreadId,
@@ -507,6 +508,30 @@ export const AgentRuntimeDefault = Layer.effect(
               .pipe(
                 Effect.catchAll(() => Effect.succeed(working)),
               );
+          }
+        }
+
+        // 2b. Photo signals — when an inbound message carries image
+        // attachments, stamp a per-case EXIF rollup onto the context. A
+        // stripped image (no camera metadata) is a cheap fraud signal for
+        // the damaged-product flow; the dashboard ApprovalCard surfaces it
+        // as a chip. Best-effort — a context-write failure never blocks the
+        // tick, and a fresh stamp overwrites any prior one (latest reply
+        // wins, mirroring `productMatch`).
+        if (
+          event.type === "message.received" ||
+          event.type === "customer.replied"
+        ) {
+          const signals = summarizePhotoSignals(event.payload.attachments);
+          if (signals) {
+            working = yield* cases
+              .update(working.id, {
+                context: {
+                  ...working.context,
+                  photoSignals: signals,
+                } as never,
+              })
+              .pipe(Effect.catchAll(() => Effect.succeed(working)));
           }
         }
 
