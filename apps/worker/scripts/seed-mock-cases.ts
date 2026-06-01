@@ -119,6 +119,9 @@ interface Scenario {
     readonly stripped: number;
     readonly anyStripped: boolean;
   };
+  // Risk flags the runtime stamps on the context (e.g. the duplicate-photo
+  // guard); surfaced as ApprovalCard chips.
+  readonly riskFlags?: readonly string[];
   /** Specialist tools that ran (allow) before the terminal step. */
   readonly executedTools: readonly ToolStep[];
   readonly terminal: Terminal;
@@ -353,6 +356,7 @@ const build = (tenantId: string, s: Scenario): BuiltRows => {
   };
   if (s.productMatch) context["productMatch"] = s.productMatch;
   if (s.photoSignals) context["photoSignals"] = s.photoSignals;
+  if (s.riskFlags && s.riskFlags.length > 0) context["riskFlags"] = s.riskFlags;
 
   const caseRow: CaseInsert = {
     id,
@@ -581,6 +585,9 @@ const scenarios: readonly Scenario[] = [
     priority: "high",
     productMatch: "mismatch",
     photoSignals: { count: 1, withExif: 0, stripped: 1, anyStripped: true },
+    // All three fraud signals stack on this case: wrong product, stripped
+    // EXIF, and the same photo already seen on another order (#2001).
+    riskFlags: [`duplicate_photo_seen_in_case_${seedId(7)}`],
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "shopify.get_product" },
