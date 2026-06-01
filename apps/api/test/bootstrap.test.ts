@@ -1,6 +1,24 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadApiConfig } from "../src/bootstrap.js";
+import { DEFAULT_SHOPIFY_SCOPES, loadApiConfig } from "../src/bootstrap.js";
+
+describe("DEFAULT_SHOPIFY_SCOPES", () => {
+  // Must cover every scope a Shopify-backed tool declares in its
+  // `requiredConnectorScopes`, or the managed install won't request enough
+  // access and the tool gets denied at runtime. read_products was added
+  // when shopify.get_product joined the damaged-product flow. Keep aligned
+  // with shopify.app.toml + the Partner Dashboard.
+  it("includes every scope the Shopify tools require", () => {
+    for (const scope of [
+      "read_orders", // shopify.get_order / findOrderByName
+      "read_customers", // shopify.get_customer / searchByEmail
+      "read_products", // shopify.get_product
+      "write_orders", // refund.create
+    ]) {
+      expect(DEFAULT_SHOPIFY_SCOPES).toContain(scope);
+    }
+  });
+});
 
 const setEnv = (vars: Record<string, string>) => {
   const prev: Record<string, string | undefined> = {};

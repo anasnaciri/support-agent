@@ -46,13 +46,19 @@ export interface ShopifyAppConfig {
  *   2. Documentation for which tool needs which scope:
  *      - `read_orders`      → shopify.get_order, shopify.findOrderByName
  *      - `read_customers`   → shopify.get_customer, shopify.searchByEmail
+ *      - `read_products`    → shopify.get_product (damaged-product photo
+ *                             cross-check)
  *      - `write_orders`     → refund.create (and future order-edit tools)
  *
- * Keep aligned with the Partner Dashboard config.
+ * Keep aligned with the Partner Dashboard config AND `shopify.app.toml`.
+ * The `shopify-tool-scopes` test asserts every Shopify tool's
+ * `requiredConnectorScopes` is covered here, so a new scoped tool can't
+ * silently outrun the requested scopes.
  */
 export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_orders",
   "read_customers",
+  "read_products",
   "write_orders",
 ];
 

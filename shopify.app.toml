@@ -1,0 +1,58 @@
+# Shopify app configuration — committed so the app version (scopes, URLs,
+# and mandatory compliance webhooks) is registered with Shopify rather than
+# living only in the Partner Dashboard. Link + push it with the Shopify CLI:
+#
+#   shopify app config link      # binds this file to the app, fills client_id
+#   shopify app deploy           # releases this version + runs review checks
+#
+# Two values are deployment-specific and MUST be set before linking:
+#   * client_id        — the app's Client ID (Shopify API key) from the
+#                        Partner Dashboard. `config link` writes it for you.
+#   * the host in every URL below — the public base URL of apps/api (the same
+#                        origin that serves /shopify/auth/callback and the
+#                        /webhooks/shopify/* handlers). Replace
+#                        `https://your-app-domain.example` throughout.
+#
+# Keep `[access_scopes].scopes` aligned with apps/api `DEFAULT_SHOPIFY_SCOPES`
+# (the bootstrap test enforces tool→scope coverage).
+
+client_id = "REPLACE_WITH_SHOPIFY_CLIENT_ID"
+name = "Support Agent"
+handle = "support-agent"
+application_url = "https://your-app-domain.example/installed"
+
+# Not embedded in Shopify Admin yet — the app uses its own OAuth flow and a
+# standalone connected page (/installed). Flip to `true` only once the App
+# Bridge / session-token embedded entrypoint lands (tracked separately).
+embedded = false
+
+[access_scopes]
+# read_orders     → shopify.get_order / findOrderByName
+# read_customers  → shopify.get_customer / searchByEmail
+# read_products   → shopify.get_product (damaged-product photo cross-check)
+# write_orders    → refund.create
+scopes = "read_orders,read_customers,read_products,write_orders"
+
+[auth]
+redirect_urls = [
+  "https://your-app-domain.example/shopify/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+  # App lifecycle — the handler revokes the tenant's connector on uninstall.
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://your-app-domain.example/webhooks/shopify/app/uninstalled"
+
+  # Mandatory GDPR/CCPA compliance webhooks. Handlers already exist in
+  # apps/api (HMAC-verified); this block is what registers them with Shopify
+  # and satisfies the App Store review requirement.
+  [webhooks.privacy_compliance]
+  customer_data_request_url = "https://your-app-domain.example/webhooks/shopify/customers/data_request"
+  customer_deletion_url = "https://your-app-domain.example/webhooks/shopify/customers/redact"
+  shop_deletion_url = "https://your-app-domain.example/webhooks/shopify/shop/redact"
+
+[pos]
+embedded = false
