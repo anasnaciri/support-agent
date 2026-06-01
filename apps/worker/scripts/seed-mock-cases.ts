@@ -111,6 +111,14 @@ interface Scenario {
   readonly ageMinutes: number;
   readonly priority?: "low" | "normal" | "high" | "urgent";
   readonly productMatch?: "match" | "mismatch" | "uncertain";
+  // EXIF rollup the runtime stamps from uploaded photos; surfaced as the
+  // ApprovalCard "Photo EXIF" chip.
+  readonly photoSignals?: {
+    readonly count: number;
+    readonly withExif: number;
+    readonly stripped: number;
+    readonly anyStripped: boolean;
+  };
   /** Specialist tools that ran (allow) before the terminal step. */
   readonly executedTools: readonly ToolStep[];
   readonly terminal: Terminal;
@@ -344,6 +352,7 @@ const build = (tenantId: string, s: Scenario): BuiltRows => {
     mockSeed: true,
   };
   if (s.productMatch) context["productMatch"] = s.productMatch;
+  if (s.photoSignals) context["photoSignals"] = s.photoSignals;
 
   const caseRow: CaseInsert = {
     id,
@@ -518,6 +527,7 @@ const scenarios: readonly Scenario[] = [
     handoffReason: "Customer sent photos of a damaged item from order #2001.",
     ageMinutes: 20,
     productMatch: "match",
+    photoSignals: { count: 2, withExif: 2, stripped: 0, anyStripped: false },
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "shopify.get_product" },
@@ -543,6 +553,7 @@ const scenarios: readonly Scenario[] = [
     handoffReason: "Photos of a torn custom print from order #2002; customer asked for a refund.",
     ageMinutes: 47,
     productMatch: "match",
+    photoSignals: { count: 1, withExif: 1, stripped: 0, anyStripped: false },
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "shopify.get_product" },
@@ -569,6 +580,7 @@ const scenarios: readonly Scenario[] = [
     ageMinutes: 75,
     priority: "high",
     productMatch: "mismatch",
+    photoSignals: { count: 1, withExif: 0, stripped: 1, anyStripped: true },
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "shopify.get_product" },
@@ -594,6 +606,7 @@ const scenarios: readonly Scenario[] = [
     handoffReason: "Damaged-item photo attached for order #2004.",
     ageMinutes: 110,
     productMatch: "uncertain",
+    photoSignals: { count: 2, withExif: 1, stripped: 1, anyStripped: true },
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "case.update_context" },
@@ -639,6 +652,7 @@ const scenarios: readonly Scenario[] = [
     handoffReason: "Photos of a shattered mug from order #2006.",
     ageMinutes: 400,
     productMatch: "match",
+    photoSignals: { count: 2, withExif: 2, stripped: 0, anyStripped: false },
     executedTools: [
       { tool: "shopify.get_order" },
       { tool: "shopify.get_product" },
