@@ -71,6 +71,13 @@
       "when": 1779811200000,
       "tag": "0009_timers",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780315176199,
+      "tag": "0010_colorful_starhawk",
+      "breakpoints": true
     }
   ]
 }

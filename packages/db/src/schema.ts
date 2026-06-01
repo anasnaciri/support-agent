@@ -1,4 +1,5 @@
 import {
+  bigint,
   bigserial,
   boolean,
   check,
@@ -319,6 +320,40 @@ export const timers = pgTable(
 
 export type TimerRow = typeof timers.$inferSelect;
 export type TimerInsert = typeof timers.$inferInsert;
+
+/**
+ * Perceptual hashes of customer photo attachments — backs the damaged-
+ * product duplicate-photo fraud guard. One row per uploaded image. `phash`
+ * is a 64-bit dHash stored as a signed `bigint` (two's-complement bit
+ * pattern; Hamming distance is computed on the bits, so the sign is
+ * irrelevant). We keep ONLY the hash, the case, and the tenant — never the
+ * image — and a hash is not reversible to the original photo. Lookups
+ * fetch a tenant's recent window (see the composite index) and compute
+ * Hamming distance in app code.
+ */
+export const imageHashes = pgTable(
+  "image_hashes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    phash: bigint("phash", { mode: "bigint" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("image_hashes_tenant_created_idx").on(t.tenantId, t.createdAt),
+    index("image_hashes_case_idx").on(t.caseId),
+  ],
+);
+
+export type ImageHashRow = typeof imageHashes.$inferSelect;
+export type ImageHashInsert = typeof imageHashes.$inferInsert;
 
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;
