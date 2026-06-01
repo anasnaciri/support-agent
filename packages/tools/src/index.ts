@@ -11,6 +11,7 @@ import { conversationFetchThread } from "./conversation/fetch-thread.js";
 import { conversationReply } from "./conversation/reply.js";
 import { conversationAskCustomer } from "./conversation/ask-customer.js";
 import { supplierAddSheetRow } from "./supplier/add-sheet-row.js";
+import { supplierReadSheetColumns } from "./supplier/read-sheet-columns.js";
 import { trackingLookup } from "./tracking/lookup.js";
 
 export * from "./case/update-status.js";
@@ -25,6 +26,7 @@ export * from "./conversation/fetch-thread.js";
 export * from "./conversation/reply.js";
 export * from "./conversation/ask-customer.js";
 export * from "./supplier/add-sheet-row.js";
+export * from "./supplier/read-sheet-columns.js";
 export * from "./tracking/lookup.js";
 
 /**
@@ -55,6 +57,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   shopifyGetProduct as AnyTool,
   shopifyRefundCreate as AnyTool,
   shopifyRefundRecommend as AnyTool,
+  supplierReadSheetColumns as AnyTool,
   supplierAddSheetRow as AnyTool,
   trackingLookup as AnyTool,
 ];

@@ -4,6 +4,7 @@ import {
   SheetsAuthFailed,
   SheetsAuthMissing,
   SheetsNotFound,
+  SheetsReadFailed,
   type SheetsError,
   type TenantId,
 } from "@support-agent/agent-core";
@@ -12,9 +13,14 @@ import {
   SheetsService,
   type AppendRowInput,
   type AppendRowResult,
+  type ReadHeaderInput,
 } from "@support-agent/services";
 import { refreshGmailToken } from "./gmail-token.js";
-import { SheetsHttpError, sheetsAppendRow } from "./sheets-http.js";
+import {
+  SheetsHttpError,
+  sheetsAppendRow,
+  sheetsGetValues,
+} from "./sheets-http.js";
 
 // ============================================================
 // Provider config
@@ -44,8 +50,23 @@ const DEFAULT_REFRESH_SKEW_MS = 60_000;
 
 const mapHttpError = (
   err: unknown,
-  ctx: { tenantId: TenantId; spreadsheetId: string; range: string },
+  ctx: {
+    tenantId: TenantId;
+    spreadsheetId: string;
+    range: string;
+    /** Which operation failed — picks the generic-failure tag. */
+    op: "append" | "read";
+  },
 ): SheetsError => {
+  // The generic (rate-limit / network / invalid) failure surfaces under
+  // an op-specific tag so the audit log distinguishes a header read from
+  // a row write even though both share the same {spreadsheetId, message}
+  // shape.
+  const generic = (message: string): SheetsError =>
+    ctx.op === "read"
+      ? new SheetsReadFailed({ spreadsheetId: ctx.spreadsheetId, message })
+      : new SheetsAppendFailed({ spreadsheetId: ctx.spreadsheetId, message });
+
   if (err instanceof SheetsHttpError) {
     const f = err.failure;
     if (f.kind === "auth_failed") {
@@ -58,23 +79,14 @@ const mapHttpError = (
       });
     }
     if (f.kind === "invalid") {
-      return new SheetsAppendFailed({
-        spreadsheetId: ctx.spreadsheetId,
-        message: f.message,
-      });
+      return generic(f.message);
     }
-    // rate_limited + network both surface as a generic append failure —
-    // the tool boundary sees the message verbatim so the operator can
-    // tell the difference in the audit log.
-    return new SheetsAppendFailed({
-      spreadsheetId: ctx.spreadsheetId,
-      message: err.message,
-    });
+    // rate_limited + network both surface as a generic failure — the tool
+    // boundary sees the message verbatim so the operator can tell the
+    // difference in the audit log.
+    return generic(err.message);
   }
-  return new SheetsAppendFailed({
-    spreadsheetId: ctx.spreadsheetId,
-    message: err instanceof Error ? err.message : String(err),
-  });
+  return generic(err instanceof Error ? err.message : String(err));
 };
 
 // ============================================================
@@ -165,6 +177,7 @@ export const SheetsServiceLive = (
                 tenantId,
                 spreadsheetId: input.spreadsheetId,
                 range: input.range,
+                op: "append",
               }),
           });
           return {
@@ -173,8 +186,46 @@ export const SheetsServiceLive = (
           };
         });
 
+      const readHeader = (
+        tenantId: TenantId,
+        input: ReadHeaderInput,
+      ): Effect.Effect<ReadonlyArray<string>, SheetsError> =>
+        Effect.gen(function* () {
+          const conn = yield* resolveToken(tenantId);
+          // Read only the first row of the target sheet. We derive a
+          // `<sheet>!1:1` range from the configured append range so a big
+          // sheet doesn't pull its whole column span back just to learn
+          // the header.
+          const sheetName = input.range.includes("!")
+            ? input.range.slice(0, input.range.indexOf("!"))
+            : input.range;
+          const headerRange = `${sheetName}!1:1`;
+          const rows = yield* Effect.tryPromise({
+            try: () =>
+              sheetsGetValues({
+                token: conn.accessToken,
+                spreadsheetId: input.spreadsheetId,
+                range: headerRange,
+                ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+              }),
+            catch: (cause) =>
+              mapHttpError(cause, {
+                tenantId,
+                spreadsheetId: input.spreadsheetId,
+                range: headerRange,
+                op: "read",
+              }),
+          });
+          const first = rows[0] ?? [];
+          // Coerce each cell to a trimmed string; blanks stay "".
+          return first.map((cell) =>
+            cell === null || cell === undefined ? "" : String(cell).trim(),
+          );
+        });
+
       return SheetsService.of({
         appendRow,
+        readHeader,
       });
     }),
   );

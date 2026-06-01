@@ -33,6 +33,7 @@ import {
   shopifyGetOrder,
   shopifyGetProduct,
   supplierAddSheetRow,
+  supplierReadSheetColumns,
   trackingLookup,
 } from "@support-agent/tools";
 import {
@@ -2158,11 +2159,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         conversationReply as never,
-        // missing-package-agent declares supplier.add_sheet_row in its
-        // tools array (BRANCH A optionally calls it). The runtime's
-        // `schemasFor` validates every declared tool is registered, so
-        // we register it here even though this script's BRANCH-A flow
-        // skips it (no supplierEscalationSheet configured in this test).
+        // missing-package-agent declares supplier.read_sheet_columns +
+        // supplier.add_sheet_row in its tools array (BRANCH A optionally
+        // calls them). The runtime's `schemasFor` validates every
+        // declared tool is registered, so we register both here even
+        // though this script's BRANCH-A flow skips them (no
+        // supplierEscalationSheet configured in this test).
+        supplierReadSheetColumns as never,
         supplierAddSheetRow as never,
       ]),
       PermissionServiceDefault,
@@ -2314,23 +2317,32 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c3",
-        tool: "supplier.add_sheet_row",
+        tool: "supplier.read_sheet_columns",
         input: {
           spreadsheetId: "sheet-warehouse",
           range: "Escalations!A:F",
-          values: [
-            "case-xyz",
-            "buyer@example.com",
-            "#4001",
-            "1Z888",
-            "2026-05-22T15:00:00.000Z",
-            "2026-05-24T00:00:00.000Z",
-          ],
         },
       },
       {
         type: "tool_call",
         callId: "c4",
+        tool: "supplier.add_sheet_row",
+        input: {
+          spreadsheetId: "sheet-warehouse",
+          range: "Escalations!A:F",
+          // Values aligned to the sheet's own header order returned by
+          // read_sheet_columns above: [Order, Email, Tracking, Delivered].
+          values: [
+            "#4001",
+            "buyer@example.com",
+            "1Z888",
+            "2026-05-22T15:00:00.000Z",
+          ],
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c5",
         tool: "conversation.reply",
         input: {
           threadId: "thread-missing-with-sheet",
@@ -2380,6 +2392,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         trackingLookup as never,
         shopifyGetCustomer as never,
         conversationReply as never,
+        supplierReadSheetColumns as never,
         supplierAddSheetRow as never,
       ]),
       PermissionServiceDefault,
@@ -2388,7 +2401,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ShopifyServiceTest({
         orders: new Map([[orderId, fixtureOrder]]),
       }),
-      SheetsServiceTest({}),
+      // The merchant's sheet declares its own column order; the agent
+      // reads it and aligns the appended row to it.
+      SheetsServiceTest({
+        headers: {
+          "sheet-warehouse": ["Order", "Email", "Tracking", "Delivered"],
+        },
+      }),
       approvalLinkLayer,
       platformMailNoop,
       tenantOverridesEmpty,
@@ -2444,12 +2463,18 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // Runtime parks waiting on the conversation.reply approval.
     expect(out.result.type).toBe("PausedWaitingForApproval");
 
-    // supplier.add_sheet_row ran (auto-allowed via agent override), then
+    // supplier.read_sheet_columns + supplier.add_sheet_row both ran
+    // (auto-allowed via agent override), in that order, then
     // conversation.reply parked for approval (defaultPermission ask).
     const toolInvocations = out.auditEntries
       .filter((e) => e.action === "tool.invoked")
       .map((e) => (e.details as { tool?: string }).tool);
+    expect(toolInvocations).toContain("supplier.read_sheet_columns");
     expect(toolInvocations).toContain("supplier.add_sheet_row");
+    // The columns must be read BEFORE the row is appended.
+    expect(toolInvocations.indexOf("supplier.read_sheet_columns")).toBeLessThan(
+      toolInvocations.indexOf("supplier.add_sheet_row"),
+    );
     // conversation.reply at the ask stage short-circuits BEFORE execute,
     // so there's no tool.invoked row for it — the approval row carries it.
     expect(toolInvocations).not.toContain("conversation.reply");

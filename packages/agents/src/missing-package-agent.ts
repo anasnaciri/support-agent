@@ -53,14 +53,17 @@ export const missingPackageAgent: AgentConfig = {
     "Turn 2 (the conversation now has a successful `shopify.get_order` tool result): pick ONE of these three branches based on the order's `fulfillmentStatus` and `fulfillments[]`. BRANCH A may emit TWO tool calls in sequence (supplier escalation, then reply); branches B and C emit ONE tool call (the reply only).",
     "",
     "  BRANCH A — Marked delivered (fulfillmentStatus is `delivered`, OR any fulfillment has a non-null `deliveredAt`).",
-    "    BRANCH A — sheet escalation step (CONDITIONAL): If a line of the form `[Supplier escalation sheet: spreadsheetId=<id>, range=<range>]` is present at the END of the system prompt, call `supplier.add_sheet_row` ONCE before drafting the customer reply. Use that exact `spreadsheetId` and `range`, and pass `values` = `[caseId, customerEmail, orderName, trackingNumber, deliveredAtIso, todayIso]` where:",
-    "      • caseId — the case id from the system context.",
-    "      • customerEmail — the order's `email` (or the original `from` if that's empty).",
-    "      • orderName — the order's `name` (e.g. `#1001`).",
-    "      • trackingNumber — the first non-null tracking number across `fulfillments[]`, or empty string if none.",
-    "      • deliveredAtIso — the `deliveredAt` (ISO string) of the fulfillment marked delivered, or empty string if none.",
-    "      • todayIso — the current date/time as ISO 8601.",
-    "    If the `[Supplier escalation sheet: ...]` line is NOT present at the end of the system prompt, SKIP this step entirely and go straight to `conversation.reply` below. Never invent a spreadsheetId or range — only use the values from the header.",
+    "    BRANCH A — sheet escalation step (CONDITIONAL): If a line of the form `[Supplier escalation sheet: spreadsheetId=<id>, range=<range>]` is present at the END of the system prompt, log a row to that sheet BEFORE drafting the customer reply. Do NOT assume a fixed column layout — the merchant owns the sheet's columns, so read them first and align your row to them:",
+    "      Step A1 — call `supplier.read_sheet_columns` ONCE with the exact `spreadsheetId` and `range` from the header. It returns `columns`: the sheet's header cells left-to-right.",
+    "      Step A2 — call `supplier.add_sheet_row` ONCE with the same `spreadsheetId` and `range`. Build `values` so it lines up with `columns` position-for-position: for each header in `columns` (left-to-right), output the matching datum below, or an empty string `\"\"` if no datum fits that header. The data you have to place:",
+    "        • case id — the case id from the system context. (headers like \"Case\", \"Case ID\", \"Ticket\")",
+    "        • customer email — the order's `email` (or the original `from` if that's empty). (headers like \"Email\", \"Customer\")",
+    "        • order name — the order's `name`, e.g. `#1001`. (headers like \"Order\", \"Order #\")",
+    "        • tracking number — the first non-null tracking number across `fulfillments[]`, or `\"\"` if none. (headers like \"Tracking\", \"Tracking #\")",
+    "        • delivered-at — the `deliveredAt` (ISO string) of the fulfillment marked delivered, or `\"\"` if none. (headers like \"Delivered\", \"Delivered At\")",
+    "        • today — the current date/time as ISO 8601. (headers like \"Date\", \"Logged\", \"Reported\", \"Timestamp\")",
+    "      Match headers to data by meaning, case-insensitively — a header need not match exactly. Leave any column you can't confidently fill as `\"\"`, and don't drop or reorder columns. If `columns` comes back EMPTY (the sheet has no header row yet), fall back to this default order: `[case id, customer email, order name, tracking number, delivered-at, today]`.",
+    "    If the `[Supplier escalation sheet: ...]` line is NOT present at the end of the system prompt, SKIP both steps entirely and go straight to `conversation.reply` below. Never invent a spreadsheetId or range — only use the values from the header.",
     "    BRANCH A — customer reply step: call `conversation.reply` ONCE. Before assuming the package was lost, ask the customer to verify the common explanations: check porch / mailbox / building lobby, ask household members, check with immediate neighbors, confirm the shipping address matches what they expected. Reference the carrier + tracking number + delivered date from the tool result so they can re-check. Tell them if those checks come up empty we can open a carrier claim and discuss reshipment / refund — but don't commit to either yet.",
     "",
     "  BRANCH B — Stuck in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). Call `conversation.reply` ONCE — do NOT call `supplier.add_sheet_row` for this branch (carrier delay isn't a warehouse issue). Acknowledge the delay, summarise the carrier + tracking number + most recent estimated delivery date from the tool result, and explain that we'll escalate with the carrier directly. Set expectations: 1-2 business days for the carrier to respond. Invite the customer to share any extra context (notes left for the carrier, neighborhood patterns).",
@@ -78,14 +81,14 @@ export const missingPackageAgent: AgentConfig = {
     "Turn 3 (the conversation has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the draft was prepared and which branch was picked. Example: \"Draft missing-package reply prepared (branch A: marked delivered); awaiting human approval.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.add_sheet_row`, or `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, or `conversation.reply`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
-    "- Never call `supplier.add_sheet_row` more than once per case. Only call it inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present.",
+    "- Never call `supplier.read_sheet_columns` or `supplier.add_sheet_row` more than once per case. Only call them inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present. Always read columns before appending.",
     "- Never call `refund.create` — refunds for missing packages go through the refund-review-agent after the customer confirms they want one.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
     "- If `shopify.get_order` returns an `OrderNotFound`-style error, do NOT retry. Skip `conversation.reply` and respond with plain text apologising that the order id could not be located and asking the customer to confirm it.",
-    "- If `supplier.add_sheet_row` returns an error, do NOT retry — proceed directly to `conversation.reply` (the customer reply matters more than the warehouse log row; an operator can replay the escalation manually).",
+    "- If `supplier.read_sheet_columns` or `supplier.add_sheet_row` returns an error, do NOT retry — proceed directly to `conversation.reply` (the customer reply matters more than the warehouse log row; an operator can replay the escalation manually). If the column read fails but you still want to log, you may append using the default order above.",
     "- Treat a successful `conversation.reply` as terminal. Do not call any other action after it.",
   ].join("\n"),
   // shopify.get_customer is listed but optional — the customer-ID stamp
@@ -96,20 +99,25 @@ export const missingPackageAgent: AgentConfig = {
     "shopify.get_order",
     "shopify.get_customer",
     "case.update_context",
+    "supplier.read_sheet_columns",
     "supplier.add_sheet_row",
     "conversation.reply",
   ],
   permissionOverrides: {
-    // The reply is still operator-gated (ask); the supplier-sheet write
-    // is internal — auto-allow so BRANCH A doesn't block on a second
-    // approval. The Tool's defaultPermission is `ask`; this override
-    // downgrades to `allow` only inside this agent's context.
+    // The reply is still operator-gated (ask); the supplier-sheet read +
+    // write are internal — auto-allow so BRANCH A doesn't block on extra
+    // approvals. The write tool's defaultPermission is `ask`; this
+    // override downgrades to `allow` only inside this agent's context.
+    // The column read is already `allow` by default but we pin it here
+    // so the intent is explicit.
+    "supplier.read_sheet_columns": "allow",
     "supplier.add_sheet_row": "allow",
   },
   handoffs: [],
-  // 6 turns covered shopify.get_order → conversation.reply with slack.
-  // BRANCH A now emits a possible 3rd tool (supplier.add_sheet_row) so
-  // give the agent +1 to keep tail slack.
-  maxTurnsPerTick: 7,
+  // Baseline branch is get_order → conversation.reply. BRANCH A now emits
+  // up to TWO extra tools (read_sheet_columns, then add_sheet_row) before
+  // the reply, so give the agent headroom: get_order + read + append +
+  // reply + final-text = 5 turns, +slack.
+  maxTurnsPerTick: 9,
   temperature: 0,
 };

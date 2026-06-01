@@ -181,3 +181,43 @@ export const sheetsAppendRow = async (
     updatedRows: raw.updates?.updatedRows ?? 1,
   };
 };
+
+// ============================================================
+// values.get
+// ============================================================
+
+export interface SheetsGetValuesInput {
+  readonly token: string;
+  readonly spreadsheetId: string;
+  /** A1 reference, e.g. `Escalations!1:1` for just the header row. */
+  readonly range: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
+interface RawGetValuesResponse {
+  readonly range?: string;
+  readonly majorDimension?: string;
+  /** Rows of cells. Trailing empty cells/rows are omitted by the API. */
+  readonly values?: ReadonlyArray<ReadonlyArray<unknown>>;
+}
+
+/**
+ * Read a range's cell values. `majorDimension=ROWS` so `values[0]` is the
+ * first row left-to-right. Cells come back as strings/numbers/booleans;
+ * the caller coerces. Used to discover a sheet's header schema before an
+ * append so the row lands in the sheet's own column order.
+ */
+export const sheetsGetValues = async (
+  input: SheetsGetValuesInput,
+): Promise<ReadonlyArray<ReadonlyArray<unknown>>> => {
+  const encodedRange = encodeURIComponent(input.range);
+  const raw = (await sheetsFetch({
+    method: "GET",
+    path: `/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodedRange}`,
+    query: { majorDimension: "ROWS" },
+    token: input.token,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+  })) as RawGetValuesResponse;
+
+  return raw.values ?? [];
+};

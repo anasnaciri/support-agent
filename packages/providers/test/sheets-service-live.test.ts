@@ -5,6 +5,7 @@ import {
   SheetsAuthFailed,
   SheetsAuthMissing,
   SheetsNotFound,
+  SheetsReadFailed,
   TenantId,
 } from "@support-agent/agent-core";
 import {
@@ -290,6 +291,100 @@ describe("SheetsServiceLive", () => {
       throw new Error("expected Fail cause");
     }
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("readHeader GETs the first row of the sheet and returns trimmed strings", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      // Derives a `<sheet>!1:1` range from the configured append range so
+      // it never pulls the whole column span back.
+      expect(url).toContain("/spreadsheets/sheet-1/values/Escalations!1%3A1");
+      expect(url).toContain("majorDimension=ROWS");
+      return okJson({
+        range: "Escalations!1:1",
+        majorDimension: "ROWS",
+        values: [["Case ID", " Email ", "Order", 5]],
+      });
+    });
+    const layer = SheetsServiceLive({
+      clientId: "cid",
+      clientSecret: "csecret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "sheet-1",
+            range: "Escalations!A:F",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toEqual(["Case ID", "Email", "Order", "5"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("readHeader returns [] when the sheet has no values", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ range: "Sheet1!1:1", majorDimension: "ROWS" }),
+    );
+    const layer = SheetsServiceLive({
+      clientId: "cid",
+      clientSecret: "csecret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "sheet-1",
+            range: "Sheet1!A:C",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("readHeader maps 400 to SheetsReadFailed with the API message", async () => {
+    const fetchImpl = vi.fn(async () =>
+      fail(
+        400,
+        JSON.stringify({
+          error: { code: 400, message: "Unable to parse range: Bad!1:1" },
+        }),
+      ),
+    );
+    const layer = SheetsServiceLive({
+      clientId: "cid",
+      clientSecret: "csecret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "sheet-1",
+            range: "Bad!A:Z",
+          }),
+        ),
+        layer,
+      ),
+    );
+    if (exit._tag !== "Failure") throw new Error("expected failure");
+    if (exit.cause._tag === "Fail") {
+      const err = exit.cause.error;
+      expect(err).toBeInstanceOf(SheetsReadFailed);
+      expect((err as SheetsReadFailed).message).toContain("Unable to parse range");
+    } else {
+      throw new Error("expected Fail cause");
+    }
   });
 
   it("appendRow fails with SheetsAuthMissing when the connector has no refresh token", async () => {

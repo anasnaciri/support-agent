@@ -18,6 +18,7 @@ describe("missing-package-agent config", () => {
       "shopify.get_order",
       "shopify.get_customer",
       "case.update_context",
+      "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
       "conversation.reply",
     ]);
@@ -25,11 +26,19 @@ describe("missing-package-agent config", () => {
     expect(missingPackageAgent.tools).not.toContain("agent.handoff");
     expect(missingPackageAgent.handoffs).toEqual([]);
     expect(missingPackageAgent.maxTurnsPerTick).toBeGreaterThan(1);
-    // The supplier-sheet write is auto-allowed inside this agent — the
-    // reply still needs an operator approval, but the warehouse log row
-    // shouldn't pause the case for a second approval.
+    // The supplier-sheet read + write are auto-allowed inside this agent —
+    // the reply still needs an operator approval, but discovering the
+    // columns and logging the warehouse row shouldn't pause the case.
+    expect(
+      missingPackageAgent.permissionOverrides["supplier.read_sheet_columns"],
+    ).toBe("allow");
     expect(missingPackageAgent.permissionOverrides["supplier.add_sheet_row"]).toBe(
       "allow",
+    );
+    // BRANCH A reads the sheet's own columns before appending, rather
+    // than assuming a fixed schema.
+    expect(missingPackageAgent.promptTemplate).toContain(
+      "supplier.read_sheet_columns",
     );
     // Prompt must describe the three decision branches so the model
     // picks the right one based on fulfillment state.

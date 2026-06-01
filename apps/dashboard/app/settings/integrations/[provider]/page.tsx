@@ -458,20 +458,44 @@ export default async function ConnectorManagePage({
 
               <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
                 <p className="mb-2 font-medium text-foreground">
-                  What goes in each row
+                  Columns are yours — the agent reads your header row
                 </p>
                 <p className="mb-2">
-                  When the missing-package agent escalates, it appends one row
-                  with these six columns (left-to-right):
+                  You don&apos;t need a fixed layout. When the missing-package
+                  agent escalates, it reads the sheet&apos;s header row and
+                  fills the columns it recognises by name, leaving the rest
+                  blank. Add a header row with any of these (in any order); the
+                  agent matches them case-insensitively:
                 </p>
-                <ol className="list-decimal space-y-1 pl-5">
-                  <li>Case ID</li>
-                  <li>Customer email</li>
-                  <li>Order name (e.g. #1001)</li>
-                  <li>Carrier tracking number</li>
-                  <li>Delivered-at timestamp (ISO 8601)</li>
-                  <li>Today&apos;s timestamp (ISO 8601)</li>
-                </ol>
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>
+                    <strong>Case</strong> / Case ID / Ticket — the support case
+                    id
+                  </li>
+                  <li>
+                    <strong>Email</strong> / Customer — the customer&apos;s
+                    email
+                  </li>
+                  <li>
+                    <strong>Order</strong> / Order # — the order name (e.g.
+                    #1001)
+                  </li>
+                  <li>
+                    <strong>Tracking</strong> — the carrier tracking number
+                  </li>
+                  <li>
+                    <strong>Delivered</strong> / Delivered At — the delivered-at
+                    timestamp
+                  </li>
+                  <li>
+                    <strong>Date</strong> / Logged / Reported — when the row was
+                    logged
+                  </li>
+                </ul>
+                <p className="mt-2">
+                  No header row? The agent falls back to that order,
+                  left-to-right.
+                </p>
               </div>
             </CardContent>
           </Card>

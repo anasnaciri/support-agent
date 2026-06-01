@@ -144,6 +144,10 @@ export type LLMError =
  *     Either the merchant pasted the wrong id or the sheet was deleted.
  *   - `SheetsAppendFailed`: catch-all write failure (rate limit, invalid
  *     range, malformed values) with the API message surfaced verbatim.
+ *   - `SheetsReadFailed`: catch-all read failure (rate limit, invalid
+ *     range, malformed response) when fetching the header row to align an
+ *     append against the sheet's own column schema. Mirrors
+ *     `SheetsAppendFailed` so reads and writes surface symmetrically.
  */
 export class SheetsAuthMissing extends Data.TaggedError("SheetsAuthMissing")<{
   readonly tenantId: TenantId;
@@ -163,11 +167,17 @@ export class SheetsAppendFailed extends Data.TaggedError("SheetsAppendFailed")<{
   readonly message: string;
 }> {}
 
+export class SheetsReadFailed extends Data.TaggedError("SheetsReadFailed")<{
+  readonly spreadsheetId: string;
+  readonly message: string;
+}> {}
+
 export type SheetsError =
   | SheetsAuthMissing
   | SheetsAuthFailed
   | SheetsNotFound
   | SheetsAppendFailed
+  | SheetsReadFailed
   | NetworkError;
 
 /**

@@ -76,6 +76,61 @@ describe("SheetsServiceTest", () => {
     }
   });
 
+  it("readHeader returns the fixture header row for a known spreadsheet", async () => {
+    const layer = SheetsServiceTest({
+      headers: { "sheet-1": ["Case", "Email", "Order"] },
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "sheet-1",
+            range: "Escalations!A:F",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toEqual(["Case", "Email", "Order"]);
+  });
+
+  it("readHeader returns [] when the spreadsheet has no fixture header", async () => {
+    const layer = SheetsServiceTest({});
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "blank",
+            range: "Sheet1!A:C",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("readHeader fails with SheetsNotFound when the id isn't in the allowlist", async () => {
+    const layer = SheetsServiceTest({ spreadsheets: ["known"] });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(SheetsService, (s) =>
+          s.readHeader(tenantId, {
+            spreadsheetId: "ghost",
+            range: "Sheet1!A:C",
+          }),
+        ),
+        layer,
+      ),
+    );
+    if (exit._tag !== "Failure") throw new Error("expected failure");
+    if (exit.cause._tag === "Fail") {
+      expect(exit.cause.error).toBeInstanceOf(SheetsNotFound);
+    } else {
+      throw new Error("expected Fail cause");
+    }
+  });
+
   it("appendRow runs the override impl when provided", async () => {
     const received: AppendRowInput[] = [];
     const layer = SheetsServiceTest({

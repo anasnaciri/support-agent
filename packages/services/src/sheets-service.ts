@@ -37,6 +37,18 @@ export interface AppendRowResult {
 }
 
 /**
+ * Input for `SheetsService.readHeader`. `range` is the same A1 reference
+ * the caller would append into (`Escalations!A:F`); the Live impl reads
+ * the first row within that sheet so the caller can discover the sheet's
+ * own column schema and build an append aligned to it — rather than the
+ * platform dictating a fixed column order.
+ */
+export interface ReadHeaderInput {
+  readonly spreadsheetId: string;
+  readonly range: string;
+}
+
+/**
  * Provider-neutral Sheets surface. Today the only Live impl is Google
  * Sheets, but the Tag is intentionally narrow so a future Microsoft
  * Excel / Smartsheet / Airtable layer could implement the same shape.
@@ -52,6 +64,17 @@ export class SheetsService extends Context.Tag("SheetsService")<
       tenantId: TenantId,
       input: AppendRowInput,
     ) => Effect.Effect<AppendRowResult, SheetsError>;
+    /**
+     * Read the header row (first row) of the sheet referenced by `range`.
+     * Returns the cells left-to-right as strings (blank cells become
+     * `""`); an empty array means the sheet has no header row yet. Lets a
+     * caller align an append against the sheet's existing columns instead
+     * of assuming a fixed schema.
+     */
+    readonly readHeader: (
+      tenantId: TenantId,
+      input: ReadHeaderInput,
+    ) => Effect.Effect<ReadonlyArray<string>, SheetsError>;
   }
 >() {}
 
@@ -67,11 +90,22 @@ export interface SheetsTestFixtures {
    * against without coupling to a Sheets-API-shaped row number.
    */
   readonly spreadsheets?: ReadonlyArray<string>;
+  /**
+   * Header rows keyed by spreadsheet id. The default `readHeader` impl
+   * returns the matching entry (or `[]` when absent) so tool/agent tests
+   * can drive a known column schema without a real API.
+   */
+  readonly headers?: Readonly<Record<string, ReadonlyArray<string>>>;
   /** Optional override for the `appendRow` impl — full replacement. */
   readonly appendRow?: (
     tenantId: TenantId,
     input: AppendRowInput,
   ) => Effect.Effect<AppendRowResult, SheetsError>;
+  /** Optional override for the `readHeader` impl — full replacement. */
+  readonly readHeader?: (
+    tenantId: TenantId,
+    input: ReadHeaderInput,
+  ) => Effect.Effect<ReadonlyArray<string>, SheetsError>;
 }
 
 /**
@@ -122,6 +156,23 @@ export const SheetsServiceTest = (fixtures: SheetsTestFixtures = {}) =>
           updatedRange: synthRange,
           updatedRows: 1,
         });
+      },
+      readHeader: (tenantId, input) => {
+        if (fixtures.readHeader) {
+          return fixtures.readHeader(tenantId, input);
+        }
+        if (
+          fixtures.spreadsheets &&
+          !fixtures.spreadsheets.includes(input.spreadsheetId)
+        ) {
+          return Effect.fail(
+            new SheetsNotFound({
+              spreadsheetId: input.spreadsheetId,
+              range: input.range,
+            }),
+          );
+        }
+        return Effect.succeed(fixtures.headers?.[input.spreadsheetId] ?? []);
       },
     }),
   );
