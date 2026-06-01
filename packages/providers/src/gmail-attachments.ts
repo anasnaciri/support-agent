@@ -10,6 +10,7 @@ import {
   type GmailImageAttachmentMetadata,
 } from "./gmail-http.js";
 import { extractImageExif, type ExifParse } from "./image-exif.js";
+import { computeImagePHash } from "./image-phash.js";
 
 // ============================================================
 // Limits — per-message
@@ -73,6 +74,9 @@ export interface ProcessGmailImageAttachmentsInput {
   // webhook never passes this; tests do, to assert metadata stamping
   // without real image bytes.
   readonly exifParser?: ExifParse;
+  // Injectable perceptual-hash function (defaults to the real `jimp`-backed
+  // one). Same testability rationale as `exifParser`.
+  readonly phasher?: (bytes: Uint8Array) => Promise<bigint | null>;
 }
 
 /**
@@ -159,12 +163,18 @@ export const processGmailImageAttachments = async (
       // flow. `extractImageExif` never throws, so a parse failure just
       // yields `hasExif: false` rather than dropping the attachment.
       const exif = await extractImageExif(fetched.bytes, input.exifParser);
+      // Perceptual hash for duplicate-photo detection. Also never throws;
+      // null (undecodable) just means no `phash` on the attachment.
+      const phashValue = await (input.phasher ?? computeImagePHash)(
+        fetched.bytes,
+      );
       out.push({
         filename: meta.filename,
         contentType: meta.mimeType,
         storageKey,
         sizeBytes: fetched.bytes.byteLength,
         exif,
+        ...(phashValue !== null ? { phash: phashValue.toString() } : {}),
       });
     } catch (cause) {
       // GmailHttpError + unknown errors both go here. Log + skip — the

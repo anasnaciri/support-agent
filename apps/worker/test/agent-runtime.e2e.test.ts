@@ -48,6 +48,8 @@ import {
   ConnectorCredentialStoreTest,
   ConversationServiceTest,
   defaultRefundPolicy,
+  ImageHashStore,
+  ImageHashStoreTest,
   LLMServiceFromFn,
   LLMServiceScripted,
   PermissionServiceLive,
@@ -1576,6 +1578,96 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         "gmail/tenant-acme/msg-photo/att2.png",
       );
     }
+  });
+
+  it("flags a duplicate photo (near pHash match) seen on another case", async () => {
+    // The damaged-product fraud guard: a photo whose perceptual hash is
+    // within Hamming distance of one already recorded on ANOTHER case for
+    // the same tenant stamps a `duplicate_photo_seen_in_case_<id>` risk
+    // flag onto the case context.
+    const llmFn = LLMServiceFromFn(() =>
+      Eff.succeed({ type: "final_message" as const, text: "ok" }),
+    );
+    const imageHashLayer = ImageHashStoreTest;
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+      ]),
+      PermissionServiceDefault,
+      llmFn,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+      imageHashLayer,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const priorCaseId = CaseId("99999999-9999-4999-8999-999999999999");
+    const inbound: DomainEvent = {
+      type: "message.received",
+      tenantId: TenantId("tenant-dup"),
+      threadId: "thread-dup" as never,
+      payload: {
+        threadId: "thread-dup" as never,
+        messageId: "msg-dup",
+        from: { name: "Mallory", email: "mallory@example.com" },
+        to: [{ name: "Support", email: "support@merchant.com" }],
+        subject: "Damaged again",
+        bodyText: "Another broken item, same photo as always.",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [
+          {
+            filename: "broken.jpg",
+            contentType: "image/jpeg",
+            storageKey: "gmail/tenant-dup/msg-dup/att1.jpg",
+            sizeBytes: 5000,
+            phash: "3", // distance 1 from the pre-seeded hash "1"
+          },
+        ],
+      },
+    };
+
+    const stampedCase = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          // Pre-seed a near-identical hash on a different case, same tenant.
+          const store = yield* ImageHashStore;
+          yield* store.record({
+            tenantId: TenantId("tenant-dup"),
+            caseId: priorCaseId,
+            phash: 1n,
+          });
+          const runtime = yield* AgentRuntime;
+          yield* runtime.handleEvent(inbound);
+          const repo = yield* CaseRepository;
+          return yield* repo.findByThreadId(
+            TenantId("tenant-dup"),
+            "thread-dup" as never,
+          );
+        }),
+        layer,
+      ),
+    );
+
+    const riskFlags = (
+      stampedCase?.context as Record<string, unknown> | undefined
+    )?.["riskFlags"];
+    expect(riskFlags).toEqual([
+      `duplicate_photo_seen_in_case_${priorCaseId}`,
+    ]);
   });
 
   // ----------------------------------------------------------------

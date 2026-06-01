@@ -178,6 +178,7 @@ describe("processGmailImageAttachments", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       // Stripped-image stub so the strict shape assertion stays deterministic.
       exifParser: () => Promise.resolve(undefined),
+      phasher: () => Promise.resolve(null),
     });
 
     expect(result).toHaveLength(2);
@@ -244,6 +245,7 @@ describe("processGmailImageAttachments", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       exifParser: () =>
         Promise.resolve({ Make: "Apple", Model: "iPhone 15" }),
+      phasher: () => Promise.resolve(null),
     });
 
     expect(result[0]?.exif).toEqual({
@@ -253,6 +255,41 @@ describe("processGmailImageAttachments", () => {
       dateTimeOriginal: null,
       gps: null,
     });
+  });
+
+  it("stamps the perceptual hash (as a decimal string) onto each attachment", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fetchImpl = vi.fn(async () =>
+      okJson({ data: b64url(bytes), size: bytes.byteLength }),
+    );
+    const blob = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          return yield* BlobStorage;
+        }),
+        BlobStorageTest({}),
+      ),
+    );
+
+    const result = await processGmailImageAttachments({
+      tenantId,
+      messageId: "msg-phash",
+      token: "tok",
+      imageAttachments: [
+        {
+          attachmentId: "A1",
+          filename: "front.jpg",
+          mimeType: "image/jpeg",
+          sizeBytes: bytes.byteLength,
+        },
+      ],
+      blob,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      exifParser: () => Promise.resolve(undefined),
+      phasher: () => Promise.resolve(-42n),
+    });
+
+    expect(result[0]?.phash).toBe("-42");
   });
 
   it("skips an oversized attachment and keeps processing the rest", async () => {

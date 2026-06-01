@@ -39,6 +39,7 @@ import {
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  ImageHashStoreLive,
   LLMCredentialResolverLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
@@ -391,6 +392,9 @@ export const buildWorker = async (
     mail,
     approvalLinkLayer,
     blob,
+    // Duplicate-photo fraud guard. DbClient-backed; satisfied by the
+    // dbLayer provide below. The runtime picks it up via serviceOption.
+    ImageHashStoreLive,
   );
 
   // Satisfy env's DbClient dependency.

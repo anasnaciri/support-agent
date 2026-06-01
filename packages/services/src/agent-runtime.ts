@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   AgentRegistry,
   PermissionService,
@@ -24,6 +24,7 @@ import { LLMService } from "./llm-service.js";
 import { ShopifyService } from "./shopify-service.js";
 import { TransactionRunner } from "./transaction-runner.js";
 import { PlatformMailService } from "./platform-mail.js";
+import { ImageHashStore, type SimilarImageHit } from "./image-hash-store.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
 import { signApprovalToken } from "./approval-tokens.js";
 import {
@@ -271,6 +272,11 @@ export const AgentRuntimeDefault = Layer.effect(
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
     const tenantRepo = yield* TenantRepository;
+    // Optional — captured at layer-build time so `tick` can close over it.
+    // Present in the worker (which wires ImageHashStoreLive); absent in the
+    // many test layers that don't, in which case duplicate-photo detection
+    // is simply skipped.
+    const maybeImageHashStore = yield* Effect.serviceOption(ImageHashStore);
 
     /**
      * Apply per-tenant per-agent overrides on top of the in-code
@@ -522,15 +528,79 @@ export const AgentRuntimeDefault = Layer.effect(
           event.type === "message.received" ||
           event.type === "customer.replied"
         ) {
-          const signals = summarizePhotoSignals(event.payload.attachments);
-          if (signals) {
+          const attachments = event.payload.attachments;
+          const signals = summarizePhotoSignals(attachments);
+
+          // Duplicate-photo guard: when an ImageHashStore is wired (it's
+          // optional — absent in many test layers, present in the worker),
+          // compare each photo's perceptual hash against the tenant's
+          // recent hashes. A near-match on ANOTHER case flags the re-used
+          // "broken item" photo scam. Best-effort: store failures degrade
+          // to no flag rather than aborting the tick.
+          const maybeStore = maybeImageHashStore;
+          const dupFlags: string[] = [];
+          if (Option.isSome(maybeStore)) {
+            const store = maybeStore.value;
+            const seenCaseIds = new Set<string>();
+            for (const att of attachments) {
+              if (
+                !att.contentType.startsWith("image/") ||
+                typeof att.phash !== "string"
+              ) {
+                continue;
+              }
+              let phash: bigint;
+              try {
+                phash = BigInt(att.phash);
+              } catch {
+                continue;
+              }
+              const hits = yield* store
+                .findSimilar({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  phash,
+                  maxDistance: 5,
+                  sinceDays: 90,
+                })
+                .pipe(
+                  Effect.catchAll(() =>
+                    Effect.succeed(
+                      [] as ReadonlyArray<SimilarImageHit>,
+                    ),
+                  ),
+                );
+              for (const hit of hits) {
+                if (!seenCaseIds.has(hit.caseId)) {
+                  seenCaseIds.add(hit.caseId);
+                  dupFlags.push(`duplicate_photo_seen_in_case_${hit.caseId}`);
+                }
+              }
+              // Record this photo's hash so future uploads can match it.
+              yield* store
+                .record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  phash,
+                })
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
+          }
+
+          if (signals || dupFlags.length > 0) {
+            const existingFlags = Array.isArray(working.context["riskFlags"])
+              ? (working.context["riskFlags"] as unknown[]).filter(
+                  (f): f is string => typeof f === "string",
+                )
+              : [];
+            const mergedFlags = Array.from(
+              new Set([...existingFlags, ...dupFlags]),
+            );
+            const patch: Record<string, unknown> = { ...working.context };
+            if (signals) patch["photoSignals"] = signals;
+            if (mergedFlags.length > 0) patch["riskFlags"] = mergedFlags;
             working = yield* cases
-              .update(working.id, {
-                context: {
-                  ...working.context,
-                  photoSignals: signals,
-                } as never,
-              })
+              .update(working.id, { context: patch as never })
               .pipe(Effect.catchAll(() => Effect.succeed(working)));
           }
         }

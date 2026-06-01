@@ -53,6 +53,13 @@ export interface MessageAttachment {
    * operator sees `hasExif: false` surfaced as a chip and decides.
    */
   readonly exif?: ExifSummary;
+  /**
+   * 64-bit perceptual (difference) hash of the image, as a decimal string
+   * (bigint isn't JSON-serialisable across the event bus). Computed at
+   * upload time; the runtime uses it to flag the same photo re-used across
+   * different orders. Absent for non-image or undecodable attachments.
+   */
+  readonly phash?: string;
 }
 
 /**

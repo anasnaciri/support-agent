@@ -48,7 +48,18 @@ interface Props {
     readonly stripped: number;
     readonly anyStripped: boolean;
   } | null;
+  /**
+   * Free-form risk flags stamped on the case context (e.g. the
+   * duplicate-photo guard's `duplicate_photo_seen_in_case_<id>`). Surfaced
+   * as destructive chips so the operator sees them before approving.
+   */
+  readonly riskFlags?: ReadonlyArray<string>;
 }
+
+const riskFlagLabel = (flag: string): string =>
+  flag.startsWith("duplicate_photo_seen_in_case_")
+    ? "Duplicate photo seen on another case"
+    : flag;
 
 const PRODUCT_MATCH_LABEL: Record<
   NonNullable<Props["productMatch"]>,
@@ -70,6 +81,7 @@ export const ApprovalCard = ({
   refundRecommendation,
   productMatch,
   photoSignals,
+  riskFlags,
 }: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -137,6 +149,19 @@ export const ApprovalCard = ({
                   : "Camera metadata stripped"
                 : "Camera metadata present"}
             </Badge>
+          </div>
+        ) : null}
+
+        {riskFlags && riskFlags.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Risk flags
+            </span>
+            {riskFlags.map((flag) => (
+              <Badge key={flag} variant="destructive" className="text-xs">
+                {riskFlagLabel(flag)}
+              </Badge>
+            ))}
           </div>
         ) : null}
 

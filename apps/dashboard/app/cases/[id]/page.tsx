@@ -335,6 +335,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       ? context["productMatch"]
       : null;
   const photoSignals = parsePhotoSignals(context["photoSignals"]);
+  const riskFlags = Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
 
   const [entries, customer, order, allApprovals, shopDomain] =
     await Promise.all([
@@ -472,6 +477,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           refundRecommendation={extractRefundRecommendation(entries)}
           productMatch={productMatch}
           photoSignals={photoSignals}
+          riskFlags={riskFlags}
         />
       ))}
 
