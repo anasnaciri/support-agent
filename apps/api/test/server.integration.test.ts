@@ -49,6 +49,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       callbackUrl: "http://localhost/shopify/auth/callback",
       apiVersion: "2025-01",
     },
+    dashboardBaseUrl: null,
   };
 
   let handle: ServerHandle | null = null;

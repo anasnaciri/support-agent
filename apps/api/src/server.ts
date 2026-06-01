@@ -17,6 +17,7 @@ import {
   verifyState,
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
+import { dashboardConnectRedirect } from "./post-connect-redirect.js";
 import {
   assertShopifyShopConnectable,
   claimShopifyShopForTenant,
@@ -459,11 +460,9 @@ const handleShopifyCallback = async (
     return;
   }
 
-  // Install succeeded — redirect to our App URL (`/installed`) per
-  // Shopify's non-embedded app pattern, echoing the `host` + `shop` so
-  // the landing page has the merchant context. JSON callers (tests,
-  // curl with `Accept: application/json`) still get a structured
-  // success body so assertions don't have to follow redirects.
+  // Install succeeded. JSON callers (tests, curl with
+  // `Accept: application/json`) get a structured success body so
+  // assertions don't have to follow redirects.
   const acceptsJson = (req.headers["accept"] ?? "")
     .toString()
     .toLowerCase()
@@ -477,6 +476,20 @@ const handleShopifyCallback = async (
       ownershipTransferred: persistResult.right.ownership.transferred,
       appUninstalledWebhook,
     });
+    return;
+  }
+  // Browser flow: land the merchant back in our own app (the dashboard
+  // integrations page, which now shows the active connection) when a
+  // dashboard origin is configured; otherwise fall back to the
+  // standalone `/installed` landing page, echoing `host` + `shop` so it
+  // has merchant context.
+  const dashboardRedirect = dashboardConnectRedirect(
+    cfg.dashboardBaseUrl,
+    "shopify",
+    { shop },
+  );
+  if (dashboardRedirect) {
+    sendRedirect(res, dashboardRedirect);
     return;
   }
   const installedQs = new URLSearchParams({ shop });
@@ -1094,6 +1107,13 @@ const handleGoogleCallback = async (
       scopes: token.scope,
       watchRegistered: !!watch,
     });
+    return;
+  }
+  // Same as the Shopify callback: prefer landing the merchant back on
+  // the dashboard integrations page when configured.
+  const dashboardRedirect = dashboardConnectRedirect(cfg.dashboardBaseUrl, provider);
+  if (dashboardRedirect) {
+    sendRedirect(res, dashboardRedirect);
     return;
   }
   const installedQs = new URLSearchParams({ email, provider });

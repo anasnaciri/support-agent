@@ -101,6 +101,16 @@ export interface ApiConfig {
    * the worker may have already mailed live links before this restart.
    */
   readonly approvalSigningKey: string;
+  /**
+   * Public origin of the dashboard (`apps/dashboard`), e.g.
+   * `https://app.example.com`. When set, a successful connector OAuth
+   * callback redirects the merchant back to the dashboard's
+   * `/settings/integrations` page (landing them inside our own app, the
+   * way Claude returns you to its connectors page) instead of the
+   * standalone `/installed` landing page. `null` → keep the `/installed`
+   * fallback. May carry a path prefix.
+   */
+  readonly dashboardBaseUrl: string | null;
 }
 
 const requireEnv = (name: string): string => {
@@ -149,6 +159,7 @@ export const loadApiConfig = (): ApiConfig => {
       apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2026-04",
     },
     approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
+    dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
     google: googleConfigured
       ? {
           clientId: googleClientId,

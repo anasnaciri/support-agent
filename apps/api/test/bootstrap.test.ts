@@ -104,6 +104,24 @@ describe("loadApiConfig — HTTPS callback enforcement", () => {
     expect(cfg.shopify.callbackUrl).toBe("http://example.test/cb");
   });
 
+  it("threads DASHBOARD_BASE_URL into config, null when unset", () => {
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      DASHBOARD_BASE_URL: "https://app.example.com",
+      ...baseEnv(),
+    });
+    expect(loadApiConfig().dashboardBaseUrl).toBe("https://app.example.com");
+    restore();
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      DASHBOARD_BASE_URL: "",
+      ...baseEnv(),
+    });
+    expect(loadApiConfig().dashboardBaseUrl).toBeNull();
+  });
+
   it("enables Google OAuth without requiring Gmail Pub/Sub env", () => {
     restore = setEnv({
       NODE_ENV: "production",
