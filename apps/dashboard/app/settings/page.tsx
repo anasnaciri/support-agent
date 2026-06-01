@@ -60,11 +60,11 @@ const TILES = [
       "Tenant-wide LLM tokens by day and model with estimated OpenRouter spend.",
   },
   {
-    href: "/settings/supplier-escalation",
+    href: "/settings/integrations/google_sheets",
     icon: ClipboardList,
     title: "Supplier escalation",
     description:
-      "Google Sheet target for the missing-package agent. Leave unset to skip the sheet write entirely.",
+      "Google Sheet target for the missing-package agent — configured on the Google Sheets connector. Leave unset to skip the sheet write entirely.",
   },
 ] as const;
 
@@ -75,7 +75,7 @@ export default function SettingsLanding() {
     if (href === "/settings/llm") return "BYOK";
     if (href === "/settings/refund-policy") return "$";
     if (href === "/settings/usage") return "LLM";
-    if (href === "/settings/supplier-escalation") return "📋";
+    if (href === "/settings/integrations/google_sheets") return "📋";
     return "—";
   };
 

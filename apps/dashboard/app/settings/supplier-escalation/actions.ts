@@ -41,13 +41,13 @@ export const saveSupplierEscalationAction = async (
     typeof descriptionRaw === "string" ? descriptionRaw.trim() : "";
 
   if (sheetUrl.length === 0) {
-    redirect("/settings/supplier-escalation?error=missing_sheet_url");
+    redirect("/settings/integrations/google_sheets?error=missing_sheet_url");
   }
   if (!spreadsheetId) {
-    redirect("/settings/supplier-escalation?error=bad_sheet_url");
+    redirect("/settings/integrations/google_sheets?error=bad_sheet_url");
   }
   if (!RANGE_RE.test(range)) {
-    redirect("/settings/supplier-escalation?error=bad_range");
+    redirect("/settings/integrations/google_sheets?error=bad_range");
   }
 
   await Effect.runPromise(
@@ -64,8 +64,8 @@ export const saveSupplierEscalationAction = async (
     ).pipe(Effect.scoped),
   );
 
-  revalidatePath("/settings/supplier-escalation");
-  redirect("/settings/supplier-escalation?saved=1");
+  revalidatePath("/settings/integrations/google_sheets");
+  redirect("/settings/integrations/google_sheets?saved=1");
 };
 
 export const clearSupplierEscalationAction = async (): Promise<void> => {
@@ -82,6 +82,6 @@ export const clearSupplierEscalationAction = async (): Promise<void> => {
     ).pipe(Effect.scoped),
   );
 
-  revalidatePath("/settings/supplier-escalation");
-  redirect("/settings/supplier-escalation?cleared=1");
+  revalidatePath("/settings/integrations/google_sheets");
+  redirect("/settings/integrations/google_sheets?cleared=1");
 };
