@@ -600,7 +600,16 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   it("GET /shopify/auth/callback with TAMPERED state returns 401 (does not silently fall back)", async () => {
     const shop = "tampered-state.myshopify.com";
     const goodState = signState(stateSigningKey, tenantId);
-    const tampered = goodState.slice(0, -2) + "AA";
+    const [encodedPayload, encodedSig] = goodState.split(".");
+    expect(encodedPayload).toBeDefined();
+    expect(encodedSig).toBeDefined();
+    const payload = Buffer.from(encodedPayload!, "base64url").toString("utf8");
+    const tamperedPayload = Buffer.from(
+      payload.replace(tenantId, randomUUID()),
+      "utf8",
+    ).toString("base64url");
+    const tampered = `${tamperedPayload}.${encodedSig}`;
+    expect(verifyState(stateSigningKey, tampered)).toBeNull();
     const query: Record<string, string> = {
       shop,
       code: "x",
