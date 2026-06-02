@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, type Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { PgBoss } from "pg-boss";
 import { and, eq } from "drizzle-orm";
@@ -144,6 +144,22 @@ export interface GmailPushHandlerOptions {
 
 const PROVIDER = "gmail" as const;
 
+export type GmailConnectorLayer = Layer.Layer<
+  ConnectorCredentialStore | BlobStorage,
+  never,
+  never
+>;
+
+export interface GmailMessageDispatchResult {
+  readonly published: number;
+  readonly skippedSent: number;
+  readonly failed: number;
+}
+
+export interface GmailUnreadBackfillResult extends GmailMessageDispatchResult {
+  readonly listed: number;
+}
+
 export const findTenantByGmailMailbox = (
   mailbox: string,
 ): Effect.Effect<string | null, Error, DbClient> =>
@@ -169,6 +185,125 @@ export const findTenantByGmailMailbox = (
     });
     return rows[0]?.tenantId ?? null;
   });
+
+const resolveBlobStorage = async (
+  layer: GmailConnectorLayer,
+  logPrefix: string,
+): Promise<typeof BlobStorage.Service | null> => {
+  const blobExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        return yield* BlobStorage;
+      }),
+      layer,
+    ),
+  );
+  if (blobExit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error(`${logPrefix} BlobStorage resolve failed:`, blobExit.cause);
+    return null;
+  }
+  return blobExit.value;
+};
+
+const publishGmailMessageIds = async (opts: {
+  readonly tenantId: string;
+  readonly accessToken: string;
+  readonly messageIds: ReadonlyArray<string>;
+  readonly layer: GmailConnectorLayer;
+  readonly fetchImpl?: typeof fetch;
+  readonly publish: (event: DomainEvent) => Promise<void>;
+  readonly logPrefix: string;
+}): Promise<GmailMessageDispatchResult> => {
+  const blob = await resolveBlobStorage(opts.layer, opts.logPrefix);
+  if (!blob) {
+    return { published: 0, skippedSent: 0, failed: opts.messageIds.length };
+  }
+
+  let published = 0;
+  let skippedSent = 0;
+  let failed = 0;
+
+  for (const messageId of opts.messageIds) {
+    try {
+      const msg = await gmailGetMessage({
+        token: opts.accessToken,
+        messageId,
+        ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+      });
+      // Skip messages we sent — outbound idempotency is handled upstream.
+      if (msg.labelIds.includes("SENT")) {
+        skippedSent += 1;
+        continue;
+      }
+      let attachments: ReadonlyArray<MessageAttachment> = [];
+      if (msg.imageAttachments.length > 0) {
+        attachments = await processGmailImageAttachments({
+          tenantId: TenantId(opts.tenantId),
+          messageId,
+          token: opts.accessToken,
+          imageAttachments: msg.imageAttachments,
+          blob,
+          ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+        });
+      }
+      const inbound: InboundMessage = toInboundMessage(msg, attachments);
+      const event: DomainEvent = {
+        type: "message.received",
+        tenantId: TenantId(opts.tenantId),
+        threadId: inbound.threadId,
+        payload: inbound,
+      };
+      await opts.publish(event);
+      published += 1;
+    } catch (cause) {
+      failed += 1;
+      // eslint-disable-next-line no-console
+      console.error(
+        `${opts.logPrefix} dispatch failed for messageId=${messageId}:`,
+        cause,
+      );
+    }
+  }
+
+  return { published, skippedSent, failed };
+};
+
+export const backfillUnreadGmailInbox = async (opts: {
+  readonly tenantId: string;
+  readonly mailbox: string;
+  readonly layer: GmailConnectorLayer;
+  readonly fetchImpl?: typeof fetch;
+  readonly publish?: (event: DomainEvent) => Promise<void>;
+  readonly maxMessages?: number;
+}): Promise<GmailUnreadBackfillResult> => {
+  const conn = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.get(TenantId(opts.tenantId), PROVIDER, opts.mailbox);
+      }),
+      opts.layer,
+    ),
+  );
+  const messageIds = await gmailListInboxMessageIds({
+    token: conn.accessToken,
+    query: "in:inbox is:unread",
+    maxResults: opts.maxMessages ?? 50,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+  const publish = opts.publish ?? defaultPublish;
+  const dispatched = await publishGmailMessageIds({
+    tenantId: opts.tenantId,
+    accessToken: conn.accessToken,
+    messageIds,
+    layer: opts.layer,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    publish,
+    logPrefix: "[gmail unread backfill]",
+  });
+  return { listed: messageIds.length, ...dispatched };
+};
 
 /**
  * Process one Pub/Sub push delivery:
@@ -327,64 +462,15 @@ export const handleGmailPushNotification = async (
     }
   }
 
-  const publish = opts.publish ?? defaultPublish;
-
-  // Resolve BlobStorage once per push: image-attachment uploads from
-  // multiple inbound messages share the same store handle. The Tag is
-  // always present in the Layer (Live in production, Test in dev),
-  // so this resolution never fails — but we surface it via Exit so a
-  // mis-bootstrapped Layer would log cleanly instead of crashing.
-  const blobExit = await Effect.runPromiseExit(
-    Effect.provide(
-      Effect.gen(function* () {
-        return yield* BlobStorage;
-      }),
-      opts.layer,
-    ),
-  );
-  if (blobExit._tag !== "Success") {
-    // eslint-disable-next-line no-console
-    console.error("[gmail webhook] BlobStorage resolve failed:", blobExit.cause);
-    return;
-  }
-  const blob = blobExit.value;
-
-  for (const messageId of listed.newMessageIds) {
-    try {
-      const msg = await gmailGetMessage({
-        token: conn.accessToken,
-        messageId,
-        ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
-      });
-      // Skip messages we sent — outbound idempotency is handled upstream.
-      if (msg.labelIds.includes("SENT")) continue;
-      let attachments: ReadonlyArray<MessageAttachment> = [];
-      if (msg.imageAttachments.length > 0) {
-        attachments = await processGmailImageAttachments({
-          tenantId: TenantId(opts.tenantId),
-          messageId,
-          token: conn.accessToken,
-          imageAttachments: msg.imageAttachments,
-          blob,
-          ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
-        });
-      }
-      const inbound: InboundMessage = toInboundMessage(msg, attachments);
-      const event: DomainEvent = {
-        type: "message.received",
-        tenantId: TenantId(opts.tenantId),
-        threadId: inbound.threadId,
-        payload: inbound,
-      };
-      await publish(event);
-    } catch (cause) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[gmail webhook] dispatch failed for messageId=${messageId}:`,
-        cause,
-      );
-    }
-  }
+  await publishGmailMessageIds({
+    tenantId: opts.tenantId,
+    accessToken: conn.accessToken,
+    messageIds: listed.newMessageIds,
+    layer: opts.layer,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+    publish: opts.publish ?? defaultPublish,
+    logPrefix: "[gmail webhook]",
+  });
 
   const advanceTo = listed.latestHistoryId ?? payload.historyId;
   const patchExit = await Effect.runPromiseExit(

@@ -55,6 +55,7 @@ import {
 } from "./shopify-webhook-registration.js";
 import { startGmailWatch } from "@support-agent/providers";
 import {
+  backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
   handleGmailPushNotification,
   parseGmailPushEnvelope,
@@ -936,6 +937,8 @@ const handleGoogleInstall = (
  *   5. For Gmail only, register a `users.watch` so Gmail starts pushing
  *      notifications to our Pub/Sub topic. Store the returned `historyId`
  *      + lease expiry in the connector's metadata blob.
+ *   6. For Gmail only, backfill existing unread INBOX messages so customer
+ *      replies that predate the install can resume existing cases.
  *
  * If steps 1-4 succeed but 5 fails, we still 200 — the credentials are
  * saved and a re-install (or a scheduled watch-refresh) can recover.
@@ -1094,6 +1097,22 @@ const handleGoogleCallback = async (
     }
   }
 
+  let unreadBackfill:
+    | Awaited<ReturnType<typeof backfillUnreadGmailInbox>>
+    | null = null;
+  if (provider === "gmail") {
+    try {
+      unreadBackfill = await backfillUnreadGmailInbox({
+        tenantId,
+        mailbox: email,
+        layer,
+      });
+    } catch (cause) {
+      // eslint-disable-next-line no-console
+      console.error("[google callback] unread backfill failed:", cause);
+    }
+  }
+
   const acceptsJson = (req.headers["accept"] ?? "")
     .toString()
     .toLowerCase()
@@ -1106,6 +1125,7 @@ const handleGoogleCallback = async (
       email,
       scopes: token.scope,
       watchRegistered: !!watch,
+      unreadBackfill,
     });
     return;
   }

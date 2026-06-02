@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { parseGmailPushEnvelope } from "../src/gmail-webhook.js";
+import { describe, expect, it, vi } from "vitest";
+import { Layer } from "effect";
+import {
+  BlobStorageTest,
+  ConnectorCredentialStoreTest,
+} from "@support-agent/services";
+import { TenantId, type DomainEvent } from "@support-agent/agent-core";
+import {
+  backfillUnreadGmailInbox,
+  parseGmailPushEnvelope,
+} from "../src/gmail-webhook.js";
 
 const makeEnvelope = (decodedPayload: Record<string, unknown>): Buffer => {
   const data = Buffer.from(JSON.stringify(decodedPayload), "utf8").toString(
@@ -17,6 +26,22 @@ const makeEnvelope = (decodedPayload: Record<string, unknown>): Buffer => {
     "utf8",
   );
 };
+
+const b64url = (s: string): string =>
+  Buffer.from(s, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const okJson = (body: unknown): Response =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+    headers: new Headers(),
+  }) as unknown as Response;
 
 describe("parseGmailPushEnvelope", () => {
   it("decodes a valid envelope", () => {
@@ -55,5 +80,106 @@ describe("parseGmailPushEnvelope", () => {
       "utf8",
     );
     expect(parseGmailPushEnvelope(buf)).toBeNull();
+  });
+});
+
+describe("backfillUnreadGmailInbox", () => {
+  it("publishes existing unread INBOX messages after a Gmail mailbox is connected", async () => {
+    const tenantId = TenantId("tenant-1");
+    const mailbox = "support@merchant.com";
+    const layer = Layer.mergeAll(
+      ConnectorCredentialStoreTest([
+        {
+          tenantId,
+          provider: "gmail",
+          shopDomain: mailbox,
+          accessToken: "tok",
+          refreshToken: "refresh",
+          tokenExpiresAt: new Date(Date.now() + 60_000),
+          metadata: {},
+          scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+          apiVersion: null,
+          installedAt: new Date("2026-06-02T00:00:00.000Z"),
+          status: "active",
+        },
+      ]),
+      BlobStorageTest({}),
+    );
+    const published: DomainEvent[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/users/me/messages?")) {
+        const parsed = new URL(u);
+        expect(parsed.searchParams.get("q")).toBe("in:inbox is:unread");
+        expect(parsed.searchParams.get("maxResults")).toBe("50");
+        return okJson({
+          messages: [
+            { id: "m-unread", threadId: "t-1" },
+            { id: "m-sent", threadId: "t-2" },
+          ],
+        });
+      }
+      if (u.includes("/users/me/messages/m-unread?")) {
+        return okJson({
+          id: "m-unread",
+          threadId: "t-1",
+          labelIds: ["INBOX", "UNREAD"],
+          internalDate: "1770000000000",
+          payload: {
+            headers: [
+              { name: "From", value: "jane@example.com" },
+              { name: "To", value: mailbox },
+              { name: "Subject", value: "Still waiting on order #1001" },
+            ],
+            body: { data: b64url("Can someone help with this?") },
+          },
+        });
+      }
+      if (u.includes("/users/me/messages/m-sent?")) {
+        return okJson({
+          id: "m-sent",
+          threadId: "t-2",
+          labelIds: ["SENT", "UNREAD"],
+          internalDate: "1770000001000",
+          payload: {
+            headers: [
+              { name: "From", value: mailbox },
+              { name: "To", value: "jane@example.com" },
+              { name: "Subject", value: "Re: order" },
+            ],
+            body: { data: b64url("Already sent") },
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    const result = await backfillUnreadGmailInbox({
+      tenantId,
+      mailbox,
+      layer,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      publish: async (event) => {
+        published.push(event);
+      },
+    });
+
+    expect(result).toEqual({
+      listed: 2,
+      published: 1,
+      skippedSent: 1,
+      failed: 0,
+    });
+    expect(published).toHaveLength(1);
+    expect(published[0]).toMatchObject({
+      type: "message.received",
+      tenantId,
+      threadId: "t-1",
+      payload: {
+        messageId: "m-unread",
+        subject: "Still waiting on order #1001",
+        bodyText: "Can someone help with this?",
+      },
+    });
   });
 });
