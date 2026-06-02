@@ -106,9 +106,11 @@ describe("backfillUnreadGmailInbox", () => {
       BlobStorageTest({}),
     );
     const published: DomainEvent[] = [];
+    const operations: string[] = [];
     const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
       const u = String(url);
       if (u.includes("/users/me/messages?")) {
+        operations.push("list");
         const parsed = new URL(u);
         expect(parsed.searchParams.get("q")).toBe("in:inbox is:unread");
         expect(parsed.searchParams.get("maxResults")).toBe("50");
@@ -120,6 +122,7 @@ describe("backfillUnreadGmailInbox", () => {
         });
       }
       if (u.includes("/users/me/messages/m-unread?")) {
+        operations.push("get:m-unread");
         return okJson({
           id: "m-unread",
           threadId: "t-1",
@@ -135,7 +138,12 @@ describe("backfillUnreadGmailInbox", () => {
           },
         });
       }
+      if (u.includes("/users/me/messages/m-unread/modify")) {
+        operations.push("mark-read:m-unread");
+        return okJson({ id: "m-unread", labelIds: ["INBOX"] });
+      }
       if (u.includes("/users/me/messages/m-sent?")) {
+        operations.push("get:m-sent");
         return okJson({
           id: "m-sent",
           threadId: "t-2",
@@ -160,6 +168,7 @@ describe("backfillUnreadGmailInbox", () => {
       layer,
       fetchImpl: fetchImpl as unknown as typeof fetch,
       publish: async (event) => {
+        operations.push(`publish:${event.payload.messageId}`);
         published.push(event);
       },
     });
@@ -181,5 +190,12 @@ describe("backfillUnreadGmailInbox", () => {
         bodyText: "Can someone help with this?",
       },
     });
+    expect(operations).toEqual([
+      "list",
+      "get:m-unread",
+      "publish:m-unread",
+      "mark-read:m-unread",
+      "get:m-sent",
+    ]);
   });
 });

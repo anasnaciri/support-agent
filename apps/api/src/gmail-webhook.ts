@@ -20,6 +20,7 @@ import {
   gmailGetProfile,
   gmailListHistory,
   gmailListInboxMessageIds,
+  gmailMarkMessageRead,
   processGmailImageAttachments,
   refreshGmailToken,
   toInboundMessage,
@@ -256,6 +257,21 @@ const publishGmailMessageIds = async (opts: {
       };
       await opts.publish(event);
       published += 1;
+      if (msg.labelIds.includes("UNREAD")) {
+        try {
+          await gmailMarkMessageRead({
+            token: opts.accessToken,
+            messageId,
+            ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+          });
+        } catch (cause) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `${opts.logPrefix} mark-read failed for messageId=${messageId}:`,
+            cause,
+          );
+        }
+      }
     } catch (cause) {
       failed += 1;
       // eslint-disable-next-line no-console

@@ -6,6 +6,7 @@ import {
   gmailGetThread,
   gmailListHistory,
   gmailListInboxMessageIds,
+  gmailMarkMessageRead,
   gmailSendMessage,
   GmailHttpError,
   toInboundMessage,
@@ -309,6 +310,42 @@ describe("gmailListInboxMessageIds", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(ids).toEqual([]);
+  });
+});
+
+describe("gmailMarkMessageRead", () => {
+  it("removes the UNREAD label with users.messages.modify", async () => {
+    const fetchImpl = vi.fn(async (url, init: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      expect(u).toContain("/users/me/messages/m-99/modify");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({
+        removeLabelIds: ["UNREAD"],
+      });
+      return okJson({ id: "m-99", labelIds: ["INBOX"] });
+    });
+
+    await gmailMarkMessageRead({
+      token: "tok",
+      messageId: "m-99",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps Gmail failures through the shared GmailHttpError path", async () => {
+    const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
+
+    await expect(
+      gmailMarkMessageRead({
+        token: "bad",
+        messageId: "m-99",
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({
+      failure: { kind: "auth_failed", status: 401 },
+    });
   });
 });
 

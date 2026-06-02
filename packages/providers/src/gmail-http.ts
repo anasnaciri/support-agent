@@ -534,6 +534,20 @@ export const gmailListInboxMessageIds = async (
   return (raw.messages ?? []).map((m) => m.id);
 };
 
+export const gmailMarkMessageRead = async (
+  opts: GmailHttpCallOptions & {
+    readonly messageId: string;
+  },
+): Promise<void> => {
+  await gmailFetch({
+    method: "POST",
+    path: `/users/me/messages/${encodeURIComponent(opts.messageId)}/modify`,
+    token: opts.token,
+    body: { removeLabelIds: ["UNREAD"] },
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+};
+
 export const gmailListHistory = async (
   opts: GmailHttpCallOptions & {
     readonly startHistoryId: string;
