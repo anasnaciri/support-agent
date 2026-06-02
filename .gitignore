@@ -4,6 +4,10 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+# Production secrets file for docker-compose.prod.yml — never commit.
+# The committed template is .env.prod.example.
+.env.prod
+.env.*.local
 .DS_Store
 .turbo/
 coverage/

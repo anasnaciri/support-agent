@@ -1,0 +1,21 @@
+# Caddy reverse proxy for the support-agent api.
+#
+# API_DOMAIN + ACME_EMAIL are injected from .env.prod via the caddy
+# service's `environment:` block in docker-compose.prod.yml. Caddy
+# provisions and renews a Let's Encrypt cert for {$API_DOMAIN}
+# automatically (HTTP-01 challenge on :80, serves on :443).
+#
+# IMPORTANT: for the ACME HTTP-01 challenge to succeed, {$API_DOMAIN}
+# must resolve straight to this box (a DNS-only / "grey cloud" A record
+# if the zone is on Cloudflare). If you instead front the api with the
+# Cloudflare proxy or a cloudflared tunnel, remove this service and let
+# Cloudflare terminate TLS — see DEPLOY.md.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:4000
+}

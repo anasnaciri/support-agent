@@ -1,0 +1,99 @@
+# Production stack for the support-agent backend on a single host
+# (e.g. a Hetzner Cloud VPS). The Next.js dashboard is NOT here — it
+# deploys to Cloudflare Workers separately (see DEPLOY.md, "Dashboard").
+#
+# Always pass --env-file so the compose-level ${VARS} below resolve:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod build
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+name: support-agent
+
+services:
+  # ---- Postgres (internal only; never published to the host/public) -------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---- One-shot DB migration (drizzle-kit migrate) ------------------------
+  # Not started by `up` (tools profile). Run explicitly before bringing the
+  # app up, and after every deploy that adds migrations:
+  #   docker compose ... --env-file .env.prod run --rm migrate
+  migrate:
+    build:
+      context: .
+      target: migrate
+    profiles: ["tools"]
+    restart: "no"
+    env_file: [.env.prod]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---- Fastify HTTP edge (OAuth callbacks, webhooks, approval links) ------
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    env_file: [.env.prod]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "4000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://localhost:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---- Background worker (pg-boss consumers + cron + follow-up timers) ----
+  worker:
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
+    env_file: [.env.prod]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---- TLS reverse proxy (auto Let's Encrypt) -----------------------------
+  # Fronts the api only. The dashboard lives on Cloudflare Workers.
+  # Alternative: drop this and use a cloudflared tunnel (see DEPLOY.md).
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
