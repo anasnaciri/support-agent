@@ -29,6 +29,19 @@ import {
   getApiBaseUrl,
   connectHref,
 } from "./_shared";
+import {
+  disconnectShopifyAction,
+  disconnectGmailAction,
+  disconnectGoogleSheetsAction,
+} from "./actions";
+
+const DISCONNECT_ACTIONS: Readonly<
+  Partial<Record<string, () => Promise<void>>>
+> = {
+  shopify: disconnectShopifyAction,
+  gmail: disconnectGmailAction,
+  google_sheets: disconnectGoogleSheetsAction,
+};
 
 interface PageProps {
   readonly searchParams?: Promise<
@@ -39,6 +52,10 @@ interface PageProps {
 export default async function IntegrationsPage({ searchParams }: PageProps) {
   const tenantId = await getTenantId();
   const params = (await searchParams) ?? {};
+  const shopifyParam = params["shopify"];
+  const shopifyBanner =
+    (Array.isArray(shopifyParam) ? shopifyParam[0] : shopifyParam) ===
+    "disconnected";
   const gmailParam = params["gmail"];
   const gmailBanner =
     (Array.isArray(gmailParam) ? gmailParam[0] : gmailParam) === "disconnected";
@@ -105,6 +122,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
+      {shopifyBanner ? (
+        <Alert variant="success">
+          <AlertDescription>Shopify disconnected.</AlertDescription>
+        </Alert>
+      ) : null}
+
       {gmailBanner ? (
         <Alert variant="success">
           <AlertDescription>Gmail disconnected.</AlertDescription>
@@ -152,6 +175,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               ? "active"
               : "revoked";
           const isActive = tone === "active";
+          const disconnectAction = DISCONNECT_ACTIONS[p];
 
           return (
             <Card key={p}>
@@ -167,12 +191,21 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               <CardContent className="pt-0">
                 <div className="flex flex-wrap items-center gap-2">
                   {isActive ? (
-                    <Button variant="outline" asChild>
-                      <Link href={`/settings/integrations/${p}`}>
-                        <Settings2 className="size-3.5" aria-hidden />
-                        Manage
-                      </Link>
-                    </Button>
+                    <>
+                      <Button variant="outline" asChild>
+                        <Link href={`/settings/integrations/${p}`}>
+                          <Settings2 className="size-3.5" aria-hidden />
+                          Manage
+                        </Link>
+                      </Button>
+                      {disconnectAction ? (
+                        <form action={disconnectAction}>
+                          <Button type="submit" variant="destructive">
+                            Disconnect
+                          </Button>
+                        </form>
+                      ) : null}
+                    </>
                   ) : apiBaseUrl ? (
                     <Button asChild>
                       <a

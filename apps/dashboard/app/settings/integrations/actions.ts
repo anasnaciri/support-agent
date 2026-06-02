@@ -27,7 +27,7 @@ const connectorStoreLayer = () => {
 };
 
 const disconnectProvider = async (
-  provider: "gmail" | "google_sheets",
+  provider: "shopify" | "gmail" | "google_sheets",
 ): Promise<void> => {
   const tenantId = await getTenantId();
   const tid = TenantId(tenantId);
@@ -50,6 +50,11 @@ const disconnectProvider = async (
   );
 
   revalidatePath("/settings/integrations");
+};
+
+export const disconnectShopifyAction = async (): Promise<void> => {
+  await disconnectProvider("shopify");
+  redirect("/settings/integrations?shopify=disconnected");
 };
 
 export const disconnectGmailAction = async (): Promise<void> => {

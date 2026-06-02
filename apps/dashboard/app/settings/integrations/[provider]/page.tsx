@@ -41,6 +41,7 @@ import {
   isSupportedProvider,
 } from "../_shared";
 import {
+  disconnectShopifyAction,
   disconnectGmailAction,
   disconnectGoogleSheetsAction,
 } from "../actions";
@@ -134,11 +135,13 @@ export default async function ConnectorManagePage({
       : "revoked";
   const showConnect = !!apiBaseUrl && tone !== "active";
   const disconnectAction =
-    provider === "gmail"
-      ? disconnectGmailAction
-      : provider === "google_sheets"
-        ? disconnectGoogleSheetsAction
-        : null;
+    provider === "shopify"
+      ? disconnectShopifyAction
+      : provider === "gmail"
+        ? disconnectGmailAction
+        : provider === "google_sheets"
+          ? disconnectGoogleSheetsAction
+          : null;
   const showDisconnect = !!disconnectAction && tone === "active";
   const capabilities = capabilitiesForProvider(provider);
   const missingCapability =
@@ -252,7 +255,7 @@ export default async function ConnectorManagePage({
 
             {showDisconnect && disconnectAction ? (
               <form action={disconnectAction}>
-                <Button type="submit" variant="outline">
+                <Button type="submit" variant="destructive">
                   Disconnect {label}
                 </Button>
               </form>

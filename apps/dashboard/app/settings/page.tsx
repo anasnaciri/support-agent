@@ -69,14 +69,14 @@ const TILES = [
 ] as const;
 
 export default function SettingsLanding() {
-  const valueFor = (href: string): string => {
+  const valueFor = (href: string): string | null => {
     if (href === "/settings/agents") return String(agents.length);
     if (href === "/settings/permissions") return String(tools.length);
     if (href === "/settings/llm") return "BYOK";
     if (href === "/settings/refund-policy") return "$";
     if (href === "/settings/usage") return "LLM";
     if (href === "/settings/integrations/google_sheets") return "📋";
-    return "—";
+    return null;
   };
 
   return (
@@ -95,6 +95,7 @@ export default function SettingsLanding() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {TILES.map((t) => {
           const Icon = t.icon;
+          const value = valueFor(t.href);
           return (
             <Link
               key={t.href}
@@ -111,9 +112,11 @@ export default function SettingsLanding() {
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <div className="text-2xl font-semibold tabular-nums">
-                    {valueFor(t.href)}
-                  </div>
+                  {value ? (
+                    <div className="text-2xl font-semibold tabular-nums">
+                      {value}
+                    </div>
+                  ) : null}
                   <CardDescription className="mt-1">
                     {t.description}
                   </CardDescription>
