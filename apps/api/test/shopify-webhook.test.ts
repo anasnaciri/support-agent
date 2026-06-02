@@ -1,43 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { Readable } from "node:stream";
-import type { IncomingMessage } from "node:http";
 import {
   parseCustomersDataRequest,
   parseCustomersRedact,
   parseShopRedact,
   parseUninstallPayload,
-  readRawBody,
 } from "../src/shopify-webhook.js";
-
-const asReq = (chunks: ReadonlyArray<string | Buffer>): IncomingMessage =>
-  Readable.from(chunks) as unknown as IncomingMessage;
-
-describe("readRawBody", () => {
-  it("concatenates chunks into a single buffer", async () => {
-    const req = asReq(["{\"a\":", "1}"]);
-    const buf = await readRawBody(req);
-    expect(buf.toString("utf8")).toBe('{"a":1}');
-  });
-
-  it("handles empty bodies", async () => {
-    const req = asReq([]);
-    const buf = await readRawBody(req);
-    expect(buf.length).toBe(0);
-  });
-
-  it("preserves raw bytes (no UTF-8 normalization)", async () => {
-    const raw = Buffer.from([0xff, 0xfe, 0x00, 0x42]);
-    const req = asReq([raw]);
-    const buf = await readRawBody(req);
-    expect(buf.equals(raw)).toBe(true);
-  });
-
-  it("rejects bodies that exceed maxBytes", async () => {
-    const big = Buffer.alloc(2048, 0x61);
-    const req = asReq([big]);
-    await expect(readRawBody(req, 1024)).rejects.toThrow(/exceeded/);
-  });
-});
 
 describe("parseUninstallPayload", () => {
   it("extracts id, name, domain from a typical Shopify body", () => {

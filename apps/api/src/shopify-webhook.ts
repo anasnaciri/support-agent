@@ -1,54 +1,10 @@
-import type { IncomingMessage } from "node:http";
-
-// ============================================================
-// Raw body reader
-// ============================================================
-
-/**
- * Buffer an incoming request body into a `Buffer` with a hard byte cap.
- *
- * Why a raw buffer (not JSON.parse): Shopify webhook HMAC is computed over
- * the exact bytes Shopify sent. JSON.parse + JSON.stringify changes
- * whitespace and key order, breaking the HMAC. We sign-check against the
- * bytes, then JSON.parse afterwards.
- *
- * The cap defaults to 1 MiB — Shopify's webhook payloads are tiny (small
- * KB), so anything near the cap is suspect and should fail closed.
- */
-export const readRawBody = (
-  req: IncomingMessage,
-  maxBytes = 1024 * 1024,
-): Promise<Buffer> =>
-  new Promise((resolve, reject) => {
-    const chunks: Array<Buffer> = [];
-    let total = 0;
-    let aborted = false;
-    req.on("data", (chunk: Buffer | string) => {
-      if (aborted) return;
-      const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
-      total += buf.length;
-      if (total > maxBytes) {
-        aborted = true;
-        req.destroy();
-        reject(new Error(`request body exceeded ${maxBytes} bytes`));
-        return;
-      }
-      chunks.push(buf);
-    });
-    req.on("end", () => {
-      if (aborted) return;
-      resolve(Buffer.concat(chunks));
-    });
-    req.on("error", (err) => {
-      if (aborted) return;
-      aborted = true;
-      reject(err);
-    });
-  });
-
 // ============================================================
 // app/uninstalled payload
 // ============================================================
+//
+// Raw request bytes are captured by Fastify's buffer content-type parser
+// (`apps/api/src/server.ts`), not here — webhook HMAC is verified over
+// those exact bytes before any of the parsers below run.
 
 /**
  * Shopify ships uninstall payloads roughly as:

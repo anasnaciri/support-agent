@@ -1,6 +1,13 @@
 import { Effect } from "effect";
 import { timingSafeEqual } from "node:crypto";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
+import fastifySwagger from "@fastify/swagger";
+import fastifySwaggerUi from "@fastify/swagger-ui";
 import {
   ConnectorCredentialStore,
   TransactionRunner,
@@ -31,7 +38,6 @@ import {
   parseCustomersRedact,
   parseShopRedact,
   parseUninstallPayload,
-  readRawBody,
 } from "./shopify-webhook.js";
 import {
   recordDataRequest,
@@ -74,13 +80,68 @@ import {
   type ApiConfig,
   type ApiLayer,
 } from "./bootstrap.js";
+import {
+  approvalParamsSchema,
+  errorResponseSchema,
+  gmailParamsSchema,
+  googleCallbackQuerySchema,
+  googleCallbackSuccessSchema,
+  googleInstallQuerySchema,
+  installedQuerySchema,
+  shopifyCallbackQuerySchema,
+  shopifyCallbackSuccessSchema,
+  shopifyInstallQuerySchema,
+  TAGS,
+  tokenQuerySchema,
+  webhookAckSchema,
+} from "./schemas.js";
 
 // ============================================================
-// Helpers
+// Response helpers
+// ============================================================
+//
+// Thin wrappers over the Fastify reply API. Each returns the reply so a
+// route handler / lifecycle hook can `return sendX(...)` to signal the
+// response is handled.
+
+const sendJson = (
+  res: FastifyReply,
+  status: number,
+  body: unknown,
+): FastifyReply => res.code(status).send(body);
+
+const sendRedirect = (res: FastifyReply, target: string): FastifyReply =>
+  res.code(302).header("location", target).send();
+
+const sendRedirectWithHeaders = (
+  res: FastifyReply,
+  target: string,
+  headers: Record<string, string | ReadonlyArray<string>>,
+): FastifyReply => {
+  for (const [key, value] of Object.entries(headers)) res.header(key, value);
+  return res.code(302).header("location", target).send();
+};
+
+const sendText = (
+  res: FastifyReply,
+  status: number,
+  body: string,
+): FastifyReply =>
+  res.code(status).type("text/plain; charset=utf-8").send(body);
+
+const sendHtml = (
+  res: FastifyReply,
+  status: number,
+  body: string,
+): FastifyReply =>
+  res.code(status).type("text/html; charset=utf-8").send(body);
+
+// ============================================================
+// Request helpers
 // ============================================================
 
 const readQuery = (
-  req: IncomingMessage,
+  req: FastifyRequest,
 ): { url: URL; params: Record<string, string> } => {
   // The Host header is trusted only for *parsing* the path — we never echo
   // it back to the client. For URL construction we use a placeholder that
@@ -89,30 +150,6 @@ const readQuery = (
   const params: Record<string, string> = {};
   for (const [k, v] of u.searchParams) params[k] = v;
   return { url: u, params };
-};
-
-const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body));
-};
-
-const sendRedirect = (res: ServerResponse, target: string): void => {
-  res.writeHead(302, { Location: target });
-  res.end();
-};
-
-const sendRedirectWithHeaders = (
-  res: ServerResponse,
-  target: string,
-  headers: Record<string, string | ReadonlyArray<string>>,
-): void => {
-  res.writeHead(302, { Location: target, ...headers });
-  res.end();
-};
-
-const sendText = (res: ServerResponse, status: number, body: string): void => {
-  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(body);
 };
 
 const parseCookies = (raw: string | undefined): Record<string, string> => {
@@ -145,11 +182,6 @@ const clearShopifyInstallCookie = (secure: boolean): string =>
     secure ? "; Secure" : ""
   }`;
 
-const sendHtml = (res: ServerResponse, status: number, body: string): void => {
-  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(body);
-};
-
 // ============================================================
 // Route handlers
 // ============================================================
@@ -167,8 +199,8 @@ const sendHtml = (res: ServerResponse, status: number, body: string): void => {
 const handleShopifyInstall = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const { params } = readQuery(req);
   const shopParam = params["shop"];
@@ -291,8 +323,8 @@ const handleShopifyInstall = async (
 const handleShopifyCallback = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const { params } = readQuery(req);
   const shop = params["shop"];
@@ -513,10 +545,7 @@ const handleShopifyCallback = async (
  * callback after persisting the token, so there's no token-bearing
  * Shopify request to verify here.
  */
-const handleInstalledPage = (
-  req: IncomingMessage,
-  res: ServerResponse,
-): void => {
+const handleInstalledPage = (req: FastifyRequest, res: FastifyReply): void => {
   const { params } = readQuery(req);
   const shop = params["shop"] ?? null;
   const host = params["host"] ?? null;
@@ -537,8 +566,10 @@ const handleInstalledPage = (
     : "return to your Shopify admin";
   // No-op pages should be HTML so the browser renders them; the user
   // typed the URL or got bounced here from the callback.
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(`<!doctype html>
+  sendHtml(
+    res,
+    200,
+    `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -555,7 +586,8 @@ const handleInstalledPage = (
   <p>${safeShop ? `Your store <code>${safeShop}</code> is connected to support-agent.` : "Your store is connected to support-agent."}</p>
   <p>You can ${adminAnchor} now. A dashboard for managing cases, agents, and approvals is on the way.</p>
 </body>
-</html>`);
+</html>`,
+  );
 };
 
 /**
@@ -579,8 +611,8 @@ const handleInstalledPage = (
 const handleAppUninstalled = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
   const shopHeader = req.headers["x-shopify-shop-domain"];
@@ -596,16 +628,7 @@ const handleAppUninstalled = async (
     return;
   }
 
-  let rawBody: Buffer;
-  try {
-    rawBody = await readRawBody(req);
-  } catch (cause) {
-    sendJson(res, 413, {
-      error: "body_too_large_or_unreadable",
-      detail: cause instanceof Error ? cause.message : String(cause),
-    });
-    return;
-  }
+  const rawBody = req.body as Buffer;
 
   const hmacOk = verifyShopifyWebhookHmac({
     clientSecret: cfg.shopify.clientSecret,
@@ -663,8 +686,10 @@ const handleAppUninstalled = async (
     sendJson(res, 200, { ok: true, action: "noop_already_gone" });
     return;
   }
-  // eslint-disable-next-line no-console
-  console.error("[webhook app/uninstalled] revoke failed:", revokeResult.left);
+  req.log.error(
+    { err: revokeResult.left },
+    "[webhook app/uninstalled] revoke failed",
+  );
   sendJson(res, 200, { ok: true, action: "noop_revoke_failed" });
 };
 
@@ -700,8 +725,8 @@ const handleAppUninstalled = async (
 const verifyComplianceWebhook = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<{ tenantId: string | null; shop: string; rawBody: Buffer } | null> => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
   const shopHeader = req.headers["x-shopify-shop-domain"];
@@ -716,16 +741,7 @@ const verifyComplianceWebhook = async (
     return null;
   }
 
-  let rawBody: Buffer;
-  try {
-    rawBody = await readRawBody(req);
-  } catch (cause) {
-    sendJson(res, 413, {
-      error: "body_too_large_or_unreadable",
-      detail: cause instanceof Error ? cause.message : String(cause),
-    });
-    return null;
-  }
+  const rawBody = req.body as Buffer;
 
   const hmacOk = verifyShopifyWebhookHmac({
     clientSecret: cfg.shopify.clientSecret,
@@ -743,10 +759,9 @@ const verifyComplianceWebhook = async (
   if (tenantExit._tag !== "Success") {
     // 500 here would make Shopify retry; we still 200 below with a noop
     // action so the caller sees the failure path. Log loudly.
-    // eslint-disable-next-line no-console
-    console.error(
-      "[compliance webhook] tenant lookup failed:",
-      tenantExit.cause,
+    req.log.error(
+      { err: tenantExit.cause },
+      "[compliance webhook] tenant lookup failed",
     );
     return { tenantId: null, shop, rawBody };
   }
@@ -757,8 +772,8 @@ const verifyComplianceWebhook = async (
 const handleCustomersDataRequest = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const verified = await verifyComplianceWebhook(cfg, layer, req, res);
   if (!verified) return;
@@ -785,10 +800,9 @@ const handleCustomersDataRequest = async (
     ),
   );
   if (recordExit._tag !== "Success") {
-    // eslint-disable-next-line no-console
-    console.error(
-      "[webhook customers/data_request] record failed:",
-      recordExit.cause,
+    req.log.error(
+      { err: recordExit.cause },
+      "[webhook customers/data_request] record failed",
     );
     sendJson(res, 200, { ok: true, action: "noop_record_failed" });
     return;
@@ -800,8 +814,8 @@ const handleCustomersDataRequest = async (
 const handleCustomersRedact = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const verified = await verifyComplianceWebhook(cfg, layer, req, res);
   if (!verified) return;
@@ -823,10 +837,9 @@ const handleCustomersRedact = async (
     ),
   );
   if (redactExit._tag !== "Success") {
-    // eslint-disable-next-line no-console
-    console.error(
-      "[webhook customers/redact] redact failed:",
-      redactExit.cause,
+    req.log.error(
+      { err: redactExit.cause },
+      "[webhook customers/redact] redact failed",
     );
     sendJson(res, 200, { ok: true, action: "noop_redact_failed" });
     return;
@@ -842,8 +855,8 @@ const handleCustomersRedact = async (
 const handleShopRedact = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const verified = await verifyComplianceWebhook(cfg, layer, req, res);
   if (!verified) return;
@@ -860,10 +873,9 @@ const handleShopRedact = async (
     Effect.provide(redactShop(verified.tenantId), layer),
   );
   if (redactExit._tag !== "Success") {
-    // eslint-disable-next-line no-console
-    console.error(
-      "[webhook shop/redact] redact failed:",
-      redactExit.cause,
+    req.log.error(
+      { err: redactExit.cause },
+      "[webhook shop/redact] redact failed",
     );
     sendJson(res, 200, { ok: true, action: "noop_redact_failed" });
     return;
@@ -887,8 +899,8 @@ const handleShopRedact = async (
  */
 const handleGoogleInstall = (
   cfg: ApiConfig,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): void => {
   if (!cfg.google) {
     sendJson(res, 503, { error: "google_oauth_not_configured" });
@@ -947,8 +959,8 @@ const handleGoogleInstall = (
 const handleGoogleCallback = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   if (!cfg.google) {
     sendJson(res, 503, { error: "google_oauth_not_configured" });
@@ -1065,8 +1077,7 @@ const handleGoogleCallback = async (
         topicName: cfg.google.pubsubTopic,
       });
     } catch (cause) {
-      // eslint-disable-next-line no-console
-      console.error("[google callback] watch registration failed:", cause);
+      req.log.error({ err: cause }, "[google callback] watch registration failed");
     }
   }
 
@@ -1089,10 +1100,9 @@ const handleGoogleCallback = async (
       ),
     );
     if (patchExit._tag !== "Success") {
-      // eslint-disable-next-line no-console
-      console.error(
-        "[google callback] metadata patch failed:",
-        patchExit.cause,
+      req.log.error(
+        { err: patchExit.cause },
+        "[google callback] metadata patch failed",
       );
     }
   }
@@ -1108,8 +1118,7 @@ const handleGoogleCallback = async (
         layer,
       });
     } catch (cause) {
-      // eslint-disable-next-line no-console
-      console.error("[google callback] unread backfill failed:", cause);
+      req.log.error({ err: cause }, "[google callback] unread backfill failed");
     }
   }
 
@@ -1166,8 +1175,8 @@ const handleGoogleCallback = async (
 const handleGmailWebhook = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   if (!cfg.google) {
     sendJson(res, 503, { error: "google_oauth_not_configured" });
@@ -1200,22 +1209,12 @@ const handleGmailWebhook = async (
     return;
   }
 
-  let rawBody: Buffer;
-  try {
-    rawBody = await readRawBody(req);
-  } catch (cause) {
-    sendJson(res, 413, {
-      error: "body_too_large_or_unreadable",
-      detail: cause instanceof Error ? cause.message : String(cause),
-    });
-    return;
-  }
+  const rawBody = req.body as Buffer;
 
   if (!tenantId) {
     const payload = parseGmailPushEnvelope(rawBody);
     if (!payload) {
-      // eslint-disable-next-line no-console
-      console.warn("[gmail webhook] unparseable push envelope; dropping");
+      req.log.warn("[gmail webhook] unparseable push envelope; dropping");
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -1224,15 +1223,16 @@ const handleGmailWebhook = async (
       Effect.provide(findTenantByGmailMailbox(payload.emailAddress), layer),
     );
     if (tenantExit._tag !== "Success") {
-      // eslint-disable-next-line no-console
-      console.error("[gmail webhook] tenant lookup failed:", tenantExit.cause);
+      req.log.error(
+        { err: tenantExit.cause },
+        "[gmail webhook] tenant lookup failed",
+      );
       sendJson(res, 200, { ok: true });
       return;
     }
     tenantId = tenantExit.value;
     if (!tenantId) {
-      // eslint-disable-next-line no-console
-      console.warn(
+      req.log.warn(
         `[gmail webhook] no active connection for mailbox=${payload.emailAddress}`,
       );
       sendJson(res, 200, { ok: true });
@@ -1248,8 +1248,7 @@ const handleGmailWebhook = async (
       google: cfg.google,
     });
   } catch (cause) {
-    // eslint-disable-next-line no-console
-    console.error("[gmail webhook] push handling failed:", cause);
+    req.log.error({ err: cause }, "[gmail webhook] push handling failed");
   }
   // Always 200 once token verified — Pub/Sub retries on 5xx.
   sendJson(res, 200, { ok: true });
@@ -1289,8 +1288,8 @@ const acquireApprovalBoss = async (
 const handleApprovalDecision = async (
   cfg: ApiConfig,
   layer: ApiLayer,
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: FastifyRequest,
+  res: FastifyReply,
 ): Promise<void> => {
   const url = req.url ?? "/";
   // Match the path BEFORE the query string.
@@ -1337,106 +1336,290 @@ export interface ServerHandle {
   readonly port: number;
 }
 
+/**
+ * Pino logger config. Enabled by default (structured JSON); quieted to
+ * `warn` under tests so the DB-gated integration suite isn't drowned in
+ * per-request lines. `LOG_LEVEL` overrides the level outside tests.
+ */
+const loggerConfig = () =>
+  process.env["NODE_ENV"] === "test"
+    ? { level: "warn" }
+    : { level: process.env["LOG_LEVEL"] ?? "info" };
+
 export const startServer = async (
   cfg: ApiConfig,
 ): Promise<ServerHandle> => {
   const layer = buildApiLayers(cfg);
 
-  const server = createServer((req, res) => {
-    const url = req.url ?? "/";
-    const method = req.method ?? "GET";
-    void (async () => {
-      try {
-        if (method === "GET" && url.startsWith("/shopify/install")) {
-          await handleShopifyInstall(cfg, layer, req, res);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/shopify/auth/callback")) {
-          await handleShopifyCallback(cfg, layer, req, res);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/installed")) {
-          handleInstalledPage(req, res);
-          return;
-        }
-        if (
-          method === "POST" &&
-          url.startsWith("/webhooks/shopify/app/uninstalled")
-        ) {
-          await handleAppUninstalled(cfg, layer, req, res);
-          return;
-        }
-        if (
-          method === "POST" &&
-          url.startsWith("/webhooks/shopify/customers/data_request")
-        ) {
-          await handleCustomersDataRequest(cfg, layer, req, res);
-          return;
-        }
-        if (
-          method === "POST" &&
-          url.startsWith("/webhooks/shopify/customers/redact")
-        ) {
-          await handleCustomersRedact(cfg, layer, req, res);
-          return;
-        }
-        if (
-          method === "POST" &&
-          url.startsWith("/webhooks/shopify/shop/redact")
-        ) {
-          await handleShopRedact(cfg, layer, req, res);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/google/install")) {
-          handleGoogleInstall(cfg, req, res);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/google/auth/callback")) {
-          await handleGoogleCallback(cfg, layer, req, res);
-          return;
-        }
-        if (
-          method === "POST" &&
-          url.startsWith("/webhooks/conversations/gmail")
-        ) {
-          await handleGmailWebhook(cfg, layer, req, res);
-          return;
-        }
-        if (method === "GET" && url.startsWith("/approvals/")) {
-          await handleApprovalDecision(cfg, layer, req, res);
-          return;
-        }
-        if (method === "GET" && url === "/healthz") {
-          sendText(res, 200, "ok");
-          return;
-        }
-        sendJson(res, 404, { error: "not_found" });
-      } catch (cause) {
-        // eslint-disable-next-line no-console
-        console.error("[api] unhandled error:", cause);
-        sendJson(res, 500, { error: "internal" });
-      }
-    })();
+  const app: FastifyInstance = Fastify({
+    logger: loggerConfig(),
+    // Matches the old readRawBody cap. Shopify/Pub/Sub payloads are tiny;
+    // anything near the cap is suspect and fails closed with 413.
+    bodyLimit: 1024 * 1024,
   });
 
-  return new Promise((resolve) => {
-    server.listen(cfg.port, () => {
-      const address = server.address();
-      const port =
-        address && typeof address === "object" ? address.port : cfg.port;
-      // eslint-disable-next-line no-console
-      console.log(`[api] listening on http://localhost:${port}`);
-      resolve({
-        port,
-        close: () =>
-          new Promise<void>((res) =>
-            server.close(() => {
-              res();
-            }),
-          ),
-      });
-    });
+  // Webhook HMAC is computed over the exact bytes the provider sent, so we
+  // keep the raw body as a Buffer instead of letting Fastify JSON-parse it
+  // (which would change whitespace/key order and break the signature).
+  // Handlers JSON-parse afterwards. We drop the built-in parsers first —
+  // otherwise Fastify's `application/json` parser (more specific than `*`)
+  // would still hand handlers a parsed object for Shopify + Pub/Sub
+  // payloads. With them gone, the catch-all buffers every content type.
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser(
+    "*",
+    { parseAs: "buffer" },
+    (_req, body, done) => done(null, body),
+  );
+
+  // OpenAPI generation. Registered before the routes so its onRoute hook
+  // captures every schema below; the browsable UI lands at /docs.
+  await app.register(fastifySwagger, {
+    openapi: {
+      info: {
+        title: "support-agent API",
+        description:
+          "Webhook, OAuth install/callback, and approval-link edge for the support-agent runtime.",
+        version: "0.0.0",
+      },
+      tags: TAGS,
+    },
   });
+  await app.register(fastifySwaggerUi, { routePrefix: "/docs" });
+
+  const errorResponses = {
+    "4xx": errorResponseSchema,
+    "5xx": errorResponseSchema,
+  };
+
+  // ---- Shopify install + callback ----
+  app.get(
+    "/shopify/install",
+    {
+      schema: {
+        tags: ["shopify"],
+        summary: "Start the Shopify OAuth install flow",
+        querystring: shopifyInstallQuerySchema,
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      await handleShopifyInstall(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.get(
+    "/shopify/auth/callback",
+    {
+      schema: {
+        tags: ["shopify"],
+        summary: "Shopify OAuth authorization-code callback",
+        querystring: shopifyCallbackQuerySchema,
+        response: { 200: shopifyCallbackSuccessSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleShopifyCallback(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.get(
+    "/installed",
+    {
+      schema: {
+        tags: ["shopify"],
+        summary: "Merchant landing page after a successful install",
+        querystring: installedQuerySchema,
+      },
+    },
+    async (req, res) => {
+      handleInstalledPage(req, res);
+      return res;
+    },
+  );
+
+  // ---- Shopify lifecycle + compliance webhooks ----
+  app.post(
+    "/webhooks/shopify/app/uninstalled",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify app/uninstalled — revoke the connector",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleAppUninstalled(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.post(
+    "/webhooks/shopify/customers/data_request",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify GDPR customers/data_request",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleCustomersDataRequest(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.post(
+    "/webhooks/shopify/customers/redact",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify GDPR customers/redact",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleCustomersRedact(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.post(
+    "/webhooks/shopify/shop/redact",
+    {
+      schema: {
+        tags: ["webhooks", "shopify"],
+        summary: "Shopify GDPR shop/redact",
+        response: { 200: webhookAckSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleShopRedact(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Google / Gmail OAuth ----
+  app.get(
+    "/google/install",
+    {
+      schema: {
+        tags: ["google"],
+        summary: "Start the Google / Gmail OAuth install flow",
+        querystring: googleInstallQuerySchema,
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      handleGoogleInstall(cfg, req, res);
+      return res;
+    },
+  );
+
+  app.get(
+    "/google/auth/callback",
+    {
+      schema: {
+        tags: ["google"],
+        summary: "Google OAuth authorization-code callback",
+        querystring: googleCallbackQuerySchema,
+        response: { 200: googleCallbackSuccessSchema, ...errorResponses },
+      },
+    },
+    async (req, res) => {
+      await handleGoogleCallback(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Gmail Pub/Sub push webhook (tenant-less + legacy tenant path) ----
+  const gmailWebhookOpts = {
+    schema: {
+      tags: ["webhooks", "google"],
+      summary: "Gmail Pub/Sub push notification",
+      querystring: tokenQuerySchema,
+      response: { 200: webhookAckSchema, ...errorResponses },
+    },
+  };
+  app.post("/webhooks/conversations/gmail", gmailWebhookOpts, async (req, res) => {
+    await handleGmailWebhook(cfg, layer, req, res);
+    return res;
+  });
+  app.post(
+    "/webhooks/conversations/gmail/:tenantId",
+    {
+      schema: {
+        ...gmailWebhookOpts.schema,
+        params: gmailParamsSchema,
+      },
+    },
+    async (req, res) => {
+      await handleGmailWebhook(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Approval links ----
+  app.get(
+    "/approvals/:approvalId/:action",
+    {
+      schema: {
+        tags: ["approvals"],
+        summary: "Approve or reject a gated tool call from an emailed link",
+        params: approvalParamsSchema,
+        querystring: tokenQuerySchema,
+      },
+    },
+    async (req, res) => {
+      await handleApprovalDecision(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- System ----
+  app.get(
+    "/healthz",
+    { schema: { tags: ["system"], summary: "Liveness probe" } },
+    async (_req, res) => sendText(res, 200, "ok"),
+  );
+
+  app.get(
+    "/openapi.json",
+    { schema: { tags: ["system"], summary: "OpenAPI document", hide: true } },
+    async () => app.swagger(),
+  );
+
+  app.setNotFoundHandler((_req, res) => sendJson(res, 404, { error: "not_found" }));
+
+  app.setErrorHandler((err: FastifyError, req, res) => {
+    const statusCode = err.statusCode ?? 500;
+    if (statusCode === 413) {
+      return sendJson(res, 413, {
+        error: "body_too_large_or_unreadable",
+        detail: err.message,
+      });
+    }
+    if (err.validation) {
+      return sendJson(res, 400, {
+        error: "validation_failed",
+        detail: err.message,
+      });
+    }
+    req.log.error({ err }, "[api] unhandled error");
+    return sendJson(res, 500, { error: "internal" });
+  });
+
+  await app.listen({ port: cfg.port, host: process.env["API_HOST"] ?? "0.0.0.0" });
+  const address = app.server.address();
+  const port =
+    address && typeof address === "object" ? address.port : cfg.port;
+  app.log.info(`[api] listening on http://localhost:${port}`);
+  return {
+    port,
+    close: () => app.close(),
+  };
 };
 
 // ============================================================
