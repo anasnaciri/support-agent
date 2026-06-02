@@ -24,10 +24,10 @@ importers:
   apps/api:
     dependencies:
       '@fastify/swagger':
-        specifier: ^9
+        specifier: ^9.7.0
         version: 9.7.0
       '@fastify/swagger-ui':
-        specifier: ^5
+        specifier: ^5.2.6
         version: 5.2.6
       '@support-agent/agent-core':
         specifier: workspace:*
@@ -45,7 +45,7 @@ importers:
         specifier: ^3.10.0
         version: 3.21.2
       fastify:
-        specifier: ^5
+        specifier: ^5.8.5
         version: 5.8.5
       pg-boss:
         specifier: ^12.18.2
