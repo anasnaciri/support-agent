@@ -56,6 +56,7 @@ From master-plan §16 (dependency rule) and §20 (never moves earlier):
 - Don't widen scope past what the user asked for. If you spot adjacent issues, note them in `todo.md` rather than fixing them silently.
 - Prefer editing existing files over adding new ones.
 - Stack picks are locked. Don't propose alternatives unless one is actively broken.
+- If a feature is not specific to either the main/SaaS model or the pilot model, implement it on its own shared feature branch first. After it is finished and verified, merge it into both the main/SaaS branch and the pilot branch. Do not build shared features directly inside only one of those branches unless the user explicitly asks for that.
 - If `pnpm build` fails, fix it before doing anything else.
 
 ## TDD
