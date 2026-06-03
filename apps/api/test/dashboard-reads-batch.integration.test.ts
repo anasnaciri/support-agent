@@ -7,6 +7,7 @@ import {
   cases,
   connectorConnections,
   makeDbClient,
+  tenantAgentOverrides,
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
@@ -116,6 +117,11 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       scopes: ["read_orders"],
       status: "active",
     });
+    await raw.db.insert(tenantAgentOverrides).values({
+      tenantId,
+      agentId: "refund-review-agent",
+      model: "anthropic/claude-opus-4-8",
+    });
     handle = await startServer(cfg);
     baseUrl = `http://localhost:${handle.port}`;
   });
@@ -129,6 +135,9 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       await raw.db
         .delete(connectorConnections)
         .where(sql`${connectorConnections.tenantId} = ${id}`);
+      await raw.db
+        .delete(tenantAgentOverrides)
+        .where(sql`${tenantAgentOverrides.tenantId} = ${id}`);
       await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
@@ -269,6 +278,18 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     // caseB's seeded audit row is an llm.decision (the only one for tenant1).
     expect(body.rows).toHaveLength(1);
     expect(typeof body.rows[0]?.occurredAt).toBe("string");
+  });
+
+  it("GET /dashboard/agent-overrides — per-agent model overrides", async () => {
+    if (!raw) return;
+    const body = (await (await get("/dashboard/agent-overrides")).json()) as {
+      overrides: ReadonlyArray<{ agentId: string; model: string | null }>;
+    };
+    expect(body.overrides).toHaveLength(1);
+    expect(body.overrides[0]).toEqual({
+      agentId: "refund-review-agent",
+      model: "anthropic/claude-opus-4-8",
+    });
   });
 
   it("rejects without a token (401)", async () => {

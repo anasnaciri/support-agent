@@ -5,6 +5,7 @@ import {
   auditLog,
   cases,
   connectorConnections,
+  tenantAgentOverrides,
   tenants,
 } from "./schema.js";
 
@@ -636,6 +637,30 @@ export const caseContextForTenant = async (
     .where(and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)))
     .limit(1);
   return row ? { context: row.context } : null;
+};
+
+export interface AgentOverrideRow {
+  readonly agentId: string;
+  readonly model: string | null;
+}
+
+/**
+ * Per-agent model overrides for a tenant (the `settings/agents` pages). The
+ * dashboard rebuilds its agentId→model map from this; agents without a row
+ * fall back to their config default.
+ */
+export const agentOverrides = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<ReadonlyArray<AgentOverrideRow>> => {
+  const rows = await db
+    .select({
+      agentId: tenantAgentOverrides.agentId,
+      model: tenantAgentOverrides.model,
+    })
+    .from(tenantAgentOverrides)
+    .where(eq(tenantAgentOverrides.tenantId, tenantId));
+  return rows.map((r) => ({ agentId: r.agentId, model: r.model }));
 };
 
 /** Shop domain of the tenant's active Shopify connection, or null. */

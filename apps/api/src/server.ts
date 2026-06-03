@@ -18,6 +18,7 @@ import {
 import { ConnectorNotFound, TenantId, UserId } from "@support-agent/agent-core";
 import {
   activeShopifyShopDomain,
+  agentOverrides,
   approvalDetail,
   approvalsList,
   auditList,
@@ -441,6 +442,21 @@ const handleDashboardUsage = async (
     usageRows(db, auth.tenantId, start, end),
   );
   return sendJson(res, 200, { rows });
+};
+
+// GET /dashboard/agent-overrides — per-agent model overrides (settings/agents).
+const handleDashboardAgentOverrides = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const overrides = await runWithDb(layer, (db) =>
+    agentOverrides(db, auth.tenantId),
+  );
+  return sendJson(res, 200, { overrides });
 };
 
 // GET /dashboard/connections — connector connections for the integrations
@@ -2066,6 +2082,11 @@ export const startServer = async (
     "/dashboard/usage",
     "LLM usage rows in a time window",
     handleDashboardUsage,
+  );
+  dashboardGet(
+    "/dashboard/agent-overrides",
+    "Per-agent model overrides",
+    handleDashboardAgentOverrides,
   );
 
   // Mutations. No response serializer (default JSON.stringify) so the
