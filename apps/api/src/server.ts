@@ -15,9 +15,18 @@ import {
 } from "@support-agent/services";
 import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
 import {
+  approvalDetail,
+  approvalsList,
+  auditList,
+  caseDetail,
+  caseEvents,
+  casesList,
   DbClient,
   findTenantIdByWorkosOrg,
+  parsePageNumber,
+  parsePageSize,
   todaySummary,
+  type DrizzleDb,
 } from "@support-agent/db";
 import { parseDashboardAuth } from "./dashboard-auth.js";
 import {
@@ -146,46 +155,204 @@ const sendHtml = (
 // Dashboard read API (Path B)
 // ============================================================
 
+/** Run a Promise-returning DB query against the api layer's DbClient. */
+const runWithDb = <T>(
+  layer: ApiLayer,
+  f: (db: DrizzleDb) => Promise<T>,
+): Promise<T> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        return yield* Effect.promise(() => f(db));
+      }),
+      layer,
+    ),
+  );
+
+type DashboardAuthResult =
+  | { readonly ok: true; readonly tenantId: string }
+  | { readonly ok: false; readonly status: number; readonly error: string };
+
 /**
- * GET /dashboard/today — Today-view rollup for the dashboard. Auth is a
- * shared service token + the dashboard's asserted WorkOS org (see
- * `dashboard-auth`): 503 when the token isn't configured, 401/400 on bad
- * auth, 403 when the org isn't linked to a tenant.
+ * Shared auth for `/dashboard/*`: verify the service token, read the asserted
+ * WorkOS org, resolve it to a tenant. 503 unconfigured, 401/400 bad auth,
+ * 403 when the org isn't linked to a tenant.
  */
-const handleDashboardToday = async (
+const authenticateDashboard = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
-  res: FastifyReply,
-): Promise<FastifyReply> => {
+): Promise<DashboardAuthResult> => {
   if (!cfg.dashboardApiToken) {
-    return sendJson(res, 503, { error: "dashboard_api_not_configured" });
+    return { ok: false, status: 503, error: "dashboard_api_not_configured" };
   }
   const parsed = parseDashboardAuth(
     req.headers as Record<string, string | undefined>,
     cfg.dashboardApiToken,
   );
   if (!parsed.ok) {
-    return sendJson(res, parsed.status, { error: parsed.message });
+    return { ok: false, status: parsed.status, error: parsed.message };
   }
-  const result = await Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const db = yield* DbClient;
-        const tenantId = yield* Effect.promise(() =>
-          findTenantIdByWorkosOrg(db, parsed.organizationId),
-        );
-        if (!tenantId) return { kind: "no_tenant" as const };
-        const summary = yield* Effect.promise(() => todaySummary(db, tenantId));
-        return { kind: "ok" as const, summary };
-      }),
-      layer,
+  const tenantId = await runWithDb(layer, (db) =>
+    findTenantIdByWorkosOrg(db, parsed.organizationId),
+  );
+  if (!tenantId) {
+    return { ok: false, status: 403, error: "no_tenant_for_organization" };
+  }
+  return { ok: true, tenantId };
+};
+
+/** Read a non-empty string query/param value, else undefined. */
+const strField = (
+  source: Record<string, unknown>,
+  key: string,
+): string | undefined => {
+  const v = source[key];
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+};
+
+// GET /dashboard/today — Today-view rollup.
+const handleDashboardToday = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const summary = await runWithDb(layer, (db) =>
+    todaySummary(db, auth.tenantId),
+  );
+  return sendJson(res, 200, summary);
+};
+
+// GET /dashboard/cases?page=&limit= — paginated cases list.
+const handleDashboardCases = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    casesList(
+      db,
+      auth.tenantId,
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
     ),
   );
-  if (result.kind === "no_tenant") {
-    return sendJson(res, 403, { error: "no_tenant_for_organization" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id — case + timeline + approvals.
+const handleDashboardCaseDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    caseDetail(db, auth.tenantId, id),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id/events?since= — audit rows after `since` (poll).
+const handleDashboardCaseEvents = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const sinceRaw = strField((req.query ?? {}) as Record<string, unknown>, "since");
+  let since = 0n;
+  try {
+    if (sinceRaw) since = BigInt(sinceRaw);
+  } catch {
+    since = 0n;
   }
-  return sendJson(res, 200, result.summary);
+  const result = await runWithDb(layer, (db) =>
+    caseEvents(db, auth.tenantId, id, since),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/approvals?status=&risk=&tool=&agent=&page=&limit=
+const handleDashboardApprovals = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    approvalsList(
+      db,
+      auth.tenantId,
+      {
+        status: strField(q, "status"),
+        risk: strField(q, "risk"),
+        tool: strField(q, "tool"),
+        agent: strField(q, "agent"),
+      },
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
+    ),
+  );
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/approvals/:id — full approval.
+const handleDashboardApprovalDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    approvalDetail(db, auth.tenantId, id),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/audit?action=&actor=&page=&limit= — cross-case audit log.
+const handleDashboardAudit = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    auditList(
+      db,
+      auth.tenantId,
+      { action: strField(q, "action"), actor: strField(q, "actor") },
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
+    ),
+  );
+  return sendJson(res, 200, result);
 };
 
 // ============================================================
@@ -1631,23 +1798,59 @@ export const startServer = async (
   );
 
   // ---- Dashboard read API ----
-  app.get(
-    "/dashboard/today",
-    {
-      schema: {
-        tags: ["dashboard"],
-        summary: "Today-view rollup (tenant-scoped) for the dashboard",
-        response: {
-          200: { type: "object", additionalProperties: true },
-          ...errorResponses,
+  const dashboardJsonResponse = {
+    200: { type: "object", additionalProperties: true },
+    ...errorResponses,
+  };
+  const dashboardGet = (
+    path: string,
+    summary: string,
+    handler: (
+      cfg: ApiConfig,
+      layer: ApiLayer,
+      req: FastifyRequest,
+      res: FastifyReply,
+    ) => Promise<FastifyReply>,
+  ): void => {
+    app.get(
+      path,
+      {
+        schema: {
+          tags: ["dashboard"],
+          summary,
+          response: dashboardJsonResponse,
         },
       },
-    },
-    async (req, res) => {
-      await handleDashboardToday(cfg, layer, req, res);
-      return res;
-    },
+      async (req, res) => {
+        await handler(cfg, layer, req, res);
+        return res;
+      },
+    );
+  };
+
+  dashboardGet("/dashboard/today", "Today-view rollup", handleDashboardToday);
+  dashboardGet("/dashboard/cases", "Paginated cases list", handleDashboardCases);
+  dashboardGet(
+    "/dashboard/cases/:id",
+    "Case detail with timeline + approvals",
+    handleDashboardCaseDetail,
   );
+  dashboardGet(
+    "/dashboard/cases/:id/events",
+    "New audit events for a case since ?since=",
+    handleDashboardCaseEvents,
+  );
+  dashboardGet(
+    "/dashboard/approvals",
+    "Paginated approvals list with facets",
+    handleDashboardApprovals,
+  );
+  dashboardGet(
+    "/dashboard/approvals/:id",
+    "Approval detail",
+    handleDashboardApprovalDetail,
+  );
+  dashboardGet("/dashboard/audit", "Cross-case audit log", handleDashboardAudit);
 
   // ---- System ----
   app.get(
