@@ -21,6 +21,7 @@ import {
   caseDetail,
   caseEvents,
   casesList,
+  connectionsList,
   DbClient,
   findTenantIdByWorkosOrg,
   parsePageNumber,
@@ -331,6 +332,22 @@ const handleDashboardApprovalDetail = async (
   );
   if (!result) return sendJson(res, 404, { error: "not_found" });
   return sendJson(res, 200, result);
+};
+
+// GET /dashboard/connections — connector connections for the integrations
+// pages + the case-detail Shopify shop-domain deep link.
+const handleDashboardConnections = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const connections = await runWithDb(layer, (db) =>
+    connectionsList(db, auth.tenantId),
+  );
+  return sendJson(res, 200, { connections });
 };
 
 // GET /dashboard/audit?action=&actor=&page=&limit= — cross-case audit log.
@@ -1851,6 +1868,11 @@ export const startServer = async (
     handleDashboardApprovalDetail,
   );
   dashboardGet("/dashboard/audit", "Cross-case audit log", handleDashboardAudit);
+  dashboardGet(
+    "/dashboard/connections",
+    "Connector connections (integrations)",
+    handleDashboardConnections,
+  );
 
   // ---- System ----
   app.get(

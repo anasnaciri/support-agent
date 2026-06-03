@@ -5,6 +5,7 @@ import {
   approvals,
   auditLog,
   cases,
+  connectorConnections,
   makeDbClient,
   tenants,
 } from "@support-agent/db";
@@ -106,6 +107,15 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       status: "pending",
       expiresAt: new Date(Date.now() + 86_400_000),
     });
+    await raw.db.insert(connectorConnections).values({
+      id: randomUUID(),
+      tenantId,
+      provider: "shopify",
+      shopDomain: "batch-shop.myshopify.com",
+      accessTokenEncrypted: Buffer.from([1, 2, 3]),
+      scopes: ["read_orders"],
+      status: "active",
+    });
     handle = await startServer(cfg);
     baseUrl = `http://localhost:${handle.port}`;
   });
@@ -116,6 +126,9 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     for (const id of [tenantId, otherTenantId]) {
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
       await raw.db.delete(auditLog).where(sql`${auditLog.tenantId} = ${id}`);
+      await raw.db
+        .delete(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${id}`);
       await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
@@ -208,6 +221,23 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     };
     expect(filtered.totalRows).toBe(1);
     expect(filtered.rows[0]?.action).toBe("tool.invoked");
+  });
+
+  it("GET /dashboard/connections — tenant-scoped connector list", async () => {
+    if (!raw) return;
+    const body = (await (await get("/dashboard/connections")).json()) as {
+      connections: ReadonlyArray<{
+        provider: string;
+        shopDomain: string | null;
+        status: string;
+        scopes: ReadonlyArray<string>;
+      }>;
+    };
+    expect(body.connections).toHaveLength(1);
+    expect(body.connections[0]?.provider).toBe("shopify");
+    expect(body.connections[0]?.shopDomain).toBe("batch-shop.myshopify.com");
+    expect(body.connections[0]?.status).toBe("active");
+    expect(body.connections[0]?.scopes).toContain("read_orders");
   });
 
   it("rejects without a token (401)", async () => {

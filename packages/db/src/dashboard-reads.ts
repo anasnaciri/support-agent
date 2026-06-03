@@ -1,6 +1,12 @@
 import { and, asc, desc, eq, gt, gte, like, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
-import { approvals, auditLog, cases, tenants } from "./schema.js";
+import {
+  approvals,
+  auditLog,
+  cases,
+  connectorConnections,
+  tenants,
+} from "./schema.js";
 
 // Read queries backing the dashboard's HTTP API (Path B). The dashboard
 // hosts on Cloudflare Workers and can't open a Postgres TCP pool, so these
@@ -557,4 +563,55 @@ export const auditList = async (
     .offset((page - 1) * pageSize);
 
   return { totalRows, page, pageSize, rows: rows.map(toAuditEntry) };
+};
+
+// ============================================================
+// Connector connections (integrations pages + case-detail shop domain)
+// ============================================================
+
+export interface ConnectorConnectionView {
+  readonly id: string;
+  readonly provider: string;
+  readonly shopDomain: string | null;
+  readonly status: string;
+  readonly scopes: ReadonlyArray<string>;
+  readonly installedAt: string | null;
+  readonly revokedAt: string | null;
+  readonly updatedAt: string | null;
+}
+
+/**
+ * All connector connections for a tenant (newest install first). Backs the
+ * integrations overview + per-provider pages, and the case-detail Shopify
+ * shop-domain deep link (the dashboard picks the active shopify row from
+ * this). `shopDomain` defaults to "" in the schema; normalize empty → null.
+ */
+export const connectionsList = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<ReadonlyArray<ConnectorConnectionView>> => {
+  const rows = await db
+    .select({
+      id: connectorConnections.id,
+      provider: connectorConnections.provider,
+      shopDomain: connectorConnections.shopDomain,
+      status: connectorConnections.status,
+      scopes: connectorConnections.scopes,
+      installedAt: connectorConnections.installedAt,
+      revokedAt: connectorConnections.revokedAt,
+      updatedAt: connectorConnections.updatedAt,
+    })
+    .from(connectorConnections)
+    .where(eq(connectorConnections.tenantId, tenantId))
+    .orderBy(desc(connectorConnections.installedAt));
+  return rows.map((r) => ({
+    id: r.id,
+    provider: r.provider,
+    shopDomain: r.shopDomain ? r.shopDomain : null,
+    status: r.status,
+    scopes: r.scopes ?? [],
+    installedAt: r.installedAt ? r.installedAt.toISOString() : null,
+    revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
+    updatedAt: r.updatedAt ? r.updatedAt.toISOString() : null,
+  }));
 };
