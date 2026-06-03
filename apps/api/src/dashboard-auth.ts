@@ -9,7 +9,16 @@ import { timingSafeEqual } from "node:crypto";
 // touching the endpoints.
 
 export type DashboardAuthParse =
-  | { readonly ok: true; readonly organizationId: string }
+  | {
+      readonly ok: true;
+      readonly organizationId: string;
+      /**
+       * Manager id for write actions (from `x-user-id`). The dashboard sends
+       * the WorkOS-user → decision UUID it already derives; undefined on read
+       * requests, which don't need it.
+       */
+      readonly userId: string | undefined;
+    }
   | { readonly ok: false; readonly status: 401 | 400; readonly message: string };
 
 const BEARER = "Bearer ";
@@ -44,5 +53,10 @@ export const parseDashboardAuth = (
   if (!org) {
     return { ok: false, status: 400, message: "missing x-org-id" };
   }
-  return { ok: true, organizationId: org };
+  const userId = headers["x-user-id"];
+  return {
+    ok: true,
+    organizationId: org,
+    userId: userId && userId.length > 0 ? userId : undefined,
+  };
 };

@@ -1,0 +1,207 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomBytes, randomUUID } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
+import { approvals, cases, makeDbClient, tenants } from "@support-agent/db";
+import { startServer, type ServerHandle } from "../src/server.js";
+import type { ApiConfig } from "../src/bootstrap.js";
+
+const databaseUrl = process.env["DATABASE_URL"];
+const describeIfDb = databaseUrl ? describe : describe.skip;
+
+// Path B slice 7 — dashboard write endpoints (approve / reject / takeover).
+describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
+  const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
+  const token = "dash-write-token";
+  const orgId = `org_${randomUUID().slice(0, 8)}`;
+  const otherOrgId = `org_${randomUUID().slice(0, 8)}`;
+  const tenantId = randomUUID();
+  const otherTenantId = randomUUID();
+  const managerId = randomUUID();
+
+  const caseApprove = randomUUID();
+  const caseReject = randomUUID();
+  const caseTakeover = randomUUID();
+  const pApprove = randomUUID();
+  const pReject = randomUUID();
+  const pCross = randomUUID();
+  const pTakeover = randomUUID();
+
+  const cfg = {
+    port: 0,
+    databaseUrl: databaseUrl!,
+    encryptionKey: randomBytes(32),
+    stateSigningKey: "k",
+    shopify: {
+      clientId: "c",
+      clientSecret: "s",
+      callbackUrl: "http://localhost/shopify/auth/callback",
+      apiVersion: "2025-01",
+    },
+    google: null,
+    approvalSigningKey: "a",
+    dashboardBaseUrl: null,
+    dashboardApiToken: token,
+  } as ApiConfig;
+
+  let handle: ServerHandle | null = null;
+  let baseUrl = "";
+
+  const headers = (extra: Record<string, string> = {}) => ({
+    authorization: `Bearer ${token}`,
+    "x-org-id": orgId,
+    "x-user-id": managerId,
+    "content-type": "application/json",
+    ...extra,
+  });
+  const post = (
+    path: string,
+    body: unknown = {},
+    h: Record<string, string> = headers(),
+  ) =>
+    fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify(body),
+    });
+
+  const mkCase = (id: string, owner: string, status: string) => ({
+    id,
+    tenantId: owner,
+    channel: "email",
+    status,
+    currentAgentId: "support-triage",
+  });
+  const mkApproval = (id: string, caseId: string, owner: string) => ({
+    id,
+    tenantId: owner,
+    caseId,
+    agentId: "refund-review-agent",
+    tool: "conversation.reply",
+    proposedInput: { bodyText: "original draft" },
+    riskLevel: "medium",
+    status: "pending",
+    expiresAt: new Date(Date.now() + 86_400_000),
+  });
+
+  const approvalRow = (id: string) =>
+    raw!.db
+      .select()
+      .from(approvals)
+      .where(eq(approvals.id, id))
+      .limit(1)
+      .then((r) => r[0]);
+  const caseStatus = (id: string) =>
+    raw!.db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(eq(cases.id, id))
+      .limit(1)
+      .then((r) => r[0]?.status);
+
+  beforeAll(async () => {
+    if (!raw) return;
+    await raw.db.insert(tenants).values([
+      { id: tenantId, name: "w", workosOrganizationId: orgId },
+      { id: otherTenantId, name: "w-other", workosOrganizationId: otherOrgId },
+    ]);
+    await raw.db.insert(cases).values([
+      mkCase(caseApprove, tenantId, "waiting_for_approval"),
+      mkCase(caseReject, tenantId, "waiting_for_approval"),
+      mkCase(caseTakeover, tenantId, "waiting_for_approval"),
+    ]);
+    await raw.db.insert(approvals).values([
+      mkApproval(pApprove, caseApprove, tenantId),
+      mkApproval(pReject, caseReject, tenantId),
+      mkApproval(pCross, caseApprove, tenantId),
+      mkApproval(pTakeover, caseTakeover, tenantId),
+    ]);
+    handle = await startServer(cfg);
+    baseUrl = `http://localhost:${handle.port}`;
+  });
+
+  afterAll(async () => {
+    if (!raw) return;
+    if (handle) await handle.close();
+    for (const id of [tenantId, otherTenantId]) {
+      await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
+      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
+    }
+    await raw.close();
+  });
+
+  it("approve marks the row approved with the edited body + manager id", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/approvals/${pApprove}/approve`, {
+      approvedInput: { bodyText: "manager edit" },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("decided");
+    const row = await approvalRow(pApprove);
+    expect(row?.status).toBe("approved");
+    expect(row?.decidedBy).toBe(managerId);
+    expect((row?.approvedInput as { bodyText?: string })?.bodyText).toBe(
+      "manager edit",
+    );
+  });
+
+  it("approving an already-decided row is idempotent", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/approvals/${pApprove}/approve`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "already_decided",
+    );
+  });
+
+  it("reject marks the row rejected", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/approvals/${pReject}/reject`);
+    expect(res.status).toBe(200);
+    expect((await approvalRow(pReject))?.status).toBe("rejected");
+  });
+
+  it("takeover transitions the case + cancels its pending approvals", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseTakeover}/takeover`, {
+      reason: "manual handling",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kind: string;
+      canceledApprovals: number;
+    };
+    expect(body.kind).toBe("taken_over");
+    expect(body.canceledApprovals).toBe(1);
+    expect(await caseStatus(caseTakeover)).toBe("human_takeover");
+    expect((await approvalRow(pTakeover))?.status).toBe("rejected");
+  });
+
+  it("400 when x-user-id is missing", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/approvals/${pCross}/approve`,
+      {},
+      { authorization: `Bearer ${token}`, "x-org-id": orgId },
+    );
+    expect(res.status).toBe(400);
+    // unchanged
+    expect((await approvalRow(pCross))?.status).toBe("pending");
+  });
+
+  it("404 for an approval / case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const otherHeaders = {
+      authorization: `Bearer ${token}`,
+      "x-org-id": otherOrgId,
+      "x-user-id": managerId,
+      "content-type": "application/json",
+    };
+    const a = await post(`/dashboard/approvals/${pCross}/approve`, {}, otherHeaders);
+    expect(a.status).toBe(404);
+    expect((await approvalRow(pCross))?.status).toBe("pending");
+
+    const t = await post(`/dashboard/cases/${caseApprove}/takeover`, {}, otherHeaders);
+    expect(t.status).toBe(404);
+  });
+});

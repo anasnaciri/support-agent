@@ -9,11 +9,13 @@ import Fastify, {
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import {
+  applyApprovalDecision,
   ConnectorCredentialStore,
+  decisionToEvent,
   TransactionRunner,
   verifyShopifyWebhookHmac,
 } from "@support-agent/services";
-import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
+import { ConnectorNotFound, TenantId, UserId } from "@support-agent/agent-core";
 import {
   approvalDetail,
   approvalsList,
@@ -26,6 +28,7 @@ import {
   findTenantIdByWorkosOrg,
   parsePageNumber,
   parsePageSize,
+  takeOverCase,
   todaySummary,
   usageRows,
   type DrizzleDb,
@@ -173,7 +176,11 @@ const runWithDb = <T>(
   );
 
 type DashboardAuthResult =
-  | { readonly ok: true; readonly tenantId: string }
+  | {
+      readonly ok: true;
+      readonly tenantId: string;
+      readonly userId: string | undefined;
+    }
   | { readonly ok: false; readonly status: number; readonly error: string };
 
 /**
@@ -202,7 +209,7 @@ const authenticateDashboard = async (
   if (!tenantId) {
     return { ok: false, status: 403, error: "no_tenant_for_organization" };
   }
-  return { ok: true, tenantId };
+  return { ok: true, tenantId, userId: parsed.userId };
 };
 
 /** Read a non-empty string query/param value, else undefined. */
@@ -212,6 +219,29 @@ const strField = (
 ): string | undefined => {
   const v = source[key];
   return typeof v === "string" && v.length > 0 ? v : undefined;
+};
+
+/**
+ * Parse a JSON request body. The Fastify instance registers a single buffer
+ * content-type parser (so webhook HMAC sees raw bytes), so POST handlers must
+ * decode JSON themselves. Malformed/empty bodies yield {}.
+ */
+const parseJsonBody = (req: FastifyRequest): Record<string, unknown> => {
+  const b = req.body as unknown;
+  if (!b) return {};
+  try {
+    const text = Buffer.isBuffer(b)
+      ? b.toString("utf8")
+      : typeof b === "string"
+        ? b
+        : "";
+    const parsed = text ? JSON.parse(text) : {};
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 };
 
 // GET /dashboard/today — Today-view rollup.
@@ -397,6 +427,81 @@ const handleDashboardAudit = async (
     ),
   );
   return sendJson(res, 200, result);
+};
+
+// POST /dashboard/approvals/:id/{approve,reject} — manager decision. Reuses
+// the same applyApprovalDecision + decisionToEvent + pg-boss publish as the
+// email-link flow, but tenant-scoped and with the real manager id. Body may
+// carry { approvedInput } for edit-and-approve.
+const handleDashboardApprovalAction =
+  (action: "approve" | "reject") =>
+  async (
+    cfg: ApiConfig,
+    layer: ApiLayer,
+    req: FastifyRequest,
+    res: FastifyReply,
+  ): Promise<FastifyReply> => {
+    const auth = await authenticateDashboard(cfg, layer, req);
+    if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+    if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+    const { id } = req.params as { id: string };
+    const approvedInput = parseJsonBody(req)["approvedInput"];
+    const managerId = UserId(auth.userId);
+    const result = await Effect.runPromise(
+      Effect.provide(
+        applyApprovalDecision({
+          approvalId: id,
+          action,
+          managerId,
+          tenantId: TenantId(auth.tenantId),
+          ...(approvedInput !== undefined ? { approvedInput } : {}),
+        }),
+        layer,
+      ),
+    );
+    const event = decisionToEvent(result, action, managerId);
+    if (event) {
+      try {
+        await makePgBossApprovalPublisher(() =>
+          acquireApprovalBoss(cfg.databaseUrl),
+        )(event);
+      } catch (cause) {
+        // Row already decided; the worker just won't pick it up until ops
+        // replays. Don't fail the request over a publish hiccup.
+        // eslint-disable-next-line no-console
+        console.error(
+          "[dashboard approvals] publish failed; row decided without event",
+          { approvalId: id, cause },
+        );
+      }
+    }
+    return sendJson(res, result.kind === "approval_not_found" ? 404 : 200, result);
+  };
+
+// POST /dashboard/cases/:id/takeover — manager takes over a case.
+const handleDashboardTakeover = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const managerId = auth.userId;
+  const outcome = await runWithDb(layer, (db) =>
+    takeOverCase(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId,
+      reason,
+    }),
+  );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
 };
 
 // ============================================================
@@ -1906,6 +2011,44 @@ export const startServer = async (
     handleDashboardUsage,
   );
 
+  // Mutations. No response serializer (default JSON.stringify) so the
+  // discriminated result/Date fields pass through untouched.
+  const dashboardPost = (
+    path: string,
+    summary: string,
+    handler: (
+      cfg: ApiConfig,
+      layer: ApiLayer,
+      req: FastifyRequest,
+      res: FastifyReply,
+    ) => Promise<FastifyReply>,
+  ): void => {
+    app.post(
+      path,
+      { schema: { tags: ["dashboard"], summary } },
+      async (req, res) => {
+        await handler(cfg, layer, req, res);
+        return res;
+      },
+    );
+  };
+
+  dashboardPost(
+    "/dashboard/approvals/:id/approve",
+    "Approve an approval (manager)",
+    handleDashboardApprovalAction("approve"),
+  );
+  dashboardPost(
+    "/dashboard/approvals/:id/reject",
+    "Reject an approval (manager)",
+    handleDashboardApprovalAction("reject"),
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/takeover",
+    "Take over a case (manager)",
+    handleDashboardTakeover,
+  );
+
   // ---- System ----
   app.get(
     "/healthz",
@@ -1946,7 +2089,15 @@ export const startServer = async (
   app.log.info(`[api] listening on http://localhost:${port}`);
   return {
     port,
-    close: () => app.close(),
+    close: async () => {
+      await app.close();
+      // Stop the shared approval pg-boss (started lazily on the first
+      // approval decision) so shutdown / tests don't leak its connection.
+      if (cachedApprovalBoss) {
+        await cachedApprovalBoss.stop();
+        cachedApprovalBoss = null;
+      }
+    },
   };
 };
 

@@ -13,7 +13,28 @@ describe("parseDashboardAuth", () => {
       { authorization: `Bearer ${token}`, "x-org-id": "org_123" },
       token,
     );
-    expect(r).toEqual({ ok: true, organizationId: "org_123" });
+    expect(r).toMatchObject({ ok: true, organizationId: "org_123" });
+  });
+
+  it("carries x-user-id (manager id) when present, undefined otherwise", () => {
+    const withUser = parseDashboardAuth(
+      {
+        authorization: `Bearer ${token}`,
+        "x-org-id": "org_123",
+        "x-user-id": "manager-uuid",
+      },
+      token,
+    );
+    expect(withUser).toEqual({
+      ok: true,
+      organizationId: "org_123",
+      userId: "manager-uuid",
+    });
+    const withoutUser = parseDashboardAuth(
+      { authorization: `Bearer ${token}`, "x-org-id": "org_123" },
+      token,
+    );
+    expect((withoutUser as { userId?: string }).userId).toBeUndefined();
   });
 
   it("rejects a missing Authorization header with 401", () => {
