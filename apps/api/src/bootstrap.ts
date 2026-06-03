@@ -111,6 +111,14 @@ export interface ApiConfig {
    * fallback. May carry a path prefix.
    */
   readonly dashboardBaseUrl: string | null;
+  /**
+   * Shared service token the dashboard (Cloudflare Worker) presents as
+   * `Authorization: Bearer <token>` when calling the `/dashboard/*` read
+   * API (Path B). `null` → those routes respond 503 (not configured).
+   * The dashboard does the WorkOS user auth and asserts its `x-org-id`;
+   * the api trusts this token and maps org → tenant.
+   */
+  readonly dashboardApiToken: string | null;
 }
 
 const requireEnv = (name: string): string => {
@@ -160,6 +168,7 @@ export const loadApiConfig = (): ApiConfig => {
     },
     approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
     dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
+    dashboardApiToken: process.env["DASHBOARD_API_TOKEN"]?.trim() || null,
     google: googleConfigured
       ? {
           clientId: googleClientId,

@@ -11,3 +11,4 @@ export * from "./tenant-agent-overrides-live.js";
 export * from "./tenant-repository-live.js";
 export * from "./timer-service-live.js";
 export * from "./image-hash-store-live.js";
+export * from "./dashboard-reads.js";

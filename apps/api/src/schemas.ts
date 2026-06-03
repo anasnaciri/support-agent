@@ -32,6 +32,7 @@ export const TAGS = [
   { name: "google", description: "Google / Gmail OAuth install and callback" },
   { name: "webhooks", description: "Inbound provider push webhooks" },
   { name: "approvals", description: "One-click approval-link decisions" },
+  { name: "dashboard", description: "Tenant-scoped read API for the dashboard" },
   { name: "system", description: "Health and service metadata" },
 ];
 

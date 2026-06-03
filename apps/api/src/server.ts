@@ -15,6 +15,12 @@ import {
 } from "@support-agent/services";
 import { ConnectorNotFound, TenantId } from "@support-agent/agent-core";
 import {
+  DbClient,
+  findTenantIdByWorkosOrg,
+  todaySummary,
+} from "@support-agent/db";
+import { parseDashboardAuth } from "./dashboard-auth.js";
+import {
   buildInstallUrl,
   buildManagedInstallUrl,
   isValidShopDomain,
@@ -135,6 +141,52 @@ const sendHtml = (
   body: string,
 ): FastifyReply =>
   res.code(status).type("text/html; charset=utf-8").send(body);
+
+// ============================================================
+// Dashboard read API (Path B)
+// ============================================================
+
+/**
+ * GET /dashboard/today — Today-view rollup for the dashboard. Auth is a
+ * shared service token + the dashboard's asserted WorkOS org (see
+ * `dashboard-auth`): 503 when the token isn't configured, 401/400 on bad
+ * auth, 403 when the org isn't linked to a tenant.
+ */
+const handleDashboardToday = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  if (!cfg.dashboardApiToken) {
+    return sendJson(res, 503, { error: "dashboard_api_not_configured" });
+  }
+  const parsed = parseDashboardAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.dashboardApiToken,
+  );
+  if (!parsed.ok) {
+    return sendJson(res, parsed.status, { error: parsed.message });
+  }
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        const tenantId = yield* Effect.promise(() =>
+          findTenantIdByWorkosOrg(db, parsed.organizationId),
+        );
+        if (!tenantId) return { kind: "no_tenant" as const };
+        const summary = yield* Effect.promise(() => todaySummary(db, tenantId));
+        return { kind: "ok" as const, summary };
+      }),
+      layer,
+    ),
+  );
+  if (result.kind === "no_tenant") {
+    return sendJson(res, 403, { error: "no_tenant_for_organization" });
+  }
+  return sendJson(res, 200, result.summary);
+};
 
 // ============================================================
 // Request helpers
@@ -1574,6 +1626,25 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleApprovalDecision(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Dashboard read API ----
+  app.get(
+    "/dashboard/today",
+    {
+      schema: {
+        tags: ["dashboard"],
+        summary: "Today-view rollup (tenant-scoped) for the dashboard",
+        response: {
+          200: { type: "object", additionalProperties: true },
+          ...errorResponses,
+        },
+      },
+    },
+    async (req, res) => {
+      await handleDashboardToday(cfg, layer, req, res);
       return res;
     },
   );
