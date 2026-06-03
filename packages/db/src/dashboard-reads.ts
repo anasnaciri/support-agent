@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, like, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, like, lt, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import {
   approvals,
@@ -575,6 +575,8 @@ export interface ConnectorConnectionView {
   readonly shopDomain: string | null;
   readonly status: string;
   readonly scopes: ReadonlyArray<string>;
+  /** Connector-specific metadata (e.g. LLM rows carry `baseURL`). */
+  readonly metadata: unknown;
   readonly installedAt: string | null;
   readonly revokedAt: string | null;
   readonly updatedAt: string | null;
@@ -597,6 +599,7 @@ export const connectionsList = async (
       shopDomain: connectorConnections.shopDomain,
       status: connectorConnections.status,
       scopes: connectorConnections.scopes,
+      metadata: connectorConnections.metadata,
       installedAt: connectorConnections.installedAt,
       revokedAt: connectorConnections.revokedAt,
       updatedAt: connectorConnections.updatedAt,
@@ -610,8 +613,43 @@ export const connectionsList = async (
     shopDomain: r.shopDomain ? r.shopDomain : null,
     status: r.status,
     scopes: r.scopes ?? [],
+    metadata: r.metadata,
     installedAt: r.installedAt ? r.installedAt.toISOString() : null,
     revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
     updatedAt: r.updatedAt ? r.updatedAt.toISOString() : null,
+  }));
+};
+
+// ============================================================
+// LLM usage (settings/usage). Returns the raw llm.decision audit rows in a
+// time window; the dashboard applies OpenRouter pricing + aggregation
+// (both pure / HTTP, fine on Workers).
+// ============================================================
+
+export interface UsageDecisionRow {
+  readonly occurredAt: string;
+  readonly details: unknown;
+}
+
+export const usageRows = async (
+  db: DrizzleDb,
+  tenantId: string,
+  start: Date,
+  end: Date,
+): Promise<ReadonlyArray<UsageDecisionRow>> => {
+  const rows = await db
+    .select({ occurredAt: auditLog.occurredAt, details: auditLog.details })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.tenantId, tenantId),
+        eq(auditLog.action, "llm.decision"),
+        gte(auditLog.occurredAt, start),
+        lt(auditLog.occurredAt, end),
+      ),
+    );
+  return rows.map((r) => ({
+    occurredAt: r.occurredAt.toISOString(),
+    details: r.details,
   }));
 };

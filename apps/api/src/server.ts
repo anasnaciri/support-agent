@@ -27,6 +27,7 @@ import {
   parsePageNumber,
   parsePageSize,
   todaySummary,
+  usageRows,
   type DrizzleDb,
 } from "@support-agent/db";
 import { parseDashboardAuth } from "./dashboard-auth.js";
@@ -332,6 +333,32 @@ const handleDashboardApprovalDetail = async (
   );
   if (!result) return sendJson(res, 404, { error: "not_found" });
   return sendJson(res, 200, result);
+};
+
+// GET /dashboard/usage?start=&end= — raw llm.decision rows in a window for
+// the settings/usage page (the dashboard applies pricing + aggregation).
+const handleDashboardUsage = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const now = Date.now();
+  const parseDate = (raw: string | undefined, fallback: number): Date => {
+    if (!raw) return new Date(fallback);
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? new Date(fallback) : d;
+  };
+  // Default window: trailing ~31 days when the client omits bounds.
+  const start = parseDate(strField(q, "start"), now - 31 * 86_400_000);
+  const end = parseDate(strField(q, "end"), now);
+  const rows = await runWithDb(layer, (db) =>
+    usageRows(db, auth.tenantId, start, end),
+  );
+  return sendJson(res, 200, { rows });
 };
 
 // GET /dashboard/connections — connector connections for the integrations
@@ -1872,6 +1899,11 @@ export const startServer = async (
     "/dashboard/connections",
     "Connector connections (integrations)",
     handleDashboardConnections,
+  );
+  dashboardGet(
+    "/dashboard/usage",
+    "LLM usage rows in a time window",
+    handleDashboardUsage,
   );
 
   // ---- System ----

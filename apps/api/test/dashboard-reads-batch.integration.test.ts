@@ -238,6 +238,17 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(body.connections[0]?.shopDomain).toBe("batch-shop.myshopify.com");
     expect(body.connections[0]?.status).toBe("active");
     expect(body.connections[0]?.scopes).toContain("read_orders");
+    expect(body.connections[0]).toHaveProperty("metadata");
+  });
+
+  it("GET /dashboard/usage — returns llm.decision rows in window", async () => {
+    if (!raw) return;
+    const body = (await (await get("/dashboard/usage")).json()) as {
+      rows: ReadonlyArray<{ occurredAt: string; details: unknown }>;
+    };
+    // caseB's seeded audit row is an llm.decision (the only one for tenant1).
+    expect(body.rows).toHaveLength(1);
+    expect(typeof body.rows[0]?.occurredAt).toBe("string");
   });
 
   it("rejects without a token (401)", async () => {
