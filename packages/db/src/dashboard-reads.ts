@@ -620,6 +620,43 @@ export const connectionsList = async (
   }));
 };
 
+/**
+ * The agent-stamped `context` for a case (tenant-scoped). Null when the case
+ * isn't in the tenant. Backs the case-detail Shopify panels, which read
+ * `identifiedOrderId` / `shopifyCustomerId` / `customerEmail` from it.
+ */
+export const caseContextForTenant = async (
+  db: DrizzleDb,
+  tenantId: string,
+  caseId: string,
+): Promise<{ readonly context: unknown } | null> => {
+  const [row] = await db
+    .select({ context: cases.context })
+    .from(cases)
+    .where(and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)))
+    .limit(1);
+  return row ? { context: row.context } : null;
+};
+
+/** Shop domain of the tenant's active Shopify connection, or null. */
+export const activeShopifyShopDomain = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<string | null> => {
+  const [row] = await db
+    .select({ shopDomain: connectorConnections.shopDomain })
+    .from(connectorConnections)
+    .where(
+      and(
+        eq(connectorConnections.tenantId, tenantId),
+        eq(connectorConnections.provider, "shopify"),
+        eq(connectorConnections.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row?.shopDomain ? row.shopDomain : null;
+};
+
 // ============================================================
 // LLM usage (settings/usage). Returns the raw llm.decision audit rows in a
 // time window; the dashboard applies OpenRouter pricing + aggregation

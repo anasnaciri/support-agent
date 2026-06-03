@@ -17,9 +17,11 @@ import {
 } from "@support-agent/services";
 import { ConnectorNotFound, TenantId, UserId } from "@support-agent/agent-core";
 import {
+  activeShopifyShopDomain,
   approvalDetail,
   approvalsList,
   auditList,
+  caseContextForTenant,
   caseDetail,
   caseEvents,
   casesList,
@@ -34,6 +36,10 @@ import {
   type DrizzleDb,
 } from "@support-agent/db";
 import { parseDashboardAuth } from "./dashboard-auth.js";
+import {
+  resolveCustomerForContext,
+  resolveOrderForContext,
+} from "./dashboard-shopify.js";
 import {
   buildInstallUrl,
   buildManagedInstallUrl,
@@ -363,6 +369,52 @@ const handleDashboardApprovalDetail = async (
   );
   if (!result) return sendJson(res, 404, { error: "not_found" });
   return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id/shopify — case-detail Shopify panels (customer +
+// order + active shop domain). Best-effort: Shopify failures yield nulls.
+const handleDashboardCaseShopify = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        const ctx = yield* Effect.promise(() =>
+          caseContextForTenant(db, auth.tenantId, id),
+        );
+        if (!ctx) return { kind: "not_found" as const };
+        const context = (ctx.context ?? {}) as Record<string, unknown>;
+        const shopDomain = yield* Effect.promise(() =>
+          activeShopifyShopDomain(db, auth.tenantId),
+        );
+        const order = yield* resolveOrderForContext(
+          TenantId(auth.tenantId),
+          context,
+        );
+        const customer = yield* resolveCustomerForContext(
+          TenantId(auth.tenantId),
+          context,
+        );
+        return { kind: "ok" as const, customer, order, shopDomain };
+      }),
+      layer,
+    ),
+  );
+  if (result.kind === "not_found") {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  return sendJson(res, 200, {
+    customer: result.customer,
+    order: result.order,
+    shopDomain: result.shopDomain,
+  });
 };
 
 // GET /dashboard/usage?start=&end= — raw llm.decision rows in a window for
@@ -1988,6 +2040,11 @@ export const startServer = async (
     "/dashboard/cases/:id/events",
     "New audit events for a case since ?since=",
     handleDashboardCaseEvents,
+  );
+  dashboardGet(
+    "/dashboard/cases/:id/shopify",
+    "Case-detail Shopify customer/order panels",
+    handleDashboardCaseShopify,
   );
   dashboardGet(
     "/dashboard/approvals",

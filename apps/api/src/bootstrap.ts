@@ -5,6 +5,7 @@ import {
   BlobStorageTest,
   ConnectorCredentialStore,
   parseKey,
+  ShopifyService,
   TransactionRunner,
 } from "@support-agent/services";
 import {
@@ -17,6 +18,9 @@ import {
 import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
+  ShopifyCredentialStoreFromConnector,
+  ShopifyHttpLive,
+  ShopifyServiceLive,
 } from "@support-agent/providers";
 
 // ============================================================
@@ -202,7 +206,18 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const blob = process.env["R2_BUCKET"]
     ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
     : BlobStorageTest({});
-  return Layer.mergeAll(store, approvals, tx, dbLayer, blob);
+  // ShopifyService for the dashboard's case-detail customer/order panels.
+  // Credentials resolve per-tenant from the DB-backed connector store (the
+  // managed-install path); the layer itself builds without any Shopify env.
+  const shopify = ShopifyServiceLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ShopifyHttpLive,
+        ShopifyCredentialStoreFromConnector().pipe(Layer.provide(store)),
+      ),
+    ),
+  );
+  return Layer.mergeAll(store, approvals, tx, dbLayer, blob, shopify);
 };
 
 export type ApiLayer = Layer.Layer<
@@ -210,7 +225,8 @@ export type ApiLayer = Layer.Layer<
   | ApprovalService
   | TransactionRunner
   | DbClient
-  | BlobStorage,
+  | BlobStorage
+  | ShopifyService,
   never,
   never
 >;

@@ -241,6 +241,26 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(body.connections[0]).toHaveProperty("metadata");
   });
 
+  it("GET /dashboard/cases/:id/shopify — panels (null entities + shop domain)", async () => {
+    if (!raw) return;
+    const res = await get(`/dashboard/cases/${caseA}/shopify`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      customer: unknown;
+      order: unknown;
+      shopDomain: string | null;
+    };
+    // caseA has empty context -> no Shopify lookups, so customer/order null.
+    expect(body.customer).toBeNull();
+    expect(body.order).toBeNull();
+    expect(body.shopDomain).toBe("batch-shop.myshopify.com");
+  });
+
+  it("GET /dashboard/cases/:id/shopify — 404 cross-tenant", async () => {
+    if (!raw) return;
+    expect((await get(`/dashboard/cases/${caseX}/shopify`)).status).toBe(404);
+  });
+
   it("GET /dashboard/usage — returns llm.decision rows in window", async () => {
     if (!raw) return;
     const body = (await (await get("/dashboard/usage")).json()) as {
