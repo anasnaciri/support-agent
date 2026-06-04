@@ -12,6 +12,8 @@ import {
   applyApprovalDecision,
   ConnectorCredentialStore,
   decisionToEvent,
+  defaultRefundPolicy,
+  DEFAULT_RETENTION_DAYS,
   TenantAgentOverridesService,
   TenantRepository,
   TransactionRunner,
@@ -676,6 +678,43 @@ const handleDashboardTenant = async (
   );
   return sendJson(res, 200, {
     tenant: tenant ? { tenantId: tenant.id, name: tenant.name } : null,
+  });
+};
+
+// GET /dashboard/settings — resolved tenant settings (refund policy +
+// supplier-escalation sheet + notification email + retention). Defaults are
+// applied by getSettings; a transient error falls back to platform defaults.
+const handleDashboardSettings = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const settings = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        return yield* repo.getSettings(TenantId(auth.tenantId));
+      }).pipe(
+        Effect.catchAll(() =>
+          Effect.succeed({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            retentionDays: DEFAULT_RETENTION_DAYS,
+            supplierEscalationSheet: null,
+          } as const),
+        ),
+      ),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, {
+    notificationEmail: settings.notificationEmail,
+    refundPolicy: settings.refundPolicy,
+    retentionDays: settings.retentionDays,
+    supplierEscalationSheet: settings.supplierEscalationSheet,
   });
 };
 
@@ -2532,6 +2571,11 @@ export const startServer = async (
     "/dashboard/tenant",
     "The org's tenant (or null → onboarding)",
     handleDashboardTenant,
+  );
+  dashboardGet(
+    "/dashboard/settings",
+    "Resolved tenant settings (refund policy + supplier sheet)",
+    handleDashboardSettings,
   );
 
   // Mutations. No response serializer (default JSON.stringify) so the

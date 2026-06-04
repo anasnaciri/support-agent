@@ -5,5 +5,5 @@
     "rootDir": "src"
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../agent-core" }]
+  "references": [{ "path": "../agent-core" }, { "path": "../dashboard-contracts" }]
 }

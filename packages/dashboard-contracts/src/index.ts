@@ -312,3 +312,53 @@ export interface OnboardingResult {
   /** true when the org already had a tenant (idempotent re-submit). */
   readonly alreadyExisted: boolean;
 }
+
+// ============================================================
+// Tenant settings — GET /dashboard/settings
+// ============================================================
+//
+// Resolved view of `tenants.settings` (defaults already applied by the api),
+// backing the refund-policy + supplier-escalation (Google Sheets) pages.
+
+export interface RefundPolicyView {
+  readonly askAboveMinorUnits: number;
+  readonly denyAboveMinorUnits: number;
+  readonly currencyCode: string;
+}
+
+export interface SupplierEscalationSheetView {
+  readonly spreadsheetId: string;
+  readonly range: string;
+  readonly description: string | null;
+}
+
+export interface TenantSettingsView {
+  readonly notificationEmail: string | null;
+  readonly refundPolicy: RefundPolicyView;
+  readonly retentionDays: number;
+  readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
+}
+
+// ============================================================
+// Connector scope coverage (shared rule)
+// ============================================================
+
+/**
+ * Whether `required` is covered by the `granted` scope list for a provider.
+ * The single source of truth for both the runtime permission precheck
+ * (`@support-agent/services`) and the dashboard's integrations capability grid.
+ *
+ * Shopify: every `write_X` scope implicitly covers `read_X` (Shopify's OAuth
+ * callback omits the implied `read_X`). Other providers: literal match.
+ */
+export const isConnectorScopeGranted = (
+  provider: string,
+  required: string,
+  granted: ReadonlyArray<string>,
+): boolean => {
+  if (granted.includes(required)) return true;
+  if (provider === "shopify" && required.startsWith("read_")) {
+    return granted.includes(`write_${required.slice("read_".length)}`);
+  }
+  return false;
+};

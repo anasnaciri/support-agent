@@ -14,6 +14,12 @@ import {
   ConnectorCredentialStore,
   type ConnectorConnection,
 } from "./connector-credential-store.js";
+import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
+
+// Re-exported for back-compat: the canonical implementation now lives in
+// `@support-agent/dashboard-contracts` so the dashboard's integrations grid
+// and this runtime precheck share one rule. See its doc comment.
+export { isConnectorScopeGranted };
 
 /**
  * Live `PermissionService` that layers per-tenant conditional rules on
@@ -111,35 +117,6 @@ export const applyRefundPolicy = (
   // Between thresholds → ask. If the static decision was `deny` we
   // keep `deny` (we never relax `deny`); otherwise `ask`.
   return staticPermission === "deny" ? "deny" : "ask";
-};
-
-/**
- * Whether `required` is covered by the `granted` scope list for a given
- * provider. Pure helper — exported so the dashboard's integrations grid
- * uses the same rule as the runtime check.
- *
- * Provider-specific hierarchy rules applied:
- *
- *   - **Shopify**: every `write_X` access scope implicitly covers the
- *     corresponding `read_X` scope. Shopify's OAuth callback omits
- *     `read_X` from the granted list when `write_X` was requested, so
- *     a literal `includes` check mis-reports `read_orders` as missing
- *     on a connection that has `write_orders`. See
- *     https://shopify.dev/docs/api/usage/access-scopes.
- *
- * Other providers (Gmail, Google Sheets, Outlook, LLM providers): no
- * implicit hierarchy — literal match only.
- */
-export const isConnectorScopeGranted = (
-  provider: string,
-  required: string,
-  granted: ReadonlyArray<string>,
-): boolean => {
-  if (granted.includes(required)) return true;
-  if (provider === "shopify" && required.startsWith("read_")) {
-    return granted.includes(`write_${required.slice("read_".length)}`);
-  }
-  return false;
 };
 
 /**

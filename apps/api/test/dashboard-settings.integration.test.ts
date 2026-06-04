@@ -169,6 +169,21 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(((await res.json()) as { tenant: unknown }).tenant).toBeNull();
   });
 
+  it("GET /dashboard/settings returns resolved settings (defaults applied)", async () => {
+    const res = await get("/dashboard/settings", otherOrgId);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      refundPolicy: { currencyCode: string; denyAboveMinorUnits: number };
+      retentionDays: number;
+      supplierEscalationSheet: unknown;
+      notificationEmail: unknown;
+    };
+    expect(body.refundPolicy.currencyCode).toBe("USD");
+    expect(body.refundPolicy.denyAboveMinorUnits).toBe(50000);
+    expect(body.retentionDays).toBe(730);
+    expect(body.supplierEscalationSheet).toBeNull();
+  });
+
   // ---- Onboarding ----
 
   it("POST /dashboard/onboarding creates a tenant for the org (idempotent)", async () => {

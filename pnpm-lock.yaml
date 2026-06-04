@@ -319,6 +319,9 @@ importers:
       '@support-agent/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@support-agent/dashboard-contracts':
+        specifier: workspace:*
+        version: link:../dashboard-contracts
       effect:
         specifier: ^3.10.0
         version: 3.21.2
