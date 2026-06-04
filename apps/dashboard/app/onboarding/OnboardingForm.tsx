@@ -12,9 +12,18 @@ import { createTenantAction } from "./actions";
 interface Props {
   readonly defaultEmail: string | null;
   readonly legalUrl: string | null;
+  /**
+   * ISO timestamp when the user accepted the notice + DPA at sign-up. When set,
+   * we show a passive confirmation instead of a second required checkbox.
+   */
+  readonly alreadyAcceptedAt: string | null;
 }
 
-export const OnboardingForm = ({ defaultEmail, legalUrl }: Props) => {
+export const OnboardingForm = ({
+  defaultEmail,
+  legalUrl,
+  alreadyAcceptedAt,
+}: Props) => {
   const [state, formAction, pending] = useActionState(
     createTenantAction,
     null as { readonly error?: string } | null,
@@ -48,16 +57,9 @@ export const OnboardingForm = ({ defaultEmail, legalUrl }: Props) => {
           disabled={pending}
         />
       </div>
-      <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3 text-sm">
-        <input
-          type="checkbox"
-          name="legalAccepted"
-          required
-          disabled={pending}
-          className="mt-1 size-4 rounded border-input"
-        />
-        <span className="text-muted-foreground">
-          I accept the{" "}
+      {alreadyAcceptedAt ? (
+        <p className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+          You accepted the{" "}
           {legalUrl ? (
             <a
               href={legalUrl}
@@ -71,10 +73,38 @@ export const OnboardingForm = ({ defaultEmail, legalUrl }: Props) => {
             <span className="font-medium text-foreground">
               Data Processing Notice and Data Processing Addendum
             </span>
-          )}
-          .
-        </span>
-      </label>
+          )}{" "}
+          at sign-up.
+        </p>
+      ) : (
+        <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3 text-sm">
+          <input
+            type="checkbox"
+            name="legalAccepted"
+            required
+            disabled={pending}
+            className="mt-1 size-4 rounded border-input"
+          />
+          <span className="text-muted-foreground">
+            I accept the{" "}
+            {legalUrl ? (
+              <a
+                href={legalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                Data Processing Notice and Data Processing Addendum
+              </a>
+            ) : (
+              <span className="font-medium text-foreground">
+                Data Processing Notice and Data Processing Addendum
+              </span>
+            )}
+            .
+          </span>
+        </label>
+      )}
       {state?.error ? (
         <Alert variant="warning">
           <AlertDescription>{state.error}</AlertDescription>
