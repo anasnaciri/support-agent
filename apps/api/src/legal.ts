@@ -25,15 +25,15 @@ export const renderDataProcessingNoticeHtml = (): string => {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Support Agent Data Processing Notice</title>
   <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #0f1410; color: #eef4ea; }
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #ffffff; color: #18181b; }
     main { max-width: 860px; margin: 0 auto; padding: 48px 24px 72px; }
-    h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 8px; }
-    h2 { font-size: 1.15rem; margin: 32px 0 8px; }
-    p, li { color: #c8d6c1; line-height: 1.65; }
-    .meta { color: #9fb396; font-size: 0.9rem; }
-    .box { border: 1px solid #334232; border-radius: 8px; padding: 18px; background: #151d16; }
-    a { color: #a8d36a; }
+    h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 8px; color: #111511; }
+    h2 { font-size: 1.15rem; margin: 32px 0 8px; color: #111511; }
+    p, li { color: #3f3f46; line-height: 1.65; }
+    .meta { color: #6b7280; font-size: 0.9rem; }
+    .box { border: 1px solid #e4e7e4; border-radius: 8px; padding: 18px; background: #f7f8f7; }
+    a { color: #3f8f3f; }
   </style>
 </head>
 <body>
