@@ -1,14 +1,6 @@
-import { Effect, Layer } from "effect";
 import { Banknote } from "lucide-react";
 
-import { DbClientLive, TenantRepositoryLive } from "@support-agent/db";
-import {
-  TenantRepository,
-  defaultRefundPolicy,
-  type RefundPolicy,
-} from "@support-agent/services";
-import { TenantId } from "@support-agent/agent-core";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,33 +12,6 @@ import { saveRefundPolicyAction } from "./actions";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
-const tenantRepoLayer = () => {
-  const databaseUrl = process.env["DATABASE_URL"];
-  if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const db = DbClientLive({ databaseUrl });
-  return TenantRepositoryLive.pipe(Layer.provide(db));
-};
-
-const loadPolicy = async (tenantId: string): Promise<RefundPolicy> => {
-  return Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const repo = yield* TenantRepository;
-        const settings = yield* repo.getSettings(TenantId(tenantId)).pipe(
-          Effect.catchAll(() =>
-            Effect.succeed({
-              notificationEmail: null,
-              refundPolicy: defaultRefundPolicy,
-            } as const),
-          ),
-        );
-        return settings.refundPolicy;
-      }),
-      tenantRepoLayer(),
-    ).pipe(Effect.scoped),
-  );
-};
-
 interface PageProps {
   readonly searchParams?: Promise<
     Readonly<Record<string, string | string[] | undefined>>
@@ -54,8 +19,8 @@ interface PageProps {
 }
 
 export default async function RefundPolicyPage({ searchParams }: PageProps) {
-  const tenantId = await getTenantId();
-  const policy = await loadPolicy(tenantId);
+  const ctx = await getDashboardContext();
+  const { refundPolicy: policy } = await api.settings(ctx);
   const params = (await searchParams) ?? {};
 
   const savedBanner =

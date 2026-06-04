@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { and, eq } from "drizzle-orm";
-import { approvals } from "@support-agent/db";
 
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import {
   approvalStatusVariant,
   riskVariant,
@@ -23,12 +20,8 @@ interface Params {
 
 export default async function ApprovalDetailPage({ params }: Params) {
   const { id } = await params;
-  const tenantId = await getTenantId();
-  const [row] = await db()
-    .select()
-    .from(approvals)
-    .where(and(eq(approvals.id, id), eq(approvals.tenantId, tenantId)))
-    .limit(1);
+  const ctx = await getDashboardContext();
+  const row = await api.approvalDetail(ctx, id);
   if (!row) notFound();
   const isPending = row.status === "pending";
   const proposed =
@@ -161,7 +154,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
             <p className="text-sm text-muted-foreground">
               Decided{" "}
               {row.decidedAt
-                ? row.decidedAt.toISOString().slice(0, 19).replace("T", " ")
+                ? row.decidedAt.slice(0, 19).replace("T", " ")
                 : "(no timestamp)"}
               {row.decidedBy ? ` by ${row.decidedBy}` : ""}.
               {row.approvedInput &&

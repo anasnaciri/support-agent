@@ -1,12 +1,8 @@
 import Link from "next/link";
-import { desc, and, eq, sql, type SQL } from "drizzle-orm";
-import { approvals } from "@support-agent/db";
 
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import {
-  clampPage,
   DEFAULT_PAGE_SIZE,
   parsePageNumber,
   parsePageSize,
@@ -91,7 +87,7 @@ const bannerFor = (params: {
 };
 
 export default async function ApprovalsPage({ searchParams }: SearchParams) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
   const sp = await searchParams;
   const banner = bannerFor(sp);
 
@@ -102,60 +98,20 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   const pageSize = parsePageSize(sp.limit);
   const requestedPage = parsePageNumber(sp.page);
 
-  const whereParts: SQL[] = [eq(approvals.tenantId, tenantId)];
-  if (statusFilter !== "any") {
-    whereParts.push(eq(approvals.status, statusFilter));
-  }
-  if (riskFilter) whereParts.push(eq(approvals.riskLevel, riskFilter));
-  if (toolFilter) whereParts.push(eq(approvals.tool, toolFilter));
-  if (agentFilter) whereParts.push(eq(approvals.agentId, agentFilter));
+  const { totalRows, page, rows, statusCounts, toolFacets, agentFacets } =
+    await api.approvals(
+      ctx,
+      {
+        status: statusFilter,
+        ...(riskFilter ? { risk: riskFilter } : {}),
+        ...(toolFilter ? { tool: toolFilter } : {}),
+        ...(agentFilter ? { agent: agentFilter } : {}),
+      },
+      requestedPage,
+      pageSize,
+    );
 
-  const [toolFacets, agentFacets, counts, matchingCounts] = await Promise.all([
-    db()
-      .selectDistinct({ tool: approvals.tool })
-      .from(approvals)
-      .where(eq(approvals.tenantId, tenantId))
-      .orderBy(approvals.tool),
-    db()
-      .selectDistinct({ agentId: approvals.agentId })
-      .from(approvals)
-      .where(eq(approvals.tenantId, tenantId))
-      .orderBy(approvals.agentId),
-    db()
-      .select({
-        status: approvals.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(approvals)
-      .where(eq(approvals.tenantId, tenantId))
-      .groupBy(approvals.status),
-    db()
-      .select({ count: sql<number>`count(*)::int` })
-      .from(approvals)
-      .where(and(...whereParts)),
-  ]);
-
-  const totalRows = matchingCounts[0]?.count ?? 0;
-  const page = clampPage(requestedPage, totalRows, pageSize);
-  const rows = await db()
-    .select({
-      id: approvals.id,
-      caseId: approvals.caseId,
-      agentId: approvals.agentId,
-      tool: approvals.tool,
-      status: approvals.status,
-      riskLevel: approvals.riskLevel,
-      createdAt: approvals.createdAt,
-      decidedAt: approvals.decidedAt,
-    })
-    .from(approvals)
-    .where(and(...whereParts))
-    .orderBy(desc(approvals.createdAt), desc(approvals.id))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize);
-
-  const countOf = (s: string): number =>
-    counts.find((c) => c.status === s)?.count ?? 0;
+  const countOf = (s: string): number => statusCounts[s] ?? 0;
 
   const isReset =
     !riskFilter &&
@@ -239,9 +195,9 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               </Label>
               <NativeSelect id="tool" name="tool" defaultValue={toolFilter}>
                 <option value="">Any tool</option>
-                {toolFacets.map((f) => (
-                  <option key={f.tool} value={f.tool}>
-                    {f.tool}
+                {toolFacets.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
                   </option>
                 ))}
               </NativeSelect>
@@ -259,9 +215,9 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
                 defaultValue={agentFilter}
               >
                 <option value="">Any agent</option>
-                {agentFacets.map((f) => (
-                  <option key={f.agentId} value={f.agentId}>
-                    {f.agentId}
+                {agentFacets.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
                   </option>
                 ))}
               </NativeSelect>

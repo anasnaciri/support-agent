@@ -7,9 +7,7 @@ import {
 describe("refund recommendation timeline helpers", () => {
   it("extracts a structured refund.recommend output from an audit entry", () => {
     const out = refundRecommendationFromEntry({
-      id: 1n,
       action: "tool.invoked",
-      occurredAt: new Date("2026-05-26T12:00:00.000Z"),
       details: {
         tool: "refund.recommend",
         ok: true,
@@ -33,9 +31,7 @@ describe("refund recommendation timeline helpers", () => {
   it("uses the latest recommendation when a case was re-run", () => {
     const out = extractRefundRecommendation([
       {
-        id: 1n,
         action: "tool.invoked",
-        occurredAt: new Date("2026-05-26T12:00:00.000Z"),
         details: {
           tool: "refund.recommend",
           output: {
@@ -47,9 +43,7 @@ describe("refund recommendation timeline helpers", () => {
         },
       },
       {
-        id: 2n,
         action: "tool.invoked",
-        occurredAt: new Date("2026-05-26T12:05:00.000Z"),
         details: {
           tool: "refund.recommend",
           output: {

@@ -1,22 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { asc, and, eq } from "drizzle-orm";
-import {
-  cases,
-  auditLog,
-  approvals,
-  type AuditLogRow,
-  type ApprovalRow,
-} from "@support-agent/db";
-import { TenantId } from "@support-agent/agent-core";
+import type {
+  ApprovalDetail,
+  AuditEntry,
+} from "@support-agent/dashboard-contracts";
 
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
-import {
-  fetchCustomerForCase,
-  fetchOrderForCase,
-  fetchShopifyShopDomain,
-} from "@/lib/shopify";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,10 +97,10 @@ const OUTBOUND_EMAIL_TOOLS = new Set([
 const toneToVariant = (tone: Banner["tone"]) =>
   tone === "success" ? "success" : tone === "info" ? "info" : "warning";
 
-const formatDateTime = (date: Date): string =>
-  date.toISOString().slice(0, 19).replace("T", " ");
+const formatDateTime = (date: string): string =>
+  date.slice(0, 19).replace("T", " ");
 
-const approvalStatusLabel = (approval: ApprovalRow): string => {
+const approvalStatusLabel = (approval: ApprovalDetail): string => {
   if (approval.status === "approved") return "Approved";
   if (approval.status === "rejected") return "Rejected";
   if (approval.status === "pending") return "Pending approval";
@@ -182,7 +171,7 @@ const BodyBlock = ({ value }: { readonly value: unknown }) => {
   );
 };
 
-const actorLabel = (entry: AuditLogRow): string => {
+const actorLabel = (entry: AuditEntry): string => {
   if (entry.actorType === "customer") return "Customer";
   if (entry.actorType === "agent") return `Agent ${entry.actorId ?? "unknown"}`;
   if (entry.actorType === "user") return `Human ${entry.actorId ?? "unknown"}`;
@@ -198,7 +187,7 @@ const actorLabel = (entry: AuditLogRow): string => {
  * whether to render the rollup at all.
  */
 const sumCaseTokens = (
-  entries: ReadonlyArray<AuditLogRow>,
+  entries: ReadonlyArray<AuditEntry>,
 ): { input: number; output: number; total: number } | null => {
   let input = 0;
   let output = 0;
@@ -224,23 +213,23 @@ type SimplifiedTimelineItem =
       readonly id: string;
       readonly title: string;
       readonly responsible: string;
-      readonly occurredAt: Date;
+      readonly occurredAt: string;
     }
   | {
       readonly kind: "approval";
       readonly id: string;
-      readonly approval: ApprovalRow;
-      readonly occurredAt: Date;
+      readonly approval: ApprovalDetail;
+      readonly occurredAt: string;
     }
   | {
       readonly kind: "refundRecommendation";
       readonly id: string;
       readonly recommendation: RefundRecommendationSummary;
-      readonly occurredAt: Date;
+      readonly occurredAt: string;
     };
 
 const simplifiedEmailEvent = (
-  entry: AuditLogRow,
+  entry: AuditEntry,
   customerEmail: string | null,
 ): SimplifiedTimelineItem | null => {
   if (entry.action === "event.received") {
@@ -310,14 +299,18 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const { id } = await params;
   const sp = await searchParams;
   const banner = takeOverBanner(sp.takenOver) ?? approvalBanner(sp);
-  const d = db();
-  const tenantId = await getTenantId();
-  const [caseRow] = await d
-    .select()
-    .from(cases)
-    .where(and(eq(cases.id, id), eq(cases.tenantId, tenantId)))
-    .limit(1);
-  if (!caseRow) notFound();
+  const ctx = await getDashboardContext();
+  const [detail, shopify] = await Promise.all([
+    api.caseDetail(ctx, id),
+    api.caseShopify(ctx, id),
+  ]);
+  if (!detail) notFound();
+  const caseRow = detail.case;
+  const entries = detail.auditEntries;
+  const allApprovals = detail.approvals;
+  const customer = shopify?.customer ?? null;
+  const order = shopify?.order ?? null;
+  const shopDomain = shopify?.shopDomain ?? null;
 
   const context = (caseRow.context ?? {}) as Readonly<Record<string, unknown>>;
   const customerEmail =
@@ -341,27 +334,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       )
     : [];
 
-  const [entries, customer, order, allApprovals, shopDomain] =
-    await Promise.all([
-      d
-        .select()
-        .from(auditLog)
-        .where(and(eq(auditLog.caseId, id), eq(auditLog.tenantId, tenantId)))
-        .orderBy(asc(auditLog.id)),
-      fetchCustomerForCase(TenantId(tenantId), context),
-      fetchOrderForCase(TenantId(tenantId), context),
-      d
-        .select()
-        .from(approvals)
-        .where(and(eq(approvals.caseId, id), eq(approvals.tenantId, tenantId)))
-        .orderBy(asc(approvals.createdAt)),
-      fetchShopifyShopDomain(TenantId(tenantId)),
-    ]);
-
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const tokenRollup = sumCaseTokens(entries);
   const timelineMode = sp.timeline === "simplified" ? "simplified" : "full";
   const summaryText =
@@ -406,7 +383,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       approval,
       occurredAt: approval.createdAt,
     })),
-  ].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  ].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
   return (
     <div className="space-y-6">
@@ -421,7 +398,12 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           <h1 className="text-2xl font-semibold tracking-tight">
             {caseRow.subject ?? "(no subject)"}
           </h1>
-          <CaseLiveBoundary caseId={caseRow.id} />
+          <CaseLiveBoundary
+            caseId={caseRow.id}
+            initialSince={
+              entries.length > 0 ? entries[entries.length - 1]!.id : "0"
+            }
+          />
           {canTakeOver ? (
             <form action={takeOverAction} className="ml-auto">
               <input type="hidden" name="caseId" value={caseRow.id} />
@@ -450,8 +432,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           </span>
           <span>·</span>
           <span>
-            opened{" "}
-            {caseRow.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+            opened {caseRow.createdAt.slice(0, 16).replace("T", " ")}
           </span>
           {tokenRollup ? (
             <>

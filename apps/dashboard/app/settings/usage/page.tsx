@@ -1,16 +1,12 @@
-import { and, eq, gte, lt } from "drizzle-orm";
 import { BarChart3 } from "lucide-react";
-import { fetchOpenRouterModels } from "@support-agent/providers";
-import { auditLog } from "@support-agent/db";
 
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import {
   aggregateUsageRows,
   monthBoundsUtc,
   sumUsagePoints,
-  type ModelPricing,
 } from "@/lib/usage";
+import { fetchOpenRouterPricing } from "@/lib/openrouter-pricing";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,38 +39,23 @@ const formatUsd = (n: number | null): string =>
         maximumFractionDigits: n < 0.01 ? 4 : 2,
       }).format(n);
 
-const pricingMap = async (): Promise<ReadonlyMap<string, ModelPricing>> => {
-  const catalog = await fetchOpenRouterModels();
-  const entries = catalog.entries.flatMap((entry) =>
-    entry.pricing ? [[entry.id, entry.pricing] as const] : [],
-  );
-  return new Map(entries);
-};
-
 export default async function UsageSettingsPage({ searchParams }: PageProps) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
   const params = (await searchParams) ?? {};
   const monthParam = Array.isArray(params["month"])
     ? params["month"][0]
     : params["month"];
   const bounds = monthBoundsUtc(monthParam);
-  const [rows, prices] = await Promise.all([
-    db()
-      .select({
-        occurredAt: auditLog.occurredAt,
-        details: auditLog.details,
-      })
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.tenantId, tenantId),
-          eq(auditLog.action, "llm.decision"),
-          gte(auditLog.occurredAt, bounds.start),
-          lt(auditLog.occurredAt, bounds.end),
-        ),
-      ),
-    pricingMap(),
+  const [rawRows, prices] = await Promise.all([
+    api.usage(ctx, bounds.start.toISOString(), bounds.end.toISOString()),
+    fetchOpenRouterPricing(),
   ]);
+  // The api returns occurredAt as an ISO string; aggregateUsageRows keys by day
+  // via Date#toISOString, so hydrate to Date here.
+  const rows = rawRows.map((r) => ({
+    occurredAt: new Date(r.occurredAt),
+    details: r.details,
+  }));
   const points = aggregateUsageRows(rows, prices);
   const totals = sumUsagePoints(points);
 

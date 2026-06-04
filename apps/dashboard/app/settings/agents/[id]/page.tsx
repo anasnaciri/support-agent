@@ -2,8 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
-import { fetchModelCatalog } from "@support-agent/providers";
-
+import { api, getDashboardContext } from "@/lib/api-client";
 import { findAgent, findTool, effectivePermission } from "@/lib/catalog";
 import { permissionVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -23,13 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getTenantId } from "@/lib/tenant";
-import {
-  loadAgentOverrides,
-  resolveTenantLlmCredential,
-} from "@/lib/llm-runtime";
-import { AgentId, TenantId } from "@support-agent/agent-core";
-
 import {
   clearAgentModelAction,
   setAgentModelAction,
@@ -68,34 +60,27 @@ const PROVIDER_LABEL: Readonly<Record<string, string>> = {
 
 export default async function AgentDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
-  const agent = findAgent(id);
+  const ctx = await getDashboardContext();
+  const [catalogResp, overrideRows, models] = await Promise.all([
+    api.catalog(ctx),
+    api.agentOverrides(ctx),
+    api.models(ctx),
+  ]);
+  const agent = findAgent(catalogResp, id);
   if (!agent) notFound();
 
   const sp = (await searchParams) ?? {};
   const modelBanner = Array.isArray(sp["model"]) ? sp["model"][0] : sp["model"];
 
-  const tenantIdRaw = await getTenantId();
-  const tenantId = TenantId(tenantIdRaw);
-  const [credential, overrides] = await Promise.all([
-    resolveTenantLlmCredential(tenantId),
-    loadAgentOverrides(tenantId),
-  ]);
-  const override = overrides.get(AgentId(agent.id)) ?? null;
+  const overrides = new Map(overrideRows.map((o) => [o.agentId, o.model]));
+  const override = overrides.get(agent.id) ?? null;
   const effectiveModel = override ?? agent.model;
 
-  let catalog: ReadonlyArray<ModelOption> = [];
-  let catalogError: string | null = null;
-  if (credential) {
-    const result = await fetchModelCatalog({
-      provider: credential.provider,
-      apiKey: credential.apiKey,
-      ...(credential.baseURL !== undefined
-        ? { baseURL: credential.baseURL }
-        : {}),
-    });
-    catalog = result.entries;
-    catalogError = result.error ?? null;
-  }
+  // The api resolves the tenant's LLM credential server-side and returns the
+  // model list (the decrypted key never reaches the browser).
+  const credential = models.connected ? { provider: models.provider ?? "" } : null;
+  const catalog: ReadonlyArray<ModelOption> = models.entries;
+  const catalogError: string | null = models.error;
 
   // Surface a sticky banner if the user has an override that isn't in the
   // current provider's catalog (probably switched providers). We still let
@@ -277,8 +262,8 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
             </TableHeader>
             <TableBody>
               {agent.tools.map((toolName) => {
-                const tool = findTool(toolName);
-                const perm = effectivePermission(agent, toolName);
+                const tool = findTool(catalogResp, toolName);
+                const perm = effectivePermission(agent, catalogResp, toolName);
                 const overridden =
                   agent.permissionOverrides[toolName] !== undefined;
                 return (

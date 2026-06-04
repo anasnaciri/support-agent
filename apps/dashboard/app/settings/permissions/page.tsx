@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { agents, tools, effectivePermission } from "@/lib/catalog";
+import { api, getDashboardContext } from "@/lib/api-client";
+import { effectivePermission } from "@/lib/catalog";
 import { permissionVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -14,7 +15,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-export default function PermissionsMatrixPage() {
+export default async function PermissionsMatrixPage() {
+  const ctx = await getDashboardContext();
+  const catalog = await api.catalog(ctx);
+  const agents = catalog.agents;
+  const tools = catalog.tools;
   return (
     <div className="space-y-6">
       <SettingsBreadcrumb current="Tool permissions" />
@@ -69,7 +74,7 @@ export default function PermissionsMatrixPage() {
                   </Badge>
                 </TableCell>
                 {agents.map((a) => {
-                  const eff = effectivePermission(a, t.name);
+                  const eff = effectivePermission(a, catalog, t.name);
                   const inToolList = a.tools.includes(t.name);
                   if (!inToolList) {
                     return (

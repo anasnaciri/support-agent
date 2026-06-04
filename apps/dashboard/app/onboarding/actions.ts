@@ -2,11 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
-import { tenants } from "@support-agent/db";
-import { db } from "@/lib/db";
-import { requireOrganization } from "@/lib/tenant";
+import { api, requireOrganization } from "@/lib/api-client";
 
 // Self-service tenant creation for a signed-in WorkOS org. Idempotent
 // by org: if the org already has a tenant, we redirect rather than
@@ -51,36 +47,14 @@ export const createTenantAction = async (
   const parsed = readForm(formData);
   if ("error" in parsed) return parsed;
 
-  const id = randomUUID();
-  const d = db();
-  try {
-    await d.insert(tenants).values({
-      id,
-      name: parsed.name,
-      workosOrganizationId: org.organizationId,
-      settings: { notificationEmail: parsed.notificationEmail },
-    });
-  } catch (cause) {
-    // Most likely the partial unique index on `workos_organization_id`
-    // — another tab won the race. Treat as success: look up the row
-    // and redirect home.
-    const [existing] = await d
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(
-        and(
-          eq(tenants.workosOrganizationId, org.organizationId),
-        ),
-      )
-      .limit(1);
-    if (!existing) {
-      return {
-        error:
-          cause instanceof Error
-            ? cause.message
-            : "Could not create tenant. Please try again.",
-      };
-    }
+  // The api creates the tenant for the asserted org (idempotent — a two-tab
+  // race resolves to the existing tenant).
+  const { status } = await api.onboarding(
+    { organizationId: org.organizationId },
+    { name: parsed.name, notificationEmail: parsed.notificationEmail },
+  );
+  if (status !== 200) {
+    return { error: "Could not create tenant. Please try again." };
   }
   revalidatePath("/");
   redirect("/?onboarded=1");

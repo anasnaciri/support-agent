@@ -9,11 +9,11 @@ export interface RefundRecommendationSummary {
   readonly riskFlags: ReadonlyArray<string>;
 }
 
+// Only the fields this module reads — so the api's AuditEntry (string id +
+// ISO occurredAt) is assignable without coupling to the DB row type.
 export interface RecommendationAuditEntry {
-  readonly id: bigint;
   readonly action: string;
   readonly details: unknown;
-  readonly occurredAt: Date;
 }
 
 const detailRecord = (

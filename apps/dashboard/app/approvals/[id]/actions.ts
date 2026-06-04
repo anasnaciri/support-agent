@@ -2,28 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
-import { approvals } from "@support-agent/db";
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
-import { decideApprovalFromDashboard } from "@/lib/approvals";
+import { api, getDashboardContext, type DashboardContext } from "@/lib/api-client";
 
 // Pull the proposedInput for an approval the manager is about to
-// approve-with-edits. Tenant-scoped read so a server action can't
-// cross-leak inputs between tenants. Returns null on miss — the
-// action then falls back to a no-edit approve.
+// approve-with-edits, via the api (tenant-scoped server-side). Returns null
+// on miss — the action then falls back to a no-edit approve.
 const loadProposedInput = async (
+  ctx: DashboardContext,
   approvalId: string,
 ): Promise<unknown | null> => {
-  const tenantId = await getTenantId();
-  const [row] = await db()
-    .select({ proposedInput: approvals.proposedInput })
-    .from(approvals)
-    .where(
-      and(eq(approvals.id, approvalId), eq(approvals.tenantId, tenantId)),
-    )
-    .limit(1);
-  return row?.proposedInput ?? null;
+  const detail = await api.approvalDetail(ctx, approvalId);
+  return detail?.proposedInput ?? null;
 };
 
 // Server Actions. Submitted by the <form> elements in page.tsx.
@@ -69,11 +58,12 @@ const banneredPath = (
 
 export const approveAction = async (formData: FormData): Promise<void> => {
   const approvalId = approvalIdOf(formData);
+  const ctx = await getDashboardContext();
 
   // Edit-and-Approve: when the form posts a `bodyText` field (the
   // textarea on the approval detail page for conversation.reply
   // approvals), we treat it as a manager-edited override. We hydrate
-  // the rest of the proposed input from the DB so the override stays
+  // the rest of the proposed input from the api so the override stays
   // shape-compatible with what the gated tool expects.
   //
   // For non-conversation.reply approvals — or when bodyText is absent
@@ -82,7 +72,7 @@ export const approveAction = async (formData: FormData): Promise<void> => {
   const bodyTextRaw = formData.get("bodyText");
   let approvedInput: unknown = undefined;
   if (typeof bodyTextRaw === "string") {
-    const original = await loadProposedInput(approvalId);
+    const original = await loadProposedInput(ctx, approvalId);
     if (
       original &&
       typeof original === "object" &&
@@ -92,11 +82,7 @@ export const approveAction = async (formData: FormData): Promise<void> => {
     }
   }
 
-  const result = await decideApprovalFromDashboard(
-    approvalId,
-    "approve",
-    approvedInput !== undefined ? { approvedInput } : {},
-  );
+  const result = await api.approveApproval(ctx, approvalId, approvedInput);
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${approvalId}`);
   const returnTo = returnToOf(formData);
@@ -111,7 +97,8 @@ export const approveAction = async (formData: FormData): Promise<void> => {
 
 export const rejectAction = async (formData: FormData): Promise<void> => {
   const approvalId = approvalIdOf(formData);
-  const result = await decideApprovalFromDashboard(approvalId, "reject");
+  const ctx = await getDashboardContext();
+  const result = await api.rejectApproval(ctx, approvalId);
   revalidatePath("/approvals");
   revalidatePath(`/approvals/${approvalId}`);
   const returnTo = returnToOf(formData);

@@ -1,15 +1,11 @@
 import Link from "next/link";
-import { and, desc, eq, like, sql, type SQL } from "drizzle-orm";
-import { auditLog } from "@support-agent/db";
 
-import { db } from "@/lib/db";
+import { api, getDashboardContext } from "@/lib/api-client";
 import {
-  clampPage,
   DEFAULT_PAGE_SIZE,
   parsePageNumber,
   parsePageSize,
 } from "@/lib/pagination";
-import { getTenantId } from "@/lib/tenant";
 import { actorVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,43 +73,22 @@ interface SearchParams {
 }
 
 export default async function AuditLogPage({ searchParams }: SearchParams) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
   const sp = await searchParams;
   const actionFilter = sp.action ?? "";
   const actorFilter = sp.actor ?? "";
   const pageSize = parsePageSize(sp.limit);
   const requestedPage = parsePageNumber(sp.page);
 
-  const whereParts: SQL[] = [eq(auditLog.tenantId, tenantId)];
-  if (actionFilter) {
-    whereParts.push(like(auditLog.action, `${actionFilter}%`));
-  }
-  if (actorFilter) {
-    whereParts.push(eq(auditLog.actorType, actorFilter));
-  }
-
-  const [countRow] = await db()
-    .select({ count: sql<number>`count(*)::int` })
-    .from(auditLog)
-    .where(and(...whereParts));
-
-  const totalRows = countRow?.count ?? 0;
-  const page = clampPage(requestedPage, totalRows, pageSize);
-  const rows = await db()
-    .select({
-      id: auditLog.id,
-      caseId: auditLog.caseId,
-      action: auditLog.action,
-      actorType: auditLog.actorType,
-      actorId: auditLog.actorId,
-      occurredAt: auditLog.occurredAt,
-      details: auditLog.details,
-    })
-    .from(auditLog)
-    .where(and(...whereParts))
-    .orderBy(desc(auditLog.id))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize);
+  const { totalRows, page, rows } = await api.audit(
+    ctx,
+    {
+      ...(actionFilter ? { action: actionFilter } : {}),
+      ...(actorFilter ? { actor: actorFilter } : {}),
+    },
+    requestedPage,
+    pageSize,
+  );
 
   const paginationParams: ReadonlyArray<readonly [string, string]> = [
     ["action", actionFilter],
@@ -200,12 +175,9 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
               </TableRow>
             ) : (
               rows.map((r) => (
-                <TableRow key={r.id.toString()}>
+                <TableRow key={r.id}>
                   <TableCell className="tabular-nums text-xs text-muted-foreground">
-                    {r.occurredAt
-                      .toISOString()
-                      .slice(0, 19)
-                      .replace("T", " ")}
+                    {r.occurredAt.slice(0, 19).replace("T", " ")}
                   </TableCell>
                   <TableCell>
                     <code className="rounded bg-muted px-1.5 py-0.5 text-xs">

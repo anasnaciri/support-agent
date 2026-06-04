@@ -12,15 +12,18 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 export const formatRelativeTime = (
-  date: Date,
+  date: Date | string,
   now: Date = new Date(),
 ): string => {
-  const ms = now.getTime() - date.getTime();
+  // The api returns ISO strings; Server Components used to pass Date objects.
+  // Accept both so call sites don't each have to wrap in `new Date(...)`.
+  const d = typeof date === "string" ? new Date(date) : date;
+  const ms = now.getTime() - d.getTime();
   if (ms < 0) return "just now"; // clock skew safety
   if (ms < MIN) return "just now";
   if (ms < HOUR) return `${Math.floor(ms / MIN)}m ago`;
   if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
   if (ms < 7 * DAY) return `${Math.floor(ms / DAY)}d ago`;
   // For older entries the exact date is more useful than weeks ago.
-  return date.toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
 };

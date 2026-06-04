@@ -1,11 +1,8 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import Link from "next/link";
-import { eq, desc } from "drizzle-orm";
 import { AlertTriangle, Settings2 } from "lucide-react";
 
-import { connectorConnections } from "@support-agent/db";
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +47,8 @@ interface PageProps {
 }
 
 export default async function IntegrationsPage({ searchParams }: PageProps) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
+  const tenantId = ctx.tenantId;
   const params = (await searchParams) ?? {};
   const shopifyParam = params["shopify"];
   const shopifyBanner =
@@ -76,20 +74,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
 
-  const rows = await db()
-    .select({
-      id: connectorConnections.id,
-      provider: connectorConnections.provider,
-      shopDomain: connectorConnections.shopDomain,
-      status: connectorConnections.status,
-      scopes: connectorConnections.scopes,
-      installedAt: connectorConnections.installedAt,
-      revokedAt: connectorConnections.revokedAt,
-      updatedAt: connectorConnections.updatedAt,
-    })
-    .from(connectorConnections)
-    .where(eq(connectorConnections.tenantId, tenantId))
-    .orderBy(desc(connectorConnections.installedAt));
+  const rows = await api.connections(ctx);
 
   const byProvider = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
@@ -266,7 +251,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatRelativeTime(r.installedAt)}
+                      {r.installedAt ? formatRelativeTime(r.installedAt) : "—"}
                     </TableCell>
                   </TableRow>
                 ))}

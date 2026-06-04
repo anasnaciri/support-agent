@@ -1,14 +1,7 @@
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
-import { cases } from "@support-agent/db";
 
-import { db } from "@/lib/db";
-import {
-  clampPage,
-  parsePageNumber,
-  parsePageSize,
-} from "@/lib/pagination";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
+import { parsePageNumber, parsePageSize } from "@/lib/pagination";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -30,33 +23,16 @@ interface SearchParams {
 }
 
 export default async function CasesPage({ searchParams }: SearchParams) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
   const sp = await searchParams;
   const pageSize = parsePageSize(sp.limit);
   const requestedPage = parsePageNumber(sp.page);
 
-  const [countRow] = await db()
-    .select({ count: sql<number>`count(*)::int` })
-    .from(cases)
-    .where(eq(cases.tenantId, tenantId));
-
-  const totalRows = countRow?.count ?? 0;
-  const page = clampPage(requestedPage, totalRows, pageSize);
-  const rows = await db()
-    .select({
-      id: cases.id,
-      subject: cases.subject,
-      status: cases.status,
-      category: cases.category,
-      currentAgentId: cases.currentAgentId,
-      createdAt: cases.createdAt,
-      updatedAt: cases.updatedAt,
-    })
-    .from(cases)
-    .where(eq(cases.tenantId, tenantId))
-    .orderBy(desc(cases.updatedAt), desc(cases.id))
-    .limit(pageSize)
-    .offset((page - 1) * pageSize);
+  const { totalRows, page, rows } = await api.cases(
+    ctx,
+    requestedPage,
+    pageSize,
+  );
 
   return (
     <div className="space-y-6">
@@ -111,10 +87,7 @@ export default async function CasesPage({ searchParams }: SearchParams) {
                     {r.currentAgentId}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
-                    {r.updatedAt
-                      .toISOString()
-                      .slice(0, 16)
-                      .replace("T", " ")}
+                    {r.updatedAt.slice(0, 16).replace("T", " ")}
                   </TableCell>
                 </TableRow>
               ))

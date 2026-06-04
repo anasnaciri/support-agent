@@ -1,26 +1,10 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
-import { eq, and, desc } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { Effect, Layer } from "effect";
 import { AlertTriangle, ClipboardList } from "lucide-react";
 
-import {
-  connectorConnections,
-  DbClientLive,
-  TenantRepositoryLive,
-} from "@support-agent/db";
-import {
-  isConnectorScopeGranted,
-  TenantRepository,
-  defaultRefundPolicy,
-  DEFAULT_RETENTION_DAYS,
-  TenantSettings,
-  type SupplierEscalationSheet,
-} from "@support-agent/services";
-import { TenantId } from "@support-agent/agent-core";
-import { db } from "@/lib/db";
+import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { capabilitiesForProvider } from "@/lib/catalog";
-import { getTenantId } from "@/lib/tenant";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -51,38 +35,6 @@ import {
 } from "@/app/settings/supplier-escalation/actions";
 import { googleSheetsUrlForSpreadsheetId } from "@/app/settings/supplier-escalation/sheet-url";
 
-const tenantRepoLayer = () => {
-  const databaseUrl = process.env["DATABASE_URL"];
-  if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const client = DbClientLive({ databaseUrl });
-  return TenantRepositoryLive.pipe(Layer.provide(client));
-};
-
-const loadSheet = async (
-  tenantId: string,
-): Promise<SupplierEscalationSheet | null> =>
-  Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const repo = yield* TenantRepository;
-        const settings = yield* repo.getSettings(TenantId(tenantId)).pipe(
-          Effect.catchAll(() =>
-            Effect.succeed(
-              new TenantSettings({
-                notificationEmail: null,
-                refundPolicy: defaultRefundPolicy,
-                retentionDays: DEFAULT_RETENTION_DAYS,
-                supplierEscalationSheet: null,
-              }),
-            ),
-          ),
-        );
-        return settings.supplierEscalationSheet;
-      }),
-      tenantRepoLayer(),
-    ).pipe(Effect.scoped),
-  );
-
 interface Props {
   readonly params: Promise<{ readonly provider: string }>;
   readonly searchParams?: Promise<
@@ -101,7 +53,8 @@ export default async function ConnectorManagePage({
   const { provider } = await params;
   if (!isSupportedProvider(provider)) notFound();
 
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
+  const tenantId = ctx.tenantId;
   const apiBaseUrl = getApiBaseUrl();
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
@@ -110,24 +63,15 @@ export default async function ConnectorManagePage({
   const description = PROVIDER_DESCRIPTIONS[provider] ?? "";
   const ProviderIcon = PROVIDER_ICONS[provider];
 
-  const rows = await db()
-    .select({
-      shopDomain: connectorConnections.shopDomain,
-      status: connectorConnections.status,
-      scopes: connectorConnections.scopes,
-      installedAt: connectorConnections.installedAt,
-      revokedAt: connectorConnections.revokedAt,
-    })
-    .from(connectorConnections)
-    .where(
-      and(
-        eq(connectorConnections.tenantId, tenantId),
-        eq(connectorConnections.provider, provider),
-      ),
-    )
-    .orderBy(desc(connectorConnections.installedAt));
+  const isSheets = provider === "google_sheets";
+  const [connections, catalog, settings] = await Promise.all([
+    api.connections(ctx),
+    api.catalog(ctx),
+    isSheets ? api.settings(ctx) : Promise.resolve(null),
+  ]);
 
-  const row = rows[0] ?? null;
+  const row =
+    connections.filter((c) => c.provider === provider)[0] ?? null;
   const tone = !row
     ? "missing"
     : row.status === "active"
@@ -143,7 +87,7 @@ export default async function ConnectorManagePage({
           ? disconnectGoogleSheetsAction
           : null;
   const showDisconnect = !!disconnectAction && tone === "active";
-  const capabilities = capabilitiesForProvider(provider);
+  const capabilities = capabilitiesForProvider(catalog, provider);
   const missingCapability =
     !!row &&
     capabilities.some(
@@ -154,8 +98,7 @@ export default async function ConnectorManagePage({
   // (the missing-package supplier-escalation row). It lives here — on the
   // connection itself — rather than on a separate settings page, because
   // it's a property of this connection.
-  const isSheets = provider === "google_sheets";
-  const sheet = isSheets ? await loadSheet(tenantId) : null;
+  const sheet = settings?.supplierEscalationSheet ?? null;
   const sheetUrl = sheet
     ? googleSheetsUrlForSpreadsheetId(sheet.spreadsheetId)
     : "";
@@ -216,8 +159,10 @@ export default async function ConnectorManagePage({
               ) : null}
               <div className="text-xs text-muted-foreground">
                 {row.scopes.length} scope
-                {row.scopes.length === 1 ? "" : "s"} · installed{" "}
-                {formatRelativeTime(row.installedAt)}
+                {row.scopes.length === 1 ? "" : "s"}
+                {row.installedAt
+                  ? ` · installed ${formatRelativeTime(row.installedAt)}`
+                  : ""}
                 {row.revokedAt
                   ? ` · revoked ${formatRelativeTime(row.revokedAt)}`
                   : ""}

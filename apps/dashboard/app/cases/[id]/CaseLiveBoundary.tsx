@@ -1,33 +1,60 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
 interface Props {
   readonly caseId: string;
+  /** Highest audit id at render time; we only refresh on events after it. */
+  readonly initialSince: string;
 }
 
-export default function CaseLiveBoundary({ caseId }: Props) {
+const POLL_MS = 2500;
+
+export default function CaseLiveBoundary({ caseId, initialSince }: Props) {
   const router = useRouter();
   const [state, setState] = useState<"connecting" | "open" | "error">(
     "connecting",
   );
+  const sinceRef = useRef(initialSince);
 
   useEffect(() => {
-    const source = new EventSource(`/api/cases/${caseId}/events`);
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    source.onopen = () => setState("open");
-    source.onmessage = () => {
-      router.refresh();
-    };
-    source.onerror = () => {
-      setState("error");
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/cases/${caseId}/events?since=${encodeURIComponent(sinceRef.current)}`,
+          { cache: "no-store" },
+        );
+        if (!active) return;
+        if (!res.ok) {
+          setState("error");
+        } else {
+          setState("open");
+          const data = (await res.json()) as {
+            events: ReadonlyArray<{ id: string }>;
+          };
+          if (data.events.length > 0) {
+            sinceRef.current = data.events[data.events.length - 1]!.id;
+            // Re-fetch the Server Component so the timeline + panels update.
+            router.refresh();
+          }
+        }
+      } catch {
+        if (active) setState("error");
+      } finally {
+        if (active) timer = setTimeout(tick, POLL_MS);
+      }
     };
 
+    void tick();
     return () => {
-      source.close();
+      active = false;
+      if (timer) clearTimeout(timer);
     };
   }, [caseId, router]);
 

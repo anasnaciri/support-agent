@@ -1,4 +1,4 @@
-import type { ApprovalRow } from "@support-agent/db";
+import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 import Link from "next/link";
 import { ClipboardCheck, Lightbulb } from "lucide-react";
 
@@ -19,7 +19,7 @@ import {
 } from "./refund-recommendation";
 
 interface Props {
-  readonly approval: ApprovalRow;
+  readonly approval: ApprovalDetail;
   readonly returnTo: string;
   /**
    * Latest `refund.recommend` tool output for this case, when present.

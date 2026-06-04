@@ -9,7 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { agents, tools } from "@/lib/catalog";
+import { api, getDashboardContext } from "@/lib/api-client";
 import {
   Card,
   CardContent,
@@ -68,10 +68,12 @@ const TILES = [
   },
 ] as const;
 
-export default function SettingsLanding() {
+export default async function SettingsLanding() {
+  const ctx = await getDashboardContext();
+  const catalog = await api.catalog(ctx);
   const valueFor = (href: string): string | null => {
-    if (href === "/settings/agents") return String(agents.length);
-    if (href === "/settings/permissions") return String(tools.length);
+    if (href === "/settings/agents") return String(catalog.agents.length);
+    if (href === "/settings/permissions") return String(catalog.tools.length);
     if (href === "/settings/llm") return "BYOK";
     if (href === "/settings/refund-policy") return "$";
     if (href === "/settings/usage") return "LLM";

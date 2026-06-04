@@ -1,11 +1,7 @@
 import Link from "next/link";
-import { eq, desc } from "drizzle-orm";
 import { AlertTriangle, KeyRound } from "lucide-react";
 
-import { connectorConnections } from "@support-agent/db";
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
-import { agents } from "@/lib/catalog";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -61,7 +57,8 @@ interface PageProps {
 }
 
 export default async function LlmSettingsPage({ searchParams }: PageProps) {
-  const tenantId = await getTenantId();
+  const ctx = await getDashboardContext();
+  const tenantId = ctx.tenantId;
   const params = (await searchParams) ?? {};
   const connectedBanner =
     (Array.isArray(params["connected"])
@@ -75,23 +72,13 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
     ? params["error"][0]
     : params["error"];
 
-  // We only need the LLM-provider rows. Pull everything for the tenant and
-  // filter in Node — cheap on `connector_connections` (one row per provider
-  // per shop), and avoids encoding the IN filter in Drizzle SQL.
-  const rows = await db()
-    .select({
-      id: connectorConnections.id,
-      provider: connectorConnections.provider,
-      shopDomain: connectorConnections.shopDomain,
-      status: connectorConnections.status,
-      metadata: connectorConnections.metadata,
-      installedAt: connectorConnections.installedAt,
-      revokedAt: connectorConnections.revokedAt,
-      updatedAt: connectorConnections.updatedAt,
-    })
-    .from(connectorConnections)
-    .where(eq(connectorConnections.tenantId, tenantId))
-    .orderBy(desc(connectorConnections.installedAt));
+  // We only need the LLM-provider rows. The connections endpoint returns all
+  // of the tenant's connector rows; filter to LLM providers here.
+  const [rows, catalog] = await Promise.all([
+    api.connections(ctx),
+    api.catalog(ctx),
+  ]);
+  const agents = catalog.agents;
 
   const llmRows = rows.filter((r) => isLlmProvider(r.provider));
   const active = llmRows.find((r) => r.status === "active");
@@ -189,7 +176,9 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
                   </div>
                 ) : null}
                 <div className="text-xs text-muted-foreground">
-                  Installed {formatRelativeTime(active.installedAt)}
+                  {active.installedAt
+                    ? `Installed ${formatRelativeTime(active.installedAt)}`
+                    : "Installed"}
                 </div>
               </div>
               <form action={revokeLlmAction}>

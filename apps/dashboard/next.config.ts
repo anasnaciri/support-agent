@@ -7,11 +7,7 @@ const config: NextConfig = {
   // dashboard the dev loop is faster when Next.js owns compilation.
   transpilePackages: [
     "@support-agent/agent-core",
-    "@support-agent/agents",
-    "@support-agent/db",
-    "@support-agent/providers",
-    "@support-agent/services",
-    "@support-agent/tools",
+    "@support-agent/dashboard-contracts",
   ],
 };
 

@@ -1,9 +1,6 @@
 import Link from "next/link";
 
-import { AgentId, TenantId } from "@support-agent/agent-core";
-import { agents } from "@/lib/catalog";
-import { getTenantId } from "@/lib/tenant";
-import { loadAgentOverrides } from "@/lib/llm-runtime";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
@@ -20,8 +17,13 @@ const modeVariant = (mode: string): "info" | "secondary" =>
   mode === "primary" ? "info" : "secondary";
 
 export default async function AgentsListPage() {
-  const tenantIdRaw = await getTenantId();
-  const overrides = await loadAgentOverrides(TenantId(tenantIdRaw));
+  const ctx = await getDashboardContext();
+  const [catalog, overrideRows] = await Promise.all([
+    api.catalog(ctx),
+    api.agentOverrides(ctx),
+  ]);
+  const agents = catalog.agents;
+  const overrides = new Map(overrideRows.map((o) => [o.agentId, o.model]));
   return (
     <div className="space-y-6">
       <SettingsBreadcrumb current="Agents" />
@@ -46,7 +48,7 @@ export default async function AgentsListPage() {
           </TableHeader>
           <TableBody>
             {agents.map((a) => {
-              const override = overrides.get(AgentId(a.id));
+              const override = overrides.get(a.id) ?? null;
               const effectiveModel = override ?? a.model;
               return (
                 <TableRow key={a.id}>

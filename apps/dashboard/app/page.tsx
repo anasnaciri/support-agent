@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { sql, eq, and, gte, desc } from "drizzle-orm";
 import {
   AlertTriangle,
   ArrowRight,
@@ -7,10 +6,8 @@ import {
   ClipboardCheck,
   Sprout,
 } from "lucide-react";
-import { approvals, cases } from "@support-agent/db";
 
-import { db } from "@/lib/db";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import {
   Card,
@@ -30,69 +27,12 @@ interface TodaySearchParams {
 export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const sp = searchParams ? await searchParams : {};
   const justOnboarded = sp.onboarded === "1";
-  const d = db();
-  const tenantId = await getTenantId();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const ctx = await getDashboardContext();
+  const summary = await api.today(ctx);
 
-  const [byStatus, pendingApprovals, takeoverCases, resolvedToday] =
-    await Promise.all([
-      d
-        .select({
-          status: cases.status,
-          count: sql<number>`count(*)::int`,
-        })
-        .from(cases)
-        .where(eq(cases.tenantId, tenantId))
-        .groupBy(cases.status),
-      d
-        .select({
-          id: approvals.id,
-          caseId: approvals.caseId,
-          tool: approvals.tool,
-          agentId: approvals.agentId,
-          riskLevel: approvals.riskLevel,
-          createdAt: approvals.createdAt,
-        })
-        .from(approvals)
-        .where(
-          and(
-            eq(approvals.tenantId, tenantId),
-            eq(approvals.status, "pending"),
-          ),
-        )
-        .orderBy(desc(approvals.createdAt))
-        .limit(TOP_N),
-      d
-        .select({
-          id: cases.id,
-          subject: cases.subject,
-          category: cases.category,
-          updatedAt: cases.updatedAt,
-        })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenantId, tenantId),
-            eq(cases.status, "human_takeover"),
-          ),
-        )
-        .orderBy(desc(cases.updatedAt))
-        .limit(TOP_N),
-      d
-        .select({ count: sql<number>`count(*)::int` })
-        .from(cases)
-        .where(
-          and(
-            eq(cases.tenantId, tenantId),
-            eq(cases.status, "resolved"),
-            gte(cases.resolvedAt, todayStart),
-          ),
-        ),
-    ]);
-
+  const { pendingApprovals, takeoverCases } = summary;
   const countOf = (status: string): number =>
-    byStatus.find((r) => r.status === status)?.count ?? 0;
+    summary.statusCounts[status] ?? 0;
 
   const pendingCount = pendingApprovals.length;
   const takeoverCount = takeoverCases.length;
@@ -101,7 +41,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const waitingCustomer = countOf("waiting_for_customer");
   const waitingSupplier = countOf("waiting_for_supplier");
   const waitingApproval = countOf("waiting_for_approval");
-  const resolvedTodayCount = resolvedToday[0]?.count ?? 0;
+  const resolvedTodayCount = summary.resolvedTodayCount;
 
   return (
     <div className="space-y-6">

@@ -1,67 +1,52 @@
-import "server-only";
-import type { AgentConfig, Tool, Permission } from "@support-agent/agent-core";
-import { ALL_AGENTS } from "@support-agent/agents";
-import { ALL_TOOLS } from "@support-agent/tools";
+import type { Permission } from "@support-agent/agent-core";
+import type {
+  AgentDto,
+  CatalogResponse,
+  ToolDto,
+} from "@support-agent/dashboard-contracts";
 
-// Read-only inventory of every AgentConfig + Tool registered in the
-// platform. Settings pages render from this in-memory snapshot. The
-// `ALL_AGENTS` / `ALL_TOOLS` constants are the single source of truth
-// — the worker bootstrap imports the same lists. New agent or tool?
-// Add it to the registry export in @support-agent/agents or
-// @support-agent/tools and both surfaces pick it up automatically.
-//
-// Edit flows (change a prompt, flip a permission) are intentionally
-// deferred: today the configs live in code. Per-tenant variation is
-// handled by narrow targeted tables (`tenant_agent_overrides` for
-// model, `tenants.settings.refundPolicy` for refund thresholds) — we
-// don't materialize a full per-tenant agent row because almost every
-// tenant runs the same shared agent set.
+// Pure views over the agent/tool inventory the api returns from
+// GET /dashboard/catalog. (Pre-cutover this read ALL_AGENTS/ALL_TOOLS directly,
+// but those packages transitively pull node built-ins and can't run on
+// Workers — the api projects them to plain DTOs now.)
 
-export const agents: ReadonlyArray<AgentConfig> = ALL_AGENTS;
+export const findAgent = (
+  catalog: CatalogResponse,
+  id: string,
+): AgentDto | null => catalog.agents.find((a) => a.id === id) ?? null;
 
-export const tools: ReadonlyArray<Tool<unknown, unknown>> =
-  ALL_TOOLS as ReadonlyArray<Tool<unknown, unknown>>;
-
-export const findAgent = (id: string): AgentConfig | null =>
-  agents.find((a) => a.id === id) ?? null;
-
-export const findTool = (name: string): Tool<unknown, unknown> | null =>
-  tools.find((t) => t.name === name) ?? null;
+export const findTool = (
+  catalog: CatalogResponse,
+  name: string,
+): ToolDto | null => catalog.tools.find((t) => t.name === name) ?? null;
 
 export const effectivePermission = (
-  agent: AgentConfig,
+  agent: AgentDto,
+  catalog: CatalogResponse,
   toolName: string,
 ): Permission | null => {
-  const tool = findTool(toolName);
+  const tool = findTool(catalog, toolName);
   if (!tool) return null;
   return agent.permissionOverrides[toolName] ?? tool.defaultPermission;
 };
 
-/**
- * One row of the per-provider capability grid rendered on
- * `/settings/integrations`. Derived from the tools' own
- * `requiredConnectorScopes` declarations — adding a new tool that
- * declares a new scope automatically surfaces it as a new capability,
- * with no edits to the dashboard.
- */
+/** One row of the per-provider capability grid on `/settings/integrations`. */
 export interface ConnectorCapability {
-  /** Raw scope string (matches what Shopify / Google echo back on OAuth). */
   readonly scope: string;
-  /** Comma-separated tool names that need this scope. */
   readonly tools: string;
 }
 
 /**
- * Distinct `requiredConnectorScopes` entries declared across `ALL_TOOLS`
- * for the named provider, grouped by scope and tagged with the tools
- * that need each. Stable order: alphabetical by scope so the grid
- * doesn't reshuffle between renders.
+ * Distinct `requiredConnectorScopes` entries across the catalog tools for the
+ * named provider, grouped by scope and tagged with the tools that need each.
+ * Alphabetical by scope so the grid is stable between renders.
  */
 export const capabilitiesForProvider = (
+  catalog: CatalogResponse,
   provider: string,
 ): ReadonlyArray<ConnectorCapability> => {
   const byScope = new Map<string, string[]>();
-  for (const t of tools) {
+  for (const t of catalog.tools) {
     const req = t.requiredConnectorScopes;
     if (!req || req.provider !== provider) continue;
     for (const s of req.scopes) {
@@ -72,8 +57,5 @@ export const capabilitiesForProvider = (
   }
   return [...byScope.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([scope, toolNames]) => ({
-      scope,
-      tools: toolNames.join(", "),
-    }));
+    .map(([scope, toolNames]) => ({ scope, tools: toolNames.join(", ") }));
 };

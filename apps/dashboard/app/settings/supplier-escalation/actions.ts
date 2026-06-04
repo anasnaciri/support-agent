@@ -2,35 +2,19 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { Effect, Layer } from "effect";
-import { DbClientLive, TenantRepositoryLive } from "@support-agent/db";
-import { TenantRepository } from "@support-agent/services";
-import { TenantId } from "@support-agent/agent-core";
-import { getTenantId } from "@/lib/tenant";
+import { api, getDashboardContext } from "@/lib/api-client";
 import { extractGoogleSheetsSpreadsheetId } from "./sheet-url";
 
-const tenantRepoLayer = () => {
-  const databaseUrl = process.env["DATABASE_URL"];
-  if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  const db = DbClientLive({ databaseUrl });
-  return TenantRepositoryLive.pipe(Layer.provide(db));
-};
-
-// A1 reference with mandatory sheet-name prefix. Permissive: column
-// span can be a single letter (`Escalations!A:A`), a range
-// (`Escalations!A:F`), or a numbered window (`Escalations!A1:F100`).
-// The sheet name itself can include spaces / unicode — only forbid the
-// `!` separator inside it.
+// A1 reference with mandatory sheet-name prefix (permissive on the column
+// span). Forbids only the `!` separator inside the sheet name.
 const RANGE_RE = /^[^!]+![A-Z]+\d*(:[A-Z]+\d*)?$/;
 
 export const saveSupplierEscalationAction = async (
   formData: FormData,
 ): Promise<void> => {
-  const tenantId = await getTenantId();
-  const tid = TenantId(tenantId);
+  const ctx = await getDashboardContext();
 
-  const sheetUrlRaw =
-    formData.get("sheetUrl") ?? formData.get("spreadsheetId");
+  const sheetUrlRaw = formData.get("sheetUrl") ?? formData.get("spreadsheetId");
   const rangeRaw = formData.get("range");
   const descriptionRaw = formData.get("description");
 
@@ -50,38 +34,19 @@ export const saveSupplierEscalationAction = async (
     redirect("/settings/integrations/google_sheets?error=bad_range");
   }
 
-  await Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const repo = yield* TenantRepository;
-        yield* repo.setSupplierEscalationSheet(tid, {
-          spreadsheetId,
-          range,
-          description: description.length > 0 ? description : null,
-        });
-      }),
-      tenantRepoLayer(),
-    ).pipe(Effect.scoped),
-  );
+  await api.setSupplierSheet(ctx, {
+    spreadsheetId,
+    range,
+    description: description.length > 0 ? description : null,
+  });
 
   revalidatePath("/settings/integrations/google_sheets");
   redirect("/settings/integrations/google_sheets?saved=1");
 };
 
 export const clearSupplierEscalationAction = async (): Promise<void> => {
-  const tenantId = await getTenantId();
-  const tid = TenantId(tenantId);
-
-  await Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const repo = yield* TenantRepository;
-        yield* repo.setSupplierEscalationSheet(tid, null);
-      }),
-      tenantRepoLayer(),
-    ).pipe(Effect.scoped),
-  );
-
+  const ctx = await getDashboardContext();
+  await api.clearSupplierSheet(ctx);
   revalidatePath("/settings/integrations/google_sheets");
   redirect("/settings/integrations/google_sheets?cleared=1");
 };

@@ -2,10 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { withAuth } from "@workos-inc/authkit-nextjs";
-import { takeOverCase } from "@/lib/case-actions";
-import { getTenantId } from "@/lib/tenant";
-import { dashboardUserDecisionUuid } from "@/lib/user-id";
+import { api, getDashboardContext } from "@/lib/api-client";
 
 const caseIdOf = (formData: FormData): string => {
   const id = formData.get("caseId");
@@ -17,15 +14,9 @@ const caseIdOf = (formData: FormData): string => {
 
 export const takeOverAction = async (formData: FormData): Promise<void> => {
   const caseId = caseIdOf(formData);
-  const tenantId = await getTenantId();
-  const { user } = await withAuth();
-  if (!user) throw new Error("unauthenticated");
+  const ctx = await getDashboardContext();
 
-  const result = await takeOverCase({
-    caseId,
-    tenantId,
-    managerId: dashboardUserDecisionUuid(user.id),
-  });
+  const result = await api.takeover(ctx, caseId);
 
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
