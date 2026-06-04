@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import {
@@ -5,7 +6,9 @@ import {
   auditLog,
   caseStateTransitions,
   cases,
+  tenants,
 } from "./schema.js";
+import type { OnboardingResult } from "@support-agent/dashboard-contracts";
 
 // Write operations backing the dashboard's HTTP API (Path B). Ported from
 // the dashboard's lib/case-actions.ts so the api owns the mutation (the
@@ -99,3 +102,45 @@ export const takeOverCase = async (
 
     return { kind: "taken_over", canceledApprovals: canceled.length };
   });
+
+/**
+ * Self-service tenant creation for a signed-in WorkOS org (ported from the
+ * dashboard's onboarding action). Idempotent by org: the partial unique index
+ * on `workos_organization_id` rejects a second row, so a re-submit / two-tab
+ * race resolves to the existing tenant with `alreadyExisted: true`.
+ */
+export const createTenantForOrg = async (
+  db: DrizzleDb,
+  input: {
+    readonly organizationId: string;
+    readonly name: string;
+    readonly notificationEmail: string;
+  },
+): Promise<OnboardingResult> => {
+  const existing = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.workosOrganizationId, input.organizationId))
+    .limit(1);
+  if (existing[0]) return { tenantId: existing[0].id, alreadyExisted: true };
+
+  const id = randomUUID();
+  try {
+    await db.insert(tenants).values({
+      id,
+      name: input.name,
+      workosOrganizationId: input.organizationId,
+      settings: { notificationEmail: input.notificationEmail },
+    });
+    return { tenantId: id, alreadyExisted: false };
+  } catch (cause) {
+    // Most likely the unique index — another tab won the race. Re-read.
+    const [row] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.workosOrganizationId, input.organizationId))
+      .limit(1);
+    if (row) return { tenantId: row.id, alreadyExisted: true };
+    throw cause;
+  }
+};

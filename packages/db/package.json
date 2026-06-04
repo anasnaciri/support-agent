@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
+    "@support-agent/dashboard-contracts": "workspace:*",
     "@support-agent/services": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "effect": "^3.10.0",

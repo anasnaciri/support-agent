@@ -1,4 +1,21 @@
 import { and, asc, desc, eq, gt, gte, like, lt, sql, type SQL } from "drizzle-orm";
+import {
+  clampPage,
+  type AgentOverrideRow,
+  type ApprovalDetail,
+  type ApprovalListRow,
+  type ApprovalsFilter,
+  type ApprovalsListResult,
+  type AuditEntry,
+  type AuditFilter,
+  type CaseDetail,
+  type CaseEventsResult,
+  type CaseListRow,
+  type ConnectorConnectionView,
+  type Page,
+  type TodaySummary,
+  type UsageDecisionRow,
+} from "@support-agent/dashboard-contracts";
 import type { DrizzleDb } from "./client.js";
 import {
   approvals,
@@ -13,44 +30,41 @@ import {
 // hosts on Cloudflare Workers and can't open a Postgres TCP pool, so these
 // flat reads live here (where drizzle is a runtime dep) and are exposed by
 // apps/api endpoints rather than run in the dashboard's Server Components.
+//
+// The JSON shapes these return live in `@support-agent/dashboard-contracts`
+// (the shared, Worker-safe contract). The pagination helpers + every view
+// type are re-exported here so existing `@support-agent/db` importers (the api
+// edge) keep working unchanged.
+
+export {
+  PAGE_SIZE_OPTIONS,
+  DEFAULT_PAGE_SIZE,
+  parsePageSize,
+  parsePageNumber,
+  totalPagesFor,
+  clampPage,
+} from "@support-agent/dashboard-contracts";
+export type {
+  Page,
+  TodayPendingApproval,
+  TodayTakeoverCase,
+  TodaySummary,
+  CaseListRow,
+  CaseDetailCase,
+  AuditEntry,
+  ApprovalDetail,
+  CaseDetail,
+  CaseEventsResult,
+  ApprovalsFilter,
+  ApprovalListRow,
+  ApprovalsListResult,
+  AuditFilter,
+  ConnectorConnectionView,
+  AgentOverrideRow,
+  UsageDecisionRow,
+} from "@support-agent/dashboard-contracts";
 
 const TOP_N = 5;
-
-// ============================================================
-// Pagination (canonical; the dashboard's lib/pagination.ts mirrors these
-// and will import them from here in the cutover slice).
-// ============================================================
-
-export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
-export const DEFAULT_PAGE_SIZE = 25;
-
-export const parsePageSize = (value: string | undefined): number => {
-  const parsed = Number(value);
-  return PAGE_SIZE_OPTIONS.some((option) => option === parsed)
-    ? parsed
-    : DEFAULT_PAGE_SIZE;
-};
-
-export const parsePageNumber = (value: string | undefined): number => {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-};
-
-export const totalPagesFor = (totalRows: number, pageSize: number): number =>
-  Math.max(1, Math.ceil(totalRows / pageSize));
-
-export const clampPage = (
-  page: number,
-  totalRows: number,
-  pageSize: number,
-): number => Math.min(page, totalPagesFor(totalRows, pageSize));
-
-export interface Page<Row> {
-  readonly totalRows: number;
-  readonly page: number;
-  readonly pageSize: number;
-  readonly rows: ReadonlyArray<Row>;
-}
 
 /** Resolve the tenant a WorkOS organization is linked to, or null. */
 export const findTenantIdByWorkosOrg = async (
@@ -65,29 +79,22 @@ export const findTenantIdByWorkosOrg = async (
   return rows[0]?.id ?? null;
 };
 
-export interface TodayPendingApproval {
-  readonly id: string;
-  readonly caseId: string;
-  readonly tool: string;
-  readonly agentId: string;
-  readonly riskLevel: string;
-  readonly createdAt: string;
-}
-
-export interface TodayTakeoverCase {
-  readonly id: string;
-  readonly subject: string | null;
-  readonly category: string | null;
-  readonly updatedAt: string;
-}
-
-export interface TodaySummary {
-  /** Case count per status (raw; the view derives groupings like "in progress"). */
-  readonly statusCounts: Record<string, number>;
-  readonly resolvedTodayCount: number;
-  readonly pendingApprovals: ReadonlyArray<TodayPendingApproval>;
-  readonly takeoverCases: ReadonlyArray<TodayTakeoverCase>;
-}
+/**
+ * Tenant id + name for a WorkOS org, or null when the org has no tenant yet.
+ * Backs `GET /dashboard/tenant` (the dashboard maps null → /onboarding).
+ */
+export const tenantByWorkosOrg = async (
+  db: DrizzleDb,
+  organizationId: string,
+): Promise<{ readonly id: string; readonly name: string } | null> => {
+  const rows = await db
+    .select({ id: tenants.id, name: tenants.name })
+    .from(tenants)
+    .where(eq(tenants.workosOrganizationId, organizationId))
+    .limit(1);
+  const row = rows[0];
+  return row ? { id: row.id, name: row.name } : null;
+};
 
 /** Today-view rollup for one tenant (counts + top-N approval/takeover lists). */
 export const todaySummary = async (
@@ -174,16 +181,6 @@ export const todaySummary = async (
 // Cases
 // ============================================================
 
-export interface CaseListRow {
-  readonly id: string;
-  readonly subject: string | null;
-  readonly status: string;
-  readonly category: string | null;
-  readonly currentAgentId: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
 /** Paginated cases list for one tenant, newest activity first. */
 export const casesList = async (
   db: DrizzleDb,
@@ -227,53 +224,6 @@ export const casesList = async (
     })),
   };
 };
-
-export interface CaseDetailCase {
-  readonly id: string;
-  readonly subject: string | null;
-  readonly status: string;
-  readonly category: string | null;
-  readonly currentAgentId: string;
-  readonly priority: string;
-  readonly summary: string | null;
-  readonly context: unknown;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly resolvedAt: string | null;
-}
-
-export interface AuditEntry {
-  readonly id: string;
-  readonly caseId: string | null;
-  readonly action: string;
-  readonly actorType: string;
-  readonly actorId: string | null;
-  readonly occurredAt: string;
-  readonly details: unknown;
-}
-
-export interface ApprovalDetail {
-  readonly id: string;
-  readonly caseId: string;
-  readonly agentId: string;
-  readonly tool: string;
-  readonly proposedInput: unknown;
-  readonly approvedInput: unknown;
-  readonly reasoning: string | null;
-  readonly riskLevel: string;
-  readonly status: string;
-  readonly decidedBy: string | null;
-  readonly decidedAt: string | null;
-  readonly decisionReason: string | null;
-  readonly expiresAt: string;
-  readonly createdAt: string;
-}
-
-export interface CaseDetail {
-  readonly case: CaseDetailCase;
-  readonly auditEntries: ReadonlyArray<AuditEntry>;
-  readonly approvals: ReadonlyArray<ApprovalDetail>;
-}
 
 const toApprovalDetail = (a: typeof approvals.$inferSelect): ApprovalDetail => ({
   id: a.id,
@@ -352,16 +302,6 @@ export const caseDetail = async (
   };
 };
 
-export interface CaseEventsResult {
-  readonly events: ReadonlyArray<{
-    readonly id: string;
-    readonly action: string;
-    readonly actorType: string;
-    readonly actorId: string | null;
-    readonly occurredAt: string;
-  }>;
-}
-
 /**
  * Audit rows for a case with id > `sinceId`, ascending (poll replacement for
  * the old SSE route). Returns null when the case isn't in the tenant (404).
@@ -406,32 +346,6 @@ export const caseEvents = async (
 // ============================================================
 // Approvals
 // ============================================================
-
-export interface ApprovalsFilter {
-  /** "pending" (default), a concrete status, or "any" to skip the filter. */
-  readonly status?: string | undefined;
-  readonly risk?: string | undefined;
-  readonly tool?: string | undefined;
-  readonly agent?: string | undefined;
-}
-
-export interface ApprovalListRow {
-  readonly id: string;
-  readonly caseId: string;
-  readonly agentId: string;
-  readonly tool: string;
-  readonly status: string;
-  readonly riskLevel: string;
-  readonly createdAt: string;
-  readonly decidedAt: string | null;
-}
-
-export interface ApprovalsListResult extends Page<ApprovalListRow> {
-  /** Counts per status across the tenant (unfiltered) for the header chips. */
-  readonly statusCounts: Record<string, number>;
-  readonly toolFacets: ReadonlyArray<string>;
-  readonly agentFacets: ReadonlyArray<string>;
-}
 
 export const approvalsList = async (
   db: DrizzleDb,
@@ -530,13 +444,6 @@ export const approvalDetail = async (
 // Audit log
 // ============================================================
 
-export interface AuditFilter {
-  /** Action prefix (LIKE `${action}%`), matching the dashboard's filters. */
-  readonly action?: string | undefined;
-  /** actorType exact match. */
-  readonly actor?: string | undefined;
-}
-
 export const auditList = async (
   db: DrizzleDb,
   tenantId: string,
@@ -569,19 +476,6 @@ export const auditList = async (
 // ============================================================
 // Connector connections (integrations pages + case-detail shop domain)
 // ============================================================
-
-export interface ConnectorConnectionView {
-  readonly id: string;
-  readonly provider: string;
-  readonly shopDomain: string | null;
-  readonly status: string;
-  readonly scopes: ReadonlyArray<string>;
-  /** Connector-specific metadata (e.g. LLM rows carry `baseURL`). */
-  readonly metadata: unknown;
-  readonly installedAt: string | null;
-  readonly revokedAt: string | null;
-  readonly updatedAt: string | null;
-}
 
 /**
  * All connector connections for a tenant (newest install first). Backs the
@@ -639,11 +533,6 @@ export const caseContextForTenant = async (
   return row ? { context: row.context } : null;
 };
 
-export interface AgentOverrideRow {
-  readonly agentId: string;
-  readonly model: string | null;
-}
-
 /**
  * Per-agent model overrides for a tenant (the `settings/agents` pages). The
  * dashboard rebuilds its agentId→model map from this; agents without a row
@@ -687,11 +576,6 @@ export const activeShopifyShopDomain = async (
 // time window; the dashboard applies OpenRouter pricing + aggregation
 // (both pure / HTTP, fine on Workers).
 // ============================================================
-
-export interface UsageDecisionRow {
-  readonly occurredAt: string;
-  readonly details: unknown;
-}
 
 export const usageRows = async (
   db: DrizzleDb,

@@ -16,9 +16,12 @@
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^5.2.6",
     "@support-agent/agent-core": "workspace:*",
+    "@support-agent/agents": "workspace:*",
+    "@support-agent/dashboard-contracts": "workspace:*",
     "@support-agent/db": "workspace:*",
     "@support-agent/providers": "workspace:*",
     "@support-agent/services": "workspace:*",
+    "@support-agent/tools": "workspace:*",
     "effect": "^3.10.0",
     "fastify": "^5.8.5",
     "pg-boss": "^12.18.2"

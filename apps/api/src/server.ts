@@ -12,10 +12,20 @@ import {
   applyApprovalDecision,
   ConnectorCredentialStore,
   decisionToEvent,
+  TenantAgentOverridesService,
+  TenantRepository,
   TransactionRunner,
   verifyShopifyWebhookHmac,
+  type LLMProvider,
 } from "@support-agent/services";
-import { ConnectorNotFound, TenantId, UserId } from "@support-agent/agent-core";
+import {
+  AgentId,
+  ConnectorNotFound,
+  TenantId,
+  UserId,
+} from "@support-agent/agent-core";
+import { ALL_AGENTS } from "@support-agent/agents";
+import { ALL_TOOLS } from "@support-agent/tools";
 import {
   activeShopifyShopDomain,
   agentOverrides,
@@ -27,16 +37,24 @@ import {
   caseEvents,
   casesList,
   connectionsList,
+  createTenantForOrg,
   DbClient,
   findTenantIdByWorkosOrg,
   parsePageNumber,
   parsePageSize,
   takeOverCase,
+  tenantByWorkosOrg,
   todaySummary,
   usageRows,
   type DrizzleDb,
 } from "@support-agent/db";
+import { fetchModelCatalog } from "@support-agent/providers";
 import { parseDashboardAuth } from "./dashboard-auth.js";
+import { buildCatalogResponse } from "./dashboard-catalog.js";
+import {
+  buildModelsResponse,
+  resolveActiveLlmCredential,
+} from "./dashboard-llm.js";
 import {
   resolveCustomerForContext,
   resolveOrderForContext,
@@ -217,6 +235,41 @@ const authenticateDashboard = async (
     return { ok: false, status: 403, error: "no_tenant_for_organization" };
   }
   return { ok: true, tenantId, userId: parsed.userId };
+};
+
+type DashboardOrgAuthResult =
+  | {
+      readonly ok: true;
+      readonly organizationId: string;
+      readonly userId: string | undefined;
+    }
+  | { readonly ok: false; readonly status: number; readonly error: string };
+
+/**
+ * Auth for the pre-tenant endpoints (`GET /dashboard/tenant`,
+ * `POST /dashboard/onboarding`): verify the service token + read the asserted
+ * WorkOS org, but do NOT require a tenant (those endpoints exist precisely for
+ * the org-without-a-tenant onboarding case). Pure — no DB lookup.
+ */
+const authenticateDashboardOrg = (
+  cfg: ApiConfig,
+  req: FastifyRequest,
+): DashboardOrgAuthResult => {
+  if (!cfg.dashboardApiToken) {
+    return { ok: false, status: 503, error: "dashboard_api_not_configured" };
+  }
+  const parsed = parseDashboardAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.dashboardApiToken,
+  );
+  if (!parsed.ok) {
+    return { ok: false, status: parsed.status, error: parsed.message };
+  }
+  return {
+    ok: true,
+    organizationId: parsed.organizationId,
+    userId: parsed.userId,
+  };
 };
 
 /** Read a non-empty string query/param value, else undefined. */
@@ -570,6 +623,383 @@ const handleDashboardTakeover = async (
     }),
   );
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// ---- Dashboard catalog / models / tenant (reads) ----
+
+// GET /dashboard/catalog — static agent + tool inventory (settings pages).
+const handleDashboardCatalog = async (
+  cfg: ApiConfig,
+  _layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  return sendJson(res, 200, buildCatalogResponse(ALL_AGENTS, ALL_TOOLS));
+};
+
+// GET /dashboard/models — the tenant's LLM model catalog. The decrypted key
+// is resolved + used server-side; only the model list reaches the client.
+const handleDashboardModels = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const cred = await Effect.runPromise(
+    Effect.provide(resolveActiveLlmCredential(auth.tenantId), layer),
+  );
+  if (!cred) return sendJson(res, 200, buildModelsResponse(null, null));
+  const catalog = await fetchModelCatalog({
+    provider: cred.provider,
+    apiKey: cred.apiKey,
+    ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
+  });
+  return sendJson(res, 200, buildModelsResponse(cred, catalog));
+};
+
+// GET /dashboard/tenant — the org's tenant (or null → dashboard sends to
+// onboarding). Token + org auth; does NOT require an existing tenant.
+const handleDashboardTenant = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const tenant = await runWithDb(layer, (db) =>
+    tenantByWorkosOrg(db, auth.organizationId),
+  );
+  return sendJson(res, 200, {
+    tenant: tenant ? { tenantId: tenant.id, name: tenant.name } : null,
+  });
+};
+
+// ---- Dashboard settings (writes) ----
+
+const LLM_PROVIDER_SET: ReadonlySet<string> = new Set([
+  "openrouter",
+  "anthropic",
+  "openai",
+]);
+const isLlmProviderName = (p: string): p is LLMProvider =>
+  LLM_PROVIDER_SET.has(p);
+
+const CONNECTOR_PROVIDERS = ["shopify", "gmail", "google_sheets"] as const;
+type DisconnectProvider = (typeof CONNECTOR_PROVIDERS)[number];
+const isDisconnectProvider = (p: string): p is DisconnectProvider =>
+  (CONNECTOR_PROVIDERS as ReadonlyArray<string>).includes(p);
+
+// A1 reference with mandatory sheet-name prefix (mirrors the dashboard's
+// supplier-escalation form validation).
+const SUPPLIER_RANGE_RE = /^[^!]+![A-Z]+\d*(:[A-Z]+\d*)?$/;
+
+// POST /dashboard/onboarding — create a tenant for the asserted org.
+const handleDashboardOnboarding = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+  const email =
+    typeof body["notificationEmail"] === "string"
+      ? body["notificationEmail"].trim()
+      : "";
+  if (name.length < 2) return sendJson(res, 400, { error: "bad_name" });
+  if (!email.includes("@")) return sendJson(res, 400, { error: "bad_email" });
+  const result = await runWithDb(layer, (db) =>
+    createTenantForOrg(db, {
+      organizationId: auth.organizationId,
+      name: name.slice(0, 120),
+      notificationEmail: email.slice(0, 254),
+    }),
+  );
+  return sendJson(res, 200, result);
+};
+
+// POST /dashboard/agents/:id/model — set a per-agent model override.
+const handleDashboardAgentModelSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!ALL_AGENTS.some((a) => a.id === id)) {
+    return sendJson(res, 404, { error: "unknown_agent" });
+  }
+  const body = parseJsonBody(req);
+  const model = typeof body["model"] === "string" ? body["model"].trim() : "";
+  if (!model) return sendJson(res, 400, { error: "missing_model" });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        yield* svc.setModel(TenantId(auth.tenantId), AgentId(id), model);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/agents/:id/model/clear — drop the override (→ config default).
+const handleDashboardAgentModelClear = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!ALL_AGENTS.some((a) => a.id === id)) {
+    return sendJson(res, 404, { error: "unknown_agent" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        yield* svc.clearModel(TenantId(auth.tenantId), AgentId(id));
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/llm — connect a BYOK LLM credential (api encrypts + stores).
+const handleDashboardLlmConnect = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const provider =
+    typeof body["provider"] === "string" ? body["provider"].trim() : "";
+  const apiKey = typeof body["apiKey"] === "string" ? body["apiKey"].trim() : "";
+  const baseURL =
+    typeof body["baseURL"] === "string" ? body["baseURL"].trim() : "";
+  if (!isLlmProviderName(provider)) {
+    return sendJson(res, 400, { error: "bad_provider" });
+  }
+  if (apiKey.length < 8) return sendJson(res, 400, { error: "missing_key" });
+  const tid = TenantId(auth.tenantId);
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        // At most one active LLM provider per tenant — revoke any existing
+        // active LLM rows before the upsert (mirrors the dashboard action).
+        const rows = yield* store.listForTenant(tid);
+        const activeLlm = rows.filter(
+          (r) => isLlmProviderName(r.provider) && r.status === "active",
+        );
+        yield* Effect.all(
+          activeLlm.map((r) =>
+            store.revoke(tid, r.provider as LLMProvider, r.shopDomain),
+          ),
+          { concurrency: 1 },
+        );
+        yield* store.put({
+          tenantId: tid,
+          provider,
+          shopDomain: "default",
+          accessToken: apiKey,
+          scopes: [],
+          ...(baseURL.length > 0
+            ? { metadata: { baseURL } as Readonly<Record<string, unknown>> }
+            : {}),
+        });
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/llm/revoke — revoke the tenant's active LLM credential(s).
+const handleDashboardLlmRevoke = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const tid = TenantId(auth.tenantId);
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        const rows = yield* store.listForTenant(tid);
+        const activeLlm = rows.filter(
+          (r) => isLlmProviderName(r.provider) && r.status === "active",
+        );
+        yield* Effect.all(
+          activeLlm.map((r) =>
+            store.revoke(tid, r.provider as LLMProvider, r.shopDomain),
+          ),
+          { concurrency: 1 },
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/refund-policy — set the tenant's conditional refund rule.
+const handleDashboardRefundPolicy = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const currency =
+    typeof body["currencyCode"] === "string"
+      ? body["currencyCode"].trim().toUpperCase()
+      : "";
+  const ask = body["askAboveMinorUnits"];
+  const deny = body["denyAboveMinorUnits"];
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return sendJson(res, 400, { error: "bad_currency" });
+  }
+  if (
+    typeof ask !== "number" ||
+    !Number.isInteger(ask) ||
+    ask < 0 ||
+    typeof deny !== "number" ||
+    !Number.isInteger(deny) ||
+    deny < 0
+  ) {
+    return sendJson(res, 400, { error: "bad_amount" });
+  }
+  if (ask > deny) return sendJson(res, 400, { error: "bad_order" });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setRefundPolicy(TenantId(auth.tenantId), {
+          askAboveMinorUnits: ask,
+          denyAboveMinorUnits: deny,
+          currencyCode: currency,
+        });
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/supplier-sheet — set the missing-package escalation sheet.
+const handleDashboardSupplierSheet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const spreadsheetId =
+    typeof body["spreadsheetId"] === "string"
+      ? body["spreadsheetId"].trim()
+      : "";
+  const range = typeof body["range"] === "string" ? body["range"].trim() : "";
+  const description =
+    typeof body["description"] === "string" ? body["description"].trim() : "";
+  if (!spreadsheetId) {
+    return sendJson(res, 400, { error: "missing_spreadsheet_id" });
+  }
+  if (!SUPPLIER_RANGE_RE.test(range)) {
+    return sendJson(res, 400, { error: "bad_range" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setSupplierEscalationSheet(TenantId(auth.tenantId), {
+          spreadsheetId,
+          range,
+          description: description.length > 0 ? description : null,
+        });
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/supplier-sheet/clear — clear the escalation sheet.
+const handleDashboardSupplierSheetClear = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setSupplierEscalationSheet(TenantId(auth.tenantId), null);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/connections/:provider/disconnect — revoke a connector.
+const handleDashboardDisconnect = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { provider } = req.params as { provider: string };
+  if (!isDisconnectProvider(provider)) {
+    return sendJson(res, 400, { error: "bad_provider" });
+  }
+  const tid = TenantId(auth.tenantId);
+  const revoked = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        const rows = yield* store.listForTenant(tid);
+        const active = rows.filter(
+          (r) => r.provider === provider && r.status === "active",
+        );
+        yield* Effect.all(
+          active.map((r) => store.revoke(tid, provider, r.shopDomain)),
+          { concurrency: 1 },
+        );
+        return active.length;
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { revoked });
 };
 
 // ============================================================
@@ -2088,6 +2518,21 @@ export const startServer = async (
     "Per-agent model overrides",
     handleDashboardAgentOverrides,
   );
+  dashboardGet(
+    "/dashboard/catalog",
+    "Agent + tool inventory",
+    handleDashboardCatalog,
+  );
+  dashboardGet(
+    "/dashboard/models",
+    "Tenant LLM model catalog",
+    handleDashboardModels,
+  );
+  dashboardGet(
+    "/dashboard/tenant",
+    "The org's tenant (or null → onboarding)",
+    handleDashboardTenant,
+  );
 
   // Mutations. No response serializer (default JSON.stringify) so the
   // discriminated result/Date fields pass through untouched.
@@ -2125,6 +2570,51 @@ export const startServer = async (
     "/dashboard/cases/:id/takeover",
     "Take over a case (manager)",
     handleDashboardTakeover,
+  );
+  dashboardPost(
+    "/dashboard/onboarding",
+    "Create a tenant for the org",
+    handleDashboardOnboarding,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/model",
+    "Set a per-agent model override",
+    handleDashboardAgentModelSet,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/model/clear",
+    "Clear a per-agent model override",
+    handleDashboardAgentModelClear,
+  );
+  dashboardPost(
+    "/dashboard/llm",
+    "Connect a BYOK LLM credential",
+    handleDashboardLlmConnect,
+  );
+  dashboardPost(
+    "/dashboard/llm/revoke",
+    "Revoke the tenant's LLM credential",
+    handleDashboardLlmRevoke,
+  );
+  dashboardPost(
+    "/dashboard/refund-policy",
+    "Set the conditional refund policy",
+    handleDashboardRefundPolicy,
+  );
+  dashboardPost(
+    "/dashboard/supplier-sheet",
+    "Set the supplier-escalation sheet",
+    handleDashboardSupplierSheet,
+  );
+  dashboardPost(
+    "/dashboard/supplier-sheet/clear",
+    "Clear the supplier-escalation sheet",
+    handleDashboardSupplierSheetClear,
+  );
+  dashboardPost(
+    "/dashboard/connections/:provider/disconnect",
+    "Disconnect (revoke) a connector",
+    handleDashboardDisconnect,
   );
 
   // ---- System ----

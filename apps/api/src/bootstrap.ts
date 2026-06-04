@@ -6,6 +6,8 @@ import {
   ConnectorCredentialStore,
   parseKey,
   ShopifyService,
+  TenantAgentOverridesService,
+  TenantRepository,
   TransactionRunner,
 } from "@support-agent/services";
 import {
@@ -13,6 +15,8 @@ import {
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  TenantAgentOverridesServiceLive,
+  TenantRepositoryLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
 import {
@@ -217,7 +221,23 @@ export const buildApiLayers = (cfg: ApiConfig) => {
       ),
     ),
   );
-  return Layer.mergeAll(store, approvals, tx, dbLayer, blob, shopify);
+  // TenantRepository (refund policy + supplier-escalation sheet) and
+  // TenantAgentOverridesService (per-agent model overrides) back the dashboard
+  // settings-write endpoints (Path B). Both are DB-backed.
+  const tenantRepo = TenantRepositoryLive.pipe(Layer.provide(dbLayer));
+  const agentOverridesSvc = TenantAgentOverridesServiceLive.pipe(
+    Layer.provide(dbLayer),
+  );
+  return Layer.mergeAll(
+    store,
+    approvals,
+    tx,
+    dbLayer,
+    blob,
+    shopify,
+    tenantRepo,
+    agentOverridesSvc,
+  );
 };
 
 export type ApiLayer = Layer.Layer<
@@ -226,7 +246,9 @@ export type ApiLayer = Layer.Layer<
   | TransactionRunner
   | DbClient
   | BlobStorage
-  | ShopifyService,
+  | ShopifyService
+  | TenantRepository
+  | TenantAgentOverridesService,
   never,
   never
 >;

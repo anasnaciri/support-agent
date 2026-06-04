@@ -32,6 +32,12 @@ importers:
       '@support-agent/agent-core':
         specifier: workspace:*
         version: link:../../packages/agent-core
+      '@support-agent/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
+      '@support-agent/dashboard-contracts':
+        specifier: workspace:*
+        version: link:../../packages/dashboard-contracts
       '@support-agent/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -41,6 +47,9 @@ importers:
       '@support-agent/services':
         specifier: workspace:*
         version: link:../../packages/services
+      '@support-agent/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       effect:
         specifier: ^3.10.0
         version: 3.21.2
@@ -198,11 +207,20 @@ importers:
         specifier: ^3.10.0
         version: 3.21.2
 
+  packages/dashboard-contracts:
+    dependencies:
+      '@support-agent/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+
   packages/db:
     dependencies:
       '@support-agent/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@support-agent/dashboard-contracts':
+        specifier: workspace:*
+        version: link:../dashboard-contracts
       '@support-agent/services':
         specifier: workspace:*
         version: link:../services

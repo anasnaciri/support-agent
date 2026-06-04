@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/agent-core" },
+    { "path": "./packages/dashboard-contracts" },
     { "path": "./packages/services" },
     { "path": "./packages/providers" },
     { "path": "./packages/tools" },
