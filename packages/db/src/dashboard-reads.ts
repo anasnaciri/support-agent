@@ -96,6 +96,49 @@ export const tenantByWorkosOrg = async (
   return row ? { id: row.id, name: row.name } : null;
 };
 
+export interface TenantDeletionSnapshot {
+  readonly id: string;
+  readonly name: string;
+  /** WorkOS org to delete after the wipe; null for headless/Shopify-only tenants. */
+  readonly workosOrganizationId: string | null;
+  /** Where to send the deletion-confirmation email; null if none configured. */
+  readonly notificationEmail: string | null;
+}
+
+/**
+ * Capture the fields the deletion-cleanup job needs (org id + notification
+ * email + name) BEFORE the tenant row is wiped — once `redactShop` runs,
+ * the row is gone and these are unrecoverable. Returns null when the tenant
+ * doesn't exist (already deleted / unknown id → 404 at the edge).
+ */
+export const tenantDeletionSnapshot = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<TenantDeletionSnapshot | null> => {
+  const rows = await db
+    .select({
+      id: tenants.id,
+      name: tenants.name,
+      workosOrganizationId: tenants.workosOrganizationId,
+      settings: tenants.settings,
+    })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const settings = (row.settings ?? {}) as { notificationEmail?: unknown };
+  return {
+    id: row.id,
+    name: row.name,
+    workosOrganizationId: row.workosOrganizationId ?? null,
+    notificationEmail:
+      typeof settings.notificationEmail === "string"
+        ? settings.notificationEmail
+        : null,
+  };
+};
+
 /** Today-view rollup for one tenant (counts + top-N approval/takeover lists). */
 export const todaySummary = async (
   db: DrizzleDb,

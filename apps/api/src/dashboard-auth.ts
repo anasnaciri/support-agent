@@ -60,3 +60,26 @@ export const parseDashboardAuth = (
     userId: userId && userId.length > 0 ? userId : undefined,
   };
 };
+
+export type AdminAuthParse =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly status: 401; readonly message: string };
+
+/**
+ * Validate the platform-operator `Authorization: Bearer <admin-token>` for
+ * the `/admin/*` routes. No org/tenant scoping — admin acts across tenants.
+ */
+export const parseAdminAuth = (
+  headers: Record<string, string | undefined>,
+  expectedToken: string,
+): AdminAuthParse => {
+  const auth = headers["authorization"];
+  if (!auth || !auth.startsWith(BEARER)) {
+    return { ok: false, status: 401, message: "missing bearer token" };
+  }
+  const token = auth.slice(BEARER.length);
+  if (!constantTimeEqual(token, expectedToken)) {
+    return { ok: false, status: 401, message: "invalid token" };
+  }
+  return { ok: true };
+};

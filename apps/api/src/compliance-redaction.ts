@@ -173,7 +173,9 @@ export interface RedactShopResult {
 
 /**
  * Wipe every row associated with a tenant. Used by the `shop/redact`
- * webhook 48h after a merchant uninstalls.
+ * webhook 48h after a merchant uninstalls, AND by self-service / admin
+ * account deletion (see `account-deletion.ts`) — both need the same
+ * complete, atomic tenant wipe.
  *
  * We delete the tenant row last so the FK cascades fire cleanly on
  * `connector_connections` (defined ON DELETE CASCADE). Other tables

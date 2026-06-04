@@ -127,6 +127,13 @@ export interface ApiConfig {
    * the api trusts this token and maps org → tenant.
    */
   readonly dashboardApiToken: string | null;
+  /**
+   * Bearer token guarding the platform-operator admin endpoints
+   * (`POST /admin/tenants/:id/delete` — delete *any* tenant's account).
+   * Distinct from `dashboardApiToken`, which is org-scoped. `null` → the
+   * admin routes respond 503 (not configured).
+   */
+  readonly adminApiToken: string | null;
 }
 
 const requireEnv = (name: string): string => {
@@ -177,6 +184,7 @@ export const loadApiConfig = (): ApiConfig => {
     approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
     dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
     dashboardApiToken: process.env["DASHBOARD_API_TOKEN"]?.trim() || null,
+    adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,
     google: googleConfigured
       ? {
           clientId: googleClientId,

@@ -50,12 +50,13 @@ import {
   parsePageSize,
   takeOverCase,
   tenantByWorkosOrg,
+  tenantDeletionSnapshot,
   todaySummary,
   usageRows,
   type DrizzleDb,
 } from "@support-agent/db";
 import { fetchModelCatalog } from "@support-agent/providers";
-import { parseDashboardAuth } from "./dashboard-auth.js";
+import { parseAdminAuth, parseDashboardAuth } from "./dashboard-auth.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   buildModelsResponse,
@@ -94,6 +95,10 @@ import {
   redactCustomer,
   redactShop,
 } from "./compliance-redaction.js";
+import {
+  makePgBossAccountCleanupPublisher,
+  type AccountCleanupJobData,
+} from "./account-deletion.js";
 import {
   buildGoogleAuthorizeUrl,
   isGoogleOAuthProvider,
@@ -656,6 +661,121 @@ const handleDashboardTakeover = async (
     }),
   );
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// ---- Account deletion (tenant self-service + admin) ----
+
+type DeleteAccountResult =
+  | { readonly kind: "tenant_not_found" }
+  | {
+      readonly kind: "deleted";
+      readonly tenantId: string;
+      readonly deletedCases: number;
+      readonly deletedAuditRows: number;
+      readonly deletedConnectorRows: number;
+      readonly workosOrganizationId: string | null;
+      readonly cleanupEnqueued: boolean;
+    };
+
+// Lazily-built cleanup publisher, memoized so the queue is ensured once
+// per process (not per delete). Reuses the same cached pg-boss instance
+// as the approval-link publisher.
+let cachedCleanupPublisher:
+  | ((data: AccountCleanupJobData) => Promise<void>)
+  | null = null;
+const accountCleanupPublisher = (
+  databaseUrl: string,
+): ((data: AccountCleanupJobData) => Promise<void>) => {
+  if (!cachedCleanupPublisher) {
+    cachedCleanupPublisher = makePgBossAccountCleanupPublisher(() =>
+      acquireApprovalBoss(databaseUrl),
+    );
+  }
+  return cachedCleanupPublisher;
+};
+
+/**
+ * Shared by the dashboard self-service + admin delete paths. Captures the
+ * WorkOS org + notification email, wipes every tenant row (`redactShop`,
+ * one tx), then enqueues the cleanup job (WorkOS org delete + deletion
+ * email) for the worker. The DB wipe is the critical, atomic step — if the
+ * enqueue fails the data is already gone, so we log + report
+ * `cleanupEnqueued:false` rather than fail the request (which would falsely
+ * imply nothing happened).
+ */
+const deleteTenantAccount = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<DeleteAccountResult> => {
+  const snapshot = await runWithDb(layer, (db) =>
+    tenantDeletionSnapshot(db, tenantId),
+  );
+  if (!snapshot) return { kind: "tenant_not_found" };
+
+  const wipe = await Effect.runPromise(
+    Effect.provide(redactShop(tenantId), layer),
+  );
+
+  let cleanupEnqueued = false;
+  try {
+    await accountCleanupPublisher(cfg.databaseUrl)({
+      tenantId: snapshot.id,
+      tenantName: snapshot.name,
+      workosOrganizationId: snapshot.workosOrganizationId,
+      notificationEmail: snapshot.notificationEmail,
+    });
+    cleanupEnqueued = true;
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[account-delete] tenant=${tenantId} wiped but cleanup enqueue failed:`,
+      cause,
+    );
+  }
+
+  return {
+    kind: "deleted",
+    tenantId,
+    deletedCases: wipe.deletedCases,
+    deletedAuditRows: wipe.deletedAuditRows,
+    deletedConnectorRows: wipe.deletedConnectorRows,
+    workosOrganizationId: snapshot.workosOrganizationId,
+    cleanupEnqueued,
+  };
+};
+
+// POST /dashboard/account/delete — a manager deletes their OWN tenant.
+const handleDashboardAccountDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const result = await deleteTenantAccount(cfg, layer, auth.tenantId);
+  return sendJson(res, result.kind === "tenant_not_found" ? 404 : 200, result);
+};
+
+// POST /admin/tenants/:id/delete — platform operator deletes ANY tenant.
+const handleAdminTenantDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  if (!cfg.adminApiToken) {
+    return sendJson(res, 503, { error: "admin_api_not_configured" });
+  }
+  const parsed = parseAdminAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.adminApiToken,
+  );
+  if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.message });
+  const { id } = req.params as { id: string };
+  const result = await deleteTenantAccount(cfg, layer, id);
+  return sendJson(res, result.kind === "tenant_not_found" ? 404 : 200, result);
 };
 
 // ---- Dashboard catalog / models / tenant (reads) ----
@@ -2767,6 +2887,26 @@ export const startServer = async (
     "Disconnect (revoke) a connector",
     handleDashboardDisconnect,
   );
+  dashboardPost(
+    "/dashboard/account/delete",
+    "Delete the tenant's own account (irreversible)",
+    handleDashboardAccountDelete,
+  );
+
+  // ---- Admin (platform operator) ----
+  app.post(
+    "/admin/tenants/:id/delete",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Delete any tenant's account (platform operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminTenantDelete(cfg, layer, req, res);
+      return res;
+    },
+  );
 
   // ---- System ----
   app.get(
@@ -2827,6 +2967,9 @@ export const startServer = async (
         await cachedApprovalBoss.stop();
         cachedApprovalBoss = null;
       }
+      // Drop the memoized cleanup publisher so a fresh server re-ensures
+      // the queue against a new pg-boss instance.
+      cachedCleanupPublisher = null;
     },
   };
 };
