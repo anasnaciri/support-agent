@@ -4,6 +4,7 @@ import {
   PlatformMailService,
   PlatformMailUnconfigured,
   TenantRepository,
+  type SendAccountDeletedInput,
   type SendApprovalLinkInput,
 } from "@support-agent/services";
 
@@ -98,6 +99,33 @@ const renderApprovalEmail = (input: SendApprovalLinkInput): {
   return { subject, text, html };
 };
 
+const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+} => {
+  const subject = `Your ${input.tenantName} account has been deleted`;
+  const lines = [
+    `Your ${input.tenantName} account on the support platform has been deleted.`,
+    ``,
+    `All associated data — cases, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.`,
+    ``,
+    `If you did not request this, contact support immediately.`,
+  ];
+  const text = lines.join("\n");
+  const escape = (s: string): string =>
+    s
+      .replace(/&/gu, "&amp;")
+      .replace(/</gu, "&lt;")
+      .replace(/>/gu, "&gt;");
+  const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
+  <p>Your <strong>${escape(input.tenantName)}</strong> account on the support platform has been deleted.</p>
+  <p>All associated data — cases, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.</p>
+  <p style="color:#666;font-size:12px;margin-top:24px">If you did not request this, contact support immediately.</p>
+</body></html>`;
+  return { subject, text, html };
+};
+
 export const PlatformMailServiceLive = Layer.effect(
   PlatformMailService,
   Effect.gen(function* () {
@@ -105,7 +133,51 @@ export const PlatformMailServiceLive = Layer.effect(
     const config = yield* ResendConfig;
     const fetchImpl = config.fetchImpl ?? fetch;
 
+    // Shared Resend POST. Renders are passed in already-built so each
+    // mail kind owns its template.
+    const post = (
+      tenantId: SendAccountDeletedInput["tenantId"],
+      recipient: string,
+      rendered: { subject: string; text: string; html: string },
+    ): Effect.Effect<void, PlatformMailSendFailed> =>
+      Effect.gen(function* () {
+        const res = yield* Effect.tryPromise({
+          try: () =>
+            fetchImpl(RESEND_ENDPOINT, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${config.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                from: config.fromAddress,
+                to: [recipient],
+                subject: rendered.subject,
+                text: rendered.text,
+                html: rendered.html,
+              }),
+            }),
+          catch: (cause) =>
+            new PlatformMailSendFailed({ tenantId, cause }),
+        });
+        if (!res.ok) {
+          const body = yield* Effect.promise(() => safeJsonBody(res));
+          return yield* Effect.fail(
+            new PlatformMailSendFailed({
+              tenantId,
+              cause: { status: res.status, body },
+            }),
+          );
+        }
+      });
+
     return PlatformMailService.of({
+      sendAccountDeleted: (input) =>
+        post(
+          input.tenantId,
+          input.recipientEmail,
+          renderAccountDeletedEmail(input),
+        ),
       sendApprovalLink: (input) =>
         Effect.gen(function* () {
           // 1. Resolve recipient via the TenantRepository Tag (db Live impl

@@ -200,6 +200,43 @@ describe("PlatformMailServiceLive — Resend", () => {
     }
   });
 
+  it("sendAccountDeleted POSTs to the recipient passed in directly (no tenant lookup)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    // tenantRepoMissing would FAIL if sendAccountDeleted tried to resolve the
+    // recipient via the repo — proves the recipient comes from the input.
+    const layer = PlatformMailServiceLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(tenantRepoMissing(), resendConfigWith(fetchImpl)),
+      ),
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const mail = yield* PlatformMailService;
+          yield* mail.sendAccountDeleted({
+            tenantId,
+            tenantName: "Acme Co",
+            recipientEmail: "owner@acme.com",
+          });
+        }),
+        layer,
+      ),
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("https://api.resend.com/emails");
+    const body = JSON.parse(init!.body as string) as {
+      to: ReadonlyArray<string>;
+      subject: string;
+      text: string;
+    };
+    expect(body.to).toEqual(["owner@acme.com"]);
+    expect(body.subject).toContain("Acme Co");
+    expect(body.text).toContain("deleted");
+  });
+
   it("maps TenantNotFound to PlatformMailSendFailed", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
     const layer = PlatformMailServiceLive.pipe(

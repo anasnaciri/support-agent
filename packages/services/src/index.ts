@@ -23,6 +23,7 @@ export * from "./tracking-service.js";
 export * from "./tracking-no-provider.js";
 export * from "./conversation-service.js";
 export * from "./platform-mail.js";
+export * from "./org-directory.js";
 export * from "./approval-link-config.js";
 export * from "./timer-service.js";
 export * from "./image-hash-store.js";

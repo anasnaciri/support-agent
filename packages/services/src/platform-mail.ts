@@ -47,11 +47,27 @@ export interface SendApprovalLinkInput {
   readonly rejectUrl: string;
 }
 
+export interface SendAccountDeletedInput {
+  readonly tenantId: TenantId;
+  /** Display name of the deleted tenant, for the email body. */
+  readonly tenantName: string;
+  /**
+   * Recipient address. Unlike `sendApprovalLink`, this is passed in
+   * directly rather than resolved from `TenantRepository`: by the time
+   * the deletion-cleanup job runs, the tenant row is already gone, so the
+   * api captures the notification email BEFORE the wipe and hands it here.
+   */
+  readonly recipientEmail: string;
+}
+
 export class PlatformMailService extends Context.Tag("PlatformMailService")<
   PlatformMailService,
   {
     readonly sendApprovalLink: (
       input: SendApprovalLinkInput,
+    ) => Effect.Effect<void, PlatformMailError>;
+    readonly sendAccountDeleted: (
+      input: SendAccountDeletedInput,
     ) => Effect.Effect<void, PlatformMailError>;
   }
 >() {}
@@ -60,10 +76,12 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
 // Test layer
 // ============================================================
 
-export interface PlatformMailTestRecord {
-  readonly kind: "approval-link";
-  readonly input: SendApprovalLinkInput;
-}
+export type PlatformMailTestRecord =
+  | { readonly kind: "approval-link"; readonly input: SendApprovalLinkInput }
+  | {
+      readonly kind: "account-deleted";
+      readonly input: SendAccountDeletedInput;
+    };
 
 export interface PlatformMailTestHandle {
   readonly sent: ReadonlyArray<PlatformMailTestRecord>;
@@ -103,6 +121,26 @@ export const makePlatformMailServiceTest = (
               );
             }
             sent.push({ kind: "approval-link", input });
+            return Effect.succeed(undefined);
+          },
+        ),
+      sendAccountDeleted: (input) =>
+        Effect.suspend(
+          (): Effect.Effect<void, PlatformMailError> => {
+            if (fixtures.unconfiguredFor?.has(input.tenantId)) {
+              return Effect.fail(
+                new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+              );
+            }
+            if (fixtures.failAll) {
+              return Effect.fail(
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause: "fixture: failAll",
+                }),
+              );
+            }
+            sent.push({ kind: "account-deleted", input });
             return Effect.succeed(undefined);
           },
         ),
