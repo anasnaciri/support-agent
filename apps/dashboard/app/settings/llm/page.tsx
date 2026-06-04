@@ -134,6 +134,20 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
           </AlertDescription>
         </Alert>
       ) : null}
+      {errorRaw === "legal_acceptance_required" ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            Accept the current data processing notice and DPA in{" "}
+            <Link
+              href="/settings/legal"
+              className="font-medium text-primary hover:underline"
+            >
+              Settings → Legal
+            </Link>{" "}
+            before connecting an LLM provider.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <Card>
         <CardHeader className="pb-3">

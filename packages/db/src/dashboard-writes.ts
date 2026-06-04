@@ -9,6 +9,7 @@ import {
   tenants,
 } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
+import type { LegalAcceptance } from "@support-agent/services";
 
 // Write operations backing the dashboard's HTTP API (Path B). Ported from
 // the dashboard's lib/case-actions.ts so the api owns the mutation (the
@@ -115,6 +116,7 @@ export const createTenantForOrg = async (
     readonly organizationId: string;
     readonly name: string;
     readonly notificationEmail: string;
+    readonly legalAcceptance: LegalAcceptance;
   },
 ): Promise<OnboardingResult> => {
   const existing = await db
@@ -130,7 +132,10 @@ export const createTenantForOrg = async (
       id,
       name: input.name,
       workosOrganizationId: input.organizationId,
-      settings: { notificationEmail: input.notificationEmail },
+      settings: {
+        notificationEmail: input.notificationEmail,
+        legalAcceptance: input.legalAcceptance,
+      },
     });
     return { tenantId: id, alreadyExisted: false };
   } catch (cause) {

@@ -2,26 +2,43 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { TenantId } from "@support-agent/agent-core";
 import {
+  DATA_PROCESSING_NOTICE_VERSION,
+  DPA_VERSION,
   TenantNotFound,
   TenantRepository,
   TenantRepositoryTest,
   TenantSettings,
   defaultRefundPolicy,
+  type LegalAcceptance,
   type RefundPolicy,
 } from "../src/index.js";
 
 const tenantId = TenantId("00000000-0000-0000-0000-000000000001");
 
+const currentLegalAcceptance: LegalAcceptance = {
+  dataProcessingNoticeVersion: DATA_PROCESSING_NOTICE_VERSION,
+  dpaVersion: DPA_VERSION,
+  acceptedAt: "2026-06-04T12:00:00.000Z",
+  acceptedByUserId: "11111111-1111-1111-1111-111111111111",
+};
+
+const settings = (
+  overrides: Partial<ConstructorParameters<typeof TenantSettings>[0]> = {},
+): TenantSettings =>
+  new TenantSettings({
+    notificationEmail: "ops@example.com",
+    refundPolicy: defaultRefundPolicy,
+    retentionDays: 730,
+    supplierEscalationSheet: null,
+    legalAcceptance: null,
+    ...overrides,
+  });
+
 describe("TenantRepositoryTest", () => {
   it("returns the configured settings on getSettings", async () => {
-    const settings = new TenantSettings({
-      notificationEmail: "ops@example.com",
-      refundPolicy: defaultRefundPolicy,
-      retentionDays: 730,
-      supplierEscalationSheet: null,
-    });
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
     const layer = TenantRepositoryTest({
-      settingsByTenant: new Map([[tenantId, settings]]),
+      settingsByTenant: new Map([[tenantId, initial]]),
     });
     const got = await Effect.runPromise(
       Effect.provide(
@@ -34,6 +51,7 @@ describe("TenantRepositoryTest", () => {
     );
     expect(got.notificationEmail).toBe("ops@example.com");
     expect(got.refundPolicy.askAboveMinorUnits).toBe(0);
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
   });
 
   it("fails with TenantNotFound when the tenant is absent", async () => {
@@ -52,12 +70,7 @@ describe("TenantRepositoryTest", () => {
   });
 
   it("setRefundPolicy replaces the refundPolicy block (preserves notificationEmail)", async () => {
-    const initial = new TenantSettings({
-      notificationEmail: "ops@example.com",
-      refundPolicy: defaultRefundPolicy,
-      retentionDays: 730,
-      supplierEscalationSheet: null,
-    });
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, initial]]),
     });
@@ -78,6 +91,7 @@ describe("TenantRepositoryTest", () => {
     );
     expect(got.notificationEmail).toBe("ops@example.com");
     expect(got.refundPolicy).toEqual(updatedPolicy);
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
   });
 
   it("setRefundPolicy fails when the tenant is absent (TenantNotFound)", async () => {
@@ -99,12 +113,7 @@ describe("TenantRepositoryTest", () => {
   });
 
   it("setSupplierEscalationSheet stores the sheet target (preserves siblings)", async () => {
-    const initial = new TenantSettings({
-      notificationEmail: "ops@example.com",
-      refundPolicy: defaultRefundPolicy,
-      retentionDays: 730,
-      supplierEscalationSheet: null,
-    });
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
     const layer = TenantRepositoryTest({
       settingsByTenant: new Map([[tenantId, initial]]),
     });
@@ -124,6 +133,7 @@ describe("TenantRepositoryTest", () => {
     );
     expect(got.notificationEmail).toBe("ops@example.com");
     expect(got.refundPolicy).toEqual(defaultRefundPolicy);
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
     expect(got.supplierEscalationSheet).toEqual({
       spreadsheetId: "abc123",
       range: "Escalations!A:F",
@@ -132,10 +142,7 @@ describe("TenantRepositoryTest", () => {
   });
 
   it("setSupplierEscalationSheet clears the sheet when passed null", async () => {
-    const initial = new TenantSettings({
-      notificationEmail: "ops@example.com",
-      refundPolicy: defaultRefundPolicy,
-      retentionDays: 730,
+    const initial = settings({
       supplierEscalationSheet: {
         spreadsheetId: "abc123",
         range: "Escalations!A:F",
@@ -165,6 +172,44 @@ describe("TenantRepositoryTest", () => {
         Effect.gen(function* () {
           const repo = yield* TenantRepository;
           yield* repo.setSupplierEscalationSheet(tenantId, null);
+        }),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(TenantNotFound);
+    }
+  });
+
+  it("setLegalAcceptance records the current notice/DPA acceptance (preserves siblings)", async () => {
+    const initial = settings();
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setLegalAcceptance(tenantId, currentLegalAcceptance);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.notificationEmail).toBe("ops@example.com");
+    expect(got.refundPolicy).toEqual(defaultRefundPolicy);
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
+  });
+
+  it("setLegalAcceptance fails when the tenant is absent (TenantNotFound)", async () => {
+    const layer = TenantRepositoryTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setLegalAcceptance(tenantId, currentLegalAcceptance);
         }),
         layer,
       ),

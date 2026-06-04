@@ -7,6 +7,7 @@ import {
   TenantRepository,
   TenantRepositoryDbError,
   TenantSettings,
+  type LegalAcceptance,
   type RefundPolicy,
   type SupplierEscalationSheet,
 } from "@support-agent/services";
@@ -72,6 +73,34 @@ const decodeSupplierEscalationSheet = (
   };
 };
 
+const decodeLegalAcceptance = (raw: unknown): LegalAcceptance | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const dataProcessingNoticeVersion = r["dataProcessingNoticeVersion"];
+  const dpaVersion = r["dpaVersion"];
+  const acceptedAt = r["acceptedAt"];
+  const acceptedByUserId = r["acceptedByUserId"];
+  if (
+    typeof dataProcessingNoticeVersion !== "string" ||
+    dataProcessingNoticeVersion.length === 0 ||
+    typeof dpaVersion !== "string" ||
+    dpaVersion.length === 0 ||
+    typeof acceptedAt !== "string" ||
+    acceptedAt.length === 0
+  ) {
+    return null;
+  }
+  return {
+    dataProcessingNoticeVersion,
+    dpaVersion,
+    acceptedAt,
+    acceptedByUserId:
+      typeof acceptedByUserId === "string" && acceptedByUserId.length > 0
+        ? acceptedByUserId
+        : null,
+  };
+};
+
 export const TenantRepositoryLive = Layer.effect(
   TenantRepository,
   Effect.gen(function* () {
@@ -108,6 +137,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly refundPolicy?: unknown;
                 readonly retentionDays?: unknown;
                 readonly supplierEscalationSheet?: unknown;
+                readonly legalAcceptance?: unknown;
               }
             | null;
           const notificationEmail =
@@ -128,11 +158,15 @@ export const TenantRepositoryLive = Layer.effect(
           const supplierEscalationSheet = decodeSupplierEscalationSheet(
             settings?.supplierEscalationSheet,
           );
+          const legalAcceptance = decodeLegalAcceptance(
+            settings?.legalAcceptance,
+          );
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
             retentionDays,
             supplierEscalationSheet,
+            legalAcceptance,
           });
         }),
 
@@ -185,6 +219,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setSupplierEscalationSheet",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setLegalAcceptance: (tenantId, acceptance) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          const acceptanceJson = JSON.stringify({
+            legalAcceptance: acceptance,
+          });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${acceptanceJson}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setLegalAcceptance",
                 cause,
               }),
           });

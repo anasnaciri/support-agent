@@ -46,9 +46,9 @@ For each question Shopify asks, we record the form answer and link to supporting
 
 **Answer:** Yes.
 
-We maintain a data processing notice listing the categories of personal data we access (customer name, email, address) and the purposes (support triage, order-status replies, missing-package verification). The notice is published at `/privacy` and linked from the install screen.
+We maintain a data processing notice listing the categories of personal data we access (customer name, email, address, support-message content, order/fulfillment data, shipping address fields when needed for support, and customer-provided image attachments) and the purposes (support triage, order-status replies, missing-package verification, damaged-product review, approval preparation, tool execution, and audit). The notice is published by the API at `/legal/data-processing` and linked from dashboard onboarding plus the Legal settings page.
 
-**Status:** Aspirational — the privacy notice is on the production-readiness backlog (`todo.md` Phase 4 / Phase 8). Truthful for the dev-store filing because the dev-store install screen is internal-only.
+**Status:** Implemented 2026-06-04. The current notice version is stored in tenant settings when accepted.
 
 ### 2. Do you limit your use of personal data to that purpose?
 
@@ -60,11 +60,11 @@ OpenRouter is disclosed as a subprocessor for LLM inference — customer data ap
 
 ### 3. Do you have privacy and data protection agreements with your merchants?
 
-**Answer:** Not yet (development); Yes (production).
+**Answer:** Yes.
 
-A Data Processing Agreement (DPA) will be in place before onboarding production merchants. The current install flow is for the support-agent test store only.
+A lightweight Data Processing Addendum is served with the data processing notice at `/legal/data-processing`. Dashboard onboarding requires acceptance before tenant creation, and existing tenants can accept current versions from Settings -> Legal. The API blocks production connector credential writes until the tenant has accepted the current notice/DPA versions.
 
-**Status:** Production gap, tracked in `todo.md`.
+**Status:** Implemented 2026-06-04. Acceptance is persisted in `tenants.settings.legalAcceptance`.
 
 ### 4. Do you respect and apply customers' consent decisions?
 
@@ -96,7 +96,7 @@ Customers can request human-only handling at any time, transitioning their case 
 
 Default retention is 24 months from case resolution; merchants will be able to configure shorter retention per data category. Retention is enforced via a daily sweep cron that deletes resolved cases, their `case_state_transitions` rows, and their `audit_log` entries past the configured window.
 
-**Status:** Sweep cron not yet implemented — tracked in `todo.md` as a production gap.
+**Status:** Implemented 2026-05-25 via the worker retention sweep cron.
 
 ### 8. Encrypt data at rest and in transit?
 
@@ -125,7 +125,7 @@ Test and production environments use distinct databases, distinct API credential
 - Customer data never leaves the per-tenant Postgres database except (a) for the merchant-authorised LLM provider's inference call (disclosed subprocessor) and (b) in support replies sent through the merchant's own messaging connector to the originating customer.
 - All `.env*` files are gitignored except `.env.example` (no secrets in source control).
 - Every runtime access to customer data is recorded in an immutable `audit_log` table (`packages/db/src/audit-log-live.ts`).
-- PII redaction in audit log + OTel traces is tracked in `todo.md` Phase 4 line 145.
+- Audit-log PII redaction is implemented and enabled with `AUDIT_LOG_REDACT_PII=1`. OTel trace-side redaction remains a separate hardening follow-up.
 
 ### 12. Limit staff access to customers' personal data?
 
@@ -162,13 +162,13 @@ The policy will be formalized as a written runbook before the first production m
 
 ## Real production gaps
 
-Three items are honestly answered "aspirational" / "in progress" above. These are the must-fix items before onboarding the first paying merchant (not blockers for the dev-store filing):
+The original three code gaps from this record are now closed:
 
-1. **Privacy / data processing notice** — public document covering categories of personal data accessed and processing purposes; link from the install screen.
-2. **Data Processing Agreement (DPA) template** — merchant accepts during the install flow before the first `connector_connections` row is written.
-3. **Retention sweep cron** — daily job deleting resolved cases + audit log entries past the configured per-tenant retention window.
+1. **Privacy / data processing notice** — implemented at `/legal/data-processing` and linked from onboarding / Settings -> Legal.
+2. **Data Processing Agreement (DPA) template + acceptance** — implemented in the same public legal document; acceptance is stored in `tenants.settings.legalAcceptance` and connector writes are blocked until current versions are accepted.
+3. **Retention sweep cron** — implemented in the worker and runs daily for resolved cases past the tenant retention window.
 
-All three are tracked in `todo.md` (Phase 4 / Phase 8).
+Operational production readiness still depends on deployment evidence (TLS, encrypted backups, access control, incident response, and real provider configuration), which is tracked separately in `todo.md`.
 
 ---
 

@@ -58,6 +58,18 @@ describe("apps/api — server smoke (no DB)", () => {
     expect(paths).toContain("/shopify/install");
   });
 
+  it("GET /legal/data-processing serves the merchant data notice + DPA", async () => {
+    const res = await fetch(`${baseUrl}/legal/data-processing`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
+    const body = await res.text();
+    expect(body).toContain("Data Processing Notice");
+    expect(body).toContain("Data Processing Addendum");
+    expect(body).toContain("customer name");
+    expect(body).toContain("customer email");
+    expect(body).toContain("OpenRouter");
+  });
+
   it("returns 404 {error:not_found} for unknown paths", async () => {
     const res = await fetch(`${baseUrl}/nope`);
     expect(res.status).toBe(404);

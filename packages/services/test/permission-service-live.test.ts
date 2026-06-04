@@ -238,6 +238,7 @@ const runCheck = async (
           refundPolicy: policyForTenant,
           retentionDays: 730,
           supplierEscalationSheet: null,
+          legalAcceptance: null,
         }),
       ],
     ]),

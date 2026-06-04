@@ -74,7 +74,11 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
 
-  const rows = await api.connections(ctx);
+  const [rows, settings] = await Promise.all([
+    api.connections(ctx),
+    api.settings(ctx),
+  ]);
+  const legalAccepted = settings.legalAcceptance !== null;
 
   const byProvider = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
@@ -128,6 +132,23 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
       {connectedLabel ? (
         <Alert variant="success">
           <AlertDescription>{connectedLabel} connected.</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!legalAccepted ? (
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Legal acceptance required</AlertTitle>
+          <AlertDescription>
+            Accept the current data processing notice and DPA in{" "}
+            <Link
+              href="/settings/legal"
+              className="font-medium text-primary hover:underline"
+            >
+              Settings → Legal
+            </Link>{" "}
+            before connecting production providers.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -191,6 +212,10 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                         </form>
                       ) : null}
                     </>
+                  ) : !legalAccepted ? (
+                    <Button asChild>
+                      <Link href="/settings/legal">Review legal terms</Link>
+                    </Button>
                   ) : apiBaseUrl ? (
                     <Button asChild>
                       <a

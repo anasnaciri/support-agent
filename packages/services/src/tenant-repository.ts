@@ -84,6 +84,29 @@ export interface SupplierEscalationSheet {
 export const defaultSupplierEscalationSheet: SupplierEscalationSheet | null =
   null;
 
+/**
+ * Versions accepted by merchants before production connector credentials are
+ * written. Bump these when the merchant-facing notice or DPA materially
+ * changes; tenants with older versions must re-accept before new connector
+ * writes are allowed.
+ */
+export const DATA_PROCESSING_NOTICE_VERSION = "2026-06-04";
+export const DPA_VERSION = "2026-06-04";
+
+export interface LegalAcceptance {
+  readonly dataProcessingNoticeVersion: string;
+  readonly dpaVersion: string;
+  readonly acceptedAt: string;
+  readonly acceptedByUserId: string | null;
+}
+
+export const legalAcceptanceIsCurrent = (
+  acceptance: LegalAcceptance | null,
+): boolean =>
+  acceptance?.dataProcessingNoticeVersion === DATA_PROCESSING_NOTICE_VERSION &&
+  acceptance.dpaVersion === DPA_VERSION &&
+  acceptance.acceptedAt.length > 0;
+
 export class TenantSettings extends Data.Class<{
   /** Email the platform sends approval / system mail to. */
   readonly notificationEmail: string | null;
@@ -107,6 +130,11 @@ export class TenantSettings extends Data.Class<{
    * its sheet-write step entirely.
    */
   readonly supplierEscalationSheet: SupplierEscalationSheet | null;
+  /**
+   * Merchant acceptance of the current data processing notice + DPA.
+   * Null means connector credential writes must be blocked.
+   */
+  readonly legalAcceptance: LegalAcceptance | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -146,6 +174,14 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setSupplierEscalationSheet: (
       tenantId: TenantId,
       sheet: SupplierEscalationSheet | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Record that the tenant accepted the current data processing notice and
+     * DPA. This is a legal/compliance gate for production connector writes.
+     */
+    readonly setLegalAcceptance: (
+      tenantId: TenantId,
+      acceptance: LegalAcceptance,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -188,6 +224,7 @@ export const TenantRepositoryTest = (
             refundPolicy: policy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
+            legalAcceptance: prev.legalAcceptance,
           }),
         );
         return Effect.void;
@@ -204,6 +241,24 @@ export const TenantRepositoryTest = (
             refundPolicy: prev.refundPolicy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: sheet,
+            legalAcceptance: prev.legalAcceptance,
+          }),
+        );
+        return Effect.void;
+      },
+      setLegalAcceptance: (tenantId, acceptance) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            notificationEmail: prev.notificationEmail,
+            refundPolicy: prev.refundPolicy,
+            retentionDays: prev.retentionDays,
+            supplierEscalationSheet: prev.supplierEscalationSheet,
+            legalAcceptance: acceptance,
           }),
         );
         return Effect.void;

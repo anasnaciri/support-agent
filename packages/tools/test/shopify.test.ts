@@ -775,6 +775,7 @@ describe("refund.recommend — tool wire-up", () => {
             refundPolicy: defaultRefundPolicy,
             retentionDays: 730,
             supplierEscalationSheet: null,
+            legalAcceptance: null,
           }),
         ],
       ]),

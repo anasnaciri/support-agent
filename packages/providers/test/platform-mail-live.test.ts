@@ -62,10 +62,12 @@ const tenantRepoWith = (
             refundPolicy: defaultRefundPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
+            legalAcceptance: null,
           }),
         ),
       setRefundPolicy: () => Effect.void,
       setSupplierEscalationSheet: () => Effect.void,
+      setLegalAcceptance: () => Effect.void,
     }),
   );
 
@@ -75,6 +77,9 @@ const tenantRepoMissing = (): Layer.Layer<TenantRepository> =>
     TenantRepository.of({
       getSettings: () => Effect.fail(new TenantNotFound({ tenantId })),
       setRefundPolicy: () => Effect.fail(new TenantNotFound({ tenantId })),
+      setSupplierEscalationSheet: () =>
+        Effect.fail(new TenantNotFound({ tenantId })),
+      setLegalAcceptance: () => Effect.fail(new TenantNotFound({ tenantId })),
     }),
   );
 

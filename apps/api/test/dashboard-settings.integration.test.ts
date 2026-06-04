@@ -10,7 +10,11 @@ import {
   tenantAgentOverrides,
   tenants,
 } from "@support-agent/db";
-import { ConnectorCredentialStore } from "@support-agent/services";
+import {
+  DATA_PROCESSING_NOTICE_VERSION,
+  DPA_VERSION,
+  ConnectorCredentialStore,
+} from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import { startServer, type ServerHandle } from "../src/server.js";
 import type { ApiConfig } from "../src/bootstrap.js";
@@ -28,9 +32,19 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   const otherOrgId = `org_${randomUUID().slice(0, 8)}`;
   const noTenantOrgId = `org_${randomUUID().slice(0, 8)}`;
   const freshOrgId = `org_${randomUUID().slice(0, 8)}`;
+  const legalFreshOrgId = `org_${randomUUID().slice(0, 8)}`;
+  const noLegalOrgId = `org_${randomUUID().slice(0, 8)}`;
+  const blockedOrgId = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
   const otherTenantId = randomUUID();
-  const createdTenantIds: string[] = [tenantId, otherTenantId];
+  const noLegalTenantId = randomUUID();
+  const blockedTenantId = randomUUID();
+  const createdTenantIds: string[] = [
+    tenantId,
+    otherTenantId,
+    noLegalTenantId,
+    blockedTenantId,
+  ];
 
   const cfg = {
     port: 0,
@@ -43,7 +57,13 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       callbackUrl: "http://localhost/shopify/auth/callback",
       apiVersion: "2025-01",
     },
-    google: null,
+    google: {
+      clientId: "google-client",
+      clientSecret: "google-secret",
+      callbackUrl: "http://localhost/google/auth/callback",
+      pubsubTopic: null,
+      pushToken: null,
+    },
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
     dashboardApiToken: token,
@@ -98,8 +118,30 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   beforeAll(async () => {
     if (!raw) return;
     await raw.db.insert(tenants).values([
-      { id: tenantId, name: "Acme", workosOrganizationId: orgId },
+      {
+        id: tenantId,
+        name: "Acme",
+        workosOrganizationId: orgId,
+        settings: {
+          legalAcceptance: {
+            dataProcessingNoticeVersion: DATA_PROCESSING_NOTICE_VERSION,
+            dpaVersion: DPA_VERSION,
+            acceptedAt: "2026-06-04T12:00:00.000Z",
+            acceptedByUserId: "11111111-1111-1111-1111-111111111111",
+          },
+        },
+      },
       { id: otherTenantId, name: "Other", workosOrganizationId: otherOrgId },
+      {
+        id: noLegalTenantId,
+        name: "No Legal",
+        workosOrganizationId: noLegalOrgId,
+      },
+      {
+        id: blockedTenantId,
+        name: "Blocked Legal",
+        workosOrganizationId: blockedOrgId,
+      },
     ]);
     handle = await startServer(cfg);
     baseUrl = `http://localhost:${handle.port}`;
@@ -177,11 +219,13 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       retentionDays: number;
       supplierEscalationSheet: unknown;
       notificationEmail: unknown;
+      legalAcceptance: unknown;
     };
     expect(body.refundPolicy.currencyCode).toBe("USD");
     expect(body.refundPolicy.denyAboveMinorUnits).toBe(50000);
     expect(body.retentionDays).toBe(730);
     expect(body.supplierEscalationSheet).toBeNull();
+    expect(body.legalAcceptance).toBeNull();
   });
 
   // ---- Onboarding ----
@@ -189,7 +233,11 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   it("POST /dashboard/onboarding creates a tenant for the org (idempotent)", async () => {
     const res = await post(
       "/dashboard/onboarding",
-      { name: "Fresh Co", notificationEmail: "ops@fresh.co" },
+      {
+        name: "Fresh Co",
+        notificationEmail: "ops@fresh.co",
+        legalAccepted: true,
+      },
       freshOrgId,
     );
     expect(res.status).toBe(200);
@@ -204,7 +252,11 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     // Re-submit → idempotent, same tenant id.
     const again = await post(
       "/dashboard/onboarding",
-      { name: "Fresh Co", notificationEmail: "ops@fresh.co" },
+      {
+        name: "Fresh Co",
+        notificationEmail: "ops@fresh.co",
+        legalAccepted: true,
+      },
       freshOrgId,
     );
     const againBody = (await again.json()) as {
@@ -213,21 +265,83 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     };
     expect(againBody.alreadyExisted).toBe(true);
     expect(againBody.tenantId).toBe(body.tenantId);
+
+    const [row] = await raw!.db
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, body.tenantId))
+      .limit(1);
+    const legal = (row?.settings as { legalAcceptance?: unknown })
+      ?.legalAcceptance as {
+      dataProcessingNoticeVersion?: string;
+      dpaVersion?: string;
+      acceptedAt?: string;
+      acceptedByUserId?: string | null;
+    };
+    expect(legal.dataProcessingNoticeVersion).toBe(
+      DATA_PROCESSING_NOTICE_VERSION,
+    );
+    expect(legal.dpaVersion).toBe(DPA_VERSION);
+    expect(legal.acceptedAt).toMatch(/T/);
+  });
+
+  it("POST /dashboard/onboarding requires legal acceptance", async () => {
+    const res = await post(
+      "/dashboard/onboarding",
+      { name: "Legal Fresh Co", notificationEmail: "ops@legal-fresh.co" },
+      legalFreshOrgId,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
   });
 
   it("POST /dashboard/onboarding 400s on a short name / bad email", async () => {
     const a = await post(
       "/dashboard/onboarding",
-      { name: "x", notificationEmail: "ops@fresh.co" },
+      { name: "x", notificationEmail: "ops@fresh.co", legalAccepted: true },
       `org_${randomUUID().slice(0, 8)}`,
     );
     expect(a.status).toBe(400);
     const b = await post(
       "/dashboard/onboarding",
-      { name: "Valid Name", notificationEmail: "nope" },
+      {
+        name: "Valid Name",
+        notificationEmail: "nope",
+        legalAccepted: true,
+      },
       `org_${randomUUID().slice(0, 8)}`,
     );
     expect(b.status).toBe(400);
+  });
+
+  it("POST /dashboard/legal-acceptance records acceptance for an existing tenant", async () => {
+    const res = await post(
+      "/dashboard/legal-acceptance",
+      {},
+      noLegalOrgId,
+      headers(noLegalOrgId, {
+        "x-user-id": "22222222-2222-2222-2222-222222222222",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [row] = await raw!.db
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, noLegalTenantId))
+      .limit(1);
+    const legal = (row?.settings as { legalAcceptance?: unknown })
+      ?.legalAcceptance as {
+      dataProcessingNoticeVersion?: string;
+      dpaVersion?: string;
+      acceptedByUserId?: string | null;
+    };
+    expect(legal.dataProcessingNoticeVersion).toBe(
+      DATA_PROCESSING_NOTICE_VERSION,
+    );
+    expect(legal.dpaVersion).toBe(DPA_VERSION);
+    expect(legal.acceptedByUserId).toBe(
+      "22222222-2222-2222-2222-222222222222",
+    );
   });
 
   // ---- Agent model override ----
@@ -278,6 +392,28 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   });
 
   // ---- LLM credential ----
+
+  it("POST /dashboard/llm rejects tenants without current legal acceptance", async () => {
+    const res = await post(
+      "/dashboard/llm",
+      {
+        provider: "openrouter",
+        apiKey: "sk-or-v1-abcdefgh",
+      },
+      blockedOrgId,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
+  });
+
+  it("GET /google/install rejects tenants without current legal acceptance", async () => {
+    const res = await fetch(
+      `${baseUrl}/google/install?tenant=${blockedTenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
+  });
 
   it("POST /dashboard/llm connects then revokes a credential", async () => {
     if (!raw) return;

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { requireOrganization } from "@/lib/api-client";
+import { dataProcessingNoticeUrl } from "@/lib/legal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { OnboardingForm } from "./OnboardingForm";
@@ -10,6 +11,7 @@ export default async function OnboardingPage() {
   if (org.existingTenantId) {
     redirect("/");
   }
+  const legalUrl = dataProcessingNoticeUrl();
 
   return (
     <div className="mx-auto mt-12 max-w-xl">
@@ -37,7 +39,7 @@ export default async function OnboardingPage() {
             </span>{" "}
             once the tenant exists.
           </p>
-          <OnboardingForm defaultEmail={org.email} />
+          <OnboardingForm defaultEmail={org.email} legalUrl={legalUrl} />
         </CardContent>
       </Card>
     </div>

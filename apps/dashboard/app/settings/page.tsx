@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bot,
   ClipboardList,
+  FileText,
   KeyRound,
   Plug,
   ShieldCheck,
@@ -46,6 +47,13 @@ const TILES = [
       "Bring your own OpenRouter, Anthropic, or OpenAI key. Required for any agent run.",
   },
   {
+    href: "/settings/legal",
+    icon: FileText,
+    title: "Legal",
+    description:
+      "Accept the data processing notice and DPA before connecting production providers.",
+  },
+  {
     href: "/settings/refund-policy",
     icon: Banknote,
     title: "Refund policy",
@@ -75,6 +83,7 @@ export default async function SettingsLanding() {
     if (href === "/settings/agents") return String(catalog.agents.length);
     if (href === "/settings/permissions") return String(catalog.tools.length);
     if (href === "/settings/llm") return "BYOK";
+    if (href === "/settings/legal") return "DPA";
     if (href === "/settings/refund-policy") return "$";
     if (href === "/settings/usage") return "LLM";
     if (href === "/settings/integrations/google_sheets") return "📋";

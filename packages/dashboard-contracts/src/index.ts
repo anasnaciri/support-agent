@@ -332,11 +332,19 @@ export interface SupplierEscalationSheetView {
   readonly description: string | null;
 }
 
+export interface LegalAcceptanceView {
+  readonly dataProcessingNoticeVersion: string;
+  readonly dpaVersion: string;
+  readonly acceptedAt: string;
+  readonly acceptedByUserId: string | null;
+}
+
 export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
   readonly retentionDays: number;
   readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
+  readonly legalAcceptance: LegalAcceptanceView | null;
 }
 
 // ============================================================

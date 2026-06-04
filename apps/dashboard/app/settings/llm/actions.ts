@@ -37,6 +37,12 @@ export const connectLlmAction = async (formData: FormData): Promise<void> => {
     const err = (res.body as { error?: string } | null)?.error ?? "bad_provider";
     redirect(`/settings/llm?error=${err}`);
   }
+  if (res.status === 403) {
+    const err =
+      (res.body as { error?: string } | null)?.error ??
+      "legal_acceptance_required";
+    redirect(`/settings/llm?error=${err}`);
+  }
 
   revalidatePath("/settings/llm");
   revalidatePath("/settings/integrations");

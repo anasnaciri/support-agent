@@ -172,6 +172,7 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
 
 export interface OrgContext {
   readonly userId: string;
+  readonly userDecisionUuid: string;
   readonly organizationId: string;
   readonly email: string | null;
   readonly existingTenantId: string | null;
@@ -185,6 +186,7 @@ export const requireOrganization = async (): Promise<OrgContext> => {
   const tenant = await fetchTenant(organizationId);
   return {
     userId: user.id,
+    userDecisionUuid: dashboardUserDecisionUuid(user.id),
     organizationId,
     email: user.email ?? null,
     existingTenantId: tenant?.tenantId ?? null,
@@ -339,7 +341,11 @@ export const api = {
   // ---- Writes ----
   onboarding: async (
     ctx: CallCtx,
-    input: { readonly name: string; readonly notificationEmail: string },
+    input: {
+      readonly name: string;
+      readonly notificationEmail: string;
+      readonly legalAccepted: boolean;
+    },
   ): Promise<{ status: number; result: OnboardingResult | null }> => {
     const { status, body } = await call("/onboarding", {
       method: "POST",
@@ -348,6 +354,9 @@ export const api = {
     });
     return { status, result: status === 200 ? (body as OnboardingResult) : null };
   },
+
+  acceptLegal: (ctx: CallCtx): Promise<CallResult> =>
+    call("/legal-acceptance", { method: "POST", ctx }),
 
   setAgentModel: (ctx: CallCtx, agentId: string, model: string): Promise<CallResult> =>
     call(`/agents/${encodeURIComponent(agentId)}/model`, {

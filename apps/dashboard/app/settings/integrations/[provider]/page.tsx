@@ -67,8 +67,9 @@ export default async function ConnectorManagePage({
   const [connections, catalog, settings] = await Promise.all([
     api.connections(ctx),
     api.catalog(ctx),
-    isSheets ? api.settings(ctx) : Promise.resolve(null),
+    api.settings(ctx),
   ]);
+  const legalAccepted = settings.legalAcceptance !== null;
 
   const row =
     connections.filter((c) => c.provider === provider)[0] ?? null;
@@ -77,7 +78,7 @@ export default async function ConnectorManagePage({
     : row.status === "active"
       ? "active"
       : "revoked";
-  const showConnect = !!apiBaseUrl && tone !== "active";
+  const showConnect = !!apiBaseUrl && legalAccepted && tone !== "active";
   const disconnectAction =
     provider === "shopify"
       ? disconnectShopifyAction
@@ -143,6 +144,20 @@ export default async function ConnectorManagePage({
         </Alert>
       ) : null}
 
+      {!legalAccepted ? (
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Legal acceptance required</AlertTitle>
+          <AlertDescription>
+            Accept the current data processing notice and DPA in{" "}
+            <a href="/settings/legal" className="font-medium text-primary hover:underline">
+              Settings → Legal
+            </a>{" "}
+            before connecting or reinstalling providers.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Connection</CardTitle>
@@ -182,6 +197,7 @@ export default async function ConnectorManagePage({
             row &&
             tone === "active" &&
             apiBaseUrl &&
+            legalAccepted &&
             missingCapability ? (
               <Button variant="outline" asChild>
                 <a href={connectHref("shopify", apiBaseUrl, tenantId, loginHint)}>
@@ -190,7 +206,11 @@ export default async function ConnectorManagePage({
               </Button>
             ) : null}
 
-            {showConnect && apiBaseUrl ? (
+            {!legalAccepted && tone !== "active" ? (
+              <Button asChild>
+                <a href="/settings/legal">Review legal terms</a>
+              </Button>
+            ) : showConnect && apiBaseUrl ? (
               <Button asChild>
                 <a href={connectHref(provider, apiBaseUrl, tenantId, loginHint)}>
                   {tone === "revoked" ? `Reconnect ${label}` : `Connect ${label}`}

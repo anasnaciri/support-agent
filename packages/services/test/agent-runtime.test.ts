@@ -35,6 +35,7 @@ const makeSettings = (
     refundPolicy: defaultRefundPolicy,
     retentionDays: DEFAULT_RETENTION_DAYS,
     supplierEscalationSheet: sheet,
+    legalAcceptance: null,
   });
 
 describe("buildSystemPrompt", () => {

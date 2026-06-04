@@ -11,14 +11,18 @@ import fastifySwaggerUi from "@fastify/swagger-ui";
 import {
   applyApprovalDecision,
   ConnectorCredentialStore,
+  DATA_PROCESSING_NOTICE_VERSION,
+  DPA_VERSION,
   decisionToEvent,
   defaultRefundPolicy,
   DEFAULT_RETENTION_DAYS,
+  legalAcceptanceIsCurrent,
   TenantAgentOverridesService,
   TenantRepository,
   TransactionRunner,
   verifyShopifyWebhookHmac,
   type LLMProvider,
+  type LegalAcceptance,
 } from "@support-agent/services";
 import {
   AgentId,
@@ -76,7 +80,6 @@ import {
   assertShopifyShopConnectable,
   claimShopifyShopForTenant,
   findTenantByShop,
-  resolveTenantByShop,
   ShopifyInstallTenantNotFound,
   ShopifyShopAlreadyConnected,
 } from "./tenant-resolver.js";
@@ -127,6 +130,7 @@ import {
   type ApiConfig,
   type ApiLayer,
 } from "./bootstrap.js";
+import { renderDataProcessingNoticeHtml } from "./legal.js";
 import {
   approvalParamsSchema,
   errorResponseSchema,
@@ -305,6 +309,33 @@ const parseJsonBody = (req: FastifyRequest): Record<string, unknown> => {
     return {};
   }
 };
+
+const makeLegalAcceptance = (
+  acceptedByUserId: string | undefined,
+): LegalAcceptance => ({
+  dataProcessingNoticeVersion: DATA_PROCESSING_NOTICE_VERSION,
+  dpaVersion: DPA_VERSION,
+  acceptedAt: new Date().toISOString(),
+  acceptedByUserId: acceptedByUserId ?? null,
+});
+
+const tenantHasCurrentLegalAcceptance = (
+  tenantId: string,
+  layer: ApiLayer,
+): Promise<boolean> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo.getSettings(TenantId(tenantId));
+        return legalAcceptanceIsCurrent(settings.legalAcceptance);
+      }).pipe(Effect.catchAll(() => Effect.succeed(false))),
+      layer,
+    ),
+  );
+
+const sendLegalAcceptanceRequired = (res: FastifyReply): FastifyReply =>
+  sendJson(res, 403, { error: "legal_acceptance_required" });
 
 // GET /dashboard/today — Today-view rollup.
 const handleDashboardToday = async (
@@ -704,6 +735,7 @@ const handleDashboardSettings = async (
             refundPolicy: defaultRefundPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
+            legalAcceptance: null,
           } as const),
         ),
       ),
@@ -715,6 +747,7 @@ const handleDashboardSettings = async (
     refundPolicy: settings.refundPolicy,
     retentionDays: settings.retentionDays,
     supplierEscalationSheet: settings.supplierEscalationSheet,
+    legalAcceptance: settings.legalAcceptance,
   });
 };
 
@@ -752,16 +785,46 @@ const handleDashboardOnboarding = async (
     typeof body["notificationEmail"] === "string"
       ? body["notificationEmail"].trim()
       : "";
+  const legalAccepted = body["legalAccepted"] === true;
   if (name.length < 2) return sendJson(res, 400, { error: "bad_name" });
   if (!email.includes("@")) return sendJson(res, 400, { error: "bad_email" });
+  if (!legalAccepted) {
+    return sendJson(res, 400, { error: "legal_acceptance_required" });
+  }
   const result = await runWithDb(layer, (db) =>
     createTenantForOrg(db, {
       organizationId: auth.organizationId,
       name: name.slice(0, 120),
       notificationEmail: email.slice(0, 254),
+      legalAcceptance: makeLegalAcceptance(auth.userId),
     }),
   );
   return sendJson(res, 200, result);
+};
+
+// POST /dashboard/legal-acceptance — accept the current legal notice + DPA
+// for an existing tenant (used by tenants created before the gate shipped).
+const handleDashboardLegalAcceptance = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setLegalAcceptance(
+          TenantId(auth.tenantId),
+          makeLegalAcceptance(auth.userId),
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
 };
 
 // POST /dashboard/agents/:id/model — set a per-agent model override.
@@ -836,6 +899,9 @@ const handleDashboardLlmConnect = async (
     return sendJson(res, 400, { error: "bad_provider" });
   }
   if (apiKey.length < 8) return sendJson(res, 400, { error: "missing_key" });
+  if (!(await tenantHasCurrentLegalAcceptance(auth.tenantId, layer))) {
+    return sendLegalAcceptanceRequired(res);
+  }
   const tid = TenantId(auth.tenantId);
   await Effect.runPromise(
     Effect.provide(
@@ -1120,6 +1186,10 @@ const handleShopifyInstall = async (
       sendJson(res, 400, { error: "missing_tenant" });
       return;
     }
+    if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
+      sendLegalAcceptanceRequired(res);
+      return;
+    }
     const pendingState = signState(cfg.stateSigningKey, tenant);
     const managedInstallUrl = buildManagedInstallUrl({
       clientId: cfg.shopify.clientId,
@@ -1157,7 +1227,7 @@ const handleShopifyInstall = async (
 
     if (!tenant) {
       const resolveExit = await Effect.runPromiseExit(
-        Effect.provide(resolveTenantByShop(shop), layer),
+        Effect.provide(findTenantByShop(shop), layer),
       );
       if (resolveExit._tag !== "Success") {
         sendJson(res, 500, {
@@ -1166,9 +1236,17 @@ const handleShopifyInstall = async (
         });
         return;
       }
+      if (!resolveExit.value) {
+        sendLegalAcceptanceRequired(res);
+        return;
+      }
       tenant = resolveExit.value;
     }
   } else {
+    if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
+      sendLegalAcceptanceRequired(res);
+      return;
+    }
     const ownership = await Effect.runPromise(
       Effect.provide(
         Effect.either(assertShopifyShopConnectable(shop, tenant)),
@@ -1189,6 +1267,11 @@ const handleShopifyInstall = async (
       });
       return;
     }
+  }
+
+  if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
+    sendLegalAcceptanceRequired(res);
+    return;
   }
 
   const state = signState(cfg.stateSigningKey, tenant);
@@ -1214,12 +1297,12 @@ const handleShopifyInstall = async (
  *      we signed `tenant` into `state`, Shopify echoed it back. We recover
  *      the tenantId from the signed state.
  *
- *   2. Shopify Custom Distribution — merchant clicked the Partner Dashboard
+ *   2. Shopify Custom Distribution — merchant clicked a Partner Dashboard
  *      install link. Shopify drove the OAuth flow directly, so we don't
  *      see the merchant before the callback and there's no `state` of our
- *      design. We look up (or auto-create) a tenant for this shop via
- *      `resolveTenantByShop`, gated on the partial unique index on
- *      `tenants.shopify_domain`.
+ *      design. We only continue when the shop is already linked to a tenant
+ *      that accepted the current legal terms; this avoids writing connector
+ *      credentials before DPA acceptance.
  *
  * HMAC is always verified. If `state` is present but doesn't verify, we
  * reject with 401 (tampered) — we never silently fall back to shop
@@ -1292,7 +1375,7 @@ const handleShopifyCallback = async (
 
   if (!tenantId) {
     const resolveExit = await Effect.runPromiseExit(
-      Effect.provide(resolveTenantByShop(shop), layer),
+      Effect.provide(findTenantByShop(shop), layer),
     );
     if (resolveExit._tag !== "Success") {
       sendJson(res, 500, {
@@ -1301,7 +1384,16 @@ const handleShopifyCallback = async (
       });
       return;
     }
+    if (!resolveExit.value) {
+      sendLegalAcceptanceRequired(res);
+      return;
+    }
     tenantId = resolveExit.value;
+  }
+
+  if (!(await tenantHasCurrentLegalAcceptance(tenantId, layer))) {
+    sendLegalAcceptanceRequired(res);
+    return;
   }
 
   let token: { accessToken: string; scope: ReadonlyArray<string> };
@@ -1802,11 +1894,12 @@ const handleShopRedact = async (
  * dashboard / link, so there's no Shopify-style HMAC fallback for a
  * tenant-less call.
  */
-const handleGoogleInstall = (
+const handleGoogleInstall = async (
   cfg: ApiConfig,
+  layer: ApiLayer,
   req: FastifyRequest,
   res: FastifyReply,
-): void => {
+): Promise<void> => {
   if (!cfg.google) {
     sendJson(res, 503, { error: "google_oauth_not_configured" });
     return;
@@ -1815,6 +1908,10 @@ const handleGoogleInstall = (
   const tenant = params["tenant"];
   if (!tenant) {
     sendJson(res, 400, { error: "missing_tenant" });
+    return;
+  }
+  if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
+    sendLegalAcceptanceRequired(res);
     return;
   }
   const providerParam = params["provider"] ?? params["connector"] ?? "gmail";
@@ -1906,6 +2003,11 @@ const handleGoogleCallback = async (
   }
   const tenantId = decoded.tenantId;
   const provider = decoded.provider;
+
+  if (!(await tenantHasCurrentLegalAcceptance(tenantId, layer))) {
+    sendLegalAcceptanceRequired(res);
+    return;
+  }
 
   let token;
   try {
@@ -2418,7 +2520,7 @@ export const startServer = async (
       },
     },
     async (req, res) => {
-      handleGoogleInstall(cfg, req, res);
+      await handleGoogleInstall(cfg, layer, req, res);
       return res;
     },
   );
@@ -2621,6 +2723,11 @@ export const startServer = async (
     handleDashboardOnboarding,
   );
   dashboardPost(
+    "/dashboard/legal-acceptance",
+    "Accept the current data processing notice + DPA",
+    handleDashboardLegalAcceptance,
+  );
+  dashboardPost(
     "/dashboard/agents/:id/model",
     "Set a per-agent model override",
     handleDashboardAgentModelSet,
@@ -2662,6 +2769,17 @@ export const startServer = async (
   );
 
   // ---- System ----
+  app.get(
+    "/legal/data-processing",
+    {
+      schema: {
+        tags: ["system"],
+        summary: "Public data processing notice and DPA",
+      },
+    },
+    async (_req, res) => sendHtml(res, 200, renderDataProcessingNoticeHtml()),
+  );
+
   app.get(
     "/healthz",
     { schema: { tags: ["system"], summary: "Liveness probe" } },

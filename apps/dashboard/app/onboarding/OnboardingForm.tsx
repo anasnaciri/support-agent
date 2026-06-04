@@ -11,9 +11,10 @@ import { createTenantAction } from "./actions";
 
 interface Props {
   readonly defaultEmail: string | null;
+  readonly legalUrl: string | null;
 }
 
-export const OnboardingForm = ({ defaultEmail }: Props) => {
+export const OnboardingForm = ({ defaultEmail, legalUrl }: Props) => {
   const [state, formAction, pending] = useActionState(
     createTenantAction,
     null as { readonly error?: string } | null,
@@ -47,6 +48,33 @@ export const OnboardingForm = ({ defaultEmail }: Props) => {
           disabled={pending}
         />
       </div>
+      <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3 text-sm">
+        <input
+          type="checkbox"
+          name="legalAccepted"
+          required
+          disabled={pending}
+          className="mt-1 size-4 rounded border-input"
+        />
+        <span className="text-muted-foreground">
+          I accept the{" "}
+          {legalUrl ? (
+            <a
+              href={legalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-primary hover:underline"
+            >
+              Data Processing Notice and Data Processing Addendum
+            </a>
+          ) : (
+            <span className="font-medium text-foreground">
+              Data Processing Notice and Data Processing Addendum
+            </span>
+          )}
+          .
+        </span>
+      </label>
       {state?.error ? (
         <Alert variant="warning">
           <AlertDescription>{state.error}</AlertDescription>

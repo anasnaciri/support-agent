@@ -16,20 +16,29 @@ import { api, requireOrganization } from "@/lib/api-client";
 interface FormShape {
   readonly name: string;
   readonly notificationEmail: string;
+  readonly legalAccepted: boolean;
 }
 
 const readForm = (formData: FormData): FormShape | { readonly error: string } => {
   const nameRaw = formData.get("name");
   const emailRaw = formData.get("notificationEmail");
+  const legalRaw = formData.get("legalAccepted");
   if (typeof nameRaw !== "string" || nameRaw.trim().length < 2) {
     return { error: "Team name is required (at least 2 characters)." };
   }
   if (typeof emailRaw !== "string" || !emailRaw.includes("@")) {
     return { error: "Notification email looks malformed." };
   }
+  if (legalRaw !== "on") {
+    return {
+      error:
+        "Accept the data processing notice and Data Processing Addendum to continue.",
+    };
+  }
   return {
     name: nameRaw.trim().slice(0, 120),
     notificationEmail: emailRaw.trim().slice(0, 254),
+    legalAccepted: true,
   };
 };
 
@@ -50,8 +59,15 @@ export const createTenantAction = async (
   // The api creates the tenant for the asserted org (idempotent — a two-tab
   // race resolves to the existing tenant).
   const { status } = await api.onboarding(
-    { organizationId: org.organizationId },
-    { name: parsed.name, notificationEmail: parsed.notificationEmail },
+    {
+      organizationId: org.organizationId,
+      userDecisionUuid: org.userDecisionUuid,
+    },
+    {
+      name: parsed.name,
+      notificationEmail: parsed.notificationEmail,
+      legalAccepted: parsed.legalAccepted,
+    },
   );
   if (status !== 200) {
     return { error: "Could not create tenant. Please try again." };

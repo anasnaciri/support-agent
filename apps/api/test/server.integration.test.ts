@@ -3,6 +3,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
+  DATA_PROCESSING_NOTICE_VERSION,
+  DPA_VERSION,
   ConnectorCredentialStore,
   computeHmac,
 } from "@support-agent/services";
@@ -52,6 +54,15 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     dashboardBaseUrl: null,
   };
 
+  const acceptedSettings = {
+    legalAcceptance: {
+      dataProcessingNoticeVersion: DATA_PROCESSING_NOTICE_VERSION,
+      dpaVersion: DPA_VERSION,
+      acceptedAt: "2026-06-04T12:00:00.000Z",
+      acceptedByUserId: "11111111-1111-1111-1111-111111111111",
+    },
+  } as const;
+
   let handle: ServerHandle | null = null;
   let baseUrl = "";
   const originalFetch = globalThis.fetch;
@@ -61,7 +72,11 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     process.env["CREDENTIAL_ENCRYPTION_KEY"] = encryptionKeyB64;
     await raw.db
       .insert(tenants)
-      .values({ id: tenantId, name: "api-integ-test" });
+      .values({
+        id: tenantId,
+        name: "api-integ-test",
+        settings: acceptedSettings,
+      });
     handle = await startServer(cfg);
     baseUrl = `http://localhost:${handle.port}`;
   });
@@ -208,6 +223,21 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /shopify/install rejects a tenant without legal acceptance", async () => {
+    const noLegalTenantId = randomUUID();
+    extraTenantIds.push(noLegalTenantId);
+    await raw!.db
+      .insert(tenants)
+      .values({ id: noLegalTenantId, name: "no-legal-shopify" });
+
+    const res = await fetch(
+      `${baseUrl}/shopify/install?shop=no-legal.myshopify.com&tenant=${noLegalTenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
+  });
+
   it("GET /shopify/install blocks a dashboard tenant from connecting another tenant's active shop", async () => {
     const shop = "owned-active-shop.myshopify.com";
     const ownerTenantId = randomUUID();
@@ -228,8 +258,16 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     });
   });
 
-  it("GET /shopify/install accepts Shopify's signed install request without a tenant", async () => {
+  it("GET /shopify/install accepts a signed request for a preprovisioned accepted shop", async () => {
     const shop = "signed-install-shop.myshopify.com";
+    const signedTenantId = randomUUID();
+    extraTenantIds.push(signedTenantId);
+    await raw!.db.insert(tenants).values({
+      id: signedTenantId,
+      name: shop,
+      shopifyDomain: shop,
+      settings: acceptedSettings,
+    });
     const query: Record<string, string> = {
       shop,
       host: "YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvc2lnbmVkLWluc3RhbGw",
@@ -256,6 +294,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(state).toBeTruthy();
     const decoded = verifyState(stateSigningKey, state!);
     expect(decoded).toBeTruthy();
+    expect(decoded!.tenantId).toBe(signedTenantId);
 
     const tenantRows = await raw!.db
       .select()
@@ -369,13 +408,21 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     });
   });
 
-  it("GET /shopify/auth/callback without state (Custom Distribution) auto-creates a tenant for the shop", async () => {
+  it("GET /shopify/auth/callback without state uses a preprovisioned accepted tenant for the shop", async () => {
     mockShopifyFetch({
       access_token: "shpoa_custom_dist",
       scope: "read_orders,read_customers",
     });
 
     const shop = "custom-dist-shop.myshopify.com";
+    const customDistTenantId = randomUUID();
+    extraTenantIds.push(customDistTenantId);
+    await raw!.db.insert(tenants).values({
+      id: customDistTenantId,
+      name: shop,
+      shopifyDomain: shop,
+      settings: acceptedSettings,
+    });
     const query: Record<string, string> = {
       shop,
       code: "the-code-cd",
@@ -396,9 +443,9 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.shop).toBe(shop);
-    expect(typeof body.tenantId).toBe("string");
+    expect(body.tenantId).toBe(customDistTenantId);
 
-    // The tenants row was created and linked to the shop domain.
+    // The preprovisioned tenants row stayed linked to the shop domain.
     const tenantRows = await raw!.db
       .select()
       .from(tenants)
@@ -413,6 +460,44 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .where(sql`${connectorConnections.tenantId} = ${body.tenantId}`);
     expect(ccRows).toHaveLength(1);
     expect(ccRows[0]!.shopDomain).toBe(shop);
+  });
+
+  it("GET /shopify/auth/callback rejects a preprovisioned shop without legal acceptance before token exchange", async () => {
+    let tokenExchangeCalled = false;
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/admin/oauth/access_token")) {
+        tokenExchangeCalled = true;
+      }
+      return originalFetch(url as never, init);
+    }) as unknown as typeof fetch;
+
+    const shop = "callback-no-legal.myshopify.com";
+    const noLegalTenantId = randomUUID();
+    extraTenantIds.push(noLegalTenantId);
+    await raw!.db.insert(tenants).values({
+      id: noLegalTenantId,
+      name: shop,
+      shopifyDomain: shop,
+    });
+    const query: Record<string, string> = {
+      shop,
+      code: "the-code-no-legal",
+      timestamp: "1700000099",
+    };
+    const canonical = canonicalQueryForHmac(query);
+    const hmac = computeHmac(cfg.shopify.clientSecret, canonical);
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
+    expect(tokenExchangeCalled).toBe(false);
   });
 
   it("a second install for the same shop reuses the same tenant (idempotent resolve)", async () => {
@@ -468,7 +553,11 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .insert(tenants)
       .values([
         { id: oldTenantId, name: "old-transfer-owner", shopifyDomain: shop },
-        { id: newTenantId, name: "new-transfer-owner" },
+        {
+          id: newTenantId,
+          name: "new-transfer-owner",
+          settings: acceptedSettings,
+        },
       ]);
     await seedShopifyConnection(oldTenantId, shop, "revoked");
 

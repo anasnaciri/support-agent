@@ -91,6 +91,7 @@ const defaultTenantSettings = new TenantSettings({
   refundPolicy: defaultRefundPolicy,
   retentionDays: 730,
   supplierEscalationSheet: null,
+  legalAcceptance: null,
 });
 const tenantRepoDefault = TenantRepositoryTest({
   settingsByTenant: new Map([
@@ -2372,6 +2373,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
               range: "Escalations!A:F",
               description: "warehouse ops",
             },
+            legalAcceptance: null,
           }),
         ],
       ]),
@@ -3533,6 +3535,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       },
       retentionDays: 730,
       supplierEscalationSheet: null,
+      legalAcceptance: null,
     });
 
   // Shopify connection seeded with write_orders so the scope precheck
