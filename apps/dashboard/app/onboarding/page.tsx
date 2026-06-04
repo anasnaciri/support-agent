@@ -39,7 +39,11 @@ export default async function OnboardingPage() {
             </span>{" "}
             once the tenant exists.
           </p>
-          <OnboardingForm defaultEmail={org.email} legalUrl={legalUrl} />
+          <OnboardingForm
+            defaultEmail={org.email}
+            legalUrl={legalUrl}
+            alreadyAcceptedAt={org.legalAcceptedAt}
+          />
         </CardContent>
       </Card>
     </div>

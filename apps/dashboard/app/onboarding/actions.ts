@@ -19,7 +19,12 @@ interface FormShape {
   readonly legalAccepted: boolean;
 }
 
-const readForm = (formData: FormData): FormShape | { readonly error: string } => {
+const readForm = (
+  formData: FormData,
+  // When the user already accepted at sign-up (WorkOS user metadata), the
+  // onboarding form omits the checkbox and we don't require it here.
+  legalAlreadyAccepted: boolean,
+): FormShape | { readonly error: string } => {
   const nameRaw = formData.get("name");
   const emailRaw = formData.get("notificationEmail");
   const legalRaw = formData.get("legalAccepted");
@@ -29,7 +34,7 @@ const readForm = (formData: FormData): FormShape | { readonly error: string } =>
   if (typeof emailRaw !== "string" || !emailRaw.includes("@")) {
     return { error: "Notification email looks malformed." };
   }
-  if (legalRaw !== "on") {
+  if (!legalAlreadyAccepted && legalRaw !== "on") {
     return {
       error:
         "Accept the data processing notice and Data Processing Addendum to continue.",
@@ -53,7 +58,7 @@ export const createTenantAction = async (
     redirect("/");
   }
 
-  const parsed = readForm(formData);
+  const parsed = readForm(formData, org.legalAcceptedAt !== null);
   if ("error" in parsed) return parsed;
 
   // The api creates the tenant for the asserted org (idempotent — a two-tab

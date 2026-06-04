@@ -23,6 +23,7 @@ import type {
   UsageDecisionRow,
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
+import { LEGAL_ACCEPTED_AT_KEY, hasAcceptedAtSignup } from "./legal-consent";
 
 // ============================================================
 // Dashboard → apps/api client (Path B)
@@ -176,6 +177,12 @@ export interface OrgContext {
   readonly organizationId: string;
   readonly email: string | null;
   readonly existingTenantId: string | null;
+  /**
+   * ISO timestamp of the user's legal acceptance captured at the self-hosted
+   * /sign-up page (WorkOS user metadata), or null. When set, onboarding skips
+   * its own legal checkbox — the user already consented at sign-up.
+   */
+  readonly legalAcceptedAt: string | null;
 }
 
 /** For /onboarding: org context without requiring a tenant. */
@@ -184,12 +191,15 @@ export const requireOrganization = async (): Promise<OrgContext> => {
   if (!user) redirect("/sign-in");
   if (!organizationId) throw new NoTenantAccess("no_organization", null);
   const tenant = await fetchTenant(organizationId);
+  const metadata = user.metadata ?? {};
+  const acceptedAt = metadata[LEGAL_ACCEPTED_AT_KEY] ?? null;
   return {
     userId: user.id,
     userDecisionUuid: dashboardUserDecisionUuid(user.id),
     organizationId,
     email: user.email ?? null,
     existingTenantId: tenant?.tenantId ?? null,
+    legalAcceptedAt: hasAcceptedAtSignup(metadata) ? acceptedAt : null,
   };
 };
 
