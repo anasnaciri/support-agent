@@ -11,9 +11,12 @@ import {
   BlobStorageTest,
   ConnectorCredentialStore,
   ConversationServiceTest,
+  OrgDirectoryServiceTest,
   PermissionServiceLive,
   PlatformMailServiceTest,
   type AgentRuntime,
+  type OrgDirectoryService,
+  type PlatformMailService,
   type ApprovalService,
   type AuditLogService,
   type BlobStorage,
@@ -54,8 +57,10 @@ import {
   LLMConfigFromEnv,
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
+  OrgDirectoryServiceLive,
   PlatformMailServiceLive,
   ResendConfigFromEnv,
+  WorkosConfigFromEnv,
   ShopifyCredentialStoreFromConnector,
   ShopifyCredentialStoreFromEnv,
   ShopifyHttpLive,
@@ -91,6 +96,8 @@ export interface WorkerBootstrap {
     | TenantRepository
     | TransactionRunner
     | BlobStorage
+    | OrgDirectoryService
+    | PlatformMailService
     | DbClient,
     never,
     never
@@ -242,6 +249,15 @@ export const buildWorker = async (
         )
       : PlatformMailServiceTest({});
 
+  // Org directory (WorkOS) — used by the account-cleanup consumer to delete
+  // a tenant's organization after self-service / admin account deletion.
+  // Live when WORKOS_API_KEY is set; otherwise an in-memory Test layer so
+  // the worker still boots for dev/CI without WorkOS creds (org deletes
+  // become no-ops there).
+  const orgDirectory = process.env["WORKOS_API_KEY"]
+    ? OrgDirectoryServiceLive.pipe(Layer.provide(WorkosConfigFromEnv))
+    : OrgDirectoryServiceTest({});
+
   // Approval-link config. Required in production (signing key must be
   // stable so links survive restarts), but we fall back to a dev key
   // when unset so the worker boots in tests / local dev. The signing
@@ -390,6 +406,7 @@ export const buildWorker = async (
     tracking,
     conversation,
     mail,
+    orgDirectory,
     approvalLinkLayer,
     blob,
     // Duplicate-photo fraud guard. DbClient-backed; satisfied by the

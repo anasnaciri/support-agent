@@ -19,6 +19,10 @@ import {
   TIMER_SWEEP_QUEUE,
   registerTimerSweep,
 } from "./timer-sweep-schedule.js";
+import {
+  ACCOUNT_CLEANUP_QUEUE,
+  registerAccountCleanup,
+} from "./account-cleanup-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -106,6 +110,13 @@ const main = async (): Promise<void> => {
   await registerTimerSweep({ boss, runtimeLayer });
   console.log(
     `[worker] scheduled timer-sweep cron on queue=${TIMER_SWEEP_QUEUE}`,
+  );
+
+  // Account-deletion cleanup: deletes the WorkOS org + sends the deletion
+  // email for tenants wiped by apps/api's account-delete endpoints.
+  await registerAccountCleanup({ boss, runtimeLayer });
+  console.log(
+    `[worker] consuming account-cleanup on queue=${ACCOUNT_CLEANUP_QUEUE}`,
   );
 
   const onShutdown = async (signal: NodeJS.Signals) => {
