@@ -2,12 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { getWorkOS, switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { api, requireOrganization } from "@/lib/api-client";
+import { resolveOrganizationId } from "@/lib/org-provisioning";
 
-// Self-service tenant creation for a signed-in WorkOS org. Idempotent
-// by org: if the org already has a tenant, we redirect rather than
-// double-creating (the partial unique index on `workos_organization_id`
-// would reject anyway; this is a friendlier UX).
+// Self-service onboarding for a signed-in user. A brand-new signup has no
+// WorkOS organization, so we create one (named after their team) and add
+// them to it, then create the tenant under that org. An invited user
+// already has an org — we reuse it. Idempotent by org: if the org already
+// has a tenant, we redirect rather than double-creating (the partial unique
+// index on `workos_organization_id` would reject anyway).
 //
 // The form fields populate `tenants.name` and `tenants.settings`. The
 // shop domain is NOT required at this stage — Shopify install is a
@@ -56,11 +60,52 @@ export const createTenantAction = async (
   const parsed = readForm(formData);
   if ("error" in parsed) return parsed;
 
-  // The api creates the tenant for the asserted org (idempotent — a two-tab
-  // race resolves to the existing tenant).
+  // Provision the WorkOS org if the user doesn't have one yet (fresh
+  // self-service signup); reuse it if they were invited into one or a prior
+  // attempt already created one.
+  const workos = getWorkOS();
+  let resolved: { readonly organizationId: string; readonly created: boolean };
+  try {
+    resolved = await resolveOrganizationId({
+      currentOrgId: org.organizationId,
+      userId: org.userId,
+      teamName: parsed.name,
+      provisioner: {
+        findExistingOrgId: async (userId) => {
+          const memberships =
+            await workos.userManagement.listOrganizationMemberships({
+              userId,
+              statuses: ["active"],
+            });
+          return memberships.data[0]?.organizationId ?? null;
+        },
+        createOrganization: (name) =>
+          workos.organizations.createOrganization({ name }),
+        addMember: (organizationId, userId) =>
+          workos.userManagement
+            .createOrganizationMembership({ organizationId, userId })
+            .then(() => undefined),
+      },
+    });
+
+    // If the session wasn't in an org, move it into the resolved one BEFORE
+    // creating the tenant (no redirect — revalidationStrategy "none"). This
+    // makes a retry after any later failure reuse this org via the switched
+    // session / findExistingOrgId rather than orphaning a second one.
+    if (!org.organizationId) {
+      await switchToOrganization(resolved.organizationId, {
+        revalidationStrategy: "none",
+      });
+    }
+  } catch {
+    return { error: "Could not create your team. Please try again." };
+  }
+
+  // Create the tenant for the resolved org (idempotent — a two-tab race
+  // resolves to the existing tenant).
   const { status } = await api.onboarding(
     {
-      organizationId: org.organizationId,
+      organizationId: resolved.organizationId,
       userDecisionUuid: org.userDecisionUuid,
     },
     {

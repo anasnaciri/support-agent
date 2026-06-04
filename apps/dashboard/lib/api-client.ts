@@ -152,13 +152,14 @@ const fetchTenant = async (
 
 /**
  * The gate every tenant-scoped page calls first. Redirects to /sign-in when
- * there's no session, /onboarding when the org has no tenant, and throws
- * NoTenantAccess("no_organization") (→ /no-access) when the session has no org.
+ * there's no session and /onboarding when the user has no org yet (a fresh
+ * self-service signup) or their org has no tenant — onboarding provisions
+ * the WorkOS org (if needed) and creates the tenant.
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId } = await withAuth();
   if (!user) redirect("/sign-in");
-  if (!organizationId) throw new NoTenantAccess("no_organization", null);
+  if (!organizationId) redirect("/onboarding");
   const tenant = await fetchTenant(organizationId);
   if (!tenant) redirect("/onboarding");
   return {
@@ -173,21 +174,28 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
 export interface OrgContext {
   readonly userId: string;
   readonly userDecisionUuid: string;
-  readonly organizationId: string;
+  /**
+   * The user's WorkOS org, or null for a fresh self-service signup that
+   * isn't in one yet. Onboarding provisions the org when this is null.
+   */
+  readonly organizationId: string | null;
   readonly email: string | null;
   readonly existingTenantId: string | null;
 }
 
-/** For /onboarding: org context without requiring a tenant. */
+/**
+ * For /onboarding: org context that does NOT require an existing org or
+ * tenant. A brand-new self-service user has neither — onboarding creates
+ * both. Only the session (a signed-in user) is required.
+ */
 export const requireOrganization = async (): Promise<OrgContext> => {
   const { user, organizationId } = await withAuth();
   if (!user) redirect("/sign-in");
-  if (!organizationId) throw new NoTenantAccess("no_organization", null);
-  const tenant = await fetchTenant(organizationId);
+  const tenant = organizationId ? await fetchTenant(organizationId) : null;
   return {
     userId: user.id,
     userDecisionUuid: dashboardUserDecisionUuid(user.id),
-    organizationId,
+    organizationId: organizationId ?? null,
     email: user.email ?? null,
     existingTenantId: tenant?.tenantId ?? null,
   };

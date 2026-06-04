@@ -24,12 +24,17 @@ export default async function OnboardingPage() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             You&apos;re signed in as{" "}
-            <span className="font-medium text-foreground">{org.email}</span>{" "}
-            under WorkOS organization{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              {org.organizationId}
-            </code>
-            , but your team doesn&apos;t have a support-agent tenant yet.
+            <span className="font-medium text-foreground">{org.email}</span>.{" "}
+            {org.organizationId ? (
+              <>
+                Your team doesn&apos;t have a support-agent tenant yet — name it
+                below to get started.
+              </>
+            ) : (
+              <>
+                Name your team below and we&apos;ll set up your workspace.
+              </>
+            )}
           </p>
           <p className="text-sm text-muted-foreground">
             Fill this in once and you&apos;ll be sent to the dashboard. You can
