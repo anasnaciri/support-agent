@@ -358,6 +358,10 @@ export const api = {
   acceptLegal: (ctx: CallCtx): Promise<CallResult> =>
     call("/legal-acceptance", { method: "POST", ctx }),
 
+  /** Irreversibly delete the tenant's own account (wipe + WorkOS + email). */
+  deleteAccount: (ctx: CallCtx): Promise<CallResult> =>
+    call("/account/delete", { method: "POST", ctx }),
+
   setAgentModel: (ctx: CallCtx, agentId: string, model: string): Promise<CallResult> =>
     call(`/agents/${encodeURIComponent(agentId)}/model`, {
       method: "POST",

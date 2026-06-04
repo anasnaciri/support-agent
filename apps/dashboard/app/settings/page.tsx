@@ -8,6 +8,7 @@ import {
   KeyRound,
   Plug,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
@@ -73,6 +74,13 @@ const TILES = [
     title: "Supplier escalation",
     description:
       "Google Sheet target for the missing-package agent — configured on the Google Sheets connector. Leave unset to skip the sheet write entirely.",
+  },
+  {
+    href: "/settings/account",
+    icon: Trash2,
+    title: "Delete account",
+    description:
+      "Permanently delete this tenant and every record tied to it. This cannot be undone.",
   },
 ] as const;
 
