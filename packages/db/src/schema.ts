@@ -266,6 +266,50 @@ export type ConnectorConnectionRow =
 export type ConnectorConnectionInsert =
   typeof connectorConnections.$inferInsert;
 
+// Pilot custom-distribution Shopify: one operator-provisioned Shopify custom
+// app per tenant. Holds the *app* credentials (client_id + encrypted
+// client_secret) — the layer ABOVE the per-merchant access token in
+// `connector_connections`. Presence of a row is the pilot-vs-SaaS switch: a
+// tenant with a row uses its own app; a tenant without one falls back to the
+// global env app. `shop_domain` is NULL until the merchant completes Connect
+// (learned at the OAuth callback). See master-plan §19.6.
+export const shopifyAppProvisioning = pgTable(
+  "shopify_app_provisioning",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clientId: text("client_id").notNull(),
+    clientSecretEncrypted: bytea("client_secret_encrypted").notNull(),
+    shopDomain: text("shop_domain"),
+    status: text("status").notNull().default("ready"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "shopify_app_provisioning_status_check",
+      sql`${t.status} IN ('ready','connected','revoked')`,
+    ),
+    // Exactly one custom app per tenant.
+    uniqueIndex("shopify_app_provisioning_tenant_unique").on(t.tenantId),
+    // Webhooks resolve the app secret by shop domain once it's learned.
+    index("shopify_app_provisioning_shop_idx")
+      .on(t.shopDomain)
+      .where(sql`${t.shopDomain} IS NOT NULL`),
+  ],
+);
+
+export type ShopifyAppProvisioningRow =
+  typeof shopifyAppProvisioning.$inferSelect;
+export type ShopifyAppProvisioningInsert =
+  typeof shopifyAppProvisioning.$inferInsert;
+
 // Per-tenant per-agent overrides. Today only `model` is overridable, but
 // the table is structured to grow (temperature, maxTurns, prompt suffix,
 // …) without another migration. `agent_id` is text (no FK) because agent

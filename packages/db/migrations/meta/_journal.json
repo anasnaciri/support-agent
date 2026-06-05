@@ -78,6 +78,13 @@
       "when": 1780315176199,
       "tag": "0010_colorful_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780676657993,
+      "tag": "0011_nebulous_scorpion",
+      "breakpoints": true
     }
   ]
 }
