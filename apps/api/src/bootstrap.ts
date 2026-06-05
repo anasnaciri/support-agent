@@ -5,6 +5,7 @@ import {
   BlobStorageTest,
   ConnectorCredentialStore,
   parseKey,
+  ShopifyAppProvisioningStore,
   ShopifyService,
   TenantAgentOverridesService,
   TenantRepository,
@@ -15,6 +16,7 @@ import {
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  ShopifyAppProvisioningStoreLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
   TransactionRunnerLive,
@@ -206,6 +208,11 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const store = ConnectorCredentialStoreLive(cfg.encryptionKey).pipe(
     Layer.provide(dbLayer),
   );
+  // Pilot custom distribution: per-tenant Shopify app credentials. Shares
+  // the credential encryption key with the connector store.
+  const appProvisioning = ShopifyAppProvisioningStoreLive(
+    cfg.encryptionKey,
+  ).pipe(Layer.provide(dbLayer));
   // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
@@ -238,6 +245,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   );
   return Layer.mergeAll(
     store,
+    appProvisioning,
     approvals,
     tx,
     dbLayer,
@@ -250,6 +258,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
 
 export type ApiLayer = Layer.Layer<
   | ConnectorCredentialStore
+  | ShopifyAppProvisioningStore
   | ApprovalService
   | TransactionRunner
   | DbClient

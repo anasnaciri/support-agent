@@ -6,12 +6,14 @@ import {
   DATA_PROCESSING_NOTICE_VERSION,
   DPA_VERSION,
   ConnectorCredentialStore,
+  ShopifyAppProvisioningStore,
   computeHmac,
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import {
   ConnectorCredentialStoreLive,
   DbClientLive,
+  ShopifyAppProvisioningStoreLive,
   connectorConnections,
   makeDbClient,
   tenants,
@@ -406,6 +408,70 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
         },
       },
     });
+  });
+
+  it("GET /shopify/auth/callback for a pilot tenant verifies with the tenant's app secret and marks the provisioning row connected", async () => {
+    mockShopifyFetch({ access_token: "shpoa_pilot_token", scope: "read_orders" });
+
+    const pilotTenantId = randomUUID();
+    extraTenantIds.push(pilotTenantId);
+    const shop = "pilot-callback.myshopify.com";
+    const pilotSecret = "pilot-callback-secret";
+
+    await raw!.db
+      .insert(tenants)
+      .values({ id: pilotTenantId, name: "pilot-callback", settings: acceptedSettings });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const provisioning = yield* ShopifyAppProvisioningStore;
+          yield* provisioning.put({
+            tenantId: TenantId(pilotTenantId),
+            clientId: "pilot-callback-client",
+            clientSecret: pilotSecret,
+          });
+        }),
+        ShopifyAppProvisioningStoreLive(encryptionKey).pipe(
+          Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
+        ),
+      ).pipe(Effect.scoped),
+    );
+
+    const state = signState(stateSigningKey, pilotTenantId);
+    const query: Record<string, string> = {
+      shop,
+      code: "the-code",
+      state,
+      timestamp: "1700000001",
+    };
+    // Signed with the TENANT's app secret — the global secret must NOT verify.
+    const hmac = computeHmac(pilotSecret, canonicalQueryForHmac(query));
+
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+
+    // markConnected stamped shop_domain + status onto the provisioning row.
+    const prov = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const provisioning = yield* ShopifyAppProvisioningStore;
+          return yield* provisioning.get(TenantId(pilotTenantId));
+        }),
+        ShopifyAppProvisioningStoreLive(encryptionKey).pipe(
+          Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
+        ),
+      ).pipe(Effect.scoped),
+    );
+    expect(prov?.shopDomain).toBe(shop);
+    expect(prov?.status).toBe("connected");
   });
 
   it("GET /shopify/auth/callback without state uses a preprovisioned accepted tenant for the shop", async () => {
@@ -873,6 +939,106 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
         "uninstall-badsig.myshopify.com",
         "uninstall-idempotent.myshopify.com",
       ]) {
+        await raw.db
+          .delete(tenants)
+          .where(sql`${tenants.shopifyDomain} = ${shop}`);
+      }
+    });
+  });
+
+  describe("POST /webhooks/shopify/app/uninstalled — pilot per-tenant app", () => {
+    const goodShop = "pilot-uninstall-good.myshopify.com";
+    const badShop = "pilot-uninstall-bad.myshopify.com";
+    const tenantSecret = "pilot-app-secret-xyz";
+
+    // Operator-provisioned pilot app (its own secret) + a connected shop +
+    // an active connector row for the webhook to revoke.
+    const seedPilot = async (shop: string): Promise<{ tenantId: string }> => {
+      const newTenantId = randomUUID();
+      await raw!.db
+        .insert(tenants)
+        .values({ id: newTenantId, name: shop, shopifyDomain: shop });
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const provisioning = yield* ShopifyAppProvisioningStore;
+            yield* provisioning.put({
+              tenantId: TenantId(newTenantId),
+              clientId: "pilot-client-id",
+              clientSecret: tenantSecret,
+            });
+            yield* provisioning.markConnected(TenantId(newTenantId), shop);
+            const store = yield* ConnectorCredentialStore;
+            yield* store.put({
+              tenantId: TenantId(newTenantId),
+              provider: "shopify",
+              shopDomain: shop,
+              accessToken: "shpoa_pilot_seed",
+              scopes: ["read_orders"],
+              apiVersion: "2025-01",
+            });
+          }),
+          Layer.mergeAll(
+            ShopifyAppProvisioningStoreLive(encryptionKey),
+            ConnectorCredentialStoreLive(encryptionKey),
+          ).pipe(Layer.provide(DbClientLive({ databaseUrl: databaseUrl! }))),
+        ).pipe(Effect.scoped),
+      );
+      return { tenantId: newTenantId };
+    };
+
+    const post = (headers: Record<string, string>, body: string) =>
+      fetch(`${baseUrl}/webhooks/shopify/app/uninstalled`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body,
+      });
+
+    const signBodyWith = (secret: string, body: string): string =>
+      Buffer.from(computeHmac(secret, body), "hex").toString("base64");
+
+    it("verifies a webhook signed with the tenant's own app secret", async () => {
+      const { tenantId: t } = await seedPilot(goodShop);
+      const body = JSON.stringify({ id: 9, name: goodShop });
+      const res = await post(
+        {
+          "X-Shopify-Hmac-Sha256": signBodyWith(tenantSecret, body),
+          "X-Shopify-Shop-Domain": goodShop,
+        },
+        body,
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).action).toBe("revoked");
+
+      const rows = await raw!.db
+        .select()
+        .from(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${t}`);
+      expect(rows[0]!.status).toBe("revoked");
+    });
+
+    it("rejects the same webhook signed with the GLOBAL app secret", async () => {
+      const { tenantId: t } = await seedPilot(badShop);
+      const body = JSON.stringify({ id: 10, name: badShop });
+      const res = await post(
+        {
+          "X-Shopify-Hmac-Sha256": signBodyWith(cfg.shopify.clientSecret, body),
+          "X-Shopify-Shop-Domain": badShop,
+        },
+        body,
+      );
+      expect(res.status).toBe(401);
+
+      const rows = await raw!.db
+        .select()
+        .from(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${t}`);
+      expect(rows[0]!.status).toBe("active");
+    });
+
+    afterAll(async () => {
+      if (!raw) return;
+      for (const shop of [goodShop, badShop]) {
         await raw.db
           .delete(tenants)
           .where(sql`${tenants.shopifyDomain} = ${shop}`);

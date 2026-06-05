@@ -17,6 +17,7 @@ import {
   defaultRefundPolicy,
   DEFAULT_RETENTION_DAYS,
   legalAcceptanceIsCurrent,
+  ShopifyAppProvisioningStore,
   TenantAgentOverridesService,
   TenantRepository,
   TransactionRunner,
@@ -76,6 +77,11 @@ import {
   verifyState,
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
+import {
+  resolveShopifyAppForShop,
+  resolveShopifyAppForTenant,
+  type GlobalShopifyApp,
+} from "./shopify-app-resolver.js";
 import { dashboardConnectRedirect } from "./post-connect-redirect.js";
 import {
   assertShopifyShopConnectable,
@@ -1287,6 +1293,60 @@ const clearShopifyInstallCookie = (secure: boolean): string =>
  * returns to this same route with a signed `shop`, where we continue through
  * the authorization-code grant and sign the tenant into OAuth `state`.
  */
+// ============================================================
+// Shopify app credential resolution (pilot custom distribution)
+// ============================================================
+//
+// Pilot tenants each get their own operator-provisioned Shopify custom app
+// (see ShopifyAppProvisioningStore). The presence of a provisioning row is
+// the pilot-vs-SaaS switch: a tenant with a row uses its own client_id /
+// client_secret; a tenant without one falls back to the deployment-wide app.
+// `cfg.shopify` is always present today, so SaaS tenants resolve to exactly
+// the same credentials as before this slice.
+
+/** The deployment-wide Shopify app (SaaS path). */
+const globalShopifyApp = (cfg: ApiConfig): GlobalShopifyApp => ({
+  clientId: cfg.shopify.clientId,
+  clientSecret: cfg.shopify.clientSecret,
+});
+
+/**
+ * Resolve the Shopify app credentials for a known tenant (install + callback,
+ * where the merchant-initiated flow carries the tenant). Returns null only
+ * when neither a per-tenant row nor a global app exists.
+ */
+const resolveTenantShopifyApp = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<{ readonly clientId: string; readonly clientSecret: string } | null> => {
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      resolveShopifyAppForTenant(TenantId(tenantId), globalShopifyApp(cfg)),
+      layer,
+    ),
+  );
+  return exit._tag === "Success" ? exit.value : null;
+};
+
+/**
+ * Resolve the Shopify app secret for a shop domain (webhooks). The shop
+ * header is an unauthenticated routing hint; the resolved secret is what
+ * actually authenticates the request via HMAC. Returns null when the shop
+ * matches no app (no row + no global) — the caller then cannot verify and
+ * must reject.
+ */
+const resolveShopWebhookSecret = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  shop: string,
+): Promise<string | null> => {
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(resolveShopifyAppForShop(shop, globalShopifyApp(cfg)), layer),
+  );
+  return exit._tag === "Success" ? exit.value.clientSecret : null;
+};
+
 const handleShopifyInstall = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -1310,9 +1370,14 @@ const handleShopifyInstall = async (
       sendLegalAcceptanceRequired(res);
       return;
     }
+    const app = await resolveTenantShopifyApp(cfg, layer, tenant);
+    if (!app) {
+      sendJson(res, 500, { error: "shopify_app_not_configured" });
+      return;
+    }
     const pendingState = signState(cfg.stateSigningKey, tenant);
     const managedInstallUrl = buildManagedInstallUrl({
-      clientId: cfg.shopify.clientId,
+      clientId: app.clientId,
     });
     sendRedirectWithHeaders(res, managedInstallUrl, {
       "Set-Cookie": shopifyInstallCookie(
@@ -1329,6 +1394,11 @@ const handleShopifyInstall = async (
       sendJson(res, 400, { error: "missing_tenant" });
       return;
     }
+    // This `!tenant` entry is the Shopify-/SaaS-initiated install (the
+    // merchant hit a global-app install link, no tenant in hand yet), so the
+    // HMAC is verified with the deployment-wide secret. The pilot flow always
+    // carries `?tenant=` and goes through the branch below; the final install
+    // URL re-resolves the now-known tenant's client_id either way.
     const hmacOk = verifyCallbackHmac({
       clientSecret: cfg.shopify.clientSecret,
       query: params,
@@ -1394,10 +1464,15 @@ const handleShopifyInstall = async (
     return;
   }
 
+  const app = await resolveTenantShopifyApp(cfg, layer, tenant);
+  if (!app) {
+    sendJson(res, 500, { error: "shopify_app_not_configured" });
+    return;
+  }
   const state = signState(cfg.stateSigningKey, tenant);
   const installUrl = buildInstallUrl({
     shop,
-    clientId: cfg.shopify.clientId,
+    clientId: app.clientId,
     redirectUri: cfg.shopify.callbackUrl,
     state,
   });
@@ -1473,16 +1548,12 @@ const handleShopifyCallback = async (
     });
     return;
   }
-  const hmacOk = verifyCallbackHmac({
-    clientSecret: cfg.shopify.clientSecret,
-    query: params,
-    receivedHmac: hmac,
-  });
-  if (!hmacOk) {
-    sendJson(res, 401, { error: "hmac_verification_failed" });
-    return;
-  }
-
+  // Resolve the tenant BEFORE verifying the HMAC. In pilot custom
+  // distribution each tenant's callback is signed with its own app secret,
+  // so we need the tenant — and thus its app credentials — in hand first.
+  // The tenant comes from our own signed `state` (verifiable without
+  // Shopify's secret); custom-distribution direct installs with no state of
+  // our design fall back to shop resolution.
   let tenantId: string | null = null;
   if (state) {
     const decoded = verifyState(cfg.stateSigningKey, state);
@@ -1511,6 +1582,22 @@ const handleShopifyCallback = async (
     tenantId = resolveExit.value;
   }
 
+  const app = await resolveTenantShopifyApp(cfg, layer, tenantId);
+  if (!app) {
+    sendJson(res, 500, { error: "shopify_app_not_configured" });
+    return;
+  }
+
+  const hmacOk = verifyCallbackHmac({
+    clientSecret: app.clientSecret,
+    query: params,
+    receivedHmac: hmac,
+  });
+  if (!hmacOk) {
+    sendJson(res, 401, { error: "hmac_verification_failed" });
+    return;
+  }
+
   if (!(await tenantHasCurrentLegalAcceptance(tenantId, layer))) {
     sendLegalAcceptanceRequired(res);
     return;
@@ -1520,8 +1607,8 @@ const handleShopifyCallback = async (
   try {
     token = await exchangeCodeForToken({
       shop,
-      clientId: cfg.shopify.clientId,
-      clientSecret: cfg.shopify.clientSecret,
+      clientId: app.clientId,
+      clientSecret: app.clientSecret,
       code,
     });
   } catch (cause) {
@@ -1576,6 +1663,10 @@ const handleShopifyCallback = async (
                   },
                 },
               });
+              // Learn the connected shop on the pilot provisioning row and
+              // flip it to `connected`. No-op for SaaS tenants (no row).
+              const provisioning = yield* ShopifyAppProvisioningStore;
+              yield* provisioning.markConnected(TenantId(tenantId), shop);
               return { ownership };
             }),
           );
@@ -1747,8 +1838,16 @@ const handleAppUninstalled = async (
 
   const rawBody = req.body as Buffer;
 
+  // Resolve the per-tenant app secret from the (unauthenticated) shop header
+  // before verifying — each pilot shop's webhooks are signed by its own app.
+  // No match (no provisioning row + no global app) → can't verify → reject.
+  const webhookSecret = await resolveShopWebhookSecret(cfg, layer, shop);
+  if (!webhookSecret) {
+    sendJson(res, 401, { error: "hmac_verification_failed" });
+    return;
+  }
   const hmacOk = verifyShopifyWebhookHmac({
-    clientSecret: cfg.shopify.clientSecret,
+    clientSecret: webhookSecret,
     rawBody,
     receivedHmacB64: receivedHmac,
   });
@@ -1860,8 +1959,15 @@ const verifyComplianceWebhook = async (
 
   const rawBody = req.body as Buffer;
 
+  // Per-tenant app secret resolved from the shop header before verifying —
+  // pilot shops are signed by their own app (see handleAppUninstalled).
+  const webhookSecret = await resolveShopWebhookSecret(cfg, layer, shop);
+  if (!webhookSecret) {
+    sendJson(res, 401, { error: "hmac_verification_failed" });
+    return null;
+  }
   const hmacOk = verifyShopifyWebhookHmac({
-    clientSecret: cfg.shopify.clientSecret,
+    clientSecret: webhookSecret,
     rawBody,
     receivedHmacB64: receivedHmac,
   });
