@@ -17,6 +17,7 @@ import type {
   ModelsResponse,
   OnboardingResult,
   Page,
+  ShopifyAppGateView,
   TenantInfo,
   TenantSettingsView,
   TodaySummary,
@@ -325,6 +326,9 @@ export const api = {
         connections: ReadonlyArray<ConnectorConnectionView>;
       }
     ).connections,
+
+  shopifyApp: (ctx: CallCtx): Promise<ShopifyAppGateView> =>
+    okBody("/shopify-app", ctx) as Promise<ShopifyAppGateView>,
 
   usage: async (
     ctx: CallCtx,

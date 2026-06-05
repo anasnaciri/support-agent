@@ -577,6 +577,40 @@ const handleDashboardConnections = async (
   return sendJson(res, 200, { connections });
 };
 
+// GET /dashboard/shopify-app — whether the tenant can start a Shopify
+// connect. In pilot custom distribution the Connect button gates on an
+// operator-provisioned custom app; in SaaS it's always available.
+const handleDashboardShopifyApp = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        return yield* store.get(TenantId(auth.tenantId));
+      }),
+      layer,
+    ),
+  );
+  if (exit._tag !== "Success") {
+    return sendJson(res, 500, {
+      error: "lookup_failed",
+      detail: String(exit.cause),
+    });
+  }
+  const row = exit.value;
+  return sendJson(res, 200, {
+    requiresProvisioning: cfg.shopifyConnectRequiresProvisioning,
+    provisioned: row !== null && row.status !== "revoked",
+    status: row?.status ?? null,
+  });
+};
+
 // GET /dashboard/audit?action=&actor=&page=&limit= — cross-case audit log.
 const handleDashboardAudit = async (
   cfg: ApiConfig,
@@ -2998,6 +3032,11 @@ export const startServer = async (
     handleDashboardApprovalDetail,
   );
   dashboardGet("/dashboard/audit", "Cross-case audit log", handleDashboardAudit);
+  dashboardGet(
+    "/dashboard/shopify-app",
+    "Shopify connect gate (pilot provisioning status)",
+    handleDashboardShopifyApp,
+  );
   dashboardGet(
     "/dashboard/connections",
     "Connector connections (integrations)",

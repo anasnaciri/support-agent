@@ -213,6 +213,19 @@ export interface ConnectorConnectionView {
   readonly updatedAt: string | null;
 }
 
+/**
+ * Whether the tenant can start a Shopify connect. In pilot custom
+ * distribution (`requiresProvisioning: true`) the "Connect Shopify" button
+ * stays disabled until an operator has provisioned the tenant's custom app
+ * (`provisioned: true`). In the SaaS default (`requiresProvisioning: false`)
+ * Connect is always available and this view is informational.
+ */
+export interface ShopifyAppGateView {
+  readonly requiresProvisioning: boolean;
+  readonly provisioned: boolean;
+  readonly status: "ready" | "connected" | "revoked" | null;
+}
+
 // ============================================================
 // Per-agent model overrides (settings/agents)
 // ============================================================

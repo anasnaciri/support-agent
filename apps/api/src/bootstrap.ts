@@ -136,6 +136,14 @@ export interface ApiConfig {
    * admin routes respond 503 (not configured).
    */
   readonly adminApiToken: string | null;
+  /**
+   * Pilot custom distribution: when `true`, the dashboard's "Connect Shopify"
+   * button stays disabled until an operator has provisioned the tenant's
+   * Shopify custom app (a `shopify_app_provisioning` row). Default `false`
+   * keeps the SaaS self-serve behaviour (Connect always available). Set
+   * `SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true` for a pilot deployment.
+   */
+  readonly shopifyConnectRequiresProvisioning: boolean;
 }
 
 const requireEnv = (name: string): string => {
@@ -187,6 +195,8 @@ export const loadApiConfig = (): ApiConfig => {
     dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
     dashboardApiToken: process.env["DASHBOARD_API_TOKEN"]?.trim() || null,
     adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,
+    shopifyConnectRequiresProvisioning:
+      process.env["SHOPIFY_CONNECT_REQUIRES_PROVISIONING"]?.trim() === "true",
     google: googleConfigured
       ? {
           clientId: googleClientId,

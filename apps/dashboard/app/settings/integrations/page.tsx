@@ -74,11 +74,17 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const { user } = await withAuth();
   const loginHint = user?.email ?? null;
 
-  const [rows, settings] = await Promise.all([
+  const [rows, settings, shopifyGate] = await Promise.all([
     api.connections(ctx),
     api.settings(ctx),
+    api.shopifyApp(ctx),
   ]);
   const legalAccepted = settings.legalAcceptance !== null;
+  // Pilot custom distribution: Shopify Connect stays disabled until an
+  // operator has provisioned the tenant's custom app. In SaaS mode
+  // `requiresProvisioning` is false, so this never blocks.
+  const shopifyAwaitingProvisioning =
+    shopifyGate.requiresProvisioning && !shopifyGate.provisioned;
 
   const byProvider = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
@@ -216,6 +222,14 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                     <Button asChild>
                       <Link href="/settings/legal">Review legal terms</Link>
                     </Button>
+                  ) : p === "shopify" && shopifyAwaitingProvisioning ? (
+                    <div className="space-y-1.5">
+                      <Button disabled>Connect {label}</Button>
+                      <p className="text-xs text-muted-foreground">
+                        Awaiting setup — support is provisioning your Shopify
+                        app. You can connect once it&apos;s ready.
+                      </p>
+                    </div>
                   ) : apiBaseUrl ? (
                     <Button asChild>
                       <a
