@@ -1,0 +1,238 @@
+import { notFound } from "next/navigation";
+
+import { adminApi } from "@/lib/admin-api";
+import { requireSession } from "@/lib/session";
+import { Header, StatusBadge } from "@/app/_components/header";
+import {
+  provisionShopifyAppAction,
+  revokeShopifyAppAction,
+  deleteTenantAction,
+} from "./actions";
+
+export const dynamic = "force-dynamic";
+
+const OK_MESSAGES: Record<string, string> = {
+  shopify_saved: "Shopify app credentials saved.",
+  shopify_revoked: "Shopify app provisioning revoked.",
+};
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_fields: "Client ID and secret are both required.",
+  provision_failed: "Saving the credentials failed. Try again.",
+  revoke_failed: "Revoking failed. Try again.",
+  tenant_not_found: "Tenant not found.",
+  name_mismatch: "The typed name didn't match — tenant not deleted.",
+  delete_failed: "Deleting the tenant failed.",
+};
+
+interface PageProps {
+  readonly params: Promise<{ readonly id: string }>;
+  readonly searchParams?: Promise<
+    Readonly<Record<string, string | string[] | undefined>>
+  >;
+}
+
+const firstParam = (
+  v: string | string[] | undefined,
+): string | undefined => (Array.isArray(v) ? v[0] : v);
+
+export default async function TenantDetailPage({
+  params,
+  searchParams,
+}: PageProps) {
+  await requireSession();
+  const { id } = await params;
+  const detail = await adminApi.tenantDetail(id);
+  if (!detail) notFound();
+
+  const sp = (await searchParams) ?? {};
+  const okMsg = OK_MESSAGES[firstParam(sp["ok"]) ?? ""];
+  const errMsg = ERROR_MESSAGES[firstParam(sp["error"]) ?? ""];
+
+  const { tenant, shopifyApp, connections } = detail;
+  const provision = provisionShopifyAppAction.bind(null, id);
+  const revoke = revokeShopifyAppAction.bind(null, id);
+  const remove = deleteTenantAction.bind(null, id);
+
+  return (
+    <>
+      <Header crumb={tenant.name} />
+      <main className="mx-auto max-w-3xl space-y-8 px-6 py-8">
+        {okMsg ? (
+          <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+            {okMsg}
+          </p>
+        ) : null}
+        {errMsg ? (
+          <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {errMsg}
+          </p>
+        ) : null}
+
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {tenant.name}
+          </h1>
+          <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
+            <dt className="text-zinc-500">Tenant ID</dt>
+            <dd className="font-mono text-zinc-300">{tenant.id}</dd>
+            <dt className="text-zinc-500">WorkOS org</dt>
+            <dd className="font-mono text-zinc-300">
+              {tenant.workosOrganizationId ?? "—"}
+            </dd>
+            <dt className="text-zinc-500">Shopify domain</dt>
+            <dd className="font-mono text-zinc-300">
+              {tenant.shopifyDomain ?? "—"}
+            </dd>
+            <dt className="text-zinc-500">Created</dt>
+            <dd className="text-zinc-300">
+              {new Date(tenant.createdAt).toLocaleString()}
+            </dd>
+          </dl>
+        </div>
+
+        {/* ---- Shopify custom app ---- */}
+        <section className="space-y-4 rounded-lg border border-zinc-800 p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium">Shopify custom app</h2>
+            <StatusBadge status={shopifyApp?.status ?? null} />
+          </div>
+          {shopifyApp ? (
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
+              <dt className="text-zinc-500">Client ID</dt>
+              <dd className="font-mono text-zinc-300">{shopifyApp.clientId}</dd>
+              <dt className="text-zinc-500">Connected shop</dt>
+              <dd className="font-mono text-zinc-300">
+                {shopifyApp.shopDomain ?? "— (not connected yet)"}
+              </dd>
+              <dt className="text-zinc-500">Updated</dt>
+              <dd className="text-zinc-300">
+                {new Date(shopifyApp.updatedAt).toLocaleString()}
+              </dd>
+            </dl>
+          ) : (
+            <p className="text-sm text-zinc-400">
+              Not provisioned. Create a Shopify custom app for this store, then
+              paste its API key + secret below to enable the merchant&apos;s
+              Connect button.
+            </p>
+          )}
+
+          <form action={provision} className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="clientId" className="text-sm text-zinc-300">
+                  Client ID (API key)
+                </label>
+                <input
+                  id="clientId"
+                  name="clientId"
+                  required
+                  defaultValue={shopifyApp?.clientId ?? ""}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="clientSecret" className="text-sm text-zinc-300">
+                  Client secret
+                </label>
+                <input
+                  id="clientSecret"
+                  name="clientSecret"
+                  type="password"
+                  required
+                  autoComplete="off"
+                  placeholder={shopifyApp ? "•••••• (re-enter to rotate)" : ""}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+              >
+                {shopifyApp ? "Rotate credentials" : "Provision app"}
+              </button>
+            </div>
+          </form>
+
+          {shopifyApp && shopifyApp.status !== "revoked" ? (
+            <form action={revoke} className="border-t border-zinc-800 pt-3">
+              <button
+                type="submit"
+                className="text-sm text-red-400 hover:text-red-300"
+              >
+                Revoke provisioning
+              </button>
+            </form>
+          ) : null}
+        </section>
+
+        {/* ---- Connector health ---- */}
+        <section className="space-y-3">
+          <h2 className="text-lg font-medium">Connectors</h2>
+          {connections.length === 0 ? (
+            <p className="rounded-md border border-zinc-800 px-4 py-6 text-center text-sm text-zinc-400">
+              No connector connections.
+            </p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-zinc-800">
+              <table className="w-full text-sm">
+                <thead className="bg-zinc-900/60 text-left text-xs uppercase tracking-wide text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Provider</th>
+                    <th className="px-4 py-2.5 font-medium">Account / shop</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Scopes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {connections.map((c) => (
+                    <tr key={c.id}>
+                      <td className="px-4 py-2.5">{c.provider}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        {c.shopDomain ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <StatusBadge status={c.status} />
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">
+                        {c.scopes.length ? c.scopes.join(", ") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* ---- Danger zone ---- */}
+        <section className="space-y-3 rounded-lg border border-red-500/30 p-5">
+          <h2 className="text-lg font-medium text-red-300">Danger zone</h2>
+          <p className="text-sm text-zinc-400">
+            Permanently delete this tenant and all its data (cases, approvals,
+            audit, connectors). This cannot be undone. Type{" "}
+            <span className="font-mono text-zinc-200">{tenant.name}</span> to
+            confirm.
+          </p>
+          <form action={remove} className="flex flex-wrap items-center gap-2">
+            <input
+              name="confirmName"
+              required
+              autoComplete="off"
+              placeholder="Tenant name"
+              className="grow rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-red-500/60"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-red-500/40 px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-500/10"
+            >
+              Delete tenant
+            </button>
+          </form>
+        </section>
+      </main>
+    </>
+  );
+}
