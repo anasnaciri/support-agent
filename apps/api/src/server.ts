@@ -82,6 +82,11 @@ import {
   resolveShopifyAppForTenant,
   type GlobalShopifyApp,
 } from "./shopify-app-resolver.js";
+import {
+  getAdminShopifyApp,
+  putAdminShopifyApp,
+  revokeAdminShopifyApp,
+} from "./admin-shopify-app.js";
 import { dashboardConnectRedirect } from "./post-connect-redirect.js";
 import {
   assertShopifyShopConnectable,
@@ -782,6 +787,129 @@ const handleAdminTenantDelete = async (
   const { id } = req.params as { id: string };
   const result = await deleteTenantAccount(cfg, layer, id);
   return sendJson(res, result.kind === "tenant_not_found" ? 404 : 200, result);
+};
+
+// ---- Admin: per-tenant Shopify custom-app provisioning (pilot) ----
+
+/**
+ * Guard the `/admin/tenants/:id/shopify-app` routes: require the configured
+ * admin bearer token. Returns the tenant id on success, or `null` after
+ * having already sent the error response.
+ */
+const adminShopifyAppGuard = (
+  cfg: ApiConfig,
+  req: FastifyRequest,
+  res: FastifyReply,
+): string | null => {
+  if (!cfg.adminApiToken) {
+    sendJson(res, 503, { error: "admin_api_not_configured" });
+    return null;
+  }
+  const parsed = parseAdminAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.adminApiToken,
+  );
+  if (!parsed.ok) {
+    sendJson(res, parsed.status, { error: parsed.message });
+    return null;
+  }
+  return (req.params as { id: string }).id;
+};
+
+// PUT /admin/tenants/:id/shopify-app — operator sets the tenant's Shopify
+// custom-app client_id + client_secret (pilot custom distribution).
+const handleAdminShopifyAppPut = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const body = parseJsonBody(req);
+  const clientId = typeof body["clientId"] === "string" ? body["clientId"].trim() : "";
+  const clientSecret =
+    typeof body["clientSecret"] === "string" ? body["clientSecret"] : "";
+  if (!clientId || !clientSecret) {
+    sendJson(res, 400, { error: "missing_client_credentials" });
+    return;
+  }
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      putAdminShopifyApp({ tenantId, clientId, clientSecret }),
+      layer,
+    ),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, {
+      error: "provisioning_failed",
+      detail: String(exit.cause),
+    });
+    return;
+  }
+  if (exit.value.kind === "tenant_not_found") {
+    sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
+};
+
+// GET /admin/tenants/:id/shopify-app — read provisioning status (no secret).
+const handleAdminShopifyAppGet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(getAdminShopifyApp(tenantId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "lookup_failed", detail: String(exit.cause) });
+    return;
+  }
+  if (exit.value.kind === "tenant_not_found") {
+    sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  if (exit.value.kind === "not_provisioned") {
+    sendJson(res, 200, { ok: true, provisioned: false, provisioning: null });
+    return;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    provisioned: true,
+    provisioning: exit.value.provisioning,
+  });
+};
+
+// DELETE /admin/tenants/:id/shopify-app — revoke provisioning (offboarding).
+const handleAdminShopifyAppDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(revokeAdminShopifyApp(tenantId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "revoke_failed", detail: String(exit.cause) });
+    return;
+  }
+  if (exit.value.kind === "tenant_not_found") {
+    sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  if (exit.value.kind === "not_provisioned") {
+    sendJson(res, 404, { error: "not_provisioned" });
+    return;
+  }
+  sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
 };
 
 // ---- Dashboard catalog / models / tenant (reads) ----
@@ -3010,6 +3138,45 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleAdminTenantDelete(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.put(
+    "/admin/tenants/:id/shopify-app",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Provision a tenant's Shopify custom app (client_id + secret)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminShopifyAppPut(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.get(
+    "/admin/tenants/:id/shopify-app",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Read a tenant's Shopify app provisioning (never the secret)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminShopifyAppGet(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.delete(
+    "/admin/tenants/:id/shopify-app",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Revoke a tenant's Shopify app provisioning",
+      },
+    },
+    async (req, res) => {
+      await handleAdminShopifyAppDelete(cfg, layer, req, res);
       return res;
     },
   );
