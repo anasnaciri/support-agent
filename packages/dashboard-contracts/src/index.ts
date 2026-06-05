@@ -227,6 +227,44 @@ export interface ShopifyAppGateView {
 }
 
 // ============================================================
+// Admin (platform operator) — apps/admin
+// ============================================================
+
+export type ShopifyAppStatus = "ready" | "connected" | "revoked";
+
+/** One row in the admin tenant list. */
+export interface AdminTenantSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly workosOrganizationId: string | null;
+  readonly createdAt: string;
+  /** Pilot Shopify custom-app provisioning at a glance. */
+  readonly shopifyApp: {
+    readonly provisioned: boolean;
+    readonly status: ShopifyAppStatus | null;
+  };
+  readonly connectionCount: number;
+}
+
+/** Operator view of one tenant. Never includes any secret. */
+export interface AdminTenantDetail {
+  readonly tenant: {
+    readonly id: string;
+    readonly name: string;
+    readonly workosOrganizationId: string | null;
+    readonly shopifyDomain: string | null;
+    readonly createdAt: string;
+  };
+  readonly shopifyApp: {
+    readonly clientId: string;
+    readonly shopDomain: string | null;
+    readonly status: ShopifyAppStatus;
+    readonly updatedAt: string;
+  } | null;
+  readonly connections: ReadonlyArray<ConnectorConnectionView>;
+}
+
+// ============================================================
 // Per-agent model overrides (settings/agents)
 // ============================================================
 

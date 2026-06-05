@@ -87,6 +87,10 @@ import {
   putAdminShopifyApp,
   revokeAdminShopifyApp,
 } from "./admin-shopify-app.js";
+import {
+  getTenantDetailForAdmin,
+  listTenantsForAdmin,
+} from "./admin-tenants.js";
 import { dashboardConnectRedirect } from "./post-connect-redirect.js";
 import {
   assertShopifyShopConnectable,
@@ -944,6 +948,58 @@ const handleAdminShopifyAppDelete = async (
     return;
   }
   sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
+};
+
+// GET /admin/tenants — list every tenant for the operator admin app.
+const handleAdminTenantsList = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!cfg.adminApiToken) {
+    sendJson(res, 503, { error: "admin_api_not_configured" });
+    return;
+  }
+  const parsed = parseAdminAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.adminApiToken,
+  );
+  if (!parsed.ok) {
+    sendJson(res, parsed.status, { error: parsed.message });
+    return;
+  }
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(listTenantsForAdmin(), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "list_failed", detail: String(exit.cause) });
+    return;
+  }
+  sendJson(res, 200, { tenants: exit.value });
+};
+
+// GET /admin/tenants/:id — operator detail for one tenant (no secrets).
+const handleAdminTenantDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(getTenantDetailForAdmin(tenantId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "detail_failed", detail: String(exit.cause) });
+    return;
+  }
+  if (!exit.value) {
+    sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  sendJson(res, 200, exit.value);
 };
 
 // ---- Dashboard catalog / models / tenant (reads) ----
@@ -3177,6 +3233,32 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleAdminTenantDelete(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.get(
+    "/admin/tenants",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "List all tenants (platform operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminTenantsList(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.get(
+    "/admin/tenants/:id",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Tenant detail: Shopify app + connector health (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminTenantDetail(cfg, layer, req, res);
       return res;
     },
   );
