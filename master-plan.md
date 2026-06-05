@@ -1204,7 +1204,7 @@ Cursor-based, `?cursor=...&limit=50`. No offset pagination on large tables.
 There are two web apps with different audiences and authorization boundaries:
 
 - **Merchant dashboard (`apps/dashboard`).** Tenant-scoped cockpit for case operations, approvals, policies, agent settings, and merchant-managed integrations.
-- **Internal admin dashboard (`apps/admin`).** Platform-operator surface for managing tenants and connector credentials/provisioning. This is where support-agent operators create/update tenants, link pilot-branch Shopify custom app credentials/install URLs to a tenant, inspect connector health, revoke or rotate credentials, and recover broken onboarding. It is not exposed to merchant users and must have stricter platform-admin authorization, audit logging, and secret-handling controls than the merchant dashboard.
+- **Internal admin dashboard (`apps/admin`).** Platform-operator surface for managing tenants and connector credentials/provisioning. This is where support-agent operators create/update tenants, set a tenant's pilot-variant Shopify custom app `client_id`/`client_secret` (the `shopify_app_provisioning` row), inspect connector health, revoke or rotate credentials, and recover broken onboarding. It is not exposed to merchant users and must have stricter platform-admin authorization, audit logging, and secret-handling controls than the merchant dashboard.
 
 The dashboard is the merchant's daily home, not a settings page. Optimized for a support manager who walks in at 9am wanting to know: _what does the AI need from me?_
 
@@ -1250,7 +1250,7 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 `apps/admin` is a separate Next app in the repo. It manages platform-owned operational state that should not live in the merchant dashboard:
 
 - Tenant list, tenant creation, tenant suspension, tenant-to-WorkOS/org mapping, and tenant support metadata.
-- Connector credential/provisioning records, including encrypted per-tenant provider credentials and pilot-branch Shopify custom app config.
+- Connector credential/provisioning records, including encrypted per-tenant provider credentials and pilot-variant Shopify custom app config (`shopify_app_provisioning`).
 - Credential lifecycle actions: mark ready, connect/reconnect link visibility, revoke, rotate, and inspect last sync/webhook status.
 - Read-only diagnostics into cases, connector health, webhook deliveries, and audit-log entries, always behind platform-admin authorization.
 
@@ -2515,7 +2515,7 @@ The agent has more power than a chatbot. The threat model must match.
 
 **Risk:** the managed Shopify connector requests more customer/order data than the first workflow needs, blocking app review or increasing compliance burden. This review path applies when we offer one-click Shopify installation through our app; merchant-provided custom app tokens remain a connector credential mode, not the core platform assumption. `read_all_orders` is a protected extra scope for orders older than Shopify's default 60-day window and should not be requested by default.
 
-**Branch strategy:** keep Shopify distribution work split between a pilot branch and the main SaaS branch. The **pilot branch** uses Shopify custom distribution for hand-held pilots: support-agent/operator provisions or creates the customer's Shopify store/custom app, stores the tenant-linked app credentials and custom install URL, and enables the dashboard "Connect Shopify" button only after that mapping exists. The OAuth callback maps `shopDomain -> tenant/app config`, verifies/exchanges with that app secret, then writes the normal connector credential row. This branch keeps Stripe billing and avoids App Store distribution by accepting custom-distribution limits. The **main/SaaS branch** is the scalable path: Shopify is one connector among many, merchants self-serve from Settings -> Connect Shopify, and the app must resolve Shopify public limited-visibility review/billing requirements before broad launch.
+**Distribution variants (one repo, not branches):** pilot and SaaS are two **deploy/config variants of this single repo** — decided 2026-06-05, superseding the earlier two-branch plan. There is no pilot branch; the difference is expressed as runtime configuration / a selectable layer / per-variant deploy config, never as forked source, and a pilot customer is delivered as a self-contained deployable artifact built from this repo in pilot mode. The **pilot variant** uses Shopify custom distribution for hand-held pilots: support-agent/operator provisions or creates the customer's Shopify custom app and stores its tenant-linked `client_id` + encrypted `client_secret` in `shopify_app_provisioning` (one row per tenant; `shop_domain` learned at the OAuth callback). The **presence of that row is the per-tenant switch** — install/callback/webhooks then resolve the tenant's own app credentials (callback verifies the HMAC *after* resolving the tenant from signed state; webhooks resolve the per-tenant secret by shop header before verifying), and a tenant with no row falls back to the global env app. The dashboard "Connect Shopify" button is gated until provisioned via the `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` flag. The pilot variant keeps Stripe billing and avoids App Store distribution by accepting custom-distribution limits. The **SaaS variant** is the scalable path: Shopify is one connector among many, merchants self-serve from Settings -> Connect Shopify (no provisioning row, global app, gate off), and broad launch must resolve Shopify public limited-visibility review/billing requirements.
 
 **Mitigations:**
 
@@ -2617,7 +2617,7 @@ Deliverable: the agent can answer "where is my order?"
 - `LLMService` tag + `AnthropicProviderLive` _or_ `OpenAIProviderLive` (one to start; abstraction is in place but only one impl).
 - `ShopifyService` Live with `getCustomer`, `getOrder`, `getFulfillment`, `searchByEmail`.
 - Managed Shopify connector distribution prep (optional, not core-platform gating): keep scopes to `read_orders` + `read_customers` for the first workflow; defer `read_all_orders` until older-than-60-day order lookup is a proven requirement and Shopify approves it.
-- Pilot branch Shopify install mode: custom-distribution tenant provisioning (`tenantId`, `shopDomain`, `clientId`, encrypted `clientSecret`, custom install URL, status) gates the dashboard Connect button for hand-held pilots; main/SaaS branch keeps the scalable public limited-visibility connector path.
+- Pilot-variant Shopify install mode (config/deploy variant of one repo, not a branch — see §19.6): custom-distribution per-tenant provisioning (`shopify_app_provisioning`: `tenantId`, `clientId`, encrypted `clientSecret`, `shopDomain` learned at callback, status) gates the dashboard Connect button for hand-held pilots via `SHOPIFY_CONNECT_REQUIRES_PROVISIONING`; the SaaS variant keeps the scalable public limited-visibility connector path. **Landed 2026-06-05.**
 - Reduce Shopify GraphQL field selection to minimum necessary protected customer fields before review; start with `Email` + `Name`, not `Phone` / `Address`, unless the workflow truly needs them.
 - `ConversationService` / `MailboxService` with a provider-neutral thread/message/reply contract.
 - `GmailConversationConnector` as the first connector implementation; future Outlook, IMAP/SMTP, Gorgias, Klaviyo, and Zendesk connectors must implement the same contract.
@@ -2636,7 +2636,7 @@ Deliverable: a manager can see and act on cases.
 - Today view, case list, case detail with timeline.
 - Approval list + approval detail with Approve / Edit & Approve / Reject / Take Over.
 - SSE for live updates on case detail.
-- Separate `apps/admin` Next app for platform operators: tenant management, credential/provisioning records, pilot-branch Shopify custom app linkage, connector health, credential revoke/rotate, and platform-admin audit.
+- Separate `apps/admin` Next app for platform operators: tenant management, credential/provisioning records, pilot-variant Shopify custom app provisioning (`shopify_app_provisioning` — the `PUT/GET/DELETE /admin/tenants/:id/shopify-app` endpoints landed 2026-06-05; the UI is still to build), connector health, credential revoke/rotate, and platform-admin audit.
 - All command endpoints (`/approvals/:id/approve`, etc.) wired.
 - Manual happy path: agent proposes `conversation.reply` (ask), manager approves in dashboard, reply goes out through the tenant's configured connector.
 
