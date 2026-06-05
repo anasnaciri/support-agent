@@ -2636,7 +2636,7 @@ Deliverable: a manager can see and act on cases.
 - Today view, case list, case detail with timeline.
 - Approval list + approval detail with Approve / Edit & Approve / Reject / Take Over.
 - SSE for live updates on case detail.
-- Separate `apps/admin` Next app for platform operators: tenant management, credential/provisioning records, pilot-variant Shopify custom app provisioning (`shopify_app_provisioning` — the `PUT/GET/DELETE /admin/tenants/:id/shopify-app` endpoints landed 2026-06-05; the UI is still to build), connector health, credential revoke/rotate, and platform-admin audit.
+- Separate `apps/admin` Next app for platform operators: tenant management, credential/provisioning records, pilot-variant Shopify custom app provisioning (`shopify_app_provisioning`), connector health, credential revoke/rotate, and platform-admin audit. **The first version landed 2026-06-05:** `apps/admin` (Next, shared-password auth) with a tenant list + per-tenant detail (Shopify provisioning form, read-only connector health, account-deletion danger zone), over admin-authed api endpoints (`GET /admin/tenants`, `GET /admin/tenants/:id`, `PUT/GET/DELETE /admin/tenants/:id/shopify-app`, `POST /admin/tenants/:id/delete`).
 - All command endpoints (`/approvals/:id/approve`, etc.) wired.
 - Manual happy path: agent proposes `conversation.reply` (ask), manager approves in dashboard, reply goes out through the tenant's configured connector.
 
