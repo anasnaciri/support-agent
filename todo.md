@@ -11,6 +11,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
 - **Phase 1 — Runtime spine:** partial
 - **Phase 2+:** not started
+- **Session update:** 2026-06-06 (5) — **Pilot pre-onboarding audit findings FIXED (all 7 code-level findings: A1, A2, A3, A4, A6, B1, B2).** The "do not onboard until fixed" trio (A1, A2, A3) plus B1 (HIGH) are resolved, along with B2/A6/A4. Seven TDD commits, each its own logical change: `3b3157d` A1+A2 (install gated on a non-revoked provisioning row — authoritative resolver gate + revoked-not-installable + `put` reactivation + dashboard "Awaiting setup" button), `bb188d8` A3 (deterministic webhook routing — partial unique index migration 0012 + `getByShop` ordering + `markConnected`/`put` shop_domain hygiene), `4709a0a` B1 (provider-side OAuth revocation on deletion — new `oauth-revocation.ts`; grants captured pre-wipe, tokens encrypted in the cleanup job, worker revokes best-effort), `13a45e8` B2 (logged-out users → legal-gated `/sign-up`), `1b08a05` A6 (global Shopify creds **disallowed** in pilot mode, fail-fast), `fef9040` A4 (capture store domain at provisioning → bind tenant + use the proven authorize URL). Each audit checkbox below carries its fix + commit. Verified: `pnpm build` green, full suite **769 passing / 5 skipped**, dashboard + admin `next build` green. **Remaining: only A5 + B3 (deploy/infra)** — the dashboard + `apps/admin` still have no deploy target (Railway covers api+worker only), and the admin UI hasn't been deployed/live-tested. Those need the user's cloud accounts + a deploy-target decision (Cloudflare Workers/OpenNext vs a Railway Next service); pending that, **onboarding-blocking code is clear but the pilot is not yet deployed end-to-end.** Memory: [[project_pilot_pre_onboarding_audit]] (update: blockers cleared).
 - **Session update:** 2026-06-06 (4) — **Pilot pre-onboarding audit recorded (see the "⚠️ Pilot pre-onboarding audit" section below).** Two read-only audits surfaced 6 + 3 findings; **no code changed this entry — documentation only**, for another session to pick up. Headline: **do not onboard a real merchant until A1–A3 are fixed** (provisioning bypass via `/shopify/install` global fallback; revoked provisioning still installs + re-provision keeps `revoked`; ambiguous webhook-secret routing on non-unique `shop_domain`). A4–A5 (custom-distribution install link not stored/validated; dashboard + `apps/admin` deploy incomplete) must be fixed or explicitly validated before "deploy-ready." Audit B (separate): external OAuth-grant revocation missing on account deletion (B1, HIGH), `/sign-up` legal gate bypassable via `/sign-in` (B2), admin UI not deployed/live-tested (B3). Each finding has file:line + a fix direction in the section below. Verified at audit time: `pnpm build` green, focused suites 80 + 24 passing.
 - **Session update:** 2026-06-06 (3) — **Railway chosen as the primary deploy target (Hetzner kept as documented alternative).** Decision (from user): go with Railway for speed/lower ops; Hetzner+Compose stays fully documented but secondary. Added a Railway deploy target under `deploy/railway/` **without forking source or touching the Hetzner Dockerfile/compose** (per the one-repo/per-variant governance): `Dockerfile` (full workspace build; role chosen by per-service Start Command since Railway has no stage selector), `api.json` + `worker.json` (config-as-code: Dockerfile build, start commands, api **Pre-Deploy** `pnpm db:migrate` + `/healthz` healthcheck), and `railway.env.example` (vars tagged [shared]/[api]/[worker]; `DATABASE_URL=${{ Postgres.DATABASE_URL }}`, `API_PORT=${{ PORT }}`). DEPLOY.md restructured into "Railway (primary)" + "Hetzner (alternative)" with a full Railway runbook. Key wiring confirmed in code: api binds `API_PORT` (default 4000) on `0.0.0.0`; all Dockerfile targets are `FROM builder` so one image runs every role; `/healthz` exists. **I can't run the deploy (needs interactive `railway login` + their account)** — the runbook is the deliverable; user runs the CLI. Memory: [[project_deploy_hetzner_compose]] (now "Railway primary, Hetzner alt").
 - **Session update:** 2026-06-06 (2) — **PCD operator tooling built in `apps/admin` (checklist + live check).** Following the docs clarification below: each per-tenant Custom-distribution app needs no review but must declare its protected customer data fields in the Dev Dashboard or live stores redact customer PII. Added (1) a per-app **Dev Dashboard checklist** on the tenant provisioning page (set Custom distribution; declare name/email/address; run the check) and (2) a **"Run PCD check"** button → `POST /admin/tenants/:id/shopify-app/pcd-check`. New `ShopifyService.listRecentOrderPiiPresence(tenantId, limit)` (Tag + Test + Live GraphQL `RecentOrdersPii`) reads recent orders and returns **presence booleans only** — no PII crosses the service boundary. Pure `summarizeOrderPii` → verdict `present`/`redacted`/`no_orders` (anchored on customer email, since name/address can be legitimately absent); `checkAdminShopifyAppPcd` maps `ShopifyAuthMissing` → `not_connected`. `apps/admin` `checkShopifyPcd` client + `runPcdCheckAction` surface the verdict as a toned banner. TDD, all green: `pnpm build` + full suite **739 passing / 5 skipped** (+16), `apps/admin` `tsc --noEmit` + `next build` clean. Memory: [[project_pilot_shopify_app_provisioning]].
@@ -64,21 +65,25 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-## ⚠️ Pilot pre-onboarding audit (2026-06-06) — fix before first merchant
+## ⚠️ Pilot pre-onboarding audit (2026-06-06)
 
-Two audits were run this session (read-only — **no files were edited**; one
-pre-existing unstaged change in `apps/admin/next-env.d.ts` is generated, ignore
-it). **Do not onboard a real merchant until A1–A3 are fixed.** A4–A5 must be
-fixed **or explicitly validated** before calling the pilot deploy-ready.
+**STATUS (2026-06-06 session 5): all code-level findings FIXED — A1, A2, A3,
+A4, A6, B1, B2 are resolved (see each checkbox + commit below). The
+onboarding-blocking trio A1–A3 and the HIGH B1 are clear, so the code is no
+longer the blocker for onboarding a real merchant.** What remains is **A5 + B3
+(deploy/infra only)**: the merchant dashboard and `apps/admin` operator console
+still have no deploy target (Railway covers api+worker), and the admin UI hasn't
+been deployed/live-tested. Don't call the pilot "deployed end-to-end" until
+those land — but they need the user's cloud accounts + a deploy-target decision.
 
-Verified state at audit time: `pnpm build` passed; focused pilot/admin/Shopify
-suite **80 tests passing** (audit A), **24 tests passing** (audit B). Each item
-below is self-contained — file:line, the problem, and a fix direction — so a
-cold-start session can act without re-deriving.
+The two original audits were read-only; the fixes landed in session 5 across
+seven TDD commits. Each item below carries its problem, original file:line, and
+the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
+**769 passing / 5 skipped**, dashboard + admin `next build` green.
 
 ### Audit A — pilot provisioning & deploy
 
-- [ ] **A1 (HIGH) — Pilot provisioning can be bypassed.** The
+- [x] **A1 (HIGH) — Pilot provisioning can be bypassed.** FIXED 2026-06-06 (commit `3b3157d`): the gate is enforced authoritatively at the install/callback resolver (`resolveShopifyAppForTenant` takes `requireProvisioning`); pilot mode with no non-revoked row → 403 `shopify_provisioning_required`, no global fallback. The manage page mirrors the overview's disabled "Awaiting setup" button. The
   `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` gate only guards the dashboard
   *overview*. A merchant can visit the Shopify integration page or hit
   `/shopify/install` directly, which **falls back to the global Shopify app
@@ -90,7 +95,7 @@ cold-start session can act without re-deriving.
   the integration page, not just the overview. When the flag is set and there's
   no non-revoked provisioning row, **refuse the install** instead of resolving
   the global fallback app.
-- [ ] **A2 (HIGH) — Revoking provisioning does not prevent installs.** Revoked
+- [x] **A2 (HIGH) — Revoking provisioning does not prevent installs.** FIXED 2026-06-06 (commit `3b3157d`): a revoked row is not installable on the OAuth path (403, reason `revoked`); `put()` reactivates a revoked row to `ready` so re-entering creds un-blocks it; the webhook secret path still resolves a revoked row's secret. Revoked
   provisioning rows are still resolved and usable for OAuth, and re-entering
   credentials for a revoked app **preserves `revoked`** instead of
   reactivating.
@@ -103,8 +108,8 @@ cold-start session can act without re-deriving.
   [[project_pilot_shopify_app_provisioning]]). So block installs, not webhook
   verify. Separately, `put()` should reset status to `ready`/`connected` on
   re-provision so re-entering creds reactivates.
-- [ ] **A3 (MEDIUM/HIGH) — Shopify webhook secret routing can become
-  ambiguous.** `shopify_app_provisioning.shop_domain` is **not unique**, but
+- [x] **A3 (MEDIUM/HIGH) — Shopify webhook secret routing can become
+  ambiguous.** FIXED 2026-06-06 (commit `bb188d8`, migration 0012): partial unique index on `shop_domain WHERE status <> 'revoked'`; `getByShop` orders non-revoked-then-newest; `markConnected` clears other rows holding the shop; `put` reactivation clears the stale shop_domain. `shopify_app_provisioning.shop_domain` was **not unique**, but
   webhook resolution selects the *first* matching row. A shop transferred
   between tenants can leave multiple provisioning rows for the same shop →
   nondeterministic secret selection.
@@ -115,7 +120,7 @@ cold-start session can act without re-deriving.
   index on `shop_domain WHERE status != 'revoked'`, and/or prefer the
   `connected` (active) row; reconcile with the shop-transfer path that
   nulls/moves `shop_domain` so stale rows can't shadow the live one.
-- [ ] **A4 (MEDIUM) — Custom-distribution install URL is not stored.** The
+- [x] **A4 (MEDIUM) — Custom-distribution install URL is not stored.** FIXED 2026-06-06 (commit `fef9040`): the operator can record the store domain at provisioning (`PUT .../shopify-app` optional `shopDomain` + apps/admin form field). It's normalized, recorded on the row, and bound to the tenant via `claimShopifyShopForTenant` (so `tenants.shopify_domain` resolves a no-state callback; 409 if the shop is actively owned elsewhere). With the shop known, the install uses that store's standard OAuth authorize URL instead of the unverified managed-install picker. (Deviation from the original direction: we build the proven authorize URL from the captured shop rather than storing Shopify's generated link.) The
   provisioning model stores credentials but **not** Shopify's generated
   custom-distribution install link; the app builds a generic URL from the
   client id (`buildManagedInstallUrl` → `admin.shopify.com/oauth/install`),
@@ -135,7 +140,7 @@ cold-start session can act without re-deriving.
   Fix direction: finish Path B slice 9 (OpenNext/wrangler for the dashboard),
   and add a deploy target for `apps/admin` (a third Railway service, or mirror
   the dashboard's Workers path). See the Path B box in Phase 3.
-- [ ] **A6 (LOW) — Pure-pilot deploys still require global Shopify creds.** The
+- [x] **A6 (LOW) — Pure-pilot deploys still require global Shopify creds.** FIXED 2026-06-06 (commit `1b08a05`): in pilot mode (`SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true`) the global `SHOPIFY_APP_CLIENT_ID/SECRET` are not just optional but **disallowed** — `loadApiConfig` fails fast if they're set with the pilot flag (no ambiguous hybrid), and boots fine without them. `globalShopifyApp()` returns null so the resolver fails closed. The
   api can't boot using only per-tenant Shopify credentials.
   Evidence: `apps/api/src/bootstrap.ts:188` (`requireEnv`).
   Fix direction: make `cfg.shopify` optional when
@@ -145,7 +150,7 @@ cold-start session can act without re-deriving.
 
 ### Audit B — account-deletion / onboarding / admin (the "item 6" follow-up)
 
-- [ ] **B1 (HIGH) — External OAuth-grant revocation is not implemented.**
+- [x] **B1 (HIGH) — External OAuth-grant revocation is not implemented.** FIXED 2026-06-06 (commit `4709a0a`): new `packages/providers/oauth-revocation.ts` (Google token revoke, Shopify app uninstall, Gmail `users.stop`) + `revokeConnectorGrant` dispatcher. The api captures active OAuth grants **before** the wipe and passes them in the `account.cleanup` job with tokens AES-GCM-encrypted under the shared `CREDENTIAL_ENCRYPTION_KEY` (never plaintext in the job table); the worker decrypts + revokes each best-effort before the WorkOS/email steps. LLM BYOK keys excluded.
   Account deletion wipes connector credentials **before** cleanup runs, and the
   cleanup job only deletes the WorkOS org + sends a confirmation email. So
   provider-side, **Google/Gmail grants, Gmail watches, and Shopify
@@ -155,7 +160,7 @@ cold-start session can act without re-deriving.
   in the same step) and revoke provider-side during cleanup — Shopify app
   uninstall / token revoke, Google OAuth token revoke, and `users.stop` for the
   Gmail watch.
-- [ ] **B2 (MEDIUM) — New users aren't reliably routed through `/sign-up`.** The
+- [x] **B2 (MEDIUM) — New users aren't reliably routed through `/sign-up`.** FIXED 2026-06-06 (commit `13a45e8`): `getDashboardContext` + `requireOrganization` redirect logged-out users to the legal-gated `/sign-up` (not WorkOS-hosted `/sign-in`); returning users use the "Sign in" link there. The onboarding legal fallback + the api tenant-level connector gate remain the airtight net. The
   legal-gated `/sign-up` exists and the goodbye page links to it, but
   unauthenticated dashboard access still redirects to `/sign-in` (WorkOS-hosted
   sign-in), which **lets a user bypass the custom legal-gated sign-up page**.
