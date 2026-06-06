@@ -346,6 +346,38 @@ export type TenantAgentOverrideRow =
 export type TenantAgentOverrideInsert =
   typeof tenantAgentOverrides.$inferInsert;
 
+// Platform-operator audit log. Deliberately NOT tenant-scoped and with NO
+// FK to `tenants` — these rows must SURVIVE a tenant wipe so a privileged
+// action (above all, deleting a tenant) leaves a permanent record. The
+// per-tenant `audit_log` is wiped with the tenant, so it can't hold the
+// deletion record itself. See master-plan §13 ("every admin mutation must
+// write an audit row") + re-audit #2. `actor` is the operator identity
+// (today the shared-password console writes "admin"; a self-service tenant
+// deletion writes "tenant_self").
+export const adminAuditLog = pgTable(
+  "admin_audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    action: text("action").notNull(),
+    // The tenant the action targeted. No FK — the tenant row may be gone.
+    targetTenantId: uuid("target_tenant_id"),
+    actor: text("actor").notNull(),
+    details: jsonb("details")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("admin_audit_log_target_idx").on(t.targetTenantId),
+    index("admin_audit_log_created_idx").on(t.createdAt),
+  ],
+);
+
+export type AdminAuditLogRow = typeof adminAuditLog.$inferSelect;
+export type AdminAuditLogInsert = typeof adminAuditLog.$inferInsert;
+
 export const timers = pgTable(
   "timers",
   {

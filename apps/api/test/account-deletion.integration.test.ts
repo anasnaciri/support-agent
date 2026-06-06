@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import {
+  adminAuditLog,
   approvals,
   auditLog,
   caseStateTransitions,
@@ -146,6 +147,12 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     };
   };
 
+  const adminAuditRows = async (id: string) =>
+    raw!.db
+      .select()
+      .from(adminAuditLog)
+      .where(eq(adminAuditLog.targetTenantId, id));
+
   beforeAll(async () => {
     if (!raw) return;
     await seedTenant(tenantA, orgA);
@@ -168,6 +175,9 @@ describeIfDb("apps/api — account deletion (integration)", () => {
       await raw.db.delete(auditLog).where(sql`${auditLog.tenantId} = ${id}`);
       await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
+      await raw.db
+        .delete(adminAuditLog)
+        .where(sql`${adminAuditLog.targetTenantId} = ${id}`);
     }
     await raw.close();
   });
@@ -230,6 +240,13 @@ describeIfDb("apps/api — account deletion (integration)", () => {
       connectors: 1,
       overrides: 1,
     });
+
+    // A surviving platform-admin audit record exists even though the tenant's
+    // own audit_log was wiped (re-audit #2). Self-service → actor tenant_self.
+    const adminAudit = await adminAuditRows(tenantA);
+    expect(adminAudit).toHaveLength(1);
+    expect(adminAudit[0]!.action).toBe("tenant.deleted");
+    expect(adminAudit[0]!.actor).toBe("tenant_self");
   });
 
   it("a second dashboard delete (tenant A already gone) → 403 no tenant for org", async () => {
@@ -254,5 +271,11 @@ describeIfDb("apps/api — account deletion (integration)", () => {
       connectors: 0,
       overrides: 0,
     });
+
+    // Surviving admin-audit record for the admin-initiated deletion (#2).
+    const adminAudit = await adminAuditRows(tenantB);
+    expect(adminAudit).toHaveLength(1);
+    expect(adminAudit[0]!.action).toBe("tenant.deleted");
+    expect(adminAudit[0]!.actor).toBe("admin");
   });
 });

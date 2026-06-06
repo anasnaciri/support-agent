@@ -811,6 +811,9 @@ const deleteTenantAccount = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   tenantId: string,
+  // Operator identity for the surviving admin-audit record (re-audit #2):
+  // "admin" (platform console) or "tenant_self" (dashboard self-service).
+  actor: string,
 ): Promise<DeleteAccountResult> => {
   const snapshot = await runWithDb(layer, (db) =>
     tenantDeletionSnapshot(db, tenantId),
@@ -840,9 +843,20 @@ const deleteTenantAccount = async (
     return { kind: "enqueue_failed" };
   }
 
-  // 3. Wipe every tenant row (atomic).
+  // 3. Wipe every tenant row (atomic), recording a SURVIVING admin-audit
+  //    row in the same transaction (re-audit #2).
   const wipe = await Effect.runPromise(
-    Effect.provide(redactShop(tenantId), layer),
+    Effect.provide(
+      redactShop(tenantId, {
+        action: "tenant.deleted",
+        actor,
+        details: {
+          tenantName: snapshot.name,
+          workosOrganizationId: snapshot.workosOrganizationId,
+        },
+      }),
+      layer,
+    ),
   );
 
   return {
@@ -879,7 +893,12 @@ const handleDashboardAccountDelete = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const result = await deleteTenantAccount(cfg, layer, auth.tenantId);
+  const result = await deleteTenantAccount(
+    cfg,
+    layer,
+    auth.tenantId,
+    "tenant_self",
+  );
   return sendJson(res, deleteResultStatus(result), result);
 };
 
@@ -899,7 +918,7 @@ const handleAdminTenantDelete = async (
   );
   if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.message });
   const { id } = req.params as { id: string };
-  const result = await deleteTenantAccount(cfg, layer, id);
+  const result = await deleteTenantAccount(cfg, layer, id, "admin");
   return sendJson(res, deleteResultStatus(result), result);
 };
 
@@ -2539,7 +2558,14 @@ const handleShopRedact = async (
   }
 
   const redactExit = await Effect.runPromiseExit(
-    Effect.provide(redactShop(verified.tenantId), layer),
+    Effect.provide(
+      redactShop(verified.tenantId, {
+        action: "tenant.redacted",
+        actor: "shopify-compliance",
+        details: { shop: verified.shop ?? null },
+      }),
+      layer,
+    ),
   );
   if (redactExit._tag !== "Success") {
     req.log.error(

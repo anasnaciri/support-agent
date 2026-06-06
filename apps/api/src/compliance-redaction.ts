@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
+  adminAuditLog,
   DbClient,
   approvals,
   auditLog,
@@ -172,6 +173,18 @@ export interface RedactShopResult {
 }
 
 /**
+ * A surviving platform-admin audit record to write IN THE SAME transaction as
+ * the wipe (re-audit #2). Goes to `admin_audit_log`, which has no tenant FK so
+ * it outlives the deleted tenant — the per-tenant `audit_log` is wiped here.
+ */
+export interface RedactShopAdminAudit {
+  readonly action: string;
+  /** Operator identity: "admin", "tenant_self", "shopify-compliance", … */
+  readonly actor: string;
+  readonly details?: Record<string, unknown>;
+}
+
+/**
  * Wipe every row associated with a tenant. Used by the `shop/redact`
  * webhook 48h after a merchant uninstalls, AND by self-service / admin
  * account deletion (see `account-deletion.ts`) — both need the same
@@ -181,9 +194,14 @@ export interface RedactShopResult {
  * `connector_connections` (defined ON DELETE CASCADE). Other tables
  * (cases, approvals, audit_log) reference `tenant_id` without cascade,
  * so they go first.
+ *
+ * When `adminAudit` is provided, a surviving `admin_audit_log` row is written
+ * in the SAME transaction as the wipe — so the privileged deletion is
+ * recorded atomically and the record persists after the tenant is gone.
  */
 export const redactShop = (
   tenantId: string,
+  adminAudit?: RedactShopAdminAudit,
 ): Effect.Effect<RedactShopResult, Error, DbClient> =>
   Effect.gen(function* () {
     const db = yield* DbClient;
@@ -213,6 +231,24 @@ export const redactShop = (
             .delete(tenants)
             .where(eq(tenants.id, tenantId))
             .returning({ id: tenants.id });
+          // 6. surviving admin-audit record (re-audit #2) — last, so it
+          //    captures the deleted counts and is NOT removed by step 3.
+          if (adminAudit) {
+            await tx.insert(adminAuditLog).values({
+              action: adminAudit.action,
+              targetTenantId: tenantId,
+              actor: adminAudit.actor,
+              details: {
+                ...(adminAudit.details ?? {}),
+                deletedCases: deletedCases.length,
+                deletedAuditRows: deletedAudit.length,
+                deletedConnectorRows: deletedConnectors.length,
+                tenantDeleted: deletedTenant.length > 0,
+                at: new Date().toISOString(),
+                traceId: randomUUID(),
+              },
+            });
+          }
           return {
             tenantId,
             deletedCases: deletedCases.length,
