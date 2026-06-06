@@ -1,4 +1,4 @@
-import { Context, Effect, FiberRef, Layer, Runtime } from "effect";
+import { Cause, Context, Effect, FiberRef, Layer, Runtime } from "effect";
 import {
   makeDbClient,
   type DrizzleDb,
@@ -50,6 +50,14 @@ export const DbClientLive = (opts: DbClientOptions) =>
  * `AuditLogService.record(...)` inside one `withTransaction(...)` and
  * they share one SQL transaction. Effect failure → Postgres rollback.
  */
+// Sentinel rejection used to roll back the SQL transaction when the inner
+// Effect fails. Carries the original Cause so the outer Effect fails with it
+// — distinct from a commit/connection error, which is NOT one of these.
+class InnerEffectFailure<E> {
+  readonly _tag = "InnerEffectFailure";
+  constructor(readonly cause: Cause.Cause<E>) {}
+}
+
 export const withTransaction = <A, E, R>(
   eff: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R | DbClient> =>
@@ -60,20 +68,35 @@ export const withTransaction = <A, E, R>(
     // R = never; Runtime.runPromiseExit threads the parent env through.
     const runtime = yield* Effect.runtime<R>();
     return yield* Effect.async<A, E>((resume) => {
+      // CRITICAL: only resume SUCCESS after `db.transaction(...)` RESOLVES,
+      // i.e. after the COMMIT succeeds. Resuming success from inside the
+      // callback (before the commit) would report success even if Postgres
+      // then rolled the transaction back (e.g. a deferred-constraint or
+      // commit-time failure). The inner effect's value is returned from the
+      // callback so Drizzle commits, then `.then` routes it.
       db.transaction(async (tx) => {
         const txAsDb = tx as unknown as DrizzleDb;
         const exit = await Runtime.runPromiseExit(runtime)(
           Effect.locally(eff, CurrentTxRef, txAsDb),
         );
         if (exit._tag === "Success") {
-          resume(Effect.succeed(exit.value));
-          return;
+          return exit.value;
         }
-        resume(Effect.failCause(exit.cause));
-        // throw to roll back the SQL transaction
-        throw new Error("withTransaction: inner effect failed (rollback)");
-      }).catch(() => {
-        // already routed to resume() above; swallow Drizzle's rethrow
-      });
+        // Reject so Drizzle rolls the SQL transaction back, carrying the
+        // cause for the outer Effect.
+        throw new InnerEffectFailure(exit.cause);
+      }).then(
+        (value) => resume(Effect.succeed(value)),
+        (err: unknown) => {
+          if (err instanceof InnerEffectFailure) {
+            resume(Effect.failCause(err.cause as Cause.Cause<E>));
+            return;
+          }
+          // Commit / connection error AFTER the inner effect succeeded — the
+          // data did NOT persist. Surface it as a defect so the caller never
+          // sees success on a rolled-back transaction.
+          resume(Effect.die(err));
+        },
+      );
     });
   });
