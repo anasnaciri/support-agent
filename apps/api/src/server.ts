@@ -113,6 +113,7 @@ import {
   redactShop,
 } from "./compliance-redaction.js";
 import {
+  buildConnectorGrants,
   makePgBossAccountCleanupPublisher,
   type AccountCleanupJobData,
   type EncryptedConnectorGrant,
@@ -719,6 +720,11 @@ const handleDashboardTakeover = async (
 
 type DeleteAccountResult =
   | { readonly kind: "tenant_not_found" }
+  // Could not read the tenant's connector grants for revocation, OR could not
+  // schedule the cleanup job. Both happen BEFORE the wipe, so NOTHING was
+  // deleted — the caller can safely retry (audit re-audit #1c).
+  | { readonly kind: "capture_failed" }
+  | { readonly kind: "enqueue_failed" }
   | {
       readonly kind: "deleted";
       readonly tenantId: string;
@@ -755,24 +761,22 @@ const accountCleanupPublisher = (
  * `cleanupEnqueued:false` rather than fail the request (which would falsely
  * imply nothing happened).
  */
-// Providers whose connection IS a revocable OAuth grant. LLM BYOK keys
-// (openrouter/anthropic/openai) and outlook (not yet wired) are excluded.
-const REVOCABLE_GRANT_PROVIDERS: ReadonlyArray<
-  EncryptedConnectorGrant["provider"]
-> = ["shopify", "gmail", "google_sheets"];
-
 /**
- * Capture the tenant's active OAuth grants and encrypt their tokens for the
- * cleanup job (audit B1). Must run BEFORE redactShop — once the connector
- * rows are wiped these are unrecoverable. Best-effort: a read failure logs
- * and returns [] rather than blocking the deletion (the DB wipe is the
- * critical step; revocation is a courtesy on top).
+ * Capture the tenant's OAuth grants and encrypt their tokens for the cleanup
+ * job (audit B1). Must run BEFORE redactShop — once the connector rows are
+ * wiped these are unrecoverable.
+ *
+ * Captures grants in ANY status, not just `active` (re-audit #1a): a locally
+ * disconnected/`revoked` row can still have a LIVE provider-side grant that
+ * must be revoked. Returns `null` if the rows can't be read — the caller then
+ * aborts the deletion WITHOUT wiping (re-audit #1c) so it stays retriable
+ * rather than silently dropping revocation and destroying the data anyway.
  */
 const captureConnectorGrants = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   tenantId: string,
-): Promise<ReadonlyArray<EncryptedConnectorGrant>> => {
+): Promise<ReadonlyArray<EncryptedConnectorGrant> | null> => {
   const exit = await Effect.runPromiseExit(
     Effect.provide(
       Effect.gen(function* () {
@@ -788,27 +792,21 @@ const captureConnectorGrants = async (
       `[account-delete] tenant=${tenantId} could not read connector grants for revocation:`,
       Cause.pretty(exit.cause),
     );
-    return [];
+    return null;
   }
   const enc = (s: string): string =>
     encrypt(cfg.encryptionKey, s).toString("base64");
-  return exit.value
-    .filter(
-      (c) =>
-        c.status === "active" &&
-        (REVOCABLE_GRANT_PROVIDERS as ReadonlyArray<string>).includes(
-          c.provider,
-        ),
-    )
-    .map((c) => ({
-      provider: c.provider as EncryptedConnectorGrant["provider"],
-      shopDomain: c.shopDomain,
-      accessTokenEncrypted: enc(c.accessToken),
-      refreshTokenEncrypted: c.refreshToken ? enc(c.refreshToken) : null,
-      apiVersion: c.apiVersion,
-    }));
+  return buildConnectorGrants(exit.value, enc);
 };
 
+/**
+ * Delete a tenant. Ordering is deliberate (re-audit #1c): capture grants →
+ * enqueue the cleanup job → THEN wipe. A capture or enqueue failure happens
+ * BEFORE the wipe, so nothing is destroyed and the caller can retry. Only once
+ * the cleanup (revoke grants + delete WorkOS org + email) is durably queued do
+ * we wipe the data. The cleanup job carries a short `startAfter` so the worker
+ * doesn't act before this request's wipe commits.
+ */
 const deleteTenantAccount = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -819,14 +817,12 @@ const deleteTenantAccount = async (
   );
   if (!snapshot) return { kind: "tenant_not_found" };
 
-  // Capture provider grants BEFORE the wipe drops the connector rows.
+  // 1. Capture provider grants (any status) before anything is destroyed.
   const connectorGrants = await captureConnectorGrants(cfg, layer, tenantId);
+  if (connectorGrants === null) return { kind: "capture_failed" };
 
-  const wipe = await Effect.runPromise(
-    Effect.provide(redactShop(tenantId), layer),
-  );
-
-  let cleanupEnqueued = false;
+  // 2. Durably queue the cleanup (revoke + org delete + email) BEFORE the
+  //    wipe, so an enqueue failure leaves all data intact and retriable.
   try {
     await accountCleanupPublisher(cfg.databaseUrl)({
       tenantId: snapshot.id,
@@ -835,14 +831,19 @@ const deleteTenantAccount = async (
       notificationEmail: snapshot.notificationEmail,
       connectorGrants,
     });
-    cleanupEnqueued = true;
   } catch (cause) {
     // eslint-disable-next-line no-console
     console.error(
-      `[account-delete] tenant=${tenantId} wiped but cleanup enqueue failed:`,
+      `[account-delete] tenant=${tenantId} cleanup enqueue failed (NOT wiped, safe to retry):`,
       cause,
     );
+    return { kind: "enqueue_failed" };
   }
+
+  // 3. Wipe every tenant row (atomic).
+  const wipe = await Effect.runPromise(
+    Effect.provide(redactShop(tenantId), layer),
+  );
 
   return {
     kind: "deleted",
@@ -851,8 +852,22 @@ const deleteTenantAccount = async (
     deletedAuditRows: wipe.deletedAuditRows,
     deletedConnectorRows: wipe.deletedConnectorRows,
     workosOrganizationId: snapshot.workosOrganizationId,
-    cleanupEnqueued,
+    cleanupEnqueued: true,
   };
+};
+
+// HTTP status for a delete outcome. `capture_failed`/`enqueue_failed` are
+// pre-wipe aborts (nothing destroyed) → 503 so the caller retries.
+const deleteResultStatus = (result: DeleteAccountResult): number => {
+  switch (result.kind) {
+    case "tenant_not_found":
+      return 404;
+    case "capture_failed":
+    case "enqueue_failed":
+      return 503;
+    case "deleted":
+      return 200;
+  }
 };
 
 // POST /dashboard/account/delete — a manager deletes their OWN tenant.
@@ -865,7 +880,7 @@ const handleDashboardAccountDelete = async (
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const result = await deleteTenantAccount(cfg, layer, auth.tenantId);
-  return sendJson(res, result.kind === "tenant_not_found" ? 404 : 200, result);
+  return sendJson(res, deleteResultStatus(result), result);
 };
 
 // POST /admin/tenants/:id/delete — platform operator deletes ANY tenant.
@@ -885,7 +900,7 @@ const handleAdminTenantDelete = async (
   if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.message });
   const { id } = req.params as { id: string };
   const result = await deleteTenantAccount(cfg, layer, id);
-  return sendJson(res, result.kind === "tenant_not_found" ? 404 : 200, result);
+  return sendJson(res, deleteResultStatus(result), result);
 };
 
 // ---- Admin: per-tenant Shopify custom-app provisioning (pilot) ----

@@ -159,7 +159,7 @@ describe("runAccountCleanup", () => {
     expect(mail.handle.sent).toHaveLength(1);
   });
 
-  it("does not fail the job when a provider revoke errors (best-effort)", async () => {
+  it("FAILS the job (so pg-boss retries) when a provider revoke errors, and does not run org/email", async () => {
     const org = makeOrgDirectoryServiceTest();
     const mail = makePlatformMailServiceTest();
     const fetchImpl = vi.fn(async () => {
@@ -178,8 +178,73 @@ describe("runAccountCleanup", () => {
       ),
     );
 
+    // Revocation failed → the whole job fails so pg-boss retries it. Because
+    // revocation runs FIRST, the org delete + the (non-idempotent) email were
+    // NOT performed — so a retry won't double-send the email.
+    expect(result._tag).toBe("Left");
+    expect(org.handle.deleted).toEqual([]);
+    expect(mail.handle.sent).toEqual([]);
+  });
+
+  it("FAILS the job when a provider returns a non-2xx revoke status", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    // 500 from Shopify uninstall → `failed` outcome → job fails.
+    const fetchImpl = vi.fn(
+      async () =>
+        ({
+          ok: false,
+          status: 500,
+          text: async () => "",
+          json: async () => ({}),
+          headers: new Headers(),
+        }) as unknown as Response,
+    );
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          runAccountCleanup(
+            { ...baseData, connectorGrants: [grant({ provider: "shopify" })] },
+            { encryptionKey: KEY, fetchImpl },
+          ),
+          Layer.mergeAll(org.layer, mail.layer),
+        ),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    expect(org.handle.deleted).toEqual([]);
+  });
+
+  it("does NOT fail when the grant is already gone provider-side (401/already_gone)", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    // 401 → token already invalid → already_gone → success.
+    const fetchImpl = vi.fn(
+      async () =>
+        ({
+          ok: false,
+          status: 401,
+          text: async () => "",
+          json: async () => ({}),
+          headers: new Headers(),
+        }) as unknown as Response,
+    );
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          runAccountCleanup(
+            { ...baseData, connectorGrants: [grant({ provider: "shopify" })] },
+            { encryptionKey: KEY, fetchImpl },
+          ),
+          Layer.mergeAll(org.layer, mail.layer),
+        ),
+      ),
+    );
+
     expect(result._tag).toBe("Right");
-    // Org delete + email still happened despite the revoke failure.
     expect(org.handle.deleted).toEqual(["org_acme"]);
     expect(mail.handle.sent).toHaveLength(1);
   });

@@ -47,6 +47,46 @@ export interface EncryptedConnectorGrant {
   readonly apiVersion: string | null;
 }
 
+/** Providers whose connection IS a revocable OAuth grant. LLM BYOK keys
+ * (openrouter/anthropic/openai) and outlook (not yet wired) are excluded. */
+export const REVOCABLE_GRANT_PROVIDERS: ReadonlyArray<
+  EncryptedConnectorGrant["provider"]
+> = ["shopify", "gmail", "google_sheets"];
+
+/** A connector row, narrowed to the fields grant-capture needs. */
+export interface ConnectorGrantSource {
+  readonly provider: string;
+  readonly shopDomain: string;
+  readonly accessToken: string;
+  readonly refreshToken: string | null;
+  readonly apiVersion: string | null;
+  /** Local status — intentionally NOT filtered on (re-audit #1a). */
+  readonly status: string;
+}
+
+/**
+ * Build the encrypted grant list for the cleanup job from a tenant's connector
+ * rows. Keeps EVERY revocable-provider row regardless of local `status`
+ * (re-audit #1a): a row we marked `revoked`/disconnected locally may still
+ * have a LIVE grant on the provider that must be revoked. `encryptToB64`
+ * encrypts each token so plaintext never lands in the pg-boss job table.
+ */
+export const buildConnectorGrants = (
+  rows: ReadonlyArray<ConnectorGrantSource>,
+  encryptToB64: (plaintext: string) => string,
+): ReadonlyArray<EncryptedConnectorGrant> =>
+  rows
+    .filter((c) =>
+      (REVOCABLE_GRANT_PROVIDERS as ReadonlyArray<string>).includes(c.provider),
+    )
+    .map((c) => ({
+      provider: c.provider as EncryptedConnectorGrant["provider"],
+      shopDomain: c.shopDomain,
+      accessTokenEncrypted: encryptToB64(c.accessToken),
+      refreshTokenEncrypted: c.refreshToken ? encryptToB64(c.refreshToken) : null,
+      apiVersion: c.apiVersion,
+    }));
+
 /**
  * Minimal pg-boss surface this module needs. Wider than the real `PgBoss`
  * type so callers can pass stubs in tests without the whole type surface.
@@ -67,7 +107,14 @@ export interface CleanupBossLike {
  * worker has — pg-boss requires the queue to exist before `send`). Uses
  * the tenant id as the singleton key so a double-submit collapses to one
  * cleanup job.
+ *
+ * The api enqueues this BEFORE wiping the tenant (so an enqueue failure can't
+ * orphan a wiped tenant — re-audit #1c). `startAfter` keeps the worker from
+ * picking the job up before that wipe commits; the singleton key collapses a
+ * retry of the same deletion onto the one job.
  */
+const CLEANUP_START_AFTER_SECONDS = 30;
+
 export const makePgBossAccountCleanupPublisher = (
   acquireBoss: () => Promise<CleanupBossLike>,
 ): ((data: AccountCleanupJobData) => Promise<void>) => {
@@ -85,6 +132,7 @@ export const makePgBossAccountCleanupPublisher = (
     }
     await boss.send(ACCOUNT_CLEANUP_QUEUE, data, {
       singletonKey: data.tenantId,
+      startAfter: CLEANUP_START_AFTER_SECONDS,
     });
   };
 };

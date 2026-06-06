@@ -58,73 +58,93 @@ export interface AccountCleanupOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
+/** A grant whose revocation did not succeed and is not "already gone". */
+export class ConnectorRevocationError extends Error {
+  readonly _tag = "ConnectorRevocationError";
+  constructor(readonly failures: ReadonlyArray<string>) {
+    super(`connector revocation failed for: ${failures.join(", ")}`);
+  }
+}
+
 /**
- * Revoke each provider grant BEST-EFFORT — decrypt the tokens, call the
- * provider revoke endpoint, log the outcome. Never fails the Effect: a
- * third-party API being down must not block the WorkOS org delete + email,
- * and (because revocation runs first) must not trigger a pg-boss retry that
- * would re-send the non-idempotent deletion email.
+ * Revoke each provider grant — decrypt the tokens, call the provider revoke
+ * endpoint. Every grant is attempted (one bad grant doesn't stop the others),
+ * then if ANY genuinely failed (transient/unknown — `already_gone` and
+ * `revoked` are successes) the Effect FAILS so pg-boss retries the job. This
+ * runs FIRST, before the (idempotent) org delete and the (terminal) email, so
+ * a retry re-runs revocation idempotently and the email still sends at most
+ * once. A missing encryption key (single-tenant dev) skips revocation with a
+ * warning rather than failing.
  */
 const revokeConnectorGrants = (
   grants: ReadonlyArray<EncryptedConnectorGrant>,
   opts: AccountCleanupOptions,
-): Effect.Effect<void> =>
-  Effect.promise(async () => {
-    if (grants.length === 0) return;
-    const key = opts.encryptionKey;
-    if (!key) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[account-cleanup] ${grants.length} connector grant(s) not revoked: no CREDENTIAL_ENCRYPTION_KEY configured`,
-      );
-      return;
-    }
-    const dec = (b64: string): string =>
-      decryptToString(key, Buffer.from(b64, "base64"));
-    for (const g of grants) {
-      try {
-        const outcome = await revokeConnectorGrant(
-          {
-            provider: g.provider,
-            shopDomain: g.shopDomain,
-            accessToken: dec(g.accessTokenEncrypted),
-            refreshToken: g.refreshTokenEncrypted
-              ? dec(g.refreshTokenEncrypted)
-              : null,
-            apiVersion: g.apiVersion,
-          },
-          opts.fetchImpl,
-        );
-        if (outcome.kind === "failed") {
-          // eslint-disable-next-line no-console
-          console.error(
-            `[account-cleanup] revoke ${g.provider}/${g.shopDomain} failed: ${outcome.detail}`,
-          );
-        }
-      } catch (cause) {
+): Effect.Effect<void, ConnectorRevocationError> =>
+  Effect.flatMap(
+    Effect.promise(async () => {
+      if (grants.length === 0) return [] as string[];
+      const key = opts.encryptionKey;
+      if (!key) {
         // eslint-disable-next-line no-console
-        console.error(
-          `[account-cleanup] revoke ${g.provider}/${g.shopDomain} threw:`,
-          cause,
+        console.warn(
+          `[account-cleanup] ${grants.length} connector grant(s) not revoked: no CREDENTIAL_ENCRYPTION_KEY configured`,
         );
+        return [] as string[];
       }
-    }
-  });
+      const dec = (b64: string): string =>
+        decryptToString(key, Buffer.from(b64, "base64"));
+      const failures: Array<string> = [];
+      for (const g of grants) {
+        const label = `${g.provider}/${g.shopDomain}`;
+        try {
+          const outcome = await revokeConnectorGrant(
+            {
+              provider: g.provider,
+              shopDomain: g.shopDomain,
+              accessToken: dec(g.accessTokenEncrypted),
+              refreshToken: g.refreshTokenEncrypted
+                ? dec(g.refreshTokenEncrypted)
+                : null,
+              apiVersion: g.apiVersion,
+            },
+            opts.fetchImpl,
+          );
+          if (outcome.kind === "failed") {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[account-cleanup] revoke ${label} failed: ${outcome.detail}`,
+            );
+            failures.push(label);
+          }
+        } catch (cause) {
+          // eslint-disable-next-line no-console
+          console.error(`[account-cleanup] revoke ${label} threw:`, cause);
+          failures.push(label);
+        }
+      }
+      return failures;
+    }),
+    (failures) =>
+      failures.length > 0
+        ? Effect.fail(new ConnectorRevocationError(failures))
+        : Effect.void,
+  );
 
 /**
- * Revoke provider grants (best-effort), delete the WorkOS org (if any),
- * then send the deletion email (if a recipient was captured). Revocation is
- * first and non-failing; org delete is idempotent (the Live impl treats a
- * 404 as success), so a pg-boss retry after a failed email re-runs cleanly
- * and the email still sends exactly once. Any WorkOS/email failure
- * propagates so pg-boss retries the job.
+ * Revoke provider grants, delete the WorkOS org (if any), then send the
+ * deletion email (if a recipient was captured) — in that order. Revocation
+ * runs first and FAILS the job (so pg-boss retries) if any grant couldn't be
+ * revoked; org delete is idempotent (the Live impl treats a 404 as success);
+ * the email is the terminal step, so a retry re-runs the idempotent steps and
+ * the email still sends at most once. Any failure propagates so pg-boss
+ * retries the whole job.
  */
 export const runAccountCleanup = (
   data: AccountCleanupJobData,
   opts: AccountCleanupOptions = { encryptionKey: null },
 ): Effect.Effect<
   void,
-  OrgDirectoryError | PlatformMailError,
+  OrgDirectoryError | PlatformMailError | ConnectorRevocationError,
   OrgDirectoryService | PlatformMailService
 > =>
   Effect.gen(function* () {
