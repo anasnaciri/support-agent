@@ -102,6 +102,12 @@ export interface WorkerBootstrap {
     never,
     never
   >;
+  /**
+   * Shared CREDENTIAL_ENCRYPTION_KEY (parsed) for decrypting connector-grant
+   * tokens in the account-cleanup job. `null` in single-tenant dev with no
+   * key configured — grant revocation is then skipped.
+   */
+  readonly credentialEncryptionKey: Buffer | null;
   readonly shutdown: () => Promise<void>;
 }
 
@@ -428,5 +434,10 @@ export const buildWorker = async (
     await boss.stop({ graceful: true });
   };
 
-  return { boss, runtimeLayer, shutdown };
+  return {
+    boss,
+    runtimeLayer,
+    credentialEncryptionKey: credKeyB64 ? parseKey(credKeyB64) : null,
+    shutdown,
+  };
 };

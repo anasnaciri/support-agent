@@ -11,6 +11,7 @@ import {
   tenantAgentOverrides,
   tenants,
 } from "@support-agent/db";
+import { encrypt } from "@support-agent/services";
 import { startServer, type ServerHandle } from "../src/server.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
@@ -100,12 +101,17 @@ describeIfDb("apps/api — account deletion (integration)", () => {
       action: "case.created",
       details: {},
     });
+    // Real AES-GCM ciphertext (under cfg.encryptionKey) so the B1
+    // grant-capture path decrypts it cleanly before the wipe instead of
+    // failing-soft. The deletion still wipes it either way.
     await raw!.db.insert(connectorConnections).values({
       id: randomUUID(),
       tenantId: id,
       provider: "shopify",
       shopDomain: `${org}.myshopify.com`,
-      accessTokenEncrypted: Buffer.from("enc"),
+      accessTokenEncrypted: encrypt(cfg.encryptionKey, "shpat_live_token"),
+      apiVersion: "2025-01",
+      scopes: ["read_orders"],
     });
     await raw!.db.insert(tenantAgentOverrides).values({
       tenantId: id,

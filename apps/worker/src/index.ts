@@ -32,7 +32,8 @@ interface WorkflowJobData {
 }
 
 const main = async (): Promise<void> => {
-  const { boss, runtimeLayer, shutdown } = await buildWorker();
+  const { boss, runtimeLayer, credentialEncryptionKey, shutdown } =
+    await buildWorker();
 
   // pg-boss requires the queue exist before work() will register a worker.
   // We call ensureWorkflowQueue (idempotent) inside an Effect runtime so we
@@ -114,7 +115,11 @@ const main = async (): Promise<void> => {
 
   // Account-deletion cleanup: deletes the WorkOS org + sends the deletion
   // email for tenants wiped by apps/api's account-delete endpoints.
-  await registerAccountCleanup({ boss, runtimeLayer });
+  await registerAccountCleanup({
+    boss,
+    runtimeLayer,
+    encryptionKey: credentialEncryptionKey,
+  });
   console.log(
     `[worker] consuming account-cleanup on queue=${ACCOUNT_CLEANUP_QUEUE}`,
   );

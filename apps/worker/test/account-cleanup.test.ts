@@ -1,10 +1,15 @@
+import { randomBytes } from "node:crypto";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  encrypt,
   makeOrgDirectoryServiceTest,
   makePlatformMailServiceTest,
 } from "@support-agent/services";
-import { runAccountCleanup } from "../src/account-cleanup.js";
+import {
+  runAccountCleanup,
+  type EncryptedConnectorGrant,
+} from "../src/account-cleanup.js";
 
 const baseData = {
   tenantId: "11111111-1111-1111-1111-111111111111",
@@ -12,6 +17,29 @@ const baseData = {
   workosOrganizationId: "org_acme" as string | null,
   notificationEmail: "owner@acme.com" as string | null,
 };
+
+const KEY = randomBytes(32);
+const encB64 = (s: string): string => encrypt(KEY, s).toString("base64");
+
+const grant = (
+  overrides: Partial<EncryptedConnectorGrant> = {},
+): EncryptedConnectorGrant => ({
+  provider: "shopify",
+  shopDomain: "pilot.myshopify.com",
+  accessTokenEncrypted: encB64("shpat_live"),
+  refreshTokenEncrypted: null,
+  apiVersion: "2025-01",
+  ...overrides,
+});
+
+const okFetch = () =>
+  ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+    json: async () => ({}),
+    headers: new Headers(),
+  }) as unknown as Response;
 
 describe("runAccountCleanup", () => {
   it("deletes the WorkOS org AND sends the deletion email", async () => {
@@ -83,5 +111,96 @@ describe("runAccountCleanup", () => {
     expect(result._tag).toBe("Left");
     // Org delete failed before the email — email not attempted.
     expect(mail.handle.sent).toEqual([]);
+  });
+
+  // ---- B1: provider-side OAuth grant revocation ----
+
+  it("revokes each connector grant provider-side before org delete + email", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    const calls: Array<string> = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      return okFetch();
+    });
+
+    await Effect.runPromise(
+      Effect.provide(
+        runAccountCleanup(
+          {
+            ...baseData,
+            connectorGrants: [
+              grant({ provider: "shopify" }),
+              grant({
+                provider: "gmail",
+                shopDomain: "ops@store.com",
+                accessTokenEncrypted: encB64("ya29_a"),
+                refreshTokenEncrypted: encB64("1//refresh"),
+                apiVersion: null,
+              }),
+            ],
+          },
+          { encryptionKey: KEY, fetchImpl },
+        ),
+        Layer.mergeAll(org.layer, mail.layer),
+      ),
+    );
+
+    // Shopify uninstall + Gmail watch-stop + Google token revoke all hit.
+    expect(calls.some((u) => u.includes("api_permissions/current.json"))).toBe(
+      true,
+    );
+    expect(calls.some((u) => u.includes("/users/me/stop"))).toBe(true);
+    expect(calls.some((u) => u === "https://oauth2.googleapis.com/revoke")).toBe(
+      true,
+    );
+    // Cleanup still completed.
+    expect(org.handle.deleted).toEqual(["org_acme"]);
+    expect(mail.handle.sent).toHaveLength(1);
+  });
+
+  it("does not fail the job when a provider revoke errors (best-effort)", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("provider down");
+    });
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          runAccountCleanup(
+            { ...baseData, connectorGrants: [grant()] },
+            { encryptionKey: KEY, fetchImpl },
+          ),
+          Layer.mergeAll(org.layer, mail.layer),
+        ),
+      ),
+    );
+
+    expect(result._tag).toBe("Right");
+    // Org delete + email still happened despite the revoke failure.
+    expect(org.handle.deleted).toEqual(["org_acme"]);
+    expect(mail.handle.sent).toHaveLength(1);
+  });
+
+  it("skips revocation (still does org + email) when no encryption key is configured", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    const fetchImpl = vi.fn(async () => okFetch());
+
+    await Effect.runPromise(
+      Effect.provide(
+        runAccountCleanup(
+          { ...baseData, connectorGrants: [grant()] },
+          { encryptionKey: null, fetchImpl },
+        ),
+        Layer.mergeAll(org.layer, mail.layer),
+      ),
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(org.handle.deleted).toEqual(["org_acme"]);
+    expect(mail.handle.sent).toHaveLength(1);
   });
 });

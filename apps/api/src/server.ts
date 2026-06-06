@@ -16,6 +16,7 @@ import {
   decisionToEvent,
   defaultRefundPolicy,
   DEFAULT_RETENTION_DAYS,
+  encrypt,
   legalAcceptanceIsCurrent,
   ShopifyAppProvisioningStore,
   TenantAgentOverridesService,
@@ -114,6 +115,7 @@ import {
 import {
   makePgBossAccountCleanupPublisher,
   type AccountCleanupJobData,
+  type EncryptedConnectorGrant,
 } from "./account-deletion.js";
 import {
   buildGoogleAuthorizeUrl,
@@ -753,6 +755,60 @@ const accountCleanupPublisher = (
  * `cleanupEnqueued:false` rather than fail the request (which would falsely
  * imply nothing happened).
  */
+// Providers whose connection IS a revocable OAuth grant. LLM BYOK keys
+// (openrouter/anthropic/openai) and outlook (not yet wired) are excluded.
+const REVOCABLE_GRANT_PROVIDERS: ReadonlyArray<
+  EncryptedConnectorGrant["provider"]
+> = ["shopify", "gmail", "google_sheets"];
+
+/**
+ * Capture the tenant's active OAuth grants and encrypt their tokens for the
+ * cleanup job (audit B1). Must run BEFORE redactShop — once the connector
+ * rows are wiped these are unrecoverable. Best-effort: a read failure logs
+ * and returns [] rather than blocking the deletion (the DB wipe is the
+ * critical step; revocation is a courtesy on top).
+ */
+const captureConnectorGrants = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<ReadonlyArray<EncryptedConnectorGrant>> => {
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.listForTenant(TenantId(tenantId));
+      }),
+      layer,
+    ),
+  );
+  if (exit._tag !== "Success") {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[account-delete] tenant=${tenantId} could not read connector grants for revocation:`,
+      Cause.pretty(exit.cause),
+    );
+    return [];
+  }
+  const enc = (s: string): string =>
+    encrypt(cfg.encryptionKey, s).toString("base64");
+  return exit.value
+    .filter(
+      (c) =>
+        c.status === "active" &&
+        (REVOCABLE_GRANT_PROVIDERS as ReadonlyArray<string>).includes(
+          c.provider,
+        ),
+    )
+    .map((c) => ({
+      provider: c.provider as EncryptedConnectorGrant["provider"],
+      shopDomain: c.shopDomain,
+      accessTokenEncrypted: enc(c.accessToken),
+      refreshTokenEncrypted: c.refreshToken ? enc(c.refreshToken) : null,
+      apiVersion: c.apiVersion,
+    }));
+};
+
 const deleteTenantAccount = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -762,6 +818,9 @@ const deleteTenantAccount = async (
     tenantDeletionSnapshot(db, tenantId),
   );
   if (!snapshot) return { kind: "tenant_not_found" };
+
+  // Capture provider grants BEFORE the wipe drops the connector rows.
+  const connectorGrants = await captureConnectorGrants(cfg, layer, tenantId);
 
   const wipe = await Effect.runPromise(
     Effect.provide(redactShop(tenantId), layer),
@@ -774,6 +833,7 @@ const deleteTenantAccount = async (
       tenantName: snapshot.name,
       workosOrganizationId: snapshot.workosOrganizationId,
       notificationEmail: snapshot.notificationEmail,
+      connectorGrants,
     });
     cleanupEnqueued = true;
   } catch (cause) {

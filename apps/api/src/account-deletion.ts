@@ -25,6 +25,26 @@ export interface AccountCleanupJobData {
   readonly workosOrganizationId: string | null;
   /** null → no email configured; the worker skips the mail step. */
   readonly notificationEmail: string | null;
+  /**
+   * Provider-side OAuth grants captured BEFORE the wipe (the connector rows
+   * are gone by cleanup time, so they can't be re-read). The worker revokes
+   * each best-effort (audit B1). Absent on jobs enqueued before this field
+   * existed → the worker treats it as an empty list.
+   *
+   * Tokens are AES-GCM ciphertext (base64) under the shared
+   * CREDENTIAL_ENCRYPTION_KEY — never plaintext in the pg-boss job table,
+   * preserving the at-rest protection the connector store gives them. Only
+   * OAuth-grant providers are included; LLM BYOK keys have nothing to revoke.
+   */
+  readonly connectorGrants?: ReadonlyArray<EncryptedConnectorGrant>;
+}
+
+export interface EncryptedConnectorGrant {
+  readonly provider: "shopify" | "gmail" | "google_sheets";
+  readonly shopDomain: string;
+  readonly accessTokenEncrypted: string;
+  readonly refreshTokenEncrypted: string | null;
+  readonly apiVersion: string | null;
 }
 
 /**

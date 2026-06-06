@@ -62,3 +62,28 @@ export const startGmailWatch = async (
     expiresAt: new Date(Number(json.expiration)),
   };
 };
+
+/**
+ * Stop the Pub/Sub watch on a mailbox (`users.stop`). Used when a tenant
+ * disconnects Gmail or deletes their account — without this the lease keeps
+ * publishing change notifications until it expires (~7 days). Best-effort:
+ * returns `false` instead of throwing so a cleanup flow isn't blocked by a
+ * dead token. A 404 (no active watch) is treated as success.
+ */
+export const stopGmailWatch = async (
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> => {
+  try {
+    const res = await fetchImpl(
+      "https://gmail.googleapis.com/gmail/v1/users/me/stop",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
+};

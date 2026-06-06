@@ -21,6 +21,8 @@ export const ACCOUNT_CLEANUP_QUEUE = "account.cleanup";
 interface RegisterOptions {
   readonly boss: PgBoss;
   readonly runtimeLayer: WorkerBootstrap["runtimeLayer"];
+  /** Shared key to decrypt connector-grant tokens for revocation (B1). */
+  readonly encryptionKey: Buffer | null;
 }
 
 export const registerAccountCleanup = async (
@@ -42,7 +44,10 @@ export const registerAccountCleanup = async (
         // delete is idempotent, so a retry after a partial failure (e.g.
         // email send) is safe.
         await Effect.runPromise(
-          Effect.provide(runAccountCleanup(data), opts.runtimeLayer),
+          Effect.provide(
+            runAccountCleanup(data, { encryptionKey: opts.encryptionKey }),
+            opts.runtimeLayer,
+          ),
         );
         // eslint-disable-next-line no-console
         console.log(
