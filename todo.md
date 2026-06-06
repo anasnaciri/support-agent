@@ -11,6 +11,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
 - **Phase 1 — Runtime spine:** partial
 - **Phase 2+:** not started
+- **Session update:** 2026-06-06 (6) — **Re-audit follow-ups fixed (R1 HIGH, R2/R4 MED/LOW; R3 documented).** A second-pass audit found the first round's fixes weren't all failure-safe. **R1 (HIGH) — deletion-time OAuth revocation made reliable** (`96ec748`): capture grants in ANY status not just `active` (a locally-revoked row can still have a live provider grant) via a new pure `buildConnectorGrants`; the worker now FAILS the cleanup job when a grant can't be revoked so pg-boss retries (order revoke→org→email keeps the email at-most-once); deletion reordered to **capture → enqueue → wipe** so a connector-read or enqueue failure aborts with 503 BEFORE any data is destroyed (no more "wiped with no recovery path"), with a `startAfter` so the worker can't act before the wipe commits. **R2 (MED) — surviving platform-admin deletion audit** (`790f640`, migration 0013): new `admin_audit_log` table (no tenant FK) written IN the wipe transaction, so a privileged deletion leaves a permanent record even though the tenant's own `audit_log` is gone — actors `admin` / `tenant_self` / `shopify-compliance` (master-plan §13). **R4 (LOW) — sign-up routing regression test** (`3c44ead`): extracted `lib/auth-redirect.ts` (pure) + a test asserting logged-out → `/sign-up` (never `/sign-in`). **R3 (admin UI ops-incomplete):** partially addressed — R2 gives admin mutations a surviving audit trail, but deploy/live-test still needs the user's Cloudflare account and per-operator identity is still the shared-password model (audit rows record actor `admin`, not an individual); both are pre-existing product decisions, recorded below. Verified: `pnpm build` green, full suite **779 passing / 5 skipped**, dashboard + admin builds green.
 - **Session update:** 2026-06-06 (5) — **Pilot pre-onboarding audit findings FIXED (all 7 code-level findings: A1, A2, A3, A4, A6, B1, B2).** The "do not onboard until fixed" trio (A1, A2, A3) plus B1 (HIGH) are resolved, along with B2/A6/A4. Seven TDD commits, each its own logical change: `3b3157d` A1+A2 (install gated on a non-revoked provisioning row — authoritative resolver gate + revoked-not-installable + `put` reactivation + dashboard "Awaiting setup" button), `bb188d8` A3 (deterministic webhook routing — partial unique index migration 0012 + `getByShop` ordering + `markConnected`/`put` shop_domain hygiene), `4709a0a` B1 (provider-side OAuth revocation on deletion — new `oauth-revocation.ts`; grants captured pre-wipe, tokens encrypted in the cleanup job, worker revokes best-effort), `13a45e8` B2 (logged-out users → legal-gated `/sign-up`), `1b08a05` A6 (global Shopify creds **disallowed** in pilot mode, fail-fast), `fef9040` A4 (capture store domain at provisioning → bind tenant + use the proven authorize URL). Each audit checkbox below carries its fix + commit. Verified: `pnpm build` green, full suite **769 passing / 5 skipped**, dashboard + admin `next build` green. **Remaining: only A5 + B3 (deploy/infra)** — the dashboard + `apps/admin` still have no deploy target (Railway covers api+worker only), and the admin UI hasn't been deployed/live-tested. Those need the user's cloud accounts + a deploy-target decision (Cloudflare Workers/OpenNext vs a Railway Next service); pending that, **onboarding-blocking code is clear but the pilot is not yet deployed end-to-end.** Memory: [[project_pilot_pre_onboarding_audit]] (update: blockers cleared).
 - **Session update:** 2026-06-06 (4) — **Pilot pre-onboarding audit recorded (see the "⚠️ Pilot pre-onboarding audit" section below).** Two read-only audits surfaced 6 + 3 findings; **no code changed this entry — documentation only**, for another session to pick up. Headline: **do not onboard a real merchant until A1–A3 are fixed** (provisioning bypass via `/shopify/install` global fallback; revoked provisioning still installs + re-provision keeps `revoked`; ambiguous webhook-secret routing on non-unique `shop_domain`). A4–A5 (custom-distribution install link not stored/validated; dashboard + `apps/admin` deploy incomplete) must be fixed or explicitly validated before "deploy-ready." Audit B (separate): external OAuth-grant revocation missing on account deletion (B1, HIGH), `/sign-up` legal gate bypassable via `/sign-in` (B2), admin UI not deployed/live-tested (B3). Each finding has file:line + a fix direction in the section below. Verified at audit time: `pnpm build` green, focused suites 80 + 24 passing.
 - **Session update:** 2026-06-06 (3) — **Railway chosen as the primary deploy target (Hetzner kept as documented alternative).** Decision (from user): go with Railway for speed/lower ops; Hetzner+Compose stays fully documented but secondary. Added a Railway deploy target under `deploy/railway/` **without forking source or touching the Hetzner Dockerfile/compose** (per the one-repo/per-variant governance): `Dockerfile` (full workspace build; role chosen by per-service Start Command since Railway has no stage selector), `api.json` + `worker.json` (config-as-code: Dockerfile build, start commands, api **Pre-Deploy** `pnpm db:migrate` + `/healthz` healthcheck), and `railway.env.example` (vars tagged [shared]/[api]/[worker]; `DATABASE_URL=${{ Postgres.DATABASE_URL }}`, `API_PORT=${{ PORT }}`). DEPLOY.md restructured into "Railway (primary)" + "Hetzner (alternative)" with a full Railway runbook. Key wiring confirmed in code: api binds `API_PORT` (default 4000) on `0.0.0.0`; all Dockerfile targets are `FROM builder` so one image runs every role; `/healthz` exists. **I can't run the deploy (needs interactive `railway login` + their account)** — the runbook is the deliverable; user runs the CLI. Memory: [[project_deploy_hetzner_compose]] (now "Railway primary, Hetzner alt").
@@ -170,6 +171,36 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
   password, no per-operator audit identity, connector health is read-only,
   broader tenant/admin tooling incomplete.
   See [[project_admin_console_scaffold]].
+
+### Re-audit follow-ups (2026-06-06 session 6)
+
+A second pass found the first round's fixes weren't all failure-safe.
+
+- [x] **R1 (HIGH) — deletion-time OAuth revocation not reliable.** FIXED
+  (`96ec748`). (a) Capture grants in ANY status, not just `active` — a
+  locally-revoked row may still have a live provider grant (`buildConnectorGrants`,
+  unit-tested). (b) Worker revocation FAILS the job on a non-`already_gone`
+  failure so pg-boss retries; order revoke→org→email keeps the email
+  at-most-once. (c) Deletion is now capture → enqueue → **wipe**: a
+  connector-read or enqueue failure aborts with 503 before any data is
+  destroyed (was: wipe-then-best-effort, no recovery path); the cleanup job
+  carries `startAfter` so the worker can't act before the wipe commits.
+- [x] **R2 (MEDIUM) — admin tenant deletion left no surviving audit record.**
+  FIXED (`790f640`, migration 0013). New platform-scoped `admin_audit_log`
+  (no tenant FK) written in the wipe transaction → the deletion record
+  outlives the wiped tenant. Actors `admin` / `tenant_self` /
+  `shopify-compliance`. Satisfies master-plan §13.
+- [~] **R3 (MEDIUM) — admin UI not operationally complete.** PARTIAL. R2 gives
+  admin mutations a surviving audit trail, but (i) deploy/live-test still needs
+  the user's Cloudflare account (overlaps A5/B3) and (ii) per-operator identity
+  is still the **shared-password** model — audit rows record actor `admin`, not
+  an individual operator. Both are pre-existing product decisions (shared
+  password chosen by the user); moving to per-operator identity (e.g. WorkOS
+  operator accounts) is a separate change, not yet scoped.
+- [x] **R4 (LOW) — `/sign-up` routing lacked a regression test.** FIXED
+  (`3c44ead`). Extracted pure `lib/auth-redirect.ts` + a test asserting
+  logged-out → `/sign-up` (never `/sign-in`). `/sign-in` stays available for
+  returning users via the explicit link on `/sign-up`.
 
 ---
 
