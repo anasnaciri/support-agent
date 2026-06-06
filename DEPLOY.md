@@ -1,4 +1,118 @@
-# Deploying support-agent (Hetzner + Docker Compose)
+# Deploying support-agent
+
+Two supported deploy targets, both built from this one repo (no source fork —
+deploy config is per-variant under `deploy/`):
+
+- **[Railway](#railway-primary) — primary.** Managed Postgres + two services
+  (api, worker) from the Dockerfile; TLS + domains managed. Fastest to stand
+  up; chosen for the pilot.
+- **[Hetzner + Docker Compose](#hetzner--docker-compose-alternative) —
+  alternative.** Self-hosted on a VPS (postgres + api + worker + Caddy).
+  Cheaper at steady state; EU-native. Kept fully documented below.
+
+In both, the Next.js **dashboard** deploys separately to Cloudflare Workers as
+a pure api client (Path B — see [Dashboard](#dashboard-cloudflare-workers)).
+
+---
+
+## Railway (primary)
+
+```
+┌─ Railway project ─────────────────────────────┐
+│  Postgres (managed)                            │      Cloudflare Workers
+│     ▲          ▲                               │      ┌──────────────┐
+│     │          │                               │      │  dashboard   │
+│  api ◀──────▶ worker     api → api.<domain> ───┼─────▶│ (Path B)     │
+│  (public)    (no port)   (TLS by Railway)      │      └──────────────┘
+└────────────────────────────────────────────────┘
+```
+
+The api and worker run from **one image** (`deploy/railway/Dockerfile`); each
+service picks its role via its Start Command. Config is version-controlled:
+[`deploy/railway/api.json`](./deploy/railway/api.json),
+[`deploy/railway/worker.json`](./deploy/railway/worker.json),
+[`deploy/railway/railway.env.example`](./deploy/railway/railway.env.example).
+
+### 1. Project + Postgres
+
+```sh
+npm i -g @railway/cli      # or: brew install railway
+railway login              # interactive — run this yourself (e.g. `! railway login`)
+railway init               # create a project (or `railway link` an existing one)
+railway add --database postgres
+```
+
+### 2. Create the two services
+
+Create **two** services in the project, both deploying from this repo:
+
+| Service | Config-as-code path (Settings → Config) | Public domain? |
+| --- | --- | --- |
+| `api` | `deploy/railway/api.json` | Yes — generate one, then add `api.<domain>` |
+| `worker` | `deploy/railway/worker.json` | No (background service) |
+
+Both build `deploy/railway/Dockerfile`. The `api.json` sets the start command,
+a **Pre-Deploy Command** that runs `pnpm db:migrate` (drizzle-kit ships in the
+image), and a `/healthz` healthcheck. `worker.json` just sets the worker start
+command. If your Railway version ignores `preDeployCommand` from config, set it
+in the api service's Settings → Deploy → Pre-Deploy Command instead.
+
+### 3. Variables
+
+Copy from [`deploy/railway/railway.env.example`](./deploy/railway/railway.env.example).
+Set the `[shared]` vars as **project shared variables** (referenced by both
+services) and the `[api]` / `[worker]` vars on their service. Two Railway
+specifics:
+
+- `DATABASE_URL=${{ Postgres.DATABASE_URL }}` — references the managed Postgres
+  over the private network (no host to manage).
+- `API_PORT=${{ PORT }}` on the **api** — Fastify reads `API_PORT`; Railway
+  injects `PORT`. The worker has no port. You do **not** need `API_DOMAIN`,
+  `ACME_EMAIL`, or any `POSTGRES_*` (managed + TLS handled by Railway).
+
+`CREDENTIAL_ENCRYPTION_KEY` and `APPROVAL_SIGNING_KEY` must be **identical** on
+api + worker — set them as shared variables once.
+
+### 4. Deploy
+
+```sh
+railway up                 # build + deploy the current service
+railway logs               # tail; check the api Pre-Deploy ran migrations
+```
+
+Generate the api's public domain, then `curl https://<api>.up.railway.app/healthz`
+→ `{"ok":true}`. Add the custom domain `api.<domain>` (Railway shows the CNAME
+to set at your DNS) and update `APPROVAL_BASE_URL` / `SHOPIFY_APP_CALLBACK_URL`
+/ `GOOGLE_OAUTH_CALLBACK_URL` to it.
+
+### 5. External provider config
+
+Same as Hetzner [§6 below](#6-external-provider-config) — point every Shopify /
+Google callback + webhook URL at `https://api.<domain>` (the Railway custom
+domain). For the per-tenant pilot apps, the redirect + webhook URLs are
+identical across apps (see `todo.md` / the provisioning runbook); only the
+keys + store domain differ.
+
+### Region + backups (GDPR / PCD)
+
+- Pick an **EU region** for the project if you have EU customers (data
+  residency for the PCD attestation in `docs/shopify-pcd.md`).
+- Railway Postgres has backups, but confirm retention meets the PCD "encrypted
+  backups" commitment; otherwise point `DATABASE_URL` at a dedicated managed
+  Postgres and keep only the app services on Railway. (pg-boss needs real
+  `LISTEN/NOTIFY` — avoid serverless Postgres poolers like Neon/Supabase
+  transaction mode for the worker's direct connection.)
+
+### Cost (pilot scale)
+
+5 tenants × ~50 orders/day is a near-flat floor — two always-on Node services +
+a small Postgres ≈ **~$20–35/mo** (Pro plan's $20 usage credit covers most of
+it). LLM inference is BYOK (tenant-billed), so it is **not** on this bill; the
+Railway cost barely moves with order volume at this scale.
+
+---
+
+## Hetzner + Docker Compose (alternative)
 
 Production topology for the pilot:
 
