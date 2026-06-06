@@ -29,6 +29,7 @@ import {
 import {
   AgentId,
   ConnectorNotFound,
+  ConnectorStoreDbError,
   TenantId,
   UserId,
 } from "@support-agent/agent-core";
@@ -133,7 +134,7 @@ import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
 } from "./shopify-webhook-registration.js";
-import { startGmailWatch } from "@support-agent/providers";
+import { startGmailWatch, revokeConnectorGrant } from "@support-agent/providers";
 import {
   backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
@@ -1081,7 +1082,20 @@ const handleAdminShopifyAppDelete = async (
     sendJson(res, 404, { error: "not_provisioned" });
     return;
   }
-  sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
+  // Offboarding the app also revokes the merchant's LIVE Shopify access
+  // token provider-side, not just the provisioning row (5th-audit #3).
+  const grants = await Effect.runPromise(
+    Effect.provide(
+      revokeConnectorProviderGrants(TenantId(tenantId), "shopify", tenantId),
+      layer,
+    ),
+  );
+  sendJson(res, 200, {
+    ok: true,
+    provisioning: exit.value.provisioning,
+    connectorRevoked: grants.revoked,
+    providerRevoked: grants.providerRevoked,
+  });
 };
 
 // POST /admin/tenants/:id/shopify-app/pcd-check — live protected-customer-data
@@ -1578,6 +1592,54 @@ const handleDashboardSupplierSheetClear = async (
   return sendJson(res, 200, { ok: true });
 };
 
+// Revoke every active connector grant for a tenant+provider PROVIDER-SIDE
+// (best-effort), THEN mark the rows revoked locally (5th-audit #3 — local
+// revoke alone leaves the Shopify/Google token live). A provider-side failure
+// is logged but doesn't block the local revoke (the caller asked to
+// disconnect). Returns how many rows were revoked locally + how many were
+// confirmed gone provider-side.
+const revokeConnectorProviderGrants = (
+  tid: TenantId,
+  provider: DisconnectProvider,
+  tenantLabel: string,
+): Effect.Effect<
+  { readonly revoked: number; readonly providerRevoked: number },
+  ConnectorNotFound | ConnectorStoreDbError,
+  ConnectorCredentialStore
+> =>
+  Effect.gen(function* () {
+    const store = yield* ConnectorCredentialStore;
+    const rows = yield* store.listForTenant(tid);
+    const active = rows.filter(
+      (r) => r.provider === provider && r.status === "active",
+    );
+    let providerRevoked = 0;
+    for (const r of active) {
+      const result = yield* Effect.promise(() =>
+        revokeConnectorGrant({
+          provider,
+          shopDomain: r.shopDomain,
+          accessToken: r.accessToken,
+          refreshToken: r.refreshToken,
+          apiVersion: r.apiVersion,
+        }),
+      );
+      if (result.kind === "revoked" || result.kind === "already_gone") {
+        providerRevoked += 1;
+      } else {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[disconnect] tenant=${tenantLabel} provider=${provider}/${r.shopDomain} provider-side revoke failed: ${result.detail}`,
+        );
+      }
+    }
+    yield* Effect.all(
+      active.map((r) => store.revoke(tid, provider, r.shopDomain)),
+      { concurrency: 1 },
+    );
+    return { revoked: active.length, providerRevoked };
+  });
+
 // POST /dashboard/connections/:provider/disconnect — revoke a connector.
 const handleDashboardDisconnect = async (
   cfg: ApiConfig,
@@ -1591,25 +1653,17 @@ const handleDashboardDisconnect = async (
   if (!isDisconnectProvider(provider)) {
     return sendJson(res, 400, { error: "bad_provider" });
   }
-  const tid = TenantId(auth.tenantId);
-  const revoked = await Effect.runPromise(
+  const outcome = await Effect.runPromise(
     Effect.provide(
-      Effect.gen(function* () {
-        const store = yield* ConnectorCredentialStore;
-        const rows = yield* store.listForTenant(tid);
-        const active = rows.filter(
-          (r) => r.provider === provider && r.status === "active",
-        );
-        yield* Effect.all(
-          active.map((r) => store.revoke(tid, provider, r.shopDomain)),
-          { concurrency: 1 },
-        );
-        return active.length;
-      }),
+      revokeConnectorProviderGrants(
+        TenantId(auth.tenantId),
+        provider,
+        auth.tenantId,
+      ),
       layer,
     ),
   );
-  return sendJson(res, 200, { revoked });
+  return sendJson(res, 200, outcome);
 };
 
 // ============================================================

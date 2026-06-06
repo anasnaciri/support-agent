@@ -569,12 +569,40 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
 
   // ---- Connector disconnect ----
 
-  it("POST /dashboard/connections/:provider/disconnect revokes active rows", async () => {
+  it("POST /dashboard/connections/:provider/disconnect revokes provider-side AND locally", async () => {
     if (!raw) return;
     await seedConnection(tenantId, "gmail", "mailbox@acme.test");
-    const res = await post("/dashboard/connections/gmail/disconnect");
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { revoked: number }).revoked).toBe(1);
+    // Disconnect now revokes the grant PROVIDER-SIDE (5th-audit #3). Stub
+    // fetch so the test doesn't hit Google; record that it was called.
+    const originalFetch = globalThis.fetch;
+    const calls: Array<string> = [];
+    // Stub ONLY the external provider calls; pass the test's own HTTP
+    // requests to the in-process api server through to the real fetch.
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const u = String(url);
+      if (u.includes("googleapis.com")) {
+        calls.push(u);
+        return new Response("", { status: 200 });
+      }
+      return originalFetch(url, init);
+    }) as typeof fetch;
+    let body: { revoked: number; providerRevoked: number };
+    try {
+      const res = await post("/dashboard/connections/gmail/disconnect");
+      expect(res.status).toBe(200);
+      body = (await res.json()) as typeof body;
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(body.revoked).toBe(1);
+    // Provider-side revoke was attempted (Gmail watch-stop + token revoke).
+    expect(body.providerRevoked).toBe(1);
+    expect(calls.some((u) => u.includes("oauth2.googleapis.com/revoke"))).toBe(
+      true,
+    );
     const active = await raw.db
       .select({ id: connectorConnections.id })
       .from(connectorConnections)
