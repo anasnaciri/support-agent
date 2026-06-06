@@ -31,8 +31,11 @@ export const registerAccountCleanup = async (
   opts: RegisterOptions,
 ): Promise<void> => {
   // Options kept in sync with apps/api's makePgBossAccountCleanupPublisher.
+  // `exclusive` + singletonKey dedupes concurrent cleanup jobs per tenant
+  // (re-audit #2). Policy can't change after creation — recreate an existing
+  // `standard` queue to adopt it.
   await opts.boss.createQueue(ACCOUNT_CLEANUP_QUEUE, {
-    policy: "standard",
+    policy: "exclusive",
     retryLimit: 5,
     retryBackoff: true,
   });

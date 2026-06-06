@@ -135,10 +135,15 @@ export const PlatformMailServiceLive = Layer.effect(
 
     // Shared Resend POST. Renders are passed in already-built so each
     // mail kind owns its template.
+    // Shared Resend POST. `idempotencyKey`, when supplied, sets Resend's
+    // `Idempotency-Key` header — Resend dedupes requests with the same key
+    // (24h window), so a retried or duplicate cleanup job can't send the same
+    // email twice (re-audit #2: the documented "email at-most-once").
     const post = (
       tenantId: SendAccountDeletedInput["tenantId"],
       recipient: string,
       rendered: { subject: string; text: string; html: string },
+      idempotencyKey?: string,
     ): Effect.Effect<void, PlatformMailSendFailed> =>
       Effect.gen(function* () {
         const res = yield* Effect.tryPromise({
@@ -148,6 +153,9 @@ export const PlatformMailServiceLive = Layer.effect(
               headers: {
                 Authorization: `Bearer ${config.apiKey}`,
                 "Content-Type": "application/json",
+                ...(idempotencyKey
+                  ? { "Idempotency-Key": idempotencyKey }
+                  : {}),
               },
               body: JSON.stringify({
                 from: config.fromAddress,
@@ -177,6 +185,9 @@ export const PlatformMailServiceLive = Layer.effect(
           input.tenantId,
           input.recipientEmail,
           renderAccountDeletedEmail(input),
+          // Stable per-tenant key → the deletion email sends at most once even
+          // across pg-boss retries or a duplicate cleanup job.
+          `account-deleted:${input.tenantId}`,
         ),
       sendApprovalLink: (input) =>
         Effect.gen(function* () {

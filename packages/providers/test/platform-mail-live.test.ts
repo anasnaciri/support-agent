@@ -235,6 +235,10 @@ describe("PlatformMailServiceLive — Resend", () => {
     expect(body.to).toEqual(["owner@acme.com"]);
     expect(body.subject).toContain("Acme Co");
     expect(body.text).toContain("deleted");
+    // Stable Idempotency-Key so a retried/duplicate cleanup job can't send
+    // the deletion email twice (re-audit #2).
+    const headers = init!.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBe(`account-deleted:${tenantId}`);
   });
 
   it("maps TenantNotFound to PlatformMailSendFailed", async () => {

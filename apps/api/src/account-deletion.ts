@@ -126,8 +126,13 @@ export const makePgBossAccountCleanupPublisher = (
     const boss = await acquireBoss();
     if (!ensured) {
       // Keep options in sync with apps/worker's registerAccountCleanup.
+      // `exclusive` + singletonKey = at most one queued-or-active cleanup job
+      // per tenant, so concurrent delete requests don't enqueue duplicates
+      // (re-audit #2 — the `standard` policy does NOT dedupe on singletonKey).
+      // NOTE: a queue's policy can't be changed after creation; an existing
+      // `standard` queue must be recreated to pick this up.
       await boss.createQueue(ACCOUNT_CLEANUP_QUEUE, {
-        policy: "standard",
+        policy: "exclusive",
         retryLimit: 5,
         retryBackoff: true,
       });
