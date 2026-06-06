@@ -153,14 +153,20 @@ const fetchTenant = async (
 };
 
 /**
- * The gate every tenant-scoped page calls first. Redirects to /sign-in when
+ * The gate every tenant-scoped page calls first. Redirects to /sign-up when
  * there's no session and /onboarding when the user has no org yet (a fresh
  * self-service signup) or their org has no tenant — onboarding provisions
  * the WorkOS org (if needed) and creates the tenant.
+ *
+ * Logged-out visitors land on the legal-gated /sign-up (not WorkOS-hosted
+ * sign-in) so a brand-new user can't slip past the data-processing checkbox
+ * (audit B2). Returning users use the "Sign in" link on that page. The
+ * onboarding legal fallback + the api tenant-level connector gate remain the
+ * airtight net for anyone who still reaches the hosted sign-up.
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId } = await withAuth();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect("/sign-up");
   if (!organizationId) redirect("/onboarding");
   const tenant = await fetchTenant(organizationId);
   if (!tenant) redirect("/onboarding");
@@ -198,7 +204,8 @@ export interface OrgContext {
  */
 export const requireOrganization = async (): Promise<OrgContext> => {
   const { user, organizationId } = await withAuth();
-  if (!user) redirect("/sign-in");
+  // Legal-gated front door (audit B2) — see getDashboardContext.
+  if (!user) redirect("/sign-up");
   const tenant = organizationId ? await fetchTenant(organizationId) : null;
   const metadata = user.metadata ?? {};
   const acceptedAt = metadata[LEGAL_ACCEPTED_AT_KEY] ?? null;
