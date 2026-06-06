@@ -249,7 +249,78 @@ describe("runAccountCleanup", () => {
     expect(mail.handle.sent).toHaveLength(1);
   });
 
-  it("skips revocation (still does org + email) when no encryption key is configured", async () => {
+  it("FAILS when grants are present but no encryption key is configured (re-audit #2)", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    const fetchImpl = vi.fn(async () => okFetch());
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          runAccountCleanup(
+            { ...baseData, connectorGrants: [grant()] },
+            { encryptionKey: null, fetchImpl },
+          ),
+          Layer.mergeAll(org.layer, mail.layer),
+        ),
+      ),
+    );
+
+    // Misconfiguration must NOT silently leave grants live — fail loudly so
+    // pg-boss retries / dead-letters, and skip the org/email steps.
+    expect(result._tag).toBe("Left");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(org.handle.deleted).toEqual([]);
+    expect(mail.handle.sent).toEqual([]);
+  });
+
+  it("succeeds with no key when there are NO grants to revoke", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+
+    await Effect.runPromise(
+      Effect.provide(
+        runAccountCleanup(baseData, { encryptionKey: null }),
+        Layer.mergeAll(org.layer, mail.layer),
+      ),
+    );
+
+    expect(org.handle.deleted).toEqual(["org_acme"]);
+    expect(mail.handle.sent).toHaveLength(1);
+  });
+
+  // ---- re-audit #1: durable deletion gate ----
+
+  it("REFUSES all destructive cleanup while the tenant still exists", async () => {
+    const org = makeOrgDirectoryServiceTest();
+    const mail = makePlatformMailServiceTest();
+    const fetchImpl = vi.fn(async () => okFetch());
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.provide(
+          runAccountCleanup(
+            { ...baseData, connectorGrants: [grant()] },
+            {
+              encryptionKey: KEY,
+              fetchImpl,
+              // Tenant still present → wipe not committed.
+              confirmTenantDeleted: async () => false,
+            },
+          ),
+          Layer.mergeAll(org.layer, mail.layer),
+        ),
+      ),
+    );
+
+    // Nothing destructive ran — not revocation, not org delete, not email.
+    expect(result._tag).toBe("Left");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(org.handle.deleted).toEqual([]);
+    expect(mail.handle.sent).toEqual([]);
+  });
+
+  it("proceeds once the tenant is confirmed deleted", async () => {
     const org = makeOrgDirectoryServiceTest();
     const mail = makePlatformMailServiceTest();
     const fetchImpl = vi.fn(async () => okFetch());
@@ -258,13 +329,17 @@ describe("runAccountCleanup", () => {
       Effect.provide(
         runAccountCleanup(
           { ...baseData, connectorGrants: [grant()] },
-          { encryptionKey: null, fetchImpl },
+          {
+            encryptionKey: KEY,
+            fetchImpl,
+            confirmTenantDeleted: async () => true,
+          },
         ),
         Layer.mergeAll(org.layer, mail.layer),
       ),
     );
 
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalled();
     expect(org.handle.deleted).toEqual(["org_acme"]);
     expect(mail.handle.sent).toHaveLength(1);
   });

@@ -109,9 +109,12 @@ export interface CleanupBossLike {
  * cleanup job.
  *
  * The api enqueues this BEFORE wiping the tenant (so an enqueue failure can't
- * orphan a wiped tenant — re-audit #1c). `startAfter` keeps the worker from
- * picking the job up before that wipe commits; the singleton key collapses a
- * retry of the same deletion onto the one job.
+ * orphan a wiped tenant — re-audit #1c). Safety against a slow/failed wipe is
+ * the worker's DURABLE deletion gate (it refuses destructive cleanup until the
+ * tenant rows are actually gone — see apps/worker account-cleanup), NOT this
+ * delay: `startAfter` is only an optimization that avoids a near-certain
+ * first-attempt retry in the normal case. The singleton key collapses a retry
+ * of the same deletion onto the one job.
  */
 const CLEANUP_START_AFTER_SECONDS = 30;
 

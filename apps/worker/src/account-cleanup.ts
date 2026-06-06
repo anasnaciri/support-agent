@@ -50,12 +50,42 @@ export interface AccountCleanupJobData {
 export interface AccountCleanupOptions {
   /**
    * Shared CREDENTIAL_ENCRYPTION_KEY used to decrypt grant tokens. `null`
-   * (single-tenant dev with no key configured) → grant revocation is
-   * skipped with a log line; the WorkOS + email steps still run.
+   * (single-tenant dev with no key configured) → if the job carries grants,
+   * cleanup FAILS rather than silently leaving live provider grants
+   * (re-audit #2). With no grants, `null` is fine.
    */
   readonly encryptionKey: Buffer | null;
   /** Injectable for tests. */
   readonly fetchImpl?: typeof fetch;
+  /**
+   * Confirms the tenant's rows are DURABLY GONE before any destructive
+   * external side-effect runs (re-audit #1 HIGH). The cleanup job is queued
+   * before the DB wipe, so without this check a slow/failed wipe could let
+   * the worker revoke grants + delete the WorkOS org + email while the tenant
+   * still exists. The schedule supplies a DB-backed check; when omitted (unit
+   * tests that don't exercise the gate) the check is skipped.
+   */
+  readonly confirmTenantDeleted?: (tenantId: string) => Promise<boolean>;
+}
+
+/** The wipe hasn't committed yet (or failed) — defer destructive cleanup. */
+export class TenantNotYetDeletedError extends Error {
+  readonly _tag = "TenantNotYetDeletedError";
+  constructor(readonly tenantId: string) {
+    super(
+      `tenant ${tenantId} still present — wipe not committed; deferring cleanup`,
+    );
+  }
+}
+
+/** The job carries grants to revoke but no key is configured to decrypt them. */
+export class MissingRevocationKeyError extends Error {
+  readonly _tag = "MissingRevocationKeyError";
+  constructor(readonly grantCount: number) {
+    super(
+      `cannot revoke ${grantCount} connector grant(s): CREDENTIAL_ENCRYPTION_KEY not configured on the worker`,
+    );
+  }
 }
 
 /** A grant whose revocation did not succeed and is not "already gone". */
@@ -79,18 +109,18 @@ export class ConnectorRevocationError extends Error {
 const revokeConnectorGrants = (
   grants: ReadonlyArray<EncryptedConnectorGrant>,
   opts: AccountCleanupOptions,
-): Effect.Effect<void, ConnectorRevocationError> =>
+): Effect.Effect<void, ConnectorRevocationError | MissingRevocationKeyError> =>
   Effect.flatMap(
-    Effect.promise(async () => {
+    Effect.gen(function* () {
       if (grants.length === 0) return [] as string[];
       const key = opts.encryptionKey;
       if (!key) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[account-cleanup] ${grants.length} connector grant(s) not revoked: no CREDENTIAL_ENCRYPTION_KEY configured`,
-        );
-        return [] as string[];
+        // The job carries grants but the worker can't decrypt them. FAIL
+        // (re-audit #2) so pg-boss retries / dead-letters loudly — silently
+        // succeeding would leave provider grants live forever.
+        return yield* Effect.fail(new MissingRevocationKeyError(grants.length));
       }
+      return yield* Effect.promise(async () => {
       const dec = (b64: string): string =>
         decryptToString(key, Buffer.from(b64, "base64"));
       const failures: Array<string> = [];
@@ -123,6 +153,7 @@ const revokeConnectorGrants = (
         }
       }
       return failures;
+      });
     }),
     (failures) =>
       failures.length > 0
@@ -131,23 +162,53 @@ const revokeConnectorGrants = (
   );
 
 /**
- * Revoke provider grants, delete the WorkOS org (if any), then send the
- * deletion email (if a recipient was captured) — in that order. Revocation
- * runs first and FAILS the job (so pg-boss retries) if any grant couldn't be
- * revoked; org delete is idempotent (the Live impl treats a 404 as success);
- * the email is the terminal step, so a retry re-runs the idempotent steps and
- * the email still sends at most once. Any failure propagates so pg-boss
- * retries the whole job.
+ * GATE the cleanup until the tenant is durably deleted (re-audit #1). The job
+ * is queued before the DB wipe, so a slow/failed wipe must NOT let us revoke
+ * grants, delete the WorkOS org, or email while the tenant still exists. If
+ * the tenant is still present we fail → pg-boss retries later; the wipe either
+ * committed by then (proceed) or genuinely failed (the job eventually
+ * dead-letters loudly, with nothing destructive done).
+ */
+const assertTenantDeleted = (
+  data: AccountCleanupJobData,
+  opts: AccountCleanupOptions,
+): Effect.Effect<void, TenantNotYetDeletedError | Error> =>
+  Effect.gen(function* () {
+    if (!opts.confirmTenantDeleted) return;
+    const gone = yield* Effect.tryPromise({
+      try: () => opts.confirmTenantDeleted!(data.tenantId),
+      catch: (cause) =>
+        new Error(`account-cleanup tenant-deleted check failed: ${String(cause)}`),
+    });
+    if (!gone) {
+      return yield* Effect.fail(new TenantNotYetDeletedError(data.tenantId));
+    }
+  });
+
+/**
+ * Confirm the tenant is durably deleted (gate), revoke provider grants, delete
+ * the WorkOS org (if any), then send the deletion email — in that order. The
+ * gate runs first so NO destructive external action happens before the wipe
+ * commits (re-audit #1). Revocation FAILS the job (so pg-boss retries) if any
+ * grant couldn't be revoked or the decryption key is missing (re-audit #2);
+ * org delete is idempotent (404 = success); the email is the terminal step, so
+ * a retry re-runs the idempotent steps and the email still sends at most once.
  */
 export const runAccountCleanup = (
   data: AccountCleanupJobData,
   opts: AccountCleanupOptions = { encryptionKey: null },
 ): Effect.Effect<
   void,
-  OrgDirectoryError | PlatformMailError | ConnectorRevocationError,
+  | OrgDirectoryError
+  | PlatformMailError
+  | ConnectorRevocationError
+  | MissingRevocationKeyError
+  | TenantNotYetDeletedError
+  | Error,
   OrgDirectoryService | PlatformMailService
 > =>
   Effect.gen(function* () {
+    yield* assertTenantDeleted(data, opts);
     yield* revokeConnectorGrants(data.connectorGrants ?? [], opts);
     if (data.workosOrganizationId) {
       const dir = yield* OrgDirectoryService;

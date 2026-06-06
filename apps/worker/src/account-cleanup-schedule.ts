@@ -8,6 +8,8 @@
 // type surface (master-plan §16).
 
 import { Effect } from "effect";
+import { eq } from "drizzle-orm";
+import { DbClient, tenants } from "@support-agent/db";
 import {
   runAccountCleanup,
   type AccountCleanupJobData,
@@ -35,17 +37,44 @@ export const registerAccountCleanup = async (
     retryBackoff: true,
   });
 
+  // The durable deletion gate (re-audit #1): the worker only runs destructive
+  // cleanup once the tenant's rows are actually gone. The job is enqueued
+  // BEFORE the wipe, so this check — not a timing delay — is what makes
+  // cleanup safe against a slow or failed wipe.
+  const confirmTenantDeleted = (tenantId: string): Promise<boolean> =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const db = yield* DbClient;
+          const rows = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({ id: tenants.id })
+                .from(tenants)
+                .where(eq(tenants.id, tenantId))
+                .limit(1),
+            catch: (cause) =>
+              new Error(`tenant existence check failed: ${String(cause)}`),
+          });
+          return rows.length === 0;
+        }),
+        opts.runtimeLayer,
+      ),
+    );
+
   await opts.boss.work<AccountCleanupJobData, void>(
     ACCOUNT_CLEANUP_QUEUE,
     async (jobs) => {
       for (const job of jobs) {
         const data = job.data;
-        // Let failures throw so pg-boss applies its retry policy. The org
-        // delete is idempotent, so a retry after a partial failure (e.g.
-        // email send) is safe.
+        // Let failures throw so pg-boss applies its retry policy. The gate +
+        // idempotent org delete make a retry after a partial failure safe.
         await Effect.runPromise(
           Effect.provide(
-            runAccountCleanup(data, { encryptionKey: opts.encryptionKey }),
+            runAccountCleanup(data, {
+              encryptionKey: opts.encryptionKey,
+              confirmTenantDeleted,
+            }),
             opts.runtimeLayer,
           ),
         );

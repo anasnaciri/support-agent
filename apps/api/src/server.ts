@@ -804,8 +804,10 @@ const captureConnectorGrants = async (
  * enqueue the cleanup job → THEN wipe. A capture or enqueue failure happens
  * BEFORE the wipe, so nothing is destroyed and the caller can retry. Only once
  * the cleanup (revoke grants + delete WorkOS org + email) is durably queued do
- * we wipe the data. The cleanup job carries a short `startAfter` so the worker
- * doesn't act before this request's wipe commits.
+ * we wipe the data. The worker's cleanup will not perform any destructive
+ * action until it confirms the tenant rows are actually gone (its deletion
+ * gate), so a slow or failed wipe here can never trigger premature revocation
+ * / org deletion / email.
  */
 const deleteTenantAccount = async (
   cfg: ApiConfig,
