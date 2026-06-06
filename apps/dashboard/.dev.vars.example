@@ -1,0 +1,20 @@
+# Cloudflare Workers runtime secrets for the dashboard (Path B, OpenNext).
+# Copy to `.dev.vars` for local `cf:preview`; in production set each with
+# `wrangler secret put <NAME>` (or the Cloudflare dashboard). Do NOT commit
+# `.dev.vars`.
+#
+# NOTE: NEXT_PUBLIC_* vars are inlined at BUILD time, not runtime — set them in
+# the environment when you run `cf:build`/`cf:deploy`, not here.
+
+# The api's public origin (dashboard → api fetches over HTTPS).
+DASHBOARD_API_BASE_URL=https://api.example.com
+# Shared bearer the api trusts on /dashboard/* (must equal the api's DASHBOARD_API_TOKEN).
+DASHBOARD_API_TOKEN=
+
+# WorkOS AuthKit (server-side).
+WORKOS_API_KEY=
+WORKOS_CLIENT_ID=
+WORKOS_COOKIE_PASSWORD=
+
+# Build-time (set in the shell for cf:build/cf:deploy, shown here for reference):
+# NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://app.example.com/callback

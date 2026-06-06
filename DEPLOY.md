@@ -270,20 +270,54 @@ mount the tunnel credentials) with ingress `api.<domain> → http://api:4000`,
 and set the Hetzner firewall to deny `80`/`443`. TLS is then terminated at
 Cloudflare's edge.
 
-## Dashboard (Cloudflare Workers)
+## Front-ends on Cloudflare Workers (OpenNext)
 
-The dashboard is **not** in this compose stack. Under **Path B**, it becomes a
-pure api client: all reads go through the api over HTTPS (no Postgres/Drizzle
-or pg-boss on the edge), deployed to Cloudflare Workers via
-[`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare). The two link
-points are `DASHBOARD_BASE_URL` (api → dashboard redirects) and the api's
-public origin (dashboard → api fetches).
+Both Next.js front-ends are **pure api clients** (Path B): every read/write goes
+through apps/api over HTTPS — no Postgres/Drizzle or pg-boss on the edge — so
+they deploy to Cloudflare Workers via
+[`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare). Each app carries
+its own `wrangler.jsonc` + `open-next.config.ts` and these scripts:
 
-> **Status:** the Path B refactor (api read endpoints + dashboard rewired to
-> fetch + OpenNext/wrangler config) is a separate workstream and is **not yet
-> implemented**. Until it lands, run the dashboard the old way (Node host /
-> `next start`) against the same `DATABASE_URL`, or keep it offline for a
-> headless pilot driven by approval-link emails.
+```
+pnpm --filter @support-agent/<app> cf:build     # opennextjs-cloudflare build → .open-next/
+pnpm --filter @support-agent/<app> cf:preview   # build + run locally in workerd
+pnpm --filter @support-agent/<app> cf:deploy    # build + wrangler deploy   (needs `wrangler login`)
+```
+
+Runtime config is **not** committed. Copy each app's `.dev.vars.example` →
+`.dev.vars` for local preview, and in production set each secret with
+`wrangler secret put <NAME>` (or the Cloudflare dashboard). `NEXT_PUBLIC_*` vars
+are inlined at **build** time, so set them in the shell for `cf:build`/`cf:deploy`.
+
+### `apps/admin` — operator console ✅ deployable
+
+No middleware, so `cf:build` succeeds today. Secrets: `ADMIN_API_BASE_URL`,
+`ADMIN_API_TOKEN` (must equal the api's), `ADMIN_DASHBOARD_PASSWORD`,
+`ADMIN_SESSION_SECRET`. **Gate the deployed Worker behind Cloudflare Access or a
+non-public hostname** — it's operator-only. Run `cf:deploy` with your account.
+
+### `apps/dashboard` — merchant dashboard ⚠️ blocked on AuthKit middleware
+
+Config is in place (`wrangler.jsonc`, `open-next.config.ts`, scripts), and the
+normal `next build` is green — but `cf:build` currently **fails** with:
+
+> `Node.js middleware is not currently supported. Consider switching to Edge Middleware.`
+
+Root cause: WorkOS **AuthKit** (`authkitProxy()` in `proxy.ts`) requires the
+Next middleware — `withAuth()` throws if the middleware isn't running — and
+**Next 16's `proxy` runs only on the Node.js runtime** (it rejects
+`runtime: "edge"`). `@opennextjs/cloudflare` ≤ 1.19.x refuses Node middleware.
+So the dashboard can't ship on Workers via OpenNext with this exact stack until
+**one** of these clears (do NOT remove the middleware — it breaks auth):
+
+1. `@opennextjs/cloudflare` adds Node-middleware support (track upstream), or
+2. AuthKit offers an Edge-compatible middleware / a middleware-less mode, or
+3. host the dashboard on a Node runtime instead (`next start` on a small VM /
+   Railway Next service) — it's still a pure api client, so only
+   `DASHBOARD_API_BASE_URL` + `DASHBOARD_API_TOKEN` + the WorkOS vars are needed.
+
+The two api↔dashboard link points are unchanged either way: `DASHBOARD_BASE_URL`
+(api → dashboard redirects) and the api's public origin (dashboard → api fetches).
 
 ## Note: image size
 

@@ -1,0 +1,14 @@
+# Cloudflare Workers runtime secrets for the operator admin console
+# (OpenNext). Copy to `.dev.vars` for local `cf:preview`; in production set each
+# with `wrangler secret put <NAME>` (or the Cloudflare dashboard). Do NOT commit
+# `.dev.vars`. This Worker is operator-only — gate it behind Cloudflare Access
+# or a non-public hostname.
+
+# The api's public origin (admin → api fetches over HTTPS).
+ADMIN_API_BASE_URL=https://api.example.com
+# Bearer for the api's /admin/* endpoints (must equal the api's ADMIN_API_TOKEN).
+ADMIN_API_TOKEN=
+# Shared operator login password (constant-time checked at /login).
+ADMIN_DASHBOARD_PASSWORD=
+# HMAC key for the signed admin session cookie.
+ADMIN_SESSION_SECRET=

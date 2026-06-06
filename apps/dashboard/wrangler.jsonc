@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "support-agent-dashboard",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-01",
+  // nodejs_compat is required by the OpenNext Cloudflare adapter (needs a
+  // compatibility_date >= 2024-09-23).
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  "observability": { "enabled": true }
+  // Runtime config is NOT committed here. Set per-environment vars/secrets with
+  // `wrangler secret put <NAME>` (or the Cloudflare dashboard) — see
+  // .dev.vars.example + DEPLOY.md:
+  //   DASHBOARD_API_BASE_URL, DASHBOARD_API_TOKEN, WORKOS_* , NEXT_PUBLIC_* .
+  // Map app.<domain> to this Worker with a custom domain / route after deploy.
+}

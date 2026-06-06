@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "support-agent-admin",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  "observability": { "enabled": true }
+  // Runtime config is NOT committed here. Set with `wrangler secret put <NAME>`
+  // (or the Cloudflare dashboard) — see .dev.vars.example + DEPLOY.md:
+  //   ADMIN_API_BASE_URL, ADMIN_API_TOKEN, ADMIN_DASHBOARD_PASSWORD,
+  //   ADMIN_SESSION_SECRET.
+  // Restrict the deployed Worker (Cloudflare Access / a non-public hostname) —
+  // it's the operator console, not a merchant-facing app.
+}

@@ -7,3 +7,8 @@ const config: NextConfig = {
 };
 
 export default config;
+
+// OpenNext → Cloudflare Workers: makes Cloudflare bindings available during
+// `next dev` (no-op for `next build` / production).
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+void initOpenNextCloudflareForDev();

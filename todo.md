@@ -132,14 +132,7 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
   resolves, and use the stored link instead of the unverified managed-install
   URL. (Custom distribution requires the store domain anyway — see the design
   note in the session log + [[project_pilot_shopify_app_provisioning]].)
-- [ ] **A5 (MEDIUM) — Full pilot deployment is incomplete.** Railway config
-  deploys **api + worker only**. The merchant dashboard still needs the
-  unfinished Cloudflare/OpenNext deploy (Path B slice 9), and there is **no
-  deploy config for `apps/admin`** (the operator console).
-  Evidence: `DEPLOY.md`, `deploy/railway/`.
-  Fix direction: finish Path B slice 9 (OpenNext/wrangler for the dashboard),
-  and add a deploy target for `apps/admin` (a third Railway service, or mirror
-  the dashboard's Workers path). See the Path B box in Phase 3.
+- [~] **A5 (MEDIUM) — Full pilot deployment is incomplete.** PARTIAL 2026-06-06 (commit `<docs>`): OpenNext → Cloudflare Workers config landed for **both** front-ends (chosen target = Cloudflare/OpenNext, not Railway) — `wrangler.jsonc`, `open-next.config.ts`, `cf:build/preview/deploy/typegen` scripts, `.dev.vars.example`, `@opennextjs/cloudflare`+`wrangler` deps, gitignore. **`apps/admin` `cf:build` verified green → deployable** (operator runs `cf:deploy` with their Cloudflare account; gate behind Cloudflare Access). **`apps/dashboard` `cf:build` is BLOCKED** by a framework incompatibility: WorkOS AuthKit requires the Next middleware (`withAuth()` throws without it) and Next 16's `proxy` is **Node-only** (rejects `runtime:"edge"`), but `@opennextjs/cloudflare` ≤1.19.x refuses Node middleware. Don't remove the middleware (breaks auth). Resolve by: (1) OpenNext gaining Node-middleware support, (2) AuthKit offering an Edge/middleware-less mode, or (3) hosting the dashboard on a Node runtime (`next start`). Full writeup in DEPLOY.md "Front-ends on Cloudflare Workers". **Still needs the user's Cloudflare account to actually deploy.** api+worker remain on Railway (`deploy/railway/`).
 - [x] **A6 (LOW) — Pure-pilot deploys still require global Shopify creds.** FIXED 2026-06-06 (commit `1b08a05`): in pilot mode (`SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true`) the global `SHOPIFY_APP_CLIENT_ID/SECRET` are not just optional but **disallowed** — `loadApiConfig` fails fast if they're set with the pilot flag (no ambiguous hybrid), and boots fine without them. `globalShopifyApp()` returns null so the resolver fails closed. The
   api can't boot using only per-tenant Shopify credentials.
   Evidence: `apps/api/src/bootstrap.ts:188` (`requireEnv`).
@@ -169,13 +162,13 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
   Fix direction: route unauthenticated users to `/sign-up` (or enforce the
   legal-acceptance gate on the `/sign-in` path) so legal acceptance can't be
   skipped. See [[project_legal_accept_at_signup]].
-- [ ] **B3 (INFO) — Admin UI is a first version, not deployed/live-tested.**
-  Tenant list/detail, Shopify provisioning/rotation/revoke, PCD check, connector
-  health, and tenant deletion exist, but the app lives only on
-  `feat/pilot-shopify-app-provisioning` (well ahead of `main`) and has **not
-  been deployed or live-tested against the api**. Known gaps: shared password,
-  no per-operator audit identity, connector health is read-only, broader
-  tenant/admin tooling incomplete. (Overlaps A5 for the deploy gap.)
+- [~] **B3 (INFO) — Admin UI is a first version, not deployed/live-tested.**
+  PARTIAL 2026-06-06: the admin app now has a verified-green Cloudflare/OpenNext
+  deploy config (see A5) and is one `cf:deploy` away from running — but actually
+  deploying + live-testing against the api needs the user's Cloudflare account,
+  so it's still **not deployed/live-tested**. Known gaps unchanged: shared
+  password, no per-operator audit identity, connector health is read-only,
+  broader tenant/admin tooling incomplete.
   See [[project_admin_console_scaffold]].
 
 ---
