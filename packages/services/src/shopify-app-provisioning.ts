@@ -57,9 +57,11 @@ export class ShopifyAppProvisioningStore extends Context.Tag(
   {
     /**
      * Upsert the app credentials for a tenant (operator provisioning). On
-     * an existing row this rotates `client_id` / `client_secret` only — it
-     * preserves `shop_domain` and `status` so re-entering credentials does
-     * not un-connect a live install.
+     * an existing row this rotates `client_id` / `client_secret` and
+     * preserves `shop_domain`, so re-entering credentials does not un-connect
+     * a live install. A `revoked` row is reactivated to `ready` (re-entering
+     * credentials must un-block the install — A2); a `ready`/`connected`
+     * status is otherwise preserved.
      */
     readonly put: (
       input: PutShopifyAppProvisioningInput,
@@ -113,7 +115,12 @@ export const ShopifyAppProvisioningStoreTest = (
           clientId: input.clientId,
           clientSecret: input.clientSecret,
           shopDomain: prior?.shopDomain ?? null,
-          status: prior?.status ?? "ready",
+          // Re-provisioning a REVOKED row reactivates it to `ready` so
+          // re-entering credentials un-blocks the install (A2). A live
+          // `ready`/`connected` status is preserved — rotating the secret of
+          // a connected app must not un-connect it.
+          status:
+            prior && prior.status !== "revoked" ? prior.status : "ready",
           createdAt: prior?.createdAt ?? now,
           updatedAt: now,
         };

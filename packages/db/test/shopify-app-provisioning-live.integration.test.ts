@@ -134,4 +134,24 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     );
     expect(fetched!.status).toBe("revoked");
   });
+
+  it("put reactivates a revoked row back to ready (A2)", async () => {
+    const fetched = await run(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        // Row is `revoked` from the previous test. Re-entering credentials
+        // must un-block the install by resetting status to `ready`.
+        yield* store.put({
+          tenantId: TenantId(tenantId),
+          clientId: "shopify_client_reactivated",
+          clientSecret: "shpss_reactivated_secret",
+        });
+        return yield* store.get(TenantId(tenantId));
+      }),
+    );
+    expect(fetched!.status).toBe("ready");
+    expect(fetched!.clientId).toBe("shopify_client_reactivated");
+    // shop_domain learned earlier survives the rotation.
+    expect(fetched!.shopDomain).toBe("pilot-store.myshopify.com");
+  });
 });

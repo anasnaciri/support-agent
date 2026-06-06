@@ -39,10 +39,12 @@ const runExit = <A, E>(
     Effect.provide(eff, ShopifyAppProvisioningStoreTest(seed)),
   );
 
-describe("shopify-app-resolver — by tenant", () => {
+describe("shopify-app-resolver — by tenant (install path)", () => {
   it("uses the per-tenant app when a provisioning row exists", async () => {
     const exit = await runExit(
-      resolveShopifyAppForTenant(TenantId(tenantId), globalApp),
+      resolveShopifyAppForTenant(TenantId(tenantId), globalApp, {
+        requireProvisioning: false,
+      }),
       [seedRow()],
     );
     expect(exit).toStrictEqual(
@@ -54,9 +56,11 @@ describe("shopify-app-resolver — by tenant", () => {
     );
   });
 
-  it("falls back to the global app when no row exists", async () => {
+  it("falls back to the global app when no row exists (SaaS mode)", async () => {
     const exit = await runExit(
-      resolveShopifyAppForTenant(TenantId(tenantId), globalApp),
+      resolveShopifyAppForTenant(TenantId(tenantId), globalApp, {
+        requireProvisioning: false,
+      }),
       [],
     );
     expect(exit).toStrictEqual(
@@ -70,11 +74,66 @@ describe("shopify-app-resolver — by tenant", () => {
 
   it("fails ShopifyAppNotConfigured when neither a row nor a global app exists", async () => {
     const exit = await runExit(
-      resolveShopifyAppForTenant(TenantId(tenantId), null),
+      resolveShopifyAppForTenant(TenantId(tenantId), null, {
+        requireProvisioning: false,
+      }),
       [],
     );
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("ShopifyAppNotConfigured");
+  });
+
+  // A1 — pilot gate must be enforced on the install path, not just the
+  // dashboard overview. With no provisioning row, refuse rather than fall
+  // back to the global app.
+  it("refuses install (ShopifyProvisioningRequired) with no row when provisioning is required, even with a global app", async () => {
+    const exit = await runExit(
+      resolveShopifyAppForTenant(TenantId(tenantId), globalApp, {
+        requireProvisioning: true,
+      }),
+      [],
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ShopifyProvisioningRequired");
+  });
+
+  // A2 — a revoked provisioning row is not installable. It must NOT silently
+  // fall back to the global app either (the tenant is a pilot tenant on its
+  // own app); webhook verification uses a separate path that still resolves
+  // the revoked secret.
+  it("refuses install on a revoked row, even with a global app, in SaaS mode", async () => {
+    const exit = await runExit(
+      resolveShopifyAppForTenant(TenantId(tenantId), globalApp, {
+        requireProvisioning: false,
+      }),
+      [seedRow({ status: "revoked" })],
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ShopifyProvisioningRequired");
+  });
+
+  it("refuses install on a revoked row in pilot mode", async () => {
+    const exit = await runExit(
+      resolveShopifyAppForTenant(TenantId(tenantId), null, {
+        requireProvisioning: true,
+      }),
+      [seedRow({ status: "revoked" })],
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ShopifyProvisioningRequired");
+  });
+
+  it("uses the per-tenant app for a ready row in pilot mode", async () => {
+    const exit = await runExit(
+      resolveShopifyAppForTenant(TenantId(tenantId), null, {
+        requireProvisioning: true,
+      }),
+      [seedRow({ status: "ready" })],
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.source).toBe("tenant");
+    }
   });
 });
 

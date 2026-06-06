@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, FiberRef, Layer } from "effect";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   decryptToString,
   encrypt,
@@ -49,9 +49,10 @@ const rowToProvisioning = (
  * Live ShopifyAppProvisioningStore backed by Postgres. Encrypts the
  * `client_secret` column with AES-256-GCM on write and decrypts on read.
  *
- * Upsert on `put` collapses the per-tenant unique key, rotating only the
- * credentials — `shop_domain` and `status` survive so re-provisioning
- * doesn't disturb a live install.
+ * Upsert on `put` collapses the per-tenant unique key, rotating the
+ * credentials — `shop_domain` survives so re-provisioning doesn't disturb a
+ * live install, and a `revoked` status is reactivated to `ready` (A2) while a
+ * live `ready`/`connected` status is preserved.
  */
 export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
   Layer.effect(
@@ -82,6 +83,10 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
                   clientId: input.clientId,
                   clientSecretEncrypted: encrypted,
                   updatedAt: now,
+                  // Re-provisioning a REVOKED row reactivates it to `ready`
+                  // so re-entering credentials un-blocks the install (A2). A
+                  // live `ready`/`connected` status is preserved.
+                  status: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN 'ready' ELSE ${shopifyAppProvisioning.status} END`,
                 },
               })
               .returning(),

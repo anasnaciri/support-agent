@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, {
   type FastifyError,
@@ -1561,18 +1561,67 @@ const globalShopifyApp = (cfg: ApiConfig): GlobalShopifyApp => ({
  * where the merchant-initiated flow carries the tenant). Returns null only
  * when neither a per-tenant row nor a global app exists.
  */
+type ResolveTenantAppOutcome =
+  | {
+      readonly kind: "ok";
+      readonly clientId: string;
+      readonly clientSecret: string;
+    }
+  // Pilot gate refused the install: no non-revoked provisioning row. A4 of the
+  // pre-onboarding audit — the gate is enforced HERE, authoritatively, not
+  // just on the dashboard overview. `reason` distinguishes "operator never
+  // provisioned" from "operator revoked it".
+  | { readonly kind: "provisioning_required"; readonly reason: string }
+  // No app exists anywhere (no per-tenant row, no global env app).
+  | { readonly kind: "not_configured" };
+
 const resolveTenantShopifyApp = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   tenantId: string,
-): Promise<{ readonly clientId: string; readonly clientSecret: string } | null> => {
+): Promise<ResolveTenantAppOutcome> => {
   const exit = await Effect.runPromiseExit(
     Effect.provide(
-      resolveShopifyAppForTenant(TenantId(tenantId), globalShopifyApp(cfg)),
+      resolveShopifyAppForTenant(TenantId(tenantId), globalShopifyApp(cfg), {
+        requireProvisioning: cfg.shopifyConnectRequiresProvisioning,
+      }),
       layer,
     ),
   );
-  return exit._tag === "Success" ? exit.value : null;
+  if (exit._tag === "Success") {
+    return {
+      kind: "ok",
+      clientId: exit.value.clientId,
+      clientSecret: exit.value.clientSecret,
+    };
+  }
+  const error = Cause.failureOption(exit.cause);
+  if (
+    error._tag === "Some" &&
+    error.value._tag === "ShopifyProvisioningRequired"
+  ) {
+    return { kind: "provisioning_required", reason: error.value.reason };
+  }
+  return { kind: "not_configured" };
+};
+
+/**
+ * Map a non-ok {@link ResolveTenantAppOutcome} to an HTTP response. A pilot
+ * gate refusal is a 403 (the operator must provision/re-provision the app),
+ * distinct from a 500 "no app exists anywhere" misconfiguration.
+ */
+const sendShopifyAppResolveError = (
+  res: FastifyReply,
+  outcome: Exclude<ResolveTenantAppOutcome, { kind: "ok" }>,
+): void => {
+  if (outcome.kind === "provisioning_required") {
+    sendJson(res, 403, {
+      error: "shopify_provisioning_required",
+      reason: outcome.reason,
+    });
+    return;
+  }
+  sendJson(res, 500, { error: "shopify_app_not_configured" });
 };
 
 /**
@@ -1617,8 +1666,8 @@ const handleShopifyInstall = async (
       return;
     }
     const app = await resolveTenantShopifyApp(cfg, layer, tenant);
-    if (!app) {
-      sendJson(res, 500, { error: "shopify_app_not_configured" });
+    if (app.kind !== "ok") {
+      sendShopifyAppResolveError(res, app);
       return;
     }
     const pendingState = signState(cfg.stateSigningKey, tenant);
@@ -1711,8 +1760,8 @@ const handleShopifyInstall = async (
   }
 
   const app = await resolveTenantShopifyApp(cfg, layer, tenant);
-  if (!app) {
-    sendJson(res, 500, { error: "shopify_app_not_configured" });
+  if (app.kind !== "ok") {
+    sendShopifyAppResolveError(res, app);
     return;
   }
   const state = signState(cfg.stateSigningKey, tenant);
@@ -1829,8 +1878,8 @@ const handleShopifyCallback = async (
   }
 
   const app = await resolveTenantShopifyApp(cfg, layer, tenantId);
-  if (!app) {
-    sendJson(res, 500, { error: "shopify_app_not_configured" });
+  if (app.kind !== "ok") {
+    sendShopifyAppResolveError(res, app);
     return;
   }
 

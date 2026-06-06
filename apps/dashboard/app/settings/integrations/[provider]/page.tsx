@@ -64,12 +64,25 @@ export default async function ConnectorManagePage({
   const ProviderIcon = PROVIDER_ICONS[provider];
 
   const isSheets = provider === "google_sheets";
-  const [connections, catalog, settings] = await Promise.all([
+  const isShopify = provider === "shopify";
+  const [connections, catalog, settings, shopifyGate] = await Promise.all([
     api.connections(ctx),
     api.catalog(ctx),
     api.settings(ctx),
+    isShopify ? api.shopifyApp(ctx) : Promise.resolve(null),
   ]);
   const legalAccepted = settings.legalAcceptance !== null;
+
+  // Pilot custom distribution: Shopify Connect stays disabled until an
+  // operator has provisioned the tenant's custom app. The api install
+  // endpoint enforces this authoritatively (403 shopify_provisioning_required)
+  // — this is the matching UX gate so the button isn't a dead link. SaaS mode
+  // sets requiresProvisioning false, so it never blocks.
+  const shopifyAwaitingProvisioning =
+    isShopify &&
+    shopifyGate !== null &&
+    shopifyGate.requiresProvisioning &&
+    !shopifyGate.provisioned;
 
   const row =
     connections.filter((c) => c.provider === provider)[0] ?? null;
@@ -78,7 +91,11 @@ export default async function ConnectorManagePage({
     : row.status === "active"
       ? "active"
       : "revoked";
-  const showConnect = !!apiBaseUrl && legalAccepted && tone !== "active";
+  const showConnect =
+    !!apiBaseUrl &&
+    legalAccepted &&
+    tone !== "active" &&
+    !shopifyAwaitingProvisioning;
   const disconnectAction =
     provider === "shopify"
       ? disconnectShopifyAction
@@ -210,6 +227,14 @@ export default async function ConnectorManagePage({
               <Button asChild>
                 <a href="/settings/legal">Review legal terms</a>
               </Button>
+            ) : shopifyAwaitingProvisioning && tone !== "active" ? (
+              <div className="space-y-1.5">
+                <Button disabled>Connect {label}</Button>
+                <p className="text-xs text-muted-foreground">
+                  Awaiting setup — support is provisioning your Shopify app.
+                  You can connect once it&apos;s ready.
+                </p>
+              </div>
             ) : showConnect && apiBaseUrl ? (
               <Button asChild>
                 <a href={connectHref(provider, apiBaseUrl, tenantId, loginHint)}>
