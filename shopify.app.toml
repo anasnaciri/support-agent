@@ -1,8 +1,21 @@
-# Shopify app configuration for our OAuth connector (public app, custom /
-# UNLISTED distribution — "connect your store → approve scopes", NOT an App
-# Store listing). Committed so the app version (scopes, URLs, compliance
-# webhooks) is version-controlled rather than living only in the Partner
-# Dashboard. Link + push it with the Shopify CLI:
+# Shopify app configuration for our OAuth connector — "connect your store →
+# approve scopes", NOT an App Store listing. Committed so the app version
+# (scopes, URLs, compliance webhooks) is version-controlled rather than living
+# only in the Partner Dashboard. Link + push it with the Shopify CLI:
+#
+# DISTRIBUTION METHOD is a Partner/Dev Dashboard setting, not a field in this
+# file — and it determines whether review is required:
+#   * Pilot (one app per store, the current path): set the app to **Custom
+#     distribution**. No Shopify review; protected customer data (Level 1 + 2,
+#     i.e. the customer name/email/address on orders) is "always available"
+#     — but you still DECLARE which PCD fields you use per app (see
+#     [access_scopes] below + docs/shopify-pcd.md), and you cannot use the
+#     Shopify Billing API.
+#   * SaaS (one global app, many stores): would be **Public** distribution,
+#     which DOES require Shopify review + a PCD attestation. "Unlisted" is a
+#     Public sub-mode and is still review-gated — it is NOT the same as Custom
+#     distribution. Do not conflate the two.
+#
 #
 #   shopify app config link      # binds this file to the app, fills client_id
 #   shopify app deploy           # releases this app version's config
@@ -30,10 +43,18 @@ application_url = "https://your-app-domain.example/installed"
 embedded = false
 
 [access_scopes]
-# read_orders     → shopify.get_order / findOrderByName
-# read_customers  → shopify.get_customer / searchByEmail
+# read_orders     → shopify.get_order / findOrderByName       (PCD: Level 2)
+# read_customers  → shopify.get_customer / searchByEmail       (PCD: Level 2)
 # read_products   → shopify.get_product (damaged-product photo cross-check)
 # write_orders    → refund.create
+#
+# read_orders + read_customers expose protected customer data (Level 2 PII:
+# customer name, email, address). On a Custom-distribution app these need NO
+# Shopify review, but each app must still DECLARE the PCD fields it uses in its
+# Dev Dashboard (Apps → API access → Protected customer data). The field set we
+# justify is name + email + address — NOT phone. If a connected store returns
+# orders with those fields blanked, the PCD declaration is missing. See
+# docs/shopify-pcd.md for the per-field justifications and the per-app checklist.
 scopes = "read_orders,read_customers,read_products,write_orders"
 
 [auth]

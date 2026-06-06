@@ -8,6 +8,28 @@ Verbatim record of what was submitted to the Shopify Partner Dashboard for the `
 
 ---
 
+## Distribution method decides whether ANY of this is review-gated
+
+The 15-question attestation below was filed for the **single global app under Public distribution** (the SaaS variant). It is **review-gated** only because of Public distribution — not because of the scopes.
+
+The **pilot** path is different (see `master-plan.md` §19.6 and [[project_pilot_shopify_app_provisioning]]): each tenant gets its own operator-provisioned **Custom-distribution** app, one app per store. For Custom-distribution apps, protected customer data is **"always available" at both Level 1 and Level 2 — no review, no attestation submission.** `read_orders` / `read_customers` will not put a pilot app in any approval queue. So for the pilot, treat the attestation submission below as **reference, not a blocker.**
+
+Two things still apply to every Custom-distribution pilot app, even with no review:
+
+1. **You must DECLARE the PCD fields per app** in its Dev Dashboard (Apps → API access → Protected customer data) — select name + email + address (the fields justified in §2; not phone). "Always available" removes the *review*, not the *declaration*. Shopify's docs are silent on whether live-store PII flows with zero declaration, and the Dec-2025 enforcement trend is to **redact/null** PII for unconfigured apps — so if a connected store returns orders with blank customer name/email/`shippingAddress`, the declaration is missing. This breaks `shopify.get_order` silently (blanked fields, not an error), degrading where-is-order / missing-package flows.
+2. **The data-protection obligations still bind** (§3, all 15) under the Partner Program Agreement — self-attested, not reviewed, but legally binding. Nothing about Custom distribution relaxes them.
+
+### Per-app provisioning checklist (Custom distribution / pilot)
+
+When provisioning a new tenant's Shopify app (operator step, alongside entering `client_id` + `client_secret` into the admin endpoint):
+
+- [ ] In the Dev Dashboard, set the app's **distribution = Custom** (not Public / not unlisted).
+- [ ] Apps → API access → **Protected customer data**: declare the fields — name, email, address (not phone).
+- [ ] After the merchant connects, **verify on the live store** that `shopify.get_order` returns a non-blank customer name/email/`shippingAddress` (confirms PCD isn't being redacted).
+- [ ] Confirm compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) are registered for the app (they ship in `shopify.app.toml`).
+
+---
+
 ## Section 1 — Protected customer data (top toggle)
 
 **Toggled:** ON.
@@ -173,6 +195,8 @@ Operational production readiness still depends on deployment evidence (TLS, encr
 ---
 
 ## Re-attestation playbook
+
+(Applies to the **Public-distribution** global app only. Custom-distribution pilot apps are never asked to re-attest — they only need the per-app field declaration in the checklist above.)
 
 When Shopify asks for re-attestation:
 
