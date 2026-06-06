@@ -144,6 +144,58 @@ describe("loadApiConfig — HTTPS callback enforcement", () => {
     });
   });
 
+  // A6 — pilot mode is pure per-tenant provisioning: it ships NO global app,
+  // and global creds are disallowed (not merely optional).
+  it("boots with no global Shopify creds when provisioning is required (pilot)", () => {
+    restore = setEnv({
+      NODE_ENV: "test",
+      ALLOW_HTTP_CALLBACK: "",
+      SHOPIFY_CONNECT_REQUIRES_PROVISIONING: "true",
+      ...baseEnv({
+        SHOPIFY_APP_CLIENT_ID: "",
+        SHOPIFY_APP_CLIENT_SECRET: "",
+        SHOPIFY_APP_CALLBACK_URL: "http://localhost/shopify/auth/callback",
+      }),
+    });
+    const cfg = loadApiConfig();
+    expect(cfg.shopify.clientId).toBeNull();
+    expect(cfg.shopify.clientSecret).toBeNull();
+    // callbackUrl + apiVersion are deployment-level — still present.
+    expect(cfg.shopify.callbackUrl).toBe(
+      "http://localhost/shopify/auth/callback",
+    );
+    expect(cfg.shopifyConnectRequiresProvisioning).toBe(true);
+  });
+
+  it("REJECTS global Shopify creds in pilot mode (no hybrid)", () => {
+    restore = setEnv({
+      NODE_ENV: "test",
+      ALLOW_HTTP_CALLBACK: "",
+      SHOPIFY_CONNECT_REQUIRES_PROVISIONING: "true",
+      ...baseEnv({
+        // Global creds present + pilot mode → fail fast.
+        SHOPIFY_APP_CLIENT_ID: "cid",
+        SHOPIFY_APP_CLIENT_SECRET: "cs",
+        SHOPIFY_APP_CALLBACK_URL: "http://localhost/shopify/auth/callback",
+      }),
+    });
+    expect(() => loadApiConfig()).toThrow(/must NOT be set when/);
+  });
+
+  it("still requires global Shopify creds in SaaS mode", () => {
+    restore = setEnv({
+      NODE_ENV: "test",
+      ALLOW_HTTP_CALLBACK: "",
+      SHOPIFY_CONNECT_REQUIRES_PROVISIONING: "",
+      ...baseEnv({
+        SHOPIFY_APP_CLIENT_ID: "",
+        SHOPIFY_APP_CLIENT_SECRET: "",
+        SHOPIFY_APP_CALLBACK_URL: "http://localhost/shopify/auth/callback",
+      }),
+    });
+    expect(() => loadApiConfig()).toThrow(/SHOPIFY_APP_CLIENT_ID is required/);
+  });
+
   it("threads optional Gmail Pub/Sub env into Google config", () => {
     restore = setEnv({
       NODE_ENV: "production",

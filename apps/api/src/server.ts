@@ -1610,11 +1610,15 @@ const clearShopifyInstallCookie = (secure: boolean): string =>
 // `cfg.shopify` is always present today, so SaaS tenants resolve to exactly
 // the same credentials as before this slice.
 
-/** The deployment-wide Shopify app (SaaS path). */
-const globalShopifyApp = (cfg: ApiConfig): GlobalShopifyApp => ({
-  clientId: cfg.shopify.clientId,
-  clientSecret: cfg.shopify.clientSecret,
-});
+/** The deployment-wide Shopify app (SaaS path), or null in a pure-pilot
+ * deployment that ships no global app (audit A6). */
+const globalShopifyApp = (cfg: ApiConfig): GlobalShopifyApp | null =>
+  cfg.shopify.clientId && cfg.shopify.clientSecret
+    ? {
+        clientId: cfg.shopify.clientId,
+        clientSecret: cfg.shopify.clientSecret,
+      }
+    : null;
 
 /**
  * Resolve the Shopify app credentials for a known tenant (install + callback,
@@ -1754,6 +1758,12 @@ const handleShopifyInstall = async (
     // HMAC is verified with the deployment-wide secret. The pilot flow always
     // carries `?tenant=` and goes through the branch below; the final install
     // URL re-resolves the now-known tenant's client_id either way.
+    // A pure-pilot deployment ships no global app (audit A6), so this
+    // global-initiated path can't be authenticated — refuse it.
+    if (!cfg.shopify.clientSecret) {
+      sendJson(res, 400, { error: "missing_tenant" });
+      return;
+    }
     const hmacOk = verifyCallbackHmac({
       clientSecret: cfg.shopify.clientSecret,
       query: params,

@@ -34,8 +34,16 @@ import {
 // ============================================================
 
 export interface ShopifyAppConfig {
-  readonly clientId: string;
-  readonly clientSecret: string;
+  /**
+   * The deployment-wide ("global") Shopify app credentials (SaaS path).
+   * `null` in a pure-pilot deployment (`SHOPIFY_CONNECT_REQUIRES_PROVISIONING`
+   * = true) that ships no global app — every tenant uses its own provisioned
+   * custom app instead (audit A6). `callbackUrl` / `apiVersion` are
+   * deployment-level (the api's own callback endpoint + Admin API version) and
+   * are always required.
+   */
+  readonly clientId: string | null;
+  readonly clientSecret: string | null;
   readonly callbackUrl: string;
   readonly apiVersion: string;
 }
@@ -180,14 +188,40 @@ export const loadApiConfig = (): ApiConfig => {
       `GOOGLE_OAUTH_CALLBACK_URL must use https:// (got ${googleCallbackUrl}). Google rejects http callbacks except for http://localhost loopback installs.`,
     );
   }
+  // Pilot mode (SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true) is PURE per-tenant
+  // provisioning — every tenant uses its own operator-provisioned custom app.
+  // A deployment-wide ("global") Shopify app is NOT allowed: keeping one around
+  // would be an ambiguous hybrid where an unprovisioned tenant might fall back
+  // to it. So the global creds must be absent in pilot mode (fail fast if set),
+  // and required in SaaS mode (audit A6). callbackUrl/apiVersion are always
+  // required — they're the api's own callback endpoint + Admin API version.
+  const requiresProvisioning =
+    process.env["SHOPIFY_CONNECT_REQUIRES_PROVISIONING"]?.trim() === "true";
+  const rawShopifyClientId = process.env["SHOPIFY_APP_CLIENT_ID"]?.trim() || null;
+  const rawShopifyClientSecret =
+    process.env["SHOPIFY_APP_CLIENT_SECRET"]?.trim() || null;
+  let shopifyClientId: string | null;
+  let shopifyClientSecret: string | null;
+  if (requiresProvisioning) {
+    if (rawShopifyClientId || rawShopifyClientSecret) {
+      throw new Error(
+        "SHOPIFY_APP_CLIENT_ID/SECRET must NOT be set when SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true — pilot mode uses per-tenant provisioned apps only, with no global app. Unset the global Shopify credentials.",
+      );
+    }
+    shopifyClientId = null;
+    shopifyClientSecret = null;
+  } else {
+    shopifyClientId = requireEnv("SHOPIFY_APP_CLIENT_ID");
+    shopifyClientSecret = requireEnv("SHOPIFY_APP_CLIENT_SECRET");
+  }
   return {
     port: Number(process.env["API_PORT"] ?? 4000),
     databaseUrl: requireEnv("DATABASE_URL"),
     encryptionKey: parseKey(requireEnv("CREDENTIAL_ENCRYPTION_KEY")),
     stateSigningKey: requireEnv("STATE_SIGNING_KEY"),
     shopify: {
-      clientId: requireEnv("SHOPIFY_APP_CLIENT_ID"),
-      clientSecret: requireEnv("SHOPIFY_APP_CLIENT_SECRET"),
+      clientId: shopifyClientId,
+      clientSecret: shopifyClientSecret,
       callbackUrl,
       apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2026-04",
     },
@@ -195,8 +229,7 @@ export const loadApiConfig = (): ApiConfig => {
     dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
     dashboardApiToken: process.env["DASHBOARD_API_TOKEN"]?.trim() || null,
     adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,
-    shopifyConnectRequiresProvisioning:
-      process.env["SHOPIFY_CONNECT_REQUIRES_PROVISIONING"]?.trim() === "true",
+    shopifyConnectRequiresProvisioning: requiresProvisioning,
     google: googleConfigured
       ? {
           clientId: googleClientId,
