@@ -739,11 +739,11 @@ type DeleteAccountResult =
 // per process (not per delete). Reuses the same cached pg-boss instance
 // as the approval-link publisher.
 let cachedCleanupPublisher:
-  | ((data: AccountCleanupJobData) => Promise<void>)
+  | ((data: AccountCleanupJobData) => Promise<string | null>)
   | null = null;
 const accountCleanupPublisher = (
   databaseUrl: string,
-): ((data: AccountCleanupJobData) => Promise<void>) => {
+): ((data: AccountCleanupJobData) => Promise<string | null>) => {
   if (!cachedCleanupPublisher) {
     cachedCleanupPublisher = makePgBossAccountCleanupPublisher(() =>
       acquireApprovalBoss(databaseUrl),
@@ -828,8 +828,9 @@ const deleteTenantAccount = async (
 
   // 2. Durably queue the cleanup (revoke + org delete + email) BEFORE the
   //    wipe, so an enqueue failure leaves all data intact and retriable.
+  let cleanupJobId: string | null;
   try {
-    await accountCleanupPublisher(cfg.databaseUrl)({
+    cleanupJobId = await accountCleanupPublisher(cfg.databaseUrl)({
       tenantId: snapshot.id,
       tenantName: snapshot.name,
       workosOrganizationId: snapshot.workosOrganizationId,
@@ -841,6 +842,16 @@ const deleteTenantAccount = async (
     console.error(
       `[account-delete] tenant=${tenantId} cleanup enqueue failed (NOT wiped, safe to retry):`,
       cause,
+    );
+    return { kind: "enqueue_failed" };
+  }
+  // No job id → the send was suppressed/no-op (e.g. a dedup policy collapsed
+  // it onto an existing job that may carry STALE creds). Do NOT wipe — that
+  // would destroy the only copy of this attempt's grants (5th-audit #1).
+  if (!cleanupJobId) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[account-delete] tenant=${tenantId} cleanup not queued (no job id); NOT wiping, safe to retry`,
     );
     return { kind: "enqueue_failed" };
   }

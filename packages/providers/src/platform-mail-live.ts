@@ -137,8 +137,11 @@ export const PlatformMailServiceLive = Layer.effect(
     // mail kind owns its template.
     // Shared Resend POST. `idempotencyKey`, when supplied, sets Resend's
     // `Idempotency-Key` header — Resend dedupes requests with the same key
-    // (24h window), so a retried or duplicate cleanup job can't send the same
-    // email twice (re-audit #2: the documented "email at-most-once").
+    // within a ~24h window. pg-boss retries (and any duplicate cleanup job)
+    // for one deletion happen far inside that window (retryLimit 5 with
+    // backoff = minutes/hours), so in practice the deletion email is sent at
+    // most once. NOTE: this is a 24h dedup, not an all-time guarantee — a
+    // resurrected duplicate beyond 24h could resend (5th-audit #3, LOW).
     const post = (
       tenantId: SendAccountDeletedInput["tenantId"],
       recipient: string,
@@ -185,8 +188,8 @@ export const PlatformMailServiceLive = Layer.effect(
           input.tenantId,
           input.recipientEmail,
           renderAccountDeletedEmail(input),
-          // Stable per-tenant key → the deletion email sends at most once even
-          // across pg-boss retries or a duplicate cleanup job.
+          // Stable per-tenant key → Resend dedupes the deletion email across
+          // this deletion's retries / duplicate jobs (within its 24h window).
           `account-deleted:${input.tenantId}`,
         ),
       sendApprovalLink: (input) =>

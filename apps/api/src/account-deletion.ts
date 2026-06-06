@@ -104,43 +104,50 @@ export interface CleanupBossLike {
 /**
  * Build the cleanup publisher. Ensures the queue exists once per process
  * (the worker also creates it on boot, but the api may publish before the
- * worker has — pg-boss requires the queue to exist before `send`). Uses
- * the tenant id as the singleton key so a double-submit collapses to one
- * cleanup job.
+ * worker has — pg-boss requires the queue to exist before `send`).
  *
  * The api enqueues this BEFORE wiping the tenant (so an enqueue failure can't
  * orphan a wiped tenant — re-audit #1c). Safety against a slow/failed wipe is
  * the worker's DURABLE deletion gate (it refuses destructive cleanup until the
- * tenant rows are actually gone — see apps/worker account-cleanup), NOT this
- * delay: `startAfter` is only an optimization that avoids a near-certain
- * first-attempt retry in the normal case. The singleton key collapses a retry
- * of the same deletion onto the one job.
+ * tenant rows are actually gone — see apps/worker account-cleanup), NOT the
+ * `startAfter`, which is only an optimization.
+ *
+ * The queue policy is `standard` ON PURPOSE: an earlier `exclusive` + singleton
+ * attempt at deduping concurrent deletes could SUPPRESS a retry that carried
+ * newer connector credentials (the second send returns null), leaving provider
+ * grants un-revoked (5th-audit #1). Duplicate cleanup jobs are harmless here —
+ * revocation is idempotent (`already_gone`), org-delete is idempotent, and the
+ * deletion email is deduped by its Resend Idempotency-Key — so we let every
+ * attempt enqueue its own job (its own creds snapshot) and rely on idempotency
+ * rather than queue-level dedup. The publisher RETURNS the job id (or null) so
+ * the caller can refuse to wipe when nothing was actually queued.
  */
 const CLEANUP_START_AFTER_SECONDS = 30;
 
 export const makePgBossAccountCleanupPublisher = (
   acquireBoss: () => Promise<CleanupBossLike>,
-): ((data: AccountCleanupJobData) => Promise<void>) => {
+): ((data: AccountCleanupJobData) => Promise<string | null>) => {
   let ensured = false;
-  return async (data: AccountCleanupJobData): Promise<void> => {
+  return async (data: AccountCleanupJobData): Promise<string | null> => {
     const boss = await acquireBoss();
     if (!ensured) {
       // Keep options in sync with apps/worker's registerAccountCleanup.
-      // `exclusive` + singletonKey = at most one queued-or-active cleanup job
-      // per tenant, so concurrent delete requests don't enqueue duplicates
-      // (re-audit #2 — the `standard` policy does NOT dedupe on singletonKey).
-      // NOTE: a queue's policy can't be changed after creation; an existing
-      // `standard` queue must be recreated to pick this up.
       await boss.createQueue(ACCOUNT_CLEANUP_QUEUE, {
-        policy: "exclusive",
+        policy: "standard",
         retryLimit: 5,
         retryBackoff: true,
       });
       ensured = true;
     }
-    await boss.send(ACCOUNT_CLEANUP_QUEUE, data, {
+    // singletonKey is still set (cheap, and de-dupes truly-simultaneous
+    // identical sends), but the `standard` policy means a send is never
+    // suppressed in a way that would drop a retry's creds — it returns the
+    // new job id. Returning it lets the caller verify a job was queued before
+    // it wipes.
+    const id = await boss.send(ACCOUNT_CLEANUP_QUEUE, data, {
       singletonKey: data.tenantId,
       startAfter: CLEANUP_START_AFTER_SECONDS,
     });
+    return typeof id === "string" ? id : null;
   };
 };

@@ -31,11 +31,12 @@ export const registerAccountCleanup = async (
   opts: RegisterOptions,
 ): Promise<void> => {
   // Options kept in sync with apps/api's makePgBossAccountCleanupPublisher.
-  // `exclusive` + singletonKey dedupes concurrent cleanup jobs per tenant
-  // (re-audit #2). Policy can't change after creation — recreate an existing
-  // `standard` queue to adopt it.
+  // `standard` ON PURPOSE: queue-level dedup (exclusive/singleton) could
+  // suppress a retry carrying newer connector creds and lose revocation
+  // (5th-audit #1). Duplicate jobs are idempotent (revoke `already_gone`,
+  // org-delete 404, email deduped by Resend key), so we tolerate them instead.
   await opts.boss.createQueue(ACCOUNT_CLEANUP_QUEUE, {
-    policy: "exclusive",
+    policy: "standard",
     retryLimit: 5,
     retryBackoff: true,
   });

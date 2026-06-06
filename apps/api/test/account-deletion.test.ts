@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildConnectorGrants,
+  makePgBossAccountCleanupPublisher,
   type ConnectorGrantSource,
 } from "../src/account-deletion.js";
 
@@ -63,5 +64,35 @@ describe("buildConnectorGrants", () => {
 
   it("returns an empty list when there are no revocable rows", () => {
     expect(buildConnectorGrants([row({ provider: "openai" })], enc)).toEqual([]);
+  });
+});
+
+describe("makePgBossAccountCleanupPublisher", () => {
+  const data = {
+    tenantId: "t1",
+    tenantName: "Acme",
+    workosOrganizationId: null,
+    notificationEmail: null,
+  };
+
+  it("returns the job id from boss.send so the caller can verify enqueue (5th-audit #1)", async () => {
+    const boss = {
+      createQueue: vi.fn(async () => undefined),
+      send: vi.fn(async () => "job-123"),
+    };
+    const publish = makePgBossAccountCleanupPublisher(async () => boss);
+    expect(await publish(data)).toBe("job-123");
+    expect(boss.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null when boss.send is suppressed (so the caller refuses to wipe)", async () => {
+    const boss = {
+      createQueue: vi.fn(async () => undefined),
+      // A dedup policy returns null when it collapses the send onto an
+      // existing job — the API must NOT wipe in that case.
+      send: vi.fn(async () => null),
+    };
+    const publish = makePgBossAccountCleanupPublisher(async () => boss);
+    expect(await publish(data)).toBeNull();
   });
 });
