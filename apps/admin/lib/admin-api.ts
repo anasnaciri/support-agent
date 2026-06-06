@@ -55,11 +55,16 @@ export const adminApi = {
     id: string,
     clientId: string,
     clientSecret: string,
+    shopDomain?: string,
   ): Promise<Response> =>
     request(`/tenants/${tid(id)}/shopify-app`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ clientId, clientSecret }),
+      body: JSON.stringify({
+        clientId,
+        clientSecret,
+        ...(shopDomain ? { shopDomain } : {}),
+      }),
     }),
 
   revokeShopifyApp: (id: string): Promise<Response> =>

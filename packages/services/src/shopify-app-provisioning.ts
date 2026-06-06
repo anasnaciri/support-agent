@@ -35,6 +35,15 @@ export interface PutShopifyAppProvisioningInput {
   readonly tenantId: TenantId;
   readonly clientId: string;
   readonly clientSecret: string;
+  /**
+   * The store the operator is provisioning this app for (custom
+   * distribution), e.g. `acme.myshopify.com`. Optional — when provided it's
+   * recorded on the row up front (A4) so the install flow can build the
+   * standard OAuth authorize URL for the known shop instead of the
+   * unverified managed-install URL, and `undefined` leaves any
+   * already-learned shop_domain untouched.
+   */
+  readonly shopDomain?: string;
 }
 
 // ============================================================
@@ -115,9 +124,11 @@ export const ShopifyAppProvisioningStoreTest = (
           tenantId: input.tenantId,
           clientId: input.clientId,
           clientSecret: input.clientSecret,
-          // Reactivation clears the stale shop_domain (A3) — a re-provisioned
-          // app awaits a fresh Connect. A live row preserves it.
-          shopDomain: reactivating ? null : (prior?.shopDomain ?? null),
+          // An explicit shopDomain (A4) is recorded as given. Otherwise:
+          // reactivation clears the stale shop_domain (A3) — a re-provisioned
+          // app awaits a fresh Connect — and a live row preserves it.
+          shopDomain:
+            input.shopDomain ?? (reactivating ? null : (prior?.shopDomain ?? null)),
           // Re-provisioning a REVOKED row reactivates it to `ready` so
           // re-entering credentials un-blocks the install (A2). A live
           // `ready`/`connected` status is preserved — rotating the secret of

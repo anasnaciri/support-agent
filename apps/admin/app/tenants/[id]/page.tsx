@@ -19,6 +19,8 @@ const OK_MESSAGES: Record<string, string> = {
 const ERROR_MESSAGES: Record<string, string> = {
   missing_fields: "Client ID and secret are both required.",
   provision_failed: "Saving the credentials failed. Try again.",
+  invalid_shop: "Store domain must be a valid *.myshopify.com domain.",
+  shop_conflict: "That store is already connected to another tenant.",
   revoke_failed: "Revoking failed. Try again.",
   tenant_not_found: "Tenant not found.",
   name_mismatch: "The typed name didn't match — tenant not deleted.",
@@ -181,6 +183,26 @@ export default async function TenantDetailPage({
                   placeholder={shopifyApp ? "•••••• (re-enter to rotate)" : ""}
                   className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
                 />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label htmlFor="shopDomain" className="text-sm text-zinc-300">
+                  Store domain{" "}
+                  <span className="text-zinc-500">(optional)</span>
+                </label>
+                <input
+                  id="shopDomain"
+                  name="shopDomain"
+                  inputMode="url"
+                  autoComplete="off"
+                  placeholder="acme.myshopify.com"
+                  defaultValue={shopifyApp?.shopDomain ?? ""}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
+                />
+                <p className="text-xs text-zinc-500">
+                  Custom-distribution store this app is for. Recorded up front so
+                  the merchant&apos;s Connect goes straight to the store&apos;s
+                  OAuth screen and direct install links resolve to this tenant.
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">

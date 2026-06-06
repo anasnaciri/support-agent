@@ -13,11 +13,19 @@ export async function provisionShopifyAppAction(
   await requireSession();
   const clientId = String(formData.get("clientId") ?? "").trim();
   const clientSecret = String(formData.get("clientSecret") ?? "");
+  const shopDomain = String(formData.get("shopDomain") ?? "").trim();
   if (!clientId || !clientSecret) {
     redirect(`/tenants/${id}?error=missing_fields`);
   }
-  const res = await adminApi.putShopifyApp(id, clientId, clientSecret);
+  const res = await adminApi.putShopifyApp(
+    id,
+    clientId,
+    clientSecret,
+    shopDomain || undefined,
+  );
   if (res.status === 404) redirect(`/tenants/${id}?error=tenant_not_found`);
+  if (res.status === 400) redirect(`/tenants/${id}?error=invalid_shop`);
+  if (res.status === 409) redirect(`/tenants/${id}?error=shop_conflict`);
   if (!res.ok) redirect(`/tenants/${id}?error=provision_failed`);
   revalidatePath(`/tenants/${id}`);
   redirect(`/tenants/${id}?ok=shopify_saved`);

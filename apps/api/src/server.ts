@@ -933,9 +933,28 @@ const handleAdminShopifyAppPut = async (
     sendJson(res, 400, { error: "missing_client_credentials" });
     return;
   }
+  // Optional store domain (A4). When given it's normalized + recorded so the
+  // install flow can use the standard authorize URL and a no-state callback
+  // resolves the tenant. An invalid value is rejected rather than ignored.
+  const rawShop =
+    typeof body["shopDomain"] === "string" ? body["shopDomain"].trim() : "";
+  let shopDomain: string | undefined;
+  if (rawShop) {
+    const normalized = normalizeShopDomain(rawShop);
+    if (!normalized) {
+      sendJson(res, 400, { error: "invalid_shop", shop: rawShop });
+      return;
+    }
+    shopDomain = normalized;
+  }
   const exit = await Effect.runPromiseExit(
     Effect.provide(
-      putAdminShopifyApp({ tenantId, clientId, clientSecret }),
+      putAdminShopifyApp({
+        tenantId,
+        clientId,
+        clientSecret,
+        ...(shopDomain ? { shopDomain } : {}),
+      }),
       layer,
     ),
   );
@@ -948,6 +967,13 @@ const handleAdminShopifyAppPut = async (
   }
   if (exit.value.kind === "tenant_not_found") {
     sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  if (exit.value.kind === "shop_conflict") {
+    sendJson(res, 409, {
+      error: "shop_already_connected",
+      shop: exit.value.shopDomain,
+    });
     return;
   }
   sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
@@ -1706,6 +1732,28 @@ const resolveShopWebhookSecret = async (
   return exit._tag === "Success" ? exit.value.clientSecret : null;
 };
 
+/**
+ * The store domain the operator recorded at provisioning (A4), or null. When
+ * present, the install flow targets that shop's standard OAuth authorize URL
+ * directly instead of the unverified managed-install store picker.
+ */
+const resolveProvisionedShop = async (
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<string | null> => {
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        const row = yield* store.get(TenantId(tenantId));
+        return row?.shopDomain ?? null;
+      }),
+      layer,
+    ),
+  );
+  return exit._tag === "Success" ? exit.value : null;
+};
+
 const handleShopifyInstall = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -1734,13 +1782,31 @@ const handleShopifyInstall = async (
       sendShopifyAppResolveError(res, app);
       return;
     }
-    const pendingState = signState(cfg.stateSigningKey, tenant);
+    // A4: if the operator recorded the store at provisioning, go straight to
+    // that shop's standard OAuth authorize URL (proven) instead of the
+    // unverified managed-install store picker.
+    const provisionedShop = await resolveProvisionedShop(layer, tenant);
+    const state = signState(cfg.stateSigningKey, tenant);
+    if (provisionedShop) {
+      const installUrl = buildInstallUrl({
+        shop: provisionedShop,
+        clientId: app.clientId,
+        redirectUri: cfg.shopify.callbackUrl,
+        state,
+      });
+      sendRedirectWithHeaders(res, installUrl, {
+        "Set-Cookie": clearShopifyInstallCookie(
+          cfg.shopify.callbackUrl.startsWith("https://"),
+        ),
+      });
+      return;
+    }
     const managedInstallUrl = buildManagedInstallUrl({
       clientId: app.clientId,
     });
     sendRedirectWithHeaders(res, managedInstallUrl, {
       "Set-Cookie": shopifyInstallCookie(
-        pendingState,
+        state,
         cfg.shopify.callbackUrl.startsWith("https://"),
       ),
     });

@@ -30,6 +30,8 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
   const unprovisionedTenantId = randomUUID();
   const revokedTenantId = randomUUID();
   const readyTenantId = randomUUID();
+  const shopBoundTenantId = randomUUID();
+  const boundShop = "bound-store.myshopify.com";
 
   const acceptedSettings = {
     legalAcceptance: {
@@ -68,7 +70,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
   );
 
-  const provision = (tenant: string) =>
+  const provision = (tenant: string, shopDomain?: string) =>
     Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -77,6 +79,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
             tenantId: TenantId(tenant),
             clientId: "pilot-client",
             clientSecret: "pilot-secret",
+            ...(shopDomain ? { shopDomain } : {}),
           });
         }),
         provisioningLayer,
@@ -96,7 +99,12 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   beforeAll(async () => {
     if (!raw) return;
-    for (const id of [unprovisionedTenantId, revokedTenantId, readyTenantId]) {
+    for (const id of [
+      unprovisionedTenantId,
+      revokedTenantId,
+      readyTenantId,
+      shopBoundTenantId,
+    ]) {
       await raw.db
         .insert(tenants)
         .values({ id, name: `install-gate-${id.slice(0, 6)}`, settings: acceptedSettings });
@@ -104,6 +112,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     await provision(revokedTenantId);
     await revoke(revokedTenantId);
     await provision(readyTenantId);
+    await provision(shopBoundTenantId, boundShop);
 
     pilot = await startServer(pilotCfg);
     pilotUrl = `http://localhost:${pilot.port}`;
@@ -115,7 +124,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     await raw.db
       .delete(tenants)
       .where(
-        sql`${tenants.id} IN (${unprovisionedTenantId}, ${revokedTenantId}, ${readyTenantId})`,
+        sql`${tenants.id} IN (${unprovisionedTenantId}, ${revokedTenantId}, ${readyTenantId}, ${shopBoundTenantId})`,
       );
     await raw.close();
   });
@@ -155,12 +164,27 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("redirects a provisioned tenant to its OWN app (pilot-client), not the global app", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&tenant=${readyTenantId}`,
+      `${pilotUrl}/shopify/install?shop=gate-ready-uniq.myshopify.com&tenant=${readyTenantId}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("client_id=pilot-client");
     expect(location).not.toContain("global-client");
+  });
+
+  // A4 — no ?shop= param, but the tenant was provisioned WITH a store domain,
+  // so the install goes straight to that shop's standard OAuth authorize URL
+  // (not the unverified admin.shopify.com managed-install store picker).
+  it("uses the provisioned shop's authorize URL for a no-shop install", async () => {
+    const res = await fetch(
+      `${pilotUrl}/shopify/install?tenant=${shopBoundTenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain(`https://${boundShop}/admin/oauth/authorize`);
+    expect(location).toContain("client_id=pilot-client");
+    expect(location).not.toContain("admin.shopify.com");
   });
 });

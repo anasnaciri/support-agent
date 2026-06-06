@@ -65,6 +65,17 @@ describe("admin-api client", () => {
     );
   });
 
+  it("putShopifyApp includes shopDomain when provided", async () => {
+    fetchMock.mockResolvedValue(jsonRes(200, { ok: true }));
+    await adminApi.putShopifyApp("t1", "cid", "secret", "acme.myshopify.com");
+    const [, init] = lastCall();
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: "cid",
+      clientSecret: "secret",
+      shopDomain: "acme.myshopify.com",
+    });
+  });
+
   it("revokeShopifyApp DELETEs the shopify-app endpoint", async () => {
     fetchMock.mockResolvedValue(jsonRes(200, { ok: true }));
     await adminApi.revokeShopifyApp("t1");

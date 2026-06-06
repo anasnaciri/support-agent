@@ -13,6 +13,10 @@ import {
   type ConnectorStoreDbError,
   type ShopifyError,
 } from "@support-agent/agent-core";
+import {
+  claimShopifyShopForTenant,
+  ShopifyShopAlreadyConnected,
+} from "./tenant-resolver.js";
 
 /**
  * Operator-facing view of a tenant's Shopify app provisioning. The
@@ -32,10 +36,17 @@ export type AdminShopifyAppResult =
   | { readonly kind: "tenant_not_found" }
   | { readonly kind: "not_provisioned" };
 
-/** `put` can only ever land on these two — it never reports `not_provisioned`. */
+/** `put` lands on one of these — it never reports `not_provisioned`. */
 export type PutAdminShopifyAppResult =
   | { readonly kind: "ok"; readonly provisioning: AdminShopifyAppView }
-  | { readonly kind: "tenant_not_found" };
+  | { readonly kind: "tenant_not_found" }
+  | {
+      // The requested shop is already actively connected to another tenant
+      // (A4) — the operator must offboard it there first.
+      readonly kind: "shop_conflict";
+      readonly shopDomain: string;
+      readonly ownerTenantId: string;
+    };
 
 const present = (row: ShopifyAppProvisioning): AdminShopifyAppView => ({
   tenantId: row.tenantId,
@@ -91,6 +102,8 @@ export interface PutAdminShopifyAppInput {
   readonly tenantId: string;
   readonly clientId: string;
   readonly clientSecret: string;
+  /** Already-normalized `*.myshopify.com` domain, or undefined (A4). */
+  readonly shopDomain?: string;
 }
 
 /** Provision (or rotate) a tenant's Shopify custom-app credentials. */
@@ -105,14 +118,36 @@ export const putAdminShopifyApp = (
     if (!(yield* tenantExists(input.tenantId))) {
       return { kind: "tenant_not_found" } as const;
     }
+    // When the operator names the store up front (A4), bind it to this tenant
+    // FIRST — both on tenants.shopify_domain (so a custom-distribution
+    // no-state callback resolves the existing tenant instead of auto-creating
+    // one) and, below, on the provisioning row. Claiming first means a shop
+    // already owned by another tenant aborts before any credential write.
+    if (input.shopDomain) {
+      const claim = yield* Effect.either(
+        claimShopifyShopForTenant(input.shopDomain, input.tenantId),
+      );
+      if (claim._tag === "Left") {
+        if (claim.left instanceof ShopifyShopAlreadyConnected) {
+          return {
+            kind: "shop_conflict",
+            shopDomain: input.shopDomain,
+            ownerTenantId: claim.left.ownerTenantId,
+          } as const;
+        }
+        return yield* Effect.fail(claim.left);
+      }
+    }
     const store = yield* ShopifyAppProvisioningStore;
     const row = yield* store.put({
       tenantId: TenantId(input.tenantId),
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
     });
     yield* writeAudit(input.tenantId, "shopify_app.provisioned", {
       clientId: input.clientId,
+      ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
     });
     return { kind: "ok", provisioning: present(row) } as const;
   });

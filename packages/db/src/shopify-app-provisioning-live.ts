@@ -65,6 +65,13 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
           const db = yield* useDb(defaultDb);
           const encrypted = encrypt(encryptionKey, input.clientSecret);
           const now = new Date();
+          // An explicit shopDomain (A4) is recorded as given on both insert and
+          // update. Without one, reactivation clears the stale shop_domain (A3)
+          // and a live row preserves it.
+          const shopDomainUpdate =
+            input.shopDomain !== undefined
+              ? input.shopDomain
+              : sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN NULL ELSE ${shopifyAppProvisioning.shopDomain} END`;
           const rows = yield* wrap(
             db
               .insert(shopifyAppProvisioning)
@@ -73,6 +80,7 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
                 tenantId: input.tenantId,
                 clientId: input.clientId,
                 clientSecretEncrypted: encrypted,
+                shopDomain: input.shopDomain ?? null,
                 status: "ready",
                 createdAt: now,
                 updatedAt: now,
@@ -87,12 +95,7 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
                   // so re-entering credentials un-blocks the install (A2). A
                   // live `ready`/`connected` status is preserved.
                   status: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN 'ready' ELSE ${shopifyAppProvisioning.status} END`,
-                  // Reactivation also clears the stale shop_domain (A3): a
-                  // re-provisioned app has not connected a shop yet, and a
-                  // leftover shop_domain could collide with the active-shop
-                  // unique index if another tenant now owns that shop. The
-                  // merchant re-stamps it via markConnected on next Connect.
-                  shopDomain: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN NULL ELSE ${shopifyAppProvisioning.shopDomain} END`,
+                  shopDomain: shopDomainUpdate,
                 },
               })
               .returning(),
