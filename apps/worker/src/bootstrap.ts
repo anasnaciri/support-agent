@@ -131,6 +131,34 @@ const requireEnv = (name: string): string => {
   return v;
 };
 
+/** Env vars the worker must have in production — without them account
+ * deletion silently skips the WorkOS org delete + the deletion email, and
+ * approval links get signed with a predictable dev key (5th-audit #6). */
+export const WORKER_REQUIRED_PROD_ENV = [
+  "CREDENTIAL_ENCRYPTION_KEY",
+  "APPROVAL_SIGNING_KEY",
+  "WORKOS_API_KEY",
+  "RESEND_API_KEY",
+  "RESEND_FROM_ADDRESS",
+] as const;
+
+/**
+ * Fail fast when a production worker is missing a required service env var,
+ * instead of silently booting with Test/no-op layers. Pure (takes env) so it's
+ * unit-testable. No-op outside production.
+ */
+export const assertProductionServicesConfigured = (
+  env: Record<string, string | undefined>,
+): void => {
+  if (env["NODE_ENV"] !== "production") return;
+  const missing = WORKER_REQUIRED_PROD_ENV.filter((name) => !env[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Worker production startup requires ${missing.join(", ")} — refusing to boot with no-op fallbacks (account deletion / email / approval signing would silently break). 5th-audit #6.`,
+    );
+  }
+};
+
 // ============================================================
 // Build
 // ============================================================
@@ -139,6 +167,27 @@ export const buildWorker = async (
   opts: BootstrapOptions = {},
 ): Promise<WorkerBootstrap> => {
   const databaseUrl = requireEnv("DATABASE_URL");
+
+  // Production must NOT silently fall back to Test/no-op services (5th-audit
+  // #6): without these, account deletion would skip the WorkOS org delete +
+  // the deletion email, and approval links would be signed with a predictable
+  // dev key. Fail fast at startup instead of discovering it on the first job.
+  // Optional CONNECTORS (Gmail/Sheets/17track) are NOT required here — a
+  // Shopify-only pilot legitimately omits them — but their fallbacks below
+  // warn loudly in production rather than going silent.
+  const isProd = process.env["NODE_ENV"] === "production";
+  assertProductionServicesConfigured(process.env);
+  // Optional connectors that fell back to a no-op layer in production are a
+  // likely misconfiguration — surface it loudly instead of silently skipping
+  // the feature (5th-audit #6).
+  const warnProdFallback = (service: string, envHint: string): void => {
+    if (isProd) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[worker] ${service} is using a NO-OP fallback in production — set ${envHint} if this connector should work.`,
+      );
+    }
+  };
 
   // BYOK: in production the LLM credential is per-tenant, read from
   // `connector_connections` via LLMCredentialResolverLive — that requires
@@ -295,7 +344,11 @@ export const buildWorker = async (
         }).pipe(
           Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
         )
-      : ConversationServiceTest({});
+      : (warnProdFallback(
+          "Gmail conversation connector",
+          "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET",
+        ),
+        ConversationServiceTest({}));
 
   // Sheets connector. Same gating as Gmail: when CREDENTIAL_ENCRYPTION_KEY
   // + Google OAuth env are set, swap in the Live layer that resolves
@@ -311,7 +364,11 @@ export const buildWorker = async (
         }).pipe(
           Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
         )
-      : SheetsServiceTest({});
+      : (warnProdFallback(
+          "Google Sheets connector",
+          "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET",
+        ),
+        SheetsServiceTest({}));
 
   // 17track tracking connector. Platform-managed credentials: a single
   // env var (`SEVENTEENTRACK_API_KEY`) gates the Live layer. When unset
