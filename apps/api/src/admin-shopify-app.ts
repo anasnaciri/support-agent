@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
-import { auditLog, DbClient, tenants } from "@support-agent/db";
+import { Effect, FiberRef } from "effect";
+import {
+  auditLog,
+  CurrentTxRef,
+  DbClient,
+  tenants,
+  withTransaction,
+  type DrizzleDb,
+} from "@support-agent/db";
 import {
   ShopifyAppProvisioningStore,
   ShopifyService,
@@ -56,11 +63,20 @@ const present = (row: ShopifyAppProvisioning): AdminShopifyAppView => ({
   updatedAt: row.updatedAt.toISOString(),
 });
 
+// Use the active transaction when one is set (inside withTransaction), else
+// the bare client — same pattern the Live repos use. This is what lets the
+// audit write join the SAME transaction as the provisioning mutation
+// (re-audit #3), so an audit-write failure rolls the mutation back.
+const useDb = (): Effect.Effect<DrizzleDb, never, DbClient> =>
+  FiberRef.get(CurrentTxRef).pipe(
+    Effect.flatMap((tx) => (tx ? Effect.succeed(tx) : DbClient)),
+  );
+
 const tenantExists = (
   tenantId: string,
 ): Effect.Effect<boolean, Error, DbClient> =>
   Effect.gen(function* () {
-    const db = yield* DbClient;
+    const db = yield* useDb();
     const rows = yield* Effect.tryPromise({
       try: () =>
         db
@@ -79,7 +95,7 @@ const writeAudit = (
   details: Record<string, unknown>,
 ): Effect.Effect<void, Error, DbClient> =>
   Effect.gen(function* () {
-    const db = yield* DbClient;
+    const db = yield* useDb();
     yield* Effect.tryPromise({
       try: () =>
         db.insert(auditLog).values({
@@ -118,38 +134,45 @@ export const putAdminShopifyApp = (
     if (!(yield* tenantExists(input.tenantId))) {
       return { kind: "tenant_not_found" } as const;
     }
-    // When the operator names the store up front (A4), bind it to this tenant
-    // FIRST — both on tenants.shopify_domain (so a custom-distribution
-    // no-state callback resolves the existing tenant instead of auto-creating
-    // one) and, below, on the provisioning row. Claiming first means a shop
-    // already owned by another tenant aborts before any credential write.
-    if (input.shopDomain) {
-      const claim = yield* Effect.either(
-        claimShopifyShopForTenant(input.shopDomain, input.tenantId),
-      );
-      if (claim._tag === "Left") {
-        if (claim.left instanceof ShopifyShopAlreadyConnected) {
-          return {
-            kind: "shop_conflict",
-            shopDomain: input.shopDomain,
-            ownerTenantId: claim.left.ownerTenantId,
-          } as const;
+    // The shop claim, the credential write, AND the audit row all run in ONE
+    // transaction (re-audit #3): an audit-write failure rolls the mutation
+    // back, so there's never a successful-but-unaudited provisioning.
+    return yield* withTransaction(
+      Effect.gen(function* () {
+        // When the operator names the store up front (A4), bind it to this
+        // tenant FIRST — on tenants.shopify_domain (so a custom-distribution
+        // no-state callback resolves the existing tenant) and, below, on the
+        // provisioning row. A shop already owned by another tenant aborts
+        // before any credential write.
+        if (input.shopDomain) {
+          const claim = yield* Effect.either(
+            claimShopifyShopForTenant(input.shopDomain, input.tenantId),
+          );
+          if (claim._tag === "Left") {
+            if (claim.left instanceof ShopifyShopAlreadyConnected) {
+              return {
+                kind: "shop_conflict",
+                shopDomain: input.shopDomain,
+                ownerTenantId: claim.left.ownerTenantId,
+              } as const;
+            }
+            return yield* Effect.fail(claim.left);
+          }
         }
-        return yield* Effect.fail(claim.left);
-      }
-    }
-    const store = yield* ShopifyAppProvisioningStore;
-    const row = yield* store.put({
-      tenantId: TenantId(input.tenantId),
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
-      ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
-    });
-    yield* writeAudit(input.tenantId, "shopify_app.provisioned", {
-      clientId: input.clientId,
-      ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
-    });
-    return { kind: "ok", provisioning: present(row) } as const;
+        const store = yield* ShopifyAppProvisioningStore;
+        const row = yield* store.put({
+          tenantId: TenantId(input.tenantId),
+          clientId: input.clientId,
+          clientSecret: input.clientSecret,
+          ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
+        });
+        yield* writeAudit(input.tenantId, "shopify_app.provisioned", {
+          clientId: input.clientId,
+          ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
+        });
+        return { kind: "ok", provisioning: present(row) } as const;
+      }),
+    );
   });
 
 /** Read a tenant's provisioning status (no secret). */
@@ -185,12 +208,19 @@ export const revokeAdminShopifyApp = (
     const store = yield* ShopifyAppProvisioningStore;
     const existing = yield* store.get(TenantId(tenantId));
     if (!existing) return { kind: "not_provisioned" } as const;
-    yield* store.revoke(TenantId(tenantId));
-    yield* writeAudit(tenantId, "shopify_app.revoked", {});
-    return {
-      kind: "ok",
-      provisioning: present({ ...existing, status: "revoked" }),
-    } as const;
+    // Revoke + audit in ONE transaction (re-audit #3) so a failed audit write
+    // rolls the revocation back.
+    return yield* withTransaction(
+      Effect.gen(function* () {
+        const s = yield* ShopifyAppProvisioningStore;
+        yield* s.revoke(TenantId(tenantId));
+        yield* writeAudit(tenantId, "shopify_app.revoked", {});
+        return {
+          kind: "ok",
+          provisioning: present({ ...existing, status: "revoked" }),
+        } as const;
+      }),
+    );
   });
 
 // ============================================================
