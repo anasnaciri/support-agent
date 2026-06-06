@@ -6,6 +6,7 @@ import { Header, StatusBadge } from "@/app/_components/header";
 import {
   provisionShopifyAppAction,
   revokeShopifyAppAction,
+  runPcdCheckAction,
   deleteTenantAction,
 } from "./actions";
 
@@ -22,6 +23,33 @@ const ERROR_MESSAGES: Record<string, string> = {
   tenant_not_found: "Tenant not found.",
   name_mismatch: "The typed name didn't match — tenant not deleted.",
   delete_failed: "Deleting the tenant failed.",
+};
+
+type Tone = "ok" | "warn" | "err";
+const PCD_MESSAGES: Record<string, { tone: Tone; text: string }> = {
+  present: {
+    tone: "ok",
+    text: "PCD check passed — recent orders return customer email/name/address. Protected customer data is flowing.",
+  },
+  redacted: {
+    tone: "warn",
+    text: "PCD check: recent orders came back with customer PII blank. Declare the app's protected customer data fields in the Dev Dashboard (Apps → API access → Protected customer data), then re-run.",
+  },
+  no_orders: {
+    tone: "warn",
+    text: "PCD check inconclusive — the store has no orders yet. Re-run after the first order to confirm PII isn't being redacted.",
+  },
+  not_connected: {
+    tone: "warn",
+    text: "PCD check: the store isn't connected yet. Have the merchant click Connect, then re-run.",
+  },
+  tenant_not_found: { tone: "err", text: "PCD check failed — tenant not found." },
+  error: { tone: "err", text: "PCD check couldn't run (Shopify error). Try again." },
+};
+const TONE_CLASS: Record<Tone, string> = {
+  ok: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  warn: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+  err: "border-red-500/30 bg-red-500/10 text-red-300",
 };
 
 interface PageProps {
@@ -47,10 +75,12 @@ export default async function TenantDetailPage({
   const sp = (await searchParams) ?? {};
   const okMsg = OK_MESSAGES[firstParam(sp["ok"]) ?? ""];
   const errMsg = ERROR_MESSAGES[firstParam(sp["error"]) ?? ""];
+  const pcdMsg = PCD_MESSAGES[firstParam(sp["pcd"]) ?? ""];
 
   const { tenant, shopifyApp, connections } = detail;
   const provision = provisionShopifyAppAction.bind(null, id);
   const revoke = revokeShopifyAppAction.bind(null, id);
+  const runPcd = runPcdCheckAction.bind(null, id);
   const remove = deleteTenantAction.bind(null, id);
 
   return (
@@ -65,6 +95,13 @@ export default async function TenantDetailPage({
         {errMsg ? (
           <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {errMsg}
+          </p>
+        ) : null}
+        {pcdMsg ? (
+          <p
+            className={`rounded-md border px-3 py-2 text-sm ${TONE_CLASS[pcdMsg.tone]}`}
+          >
+            {pcdMsg.text}
           </p>
         ) : null}
 
@@ -155,6 +192,49 @@ export default async function TenantDetailPage({
               </button>
             </div>
           </form>
+
+          {/* Custom-distribution setup checklist — the two Dev Dashboard
+              steps that aren't captured by the credentials above. */}
+          <div className="space-y-2 rounded-md border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
+            <p className="font-medium text-zinc-300">
+              Dev Dashboard checklist (per app)
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                Set the app&apos;s distribution to{" "}
+                <span className="text-zinc-200">Custom distribution</span> — not
+                Public/unlisted. Custom distribution needs no Shopify review.
+              </li>
+              <li>
+                Declare protected customer data fields (Apps → API access →
+                Protected customer data): <span className="text-zinc-200">name,
+                email, address</span> — not phone. Without this, live stores
+                return orders with customer PII blanked.
+              </li>
+              <li>
+                After the merchant connects, run the PCD check below to confirm
+                customer PII isn&apos;t being redacted.
+              </li>
+            </ul>
+          </div>
+
+          {shopifyApp ? (
+            <form
+              action={runPcd}
+              className="flex items-center gap-3 border-t border-zinc-800 pt-3"
+            >
+              <button
+                type="submit"
+                className="rounded-md border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+              >
+                Run PCD check
+              </button>
+              <span className="text-xs text-zinc-500">
+                Reads a few recent orders and reports whether customer PII comes
+                back populated or redacted.
+              </span>
+            </form>
+          ) : null}
 
           {shopifyApp && shopifyApp.status !== "revoked" ? (
             <form action={revoke} className="border-t border-zinc-800 pt-3">

@@ -83,6 +83,7 @@ import {
   type GlobalShopifyApp,
 } from "./shopify-app-resolver.js";
 import {
+  checkAdminShopifyAppPcd,
   getAdminShopifyApp,
   putAdminShopifyApp,
   revokeAdminShopifyApp,
@@ -948,6 +949,33 @@ const handleAdminShopifyAppDelete = async (
     return;
   }
   sendJson(res, 200, { ok: true, provisioning: exit.value.provisioning });
+};
+
+// POST /admin/tenants/:id/shopify-app/pcd-check — live protected-customer-data
+// probe: read a few recent orders through the tenant's connected store and
+// report whether customer PII comes back populated or redacted. Custom
+// distribution needs no Shopify review, but the app must still DECLARE its
+// PCD fields in the Dev Dashboard or Shopify redacts them on live stores.
+const handleAdminShopifyAppPcdCheck = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(checkAdminShopifyAppPcd(tenantId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 502, { error: "pcd_check_failed", detail: String(exit.cause) });
+    return;
+  }
+  if (exit.value.kind === "tenant_not_found") {
+    sendJson(res, 404, { error: "tenant_not_found" });
+    return;
+  }
+  sendJson(res, 200, { ok: true, result: exit.value });
 };
 
 // GET /admin/tenants — list every tenant for the operator admin app.
@@ -3298,6 +3326,20 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleAdminShopifyAppDelete(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.post(
+    "/admin/tenants/:id/shopify-app/pcd-check",
+    {
+      schema: {
+        tags: ["admin"],
+        summary:
+          "Probe whether the connected store returns protected customer data",
+      },
+    },
+    async (req, res) => {
+      await handleAdminShopifyAppPcdCheck(cfg, layer, req, res);
       return res;
     },
   );

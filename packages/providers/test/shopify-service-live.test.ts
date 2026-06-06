@@ -526,6 +526,122 @@ describe("ShopifyServiceLive — getProduct", () => {
   });
 });
 
+describe("ShopifyServiceLive — listRecentOrderPiiPresence (PCD probe)", () => {
+  const recentOrders = (
+    nodes: ReadonlyArray<unknown>,
+  ): { data: { orders: { nodes: ReadonlyArray<unknown> } } } => ({
+    data: { orders: { nodes } },
+  });
+
+  it("reports presence booleans (not values) when PII is returned", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(
+            200,
+            recentOrders([
+              {
+                name: "#1002",
+                email: "buyer@example.com",
+                shippingAddress: {
+                  name: "Jane Doe",
+                  address1: "123 Main",
+                  city: "Brooklyn",
+                },
+              },
+            ]),
+          ),
+      ]),
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.listRecentOrderPiiPresence(tenantId, 5),
+        ),
+        layer,
+      ),
+    );
+    expect(out).toEqual([
+      {
+        orderName: "#1002",
+        hasEmail: true,
+        hasCustomerName: true,
+        hasShippingAddress: true,
+      },
+    ]);
+    // The query asked for recent orders, newest first.
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: { n: number };
+    };
+    expect(body.query).toContain("query RecentOrdersPii");
+    expect(body.variables.n).toBe(5);
+  });
+
+  it("flags redacted/empty PII fields as absent (the misconfig signal)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(
+            200,
+            recentOrders([
+              {
+                name: "#1003",
+                email: null,
+                shippingAddress: null,
+              },
+              {
+                name: "#1004",
+                email: "   ",
+                shippingAddress: { name: "", address1: null, city: null },
+              },
+            ]),
+          ),
+      ]),
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.listRecentOrderPiiPresence(tenantId, 5),
+        ),
+        layer,
+      ),
+    );
+    expect(out).toEqual([
+      {
+        orderName: "#1003",
+        hasEmail: false,
+        hasCustomerName: false,
+        hasShippingAddress: false,
+      },
+      {
+        orderName: "#1004",
+        hasEmail: false,
+        hasCustomerName: false,
+        hasShippingAddress: false,
+      },
+    ]);
+  });
+
+  it("returns an empty list when the store has no orders", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, recentOrders([]))]),
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.listRecentOrderPiiPresence(tenantId, 5),
+        ),
+        layer,
+      ),
+    );
+    expect(out).toEqual([]);
+  });
+});
+
 describe("ShopifyServiceLive — error mapping", () => {
   const callOrder = (layer: Layer.Layer<ShopifyService>) =>
     Effect.runPromiseExit(

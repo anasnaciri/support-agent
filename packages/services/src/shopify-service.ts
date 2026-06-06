@@ -126,8 +126,41 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       customerId: CustomerId,
     ) => Effect.Effect<CustomerRefundHistory, ShopifyError>;
+
+    /**
+     * Probe whether the connected store actually returns protected
+     * customer data, or hands it back redacted/null. Reads the most
+     * recent `limit` orders and reports, per order, ONLY presence
+     * booleans for the Level-2 PII fields — never the values themselves,
+     * so no customer PII crosses this boundary (the operator PCD check
+     * shouldn't itself leak PII into admin logs).
+     *
+     * Used by the admin "Run PCD check" tool: a custom-distribution app
+     * that hasn't declared its protected customer data fields in the Dev
+     * Dashboard gets those fields silently redacted on live stores, which
+     * would quietly blank `getOrder`'s customer name/email/address. This
+     * surfaces that misconfiguration before it breaks support flows.
+     */
+    readonly listRecentOrderPiiPresence: (
+      tenantId: TenantId,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<OrderPiiPresence>, ShopifyError>;
   }
 >() {}
+
+/**
+ * Per-order presence flags for protected customer data. `orderName`
+ * (e.g. "#1001") is not PII and is safe to surface; the three booleans
+ * report whether each Level-2 field came back populated. The actual
+ * field values are inspected and discarded inside the service so they
+ * never reach the caller.
+ */
+export interface OrderPiiPresence {
+  readonly orderName: string;
+  readonly hasEmail: boolean;
+  readonly hasCustomerName: boolean;
+  readonly hasShippingAddress: boolean;
+}
 
 /**
  * Aggregated refund history for a single customer.
@@ -189,6 +222,11 @@ export interface ShopifyTestFixtures {
     CustomerId,
     CustomerRefundHistory
   >;
+  /**
+   * Fixture for `listRecentOrderPiiPresence`. When unset the default Test
+   * impl returns an empty list (the "no orders on the store yet" case).
+   */
+  readonly recentOrderPiiPresence?: ReadonlyArray<OrderPiiPresence>;
 }
 
 /**
@@ -261,5 +299,7 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           firstOrderAt: null,
         });
       },
+      listRecentOrderPiiPresence: (_tenantId, _limit) =>
+        Effect.succeed(fixtures.recentOrderPiiPresence ?? []),
     }),
   );

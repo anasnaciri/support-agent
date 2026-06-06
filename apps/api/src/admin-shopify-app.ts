@@ -4,9 +4,15 @@ import { Effect } from "effect";
 import { auditLog, DbClient, tenants } from "@support-agent/db";
 import {
   ShopifyAppProvisioningStore,
+  ShopifyService,
+  type OrderPiiPresence,
   type ShopifyAppProvisioning,
 } from "@support-agent/services";
-import { TenantId, type ConnectorStoreDbError } from "@support-agent/agent-core";
+import {
+  TenantId,
+  type ConnectorStoreDbError,
+  type ShopifyError,
+} from "@support-agent/agent-core";
 
 /**
  * Operator-facing view of a tenant's Shopify app provisioning. The
@@ -150,4 +156,103 @@ export const revokeAdminShopifyApp = (
       kind: "ok",
       provisioning: present({ ...existing, status: "revoked" }),
     } as const;
+  });
+
+// ============================================================
+// Protected-customer-data (PCD) live check
+// ============================================================
+
+/**
+ * Aggregated verdict for the per-tenant PCD check. We never surface the
+ * actual customer values — only whether the connected store returns the
+ * Level-2 PII fields populated or redacted.
+ *
+ * - `present`  — at least one recent order returned customer email; the
+ *   PCD field declaration is working.
+ * - `redacted` — orders exist but none returned customer email, which on
+ *   a real store almost always means Shopify is redacting protected
+ *   customer data because the app hasn't declared its PCD fields.
+ * - `no_orders` — the store has no orders yet, so the check is inconclusive.
+ */
+export interface PcdSummary {
+  readonly verdict: "present" | "redacted" | "no_orders";
+  readonly ordersChecked: number;
+  readonly sawEmail: boolean;
+  readonly sawCustomerName: boolean;
+  readonly sawShippingAddress: boolean;
+}
+
+/**
+ * Pure verdict from the per-order presence samples. Email is the anchor
+ * signal: essentially every real order carries a customer email, so its
+ * absence across the whole recent window is the reliable redaction tell.
+ * Name and shipping address can be legitimately missing (guest checkout,
+ * digital goods) so they inform the message but don't drive the verdict.
+ */
+export const summarizeOrderPii = (
+  samples: ReadonlyArray<OrderPiiPresence>,
+): PcdSummary => {
+  if (samples.length === 0) {
+    return {
+      verdict: "no_orders",
+      ordersChecked: 0,
+      sawEmail: false,
+      sawCustomerName: false,
+      sawShippingAddress: false,
+    };
+  }
+  const sawEmail = samples.some((s) => s.hasEmail);
+  const sawCustomerName = samples.some((s) => s.hasCustomerName);
+  const sawShippingAddress = samples.some((s) => s.hasShippingAddress);
+  return {
+    verdict: sawEmail ? "present" : "redacted",
+    ordersChecked: samples.length,
+    sawEmail,
+    sawCustomerName,
+    sawShippingAddress,
+  };
+};
+
+export type PcdCheckResult =
+  | { readonly kind: "tenant_not_found" }
+  | { readonly kind: "not_connected" }
+  | ({ readonly kind: "summary" } & PcdSummary);
+
+/** Number of recent orders sampled by the PCD check. */
+const PCD_SAMPLE_SIZE = 5;
+
+/**
+ * Run the live PCD check for a tenant: read a few recent orders through
+ * the tenant's connected Shopify store and report whether protected
+ * customer data comes back populated or redacted. `ShopifyAuthMissing`
+ * (no live connection / revoked token) maps to `not_connected` — an
+ * expected operator state, not an error.
+ */
+export const checkAdminShopifyAppPcd = (
+  tenantId: string,
+): Effect.Effect<
+  PcdCheckResult,
+  Error | ShopifyError,
+  DbClient | ShopifyService
+> =>
+  Effect.gen(function* () {
+    if (!(yield* tenantExists(tenantId))) {
+      return { kind: "tenant_not_found" } as const;
+    }
+    const shopify = yield* ShopifyService;
+    return yield* shopify
+      .listRecentOrderPiiPresence(TenantId(tenantId), PCD_SAMPLE_SIZE)
+      .pipe(
+        Effect.map(
+          (samples): PcdCheckResult => ({
+            kind: "summary",
+            ...summarizeOrderPii(samples),
+          }),
+        ),
+        Effect.catchTag(
+          "ShopifyAuthMissing",
+          (): Effect.Effect<PcdCheckResult> =>
+            Effect.succeed({ kind: "not_connected" } as const),
+        ),
+      );
   });

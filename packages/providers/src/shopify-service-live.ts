@@ -29,6 +29,7 @@ import {
   ShopifyCredentialStore,
   ShopifyService,
   type CustomerRefundHistory,
+  type OrderPiiPresence,
   type ShopifyCredentials,
   type RefundOrderInput,
 } from "@support-agent/services";
@@ -475,6 +476,24 @@ const SEARCH_ORDER_BY_NAME_QUERY = `
   }
 `;
 
+// PCD probe: pull the most recent orders and inspect the Level-2 PII
+// fields most reliably present on a real order — `email` and the
+// `shippingAddress`. A custom-distribution app that hasn't declared its
+// protected customer data fields gets these silently redacted/nulled on
+// live stores; reading a few recent orders and checking presence catches
+// that misconfiguration. We select only the fields we test for.
+const RECENT_ORDERS_PII_QUERY = `
+  query RecentOrdersPii($n: Int!) {
+    orders(first: $n, sortKey: CREATED_AT, reverse: true) {
+      nodes {
+        name
+        email
+        shippingAddress { name address1 city }
+      }
+    }
+  }
+`;
+
 // Aggregate refund history for a customer. Wide enough to catch power
 // users (first 50 orders); narrow enough that one HTTP request covers
 // the aggregation client-side. Each order is shallowly hydrated — we
@@ -836,6 +855,43 @@ export const ShopifyServiceLive = Layer.effect(
             };
             return result;
           }),
+        ),
+
+      listRecentOrderPiiPresence: (tenantId, limit) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{
+            orders: {
+              nodes: ReadonlyArray<{
+                name: string;
+                email: string | null;
+                shippingAddress: {
+                  name: string | null;
+                  address1: string | null;
+                  city: string | null;
+                } | null;
+              }>;
+            };
+          }>(http, creds, tenantId, RECENT_ORDERS_PII_QUERY, {
+            // Clamp to a sane window: enough orders to rule out a single
+            // genuinely-PII-less order skewing the verdict, capped so the
+            // probe stays one cheap request.
+            n: Math.max(1, Math.min(limit, 25)),
+          }).pipe(
+            Effect.map((data) =>
+              data.orders.nodes.map((o): OrderPiiPresence => {
+                const nonEmpty = (s: string | null | undefined): boolean =>
+                  typeof s === "string" && s.trim().length > 0;
+                return {
+                  orderName: o.name,
+                  hasEmail: nonEmpty(o.email),
+                  hasCustomerName: nonEmpty(o.shippingAddress?.name),
+                  hasShippingAddress:
+                    nonEmpty(o.shippingAddress?.address1) ||
+                    nonEmpty(o.shippingAddress?.city),
+                };
+              }),
+            ),
+          ),
         ),
 
       getCustomerRefundHistory: (tenantId, customerId) =>

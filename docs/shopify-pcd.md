@@ -25,7 +25,7 @@ When provisioning a new tenant's Shopify app (operator step, alongside entering 
 
 - [ ] In the Dev Dashboard, set the app's **distribution = Custom** (not Public / not unlisted).
 - [ ] Apps → API access → **Protected customer data**: declare the fields — name, email, address (not phone).
-- [ ] After the merchant connects, **verify on the live store** that `shopify.get_order` returns a non-blank customer name/email/`shippingAddress` (confirms PCD isn't being redacted).
+- [ ] After the merchant connects, **verify on the live store** that customer PII isn't being redacted. The operator console automates this: open the tenant in `apps/admin` and click **"Run PCD check"** (`POST /admin/tenants/:id/shopify-app/pcd-check`). It reads a few recent orders and reports `present` (PII flowing), `redacted` (declare the PCD fields, then re-run), `no_orders` (re-run after the first order), or `not_connected` (connect first). The check returns **presence booleans only** — no customer PII is read into admin logs.
 - [ ] Confirm compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) are registered for the app (they ship in `shopify.app.toml`).
 
 ---

@@ -80,4 +80,30 @@ describe("admin-api client", () => {
     expect(url).toBe(`${base}/admin/tenants/t1/delete`);
     expect(init.method).toBe("POST");
   });
+
+  it("checkShopifyPcd POSTs the pcd-check endpoint and returns the verdict", async () => {
+    fetchMock.mockResolvedValue(
+      jsonRes(200, { ok: true, result: { kind: "summary", verdict: "redacted" } }),
+    );
+    const verdict = await adminApi.checkShopifyPcd("t1");
+    expect(verdict).toBe("redacted");
+    const [url, init] = lastCall();
+    expect(url).toBe(`${base}/admin/tenants/t1/shopify-app/pcd-check`);
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).authorization).toBe(
+      "Bearer tok",
+    );
+  });
+
+  it("checkShopifyPcd maps a not_connected result", async () => {
+    fetchMock.mockResolvedValue(
+      jsonRes(200, { ok: true, result: { kind: "not_connected" } }),
+    );
+    expect(await adminApi.checkShopifyPcd("t1")).toBe("not_connected");
+  });
+
+  it("checkShopifyPcd maps a 404 to tenant_not_found", async () => {
+    fetchMock.mockResolvedValue(jsonRes(404, { error: "tenant_not_found" }));
+    expect(await adminApi.checkShopifyPcd("t9")).toBe("tenant_not_found");
+  });
 });

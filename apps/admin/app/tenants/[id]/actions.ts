@@ -31,6 +31,13 @@ export async function revokeShopifyAppAction(id: string): Promise<void> {
   redirect(`/tenants/${id}?ok=shopify_revoked`);
 }
 
+export async function runPcdCheckAction(id: string): Promise<void> {
+  await requireSession();
+  const verdict = await adminApi.checkShopifyPcd(id);
+  revalidatePath(`/tenants/${id}`);
+  redirect(`/tenants/${id}?pcd=${verdict}`);
+}
+
 export async function deleteTenantAction(
   id: string,
   formData: FormData,

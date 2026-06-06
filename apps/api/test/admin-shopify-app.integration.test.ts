@@ -3,7 +3,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { Effect, Layer } from "effect";
 import { sql } from "drizzle-orm";
 import { TenantId } from "@support-agent/agent-core";
-import { ShopifyAppProvisioningStore } from "@support-agent/services";
+import {
+  ShopifyAppProvisioningStore,
+  ShopifyService,
+  ShopifyServiceTest,
+  type OrderPiiPresence,
+} from "@support-agent/services";
 import {
   auditLog,
   DbClientLive,
@@ -13,6 +18,7 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import { checkAdminShopifyAppPcd } from "../src/admin-shopify-app.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -177,5 +183,80 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
     const res = await fetch(url(fresh), { method: "DELETE", headers: authed });
     expect(res.status).toBe(404);
     await raw!.db.delete(tenants).where(sql`${tenants.id} = ${fresh}`);
+  });
+
+  // ---- PCD live check ----
+
+  const pcdUrl = (id: string) => `${url(id)}/pcd-check`;
+
+  const runPcd = (id: string, samples: ReadonlyArray<OrderPiiPresence>) =>
+    Effect.runPromise(
+      Effect.provide(
+        checkAdminShopifyAppPcd(id),
+        Layer.merge(
+          DbClientLive({ databaseUrl: databaseUrl! }),
+          ShopifyServiceTest({ recentOrderPiiPresence: samples }),
+        ),
+      ).pipe(Effect.scoped),
+    );
+
+  it("PCD check reports tenant_not_found for an unknown tenant", async () => {
+    const out = await runPcd(randomUUID(), []);
+    expect(out.kind).toBe("tenant_not_found");
+  });
+
+  it("PCD check verdict is 'present' when orders return customer PII", async () => {
+    const out = await runPcd(tenantId, [
+      {
+        orderName: "#2001",
+        hasEmail: true,
+        hasCustomerName: true,
+        hasShippingAddress: true,
+      },
+    ]);
+    expect(out.kind).toBe("summary");
+    if (out.kind === "summary") {
+      expect(out.verdict).toBe("present");
+      expect(out.sawEmail).toBe(true);
+      expect(out.ordersChecked).toBe(1);
+    }
+  });
+
+  it("PCD check verdict is 'redacted' when no order returns email", async () => {
+    const out = await runPcd(tenantId, [
+      {
+        orderName: "#2002",
+        hasEmail: false,
+        hasCustomerName: false,
+        hasShippingAddress: false,
+      },
+    ]);
+    expect(out.kind).toBe("summary");
+    if (out.kind === "summary") expect(out.verdict).toBe("redacted");
+  });
+
+  it("PCD check verdict is 'no_orders' when the store has none", async () => {
+    const out = await runPcd(tenantId, []);
+    expect(out.kind).toBe("summary");
+    if (out.kind === "summary") expect(out.verdict).toBe("no_orders");
+  });
+
+  it("HTTP pcd-check returns not_connected when the store isn't connected", async () => {
+    // The real server uses the Live ShopifyService; with no shopify
+    // connector_connection row, credentials resolve to ShopifyAuthMissing,
+    // which the endpoint maps to not_connected (an expected operator state).
+    const res = await fetch(pcdUrl(tenantId), {
+      method: "POST",
+      headers: authed,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.result.kind).toBe("not_connected");
+  });
+
+  it("HTTP pcd-check rejects an unauthenticated request", async () => {
+    const res = await fetch(pcdUrl(tenantId), { method: "POST" });
+    expect(res.status).toBe(401);
   });
 });

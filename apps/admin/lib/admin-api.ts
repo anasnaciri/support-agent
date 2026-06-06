@@ -67,4 +67,36 @@ export const adminApi = {
 
   deleteTenant: (id: string): Promise<Response> =>
     request(`/tenants/${tid(id)}/delete`, { method: "POST" }),
+
+  // Run the live protected-customer-data probe and normalize the api's
+  // result into a single verdict code the UI can map to a message.
+  checkShopifyPcd: async (id: string): Promise<PcdCheckVerdict> => {
+    const res = await request(`/tenants/${tid(id)}/shopify-app/pcd-check`, {
+      method: "POST",
+    });
+    if (res.status === 404) return "tenant_not_found";
+    if (!res.ok) return "error";
+    const body = (await res.json()) as {
+      result?: { kind?: string; verdict?: string };
+    };
+    const r = body.result;
+    if (!r) return "error";
+    if (r.kind === "not_connected") return "not_connected";
+    if (r.kind === "tenant_not_found") return "tenant_not_found";
+    if (r.kind === "summary") {
+      const v = r.verdict;
+      return v === "present" || v === "redacted" || v === "no_orders"
+        ? v
+        : "error";
+    }
+    return "error";
+  },
 };
+
+export type PcdCheckVerdict =
+  | "present"
+  | "redacted"
+  | "no_orders"
+  | "not_connected"
+  | "tenant_not_found"
+  | "error";
