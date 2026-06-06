@@ -2130,6 +2130,22 @@ const handleShopifyCallback = async (
     return;
   }
 
+  // Enforce the provisioned shop (5th-audit #5): if the operator recorded a
+  // store at provisioning, the callback MUST be for that exact shop. The
+  // tenant's app can be installed on more than one store (all signing with the
+  // same secret, so HMAC passes), and a signed state could otherwise complete
+  // OAuth for a DIFFERENT shop and overwrite the recorded shop. Refuse the
+  // mismatch instead of silently re-binding.
+  const provisionedShop = await resolveProvisionedShop(layer, tenantId);
+  if (provisionedShop && provisionedShop !== shop) {
+    sendJson(res, 409, {
+      error: "shop_mismatch",
+      expected: provisionedShop,
+      got: shop,
+    });
+    return;
+  }
+
   if (!(await tenantHasCurrentLegalAcceptance(tenantId, layer))) {
     sendLegalAcceptanceRequired(res);
     return;

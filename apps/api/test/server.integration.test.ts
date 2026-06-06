@@ -474,6 +474,59 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(prov?.status).toBe("connected");
   });
 
+  it("GET /shopify/auth/callback rejects a shop that doesn't match the provisioned shop (5th-audit #5)", async () => {
+    mockShopifyFetch({ access_token: "shpoa_x", scope: "read_orders" });
+
+    const t = randomUUID();
+    extraTenantIds.push(t);
+    const provisionedShop = "provisioned-shop.myshopify.com";
+    const otherShop = "other-shop.myshopify.com";
+    const secret = "mismatch-secret";
+
+    await raw!.db
+      .insert(tenants)
+      .values({ id: t, name: "mismatch", settings: acceptedSettings });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const provisioning = yield* ShopifyAppProvisioningStore;
+          // Operator recorded `provisionedShop` at provisioning (A4).
+          yield* provisioning.put({
+            tenantId: TenantId(t),
+            clientId: "mismatch-client",
+            clientSecret: secret,
+            shopDomain: provisionedShop,
+          });
+        }),
+        ShopifyAppProvisioningStoreLive(encryptionKey).pipe(
+          Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
+        ),
+      ).pipe(Effect.scoped),
+    );
+
+    // Validly-signed callback (tenant's own secret) but for a DIFFERENT shop.
+    const state = signState(stateSigningKey, t);
+    const query: Record<string, string> = {
+      shop: otherShop,
+      code: "the-code",
+      state,
+      timestamp: "1700000002",
+    };
+    const hmac = computeHmac(secret, canonicalQueryForHmac(query));
+    const cbUrl = new URL(`${baseUrl}/shopify/auth/callback`);
+    for (const [k, v] of Object.entries(query)) cbUrl.searchParams.set(k, v);
+    cbUrl.searchParams.set("hmac", hmac);
+
+    const res = await fetch(cbUrl, {
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("shop_mismatch");
+    expect(body.expected).toBe(provisionedShop);
+  });
+
   it("GET /shopify/auth/callback without state uses a preprovisioned accepted tenant for the shop", async () => {
     mockShopifyFetch({
       access_token: "shpoa_custom_dist",
