@@ -302,6 +302,14 @@ export const shopifyAppProvisioning = pgTable(
     index("shopify_app_provisioning_shop_idx")
       .on(t.shopDomain)
       .where(sql`${t.shopDomain} IS NOT NULL`),
+    // At most ONE non-revoked (active) row per shop, so webhook secret
+    // routing is deterministic — a shop transferred between tenants can't
+    // leave two live rows for the same shop (A3). Revoked rows are excluded
+    // so a stale row keeps its shop_domain for late compliance webhooks
+    // without shadowing the live row.
+    uniqueIndex("shopify_app_provisioning_active_shop_unique")
+      .on(t.shopDomain)
+      .where(sql`${t.shopDomain} IS NOT NULL AND ${t.status} <> 'revoked'`),
   ],
 );
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, FiberRef, Layer } from "effect";
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import {
   decryptToString,
   encrypt,
@@ -87,6 +87,12 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
                   // so re-entering credentials un-blocks the install (A2). A
                   // live `ready`/`connected` status is preserved.
                   status: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN 'ready' ELSE ${shopifyAppProvisioning.status} END`,
+                  // Reactivation also clears the stale shop_domain (A3): a
+                  // re-provisioned app has not connected a shop yet, and a
+                  // leftover shop_domain could collide with the active-shop
+                  // unique index if another tenant now owns that shop. The
+                  // merchant re-stamps it via markConnected on next Connect.
+                  shopDomain: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN NULL ELSE ${shopifyAppProvisioning.shopDomain} END`,
                 },
               })
               .returning(),
@@ -124,6 +130,14 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
               .select()
               .from(shopifyAppProvisioning)
               .where(eq(shopifyAppProvisioning.shopDomain, shopDomain))
+              // Deterministic pick (A3): prefer a live (non-revoked) row, then
+              // the most recently updated. The active-shop unique index makes
+              // at most one non-revoked row possible, so the live row always
+              // wins; among revoked-only rows the newest is chosen.
+              .orderBy(
+                sql`(${shopifyAppProvisioning.status} <> 'revoked') DESC`,
+                desc(shopifyAppProvisioning.updatedAt),
+              )
               .limit(1),
           );
           const row = rows[0];
@@ -133,13 +147,29 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
       const markConnected = (tenantId: TenantId, shopDomain: string) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
+          const now = new Date();
+          // Clear the shop_domain on any OTHER tenant's row that still holds
+          // this shop (a transfer) BEFORE stamping the new owner, so the
+          // active-shop unique index holds and getByShop stays deterministic
+          // (A3). The old row keeps its credentials but is no longer routed.
+          yield* wrap(
+            db
+              .update(shopifyAppProvisioning)
+              .set({ shopDomain: null, updatedAt: now })
+              .where(
+                and(
+                  eq(shopifyAppProvisioning.shopDomain, shopDomain),
+                  ne(shopifyAppProvisioning.tenantId, tenantId),
+                ),
+              ),
+          );
           yield* wrap(
             db
               .update(shopifyAppProvisioning)
               .set({
                 shopDomain,
                 status: "connected",
-                updatedAt: new Date(),
+                updatedAt: now,
               })
               .where(eq(shopifyAppProvisioning.tenantId, tenantId)),
           );

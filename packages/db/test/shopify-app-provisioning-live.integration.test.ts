@@ -135,12 +135,14 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     expect(fetched!.status).toBe("revoked");
   });
 
-  it("put reactivates a revoked row back to ready (A2)", async () => {
+  it("put reactivates a revoked row back to ready and clears the stale shop_domain (A2/A3)", async () => {
     const fetched = await run(
       Effect.gen(function* () {
         const store = yield* ShopifyAppProvisioningStore;
         // Row is `revoked` from the previous test. Re-entering credentials
-        // must un-block the install by resetting status to `ready`.
+        // must un-block the install by resetting status to `ready`, and the
+        // stale shop_domain is cleared so it can't collide with the
+        // active-shop unique index — the merchant re-stamps it on Connect.
         yield* store.put({
           tenantId: TenantId(tenantId),
           clientId: "shopify_client_reactivated",
@@ -151,7 +153,73 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     );
     expect(fetched!.status).toBe("ready");
     expect(fetched!.clientId).toBe("shopify_client_reactivated");
-    // shop_domain learned earlier survives the rotation.
-    expect(fetched!.shopDomain).toBe("pilot-store.myshopify.com");
+    expect(fetched!.shopDomain).toBeNull();
   });
 });
+
+describeIfDb(
+  "ShopifyAppProvisioningStore (Live) — deterministic shop routing (A3)",
+  () => {
+    const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
+    const tenantA = randomUUID();
+    const tenantB = randomUUID();
+    const encryptionKey = randomBytes(32);
+    const shop = "transfer-shop.myshopify.com";
+
+    const liveLayer = Layer.provide(
+      ShopifyAppProvisioningStoreLive(encryptionKey),
+      DbClientLive({ databaseUrl: databaseUrl! }),
+    );
+    const run = <A, E>(
+      eff: Effect.Effect<A, E, ShopifyAppProvisioningStore | DbClient>,
+    ) => Effect.runPromise(Effect.provide(eff, liveLayer).pipe(Effect.scoped));
+
+    beforeAll(async () => {
+      if (!raw) return;
+      await raw.db.insert(tenants).values({ id: tenantA, name: "transfer-a" });
+      await raw.db.insert(tenants).values({ id: tenantB, name: "transfer-b" });
+    });
+
+    afterAll(async () => {
+      if (!raw) return;
+      await raw.db
+        .delete(shopifyAppProvisioning)
+        .where(sql`${shopifyAppProvisioning.tenantId} IN (${tenantA}, ${tenantB})`);
+      await raw.db
+        .delete(tenants)
+        .where(sql`${tenants.id} IN (${tenantA}, ${tenantB})`);
+      await raw.close();
+    });
+
+    it("transferring a shop to a new tenant clears the prior row and routes to the new owner — no unique-index violation", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* ShopifyAppProvisioningStore;
+          // Tenant A provisions + connects the shop.
+          yield* store.put({
+            tenantId: TenantId(tenantA),
+            clientId: "client-a",
+            clientSecret: "secret-a",
+          });
+          yield* store.markConnected(TenantId(tenantA), shop);
+          // Shop transfers: tenant B provisions + connects the SAME shop.
+          // This must not violate the active-shop unique index.
+          yield* store.put({
+            tenantId: TenantId(tenantB),
+            clientId: "client-b",
+            clientSecret: "secret-b",
+          });
+          yield* store.markConnected(TenantId(tenantB), shop);
+          const routed = yield* store.getByShop(shop);
+          const a = yield* store.get(TenantId(tenantA));
+          return { routed, a };
+        }),
+      );
+      // Webhook routing now resolves to tenant B (the live owner).
+      expect(result.routed!.tenantId).toBe(tenantB);
+      expect(result.routed!.clientSecret).toBe("secret-b");
+      // Tenant A's row kept its credentials but no longer holds the shop.
+      expect(result.a!.shopDomain).toBeNull();
+    });
+  },
+);

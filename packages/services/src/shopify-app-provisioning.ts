@@ -110,11 +110,14 @@ export const ShopifyAppProvisioningStoreTest = (
       Effect.sync(() => {
         const prior = store.get(input.tenantId);
         const now = new Date();
+        const reactivating = prior?.status === "revoked";
         const row: ShopifyAppProvisioning = {
           tenantId: input.tenantId,
           clientId: input.clientId,
           clientSecret: input.clientSecret,
-          shopDomain: prior?.shopDomain ?? null,
+          // Reactivation clears the stale shop_domain (A3) — a re-provisioned
+          // app awaits a fresh Connect. A live row preserves it.
+          shopDomain: reactivating ? null : (prior?.shopDomain ?? null),
           // Re-provisioning a REVOKED row reactivates it to `ready` so
           // re-entering credentials un-blocks the install (A2). A live
           // `ready`/`connected` status is preserved — rotating the secret of
@@ -141,9 +144,16 @@ export const ShopifyAppProvisioningStoreTest = (
     ) =>
       Effect.sync(
         () =>
-          Array.from(store.values()).find(
-            (r) => r.shopDomain === shopDomain,
-          ) ?? null,
+          // Deterministic pick (A3): live (non-revoked) row first, then most
+          // recently updated — mirrors the Live layer's ordering.
+          Array.from(store.values())
+            .filter((r) => r.shopDomain === shopDomain)
+            .sort((a, b) => {
+              const aLive = a.status !== "revoked" ? 1 : 0;
+              const bLive = b.status !== "revoked" ? 1 : 0;
+              if (aLive !== bLive) return bLive - aLive;
+              return b.updatedAt.getTime() - a.updatedAt.getTime();
+            })[0] ?? null,
       );
 
     const markConnected: (
@@ -151,13 +161,21 @@ export const ShopifyAppProvisioningStoreTest = (
       shopDomain: string,
     ) => Effect.Effect<void, ConnectorStoreDbError> = (tenantId, shopDomain) =>
       Effect.sync(() => {
+        const now = new Date();
+        // Clear the shop_domain on any OTHER tenant's row holding this shop
+        // before stamping the new owner (A3 transfer handling).
+        for (const [tid, r] of store) {
+          if (tid !== tenantId && r.shopDomain === shopDomain) {
+            store.set(tid, { ...r, shopDomain: null, updatedAt: now });
+          }
+        }
         const prior = store.get(tenantId);
         if (prior) {
           store.set(tenantId, {
             ...prior,
             shopDomain,
             status: "connected",
-            updatedAt: new Date(),
+            updatedAt: now,
           });
         }
       });

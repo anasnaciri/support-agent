@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "shopify_app_provisioning_active_shop_unique" ON "shopify_app_provisioning" USING btree ("shop_domain") WHERE "shopify_app_provisioning"."shop_domain" IS NOT NULL AND "shopify_app_provisioning"."status" <> 'revoked';
