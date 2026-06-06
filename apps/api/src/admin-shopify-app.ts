@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { Effect, FiberRef } from "effect";
 import {
-  auditLog,
+  adminAuditLog,
   CurrentTxRef,
   DbClient,
   tenants,
@@ -89,6 +89,11 @@ const tenantExists = (
     return rows.length > 0;
   });
 
+// Admin Shopify mutations are PLATFORM-OPERATOR actions, so they go to the
+// surviving `admin_audit_log` (no tenant FK), NOT the tenant-scoped
+// `audit_log` which is wiped when the tenant is deleted (re-audit #3). Written
+// inside the same withTransaction as the mutation so an audit-write failure
+// rolls the mutation back.
 const writeAudit = (
   tenantId: string,
   action: string,
@@ -98,19 +103,17 @@ const writeAudit = (
     const db = yield* useDb();
     yield* Effect.tryPromise({
       try: () =>
-        db.insert(auditLog).values({
-          tenantId,
-          caseId: null,
-          actorType: "system",
-          actorId: "admin",
+        db.insert(adminAuditLog).values({
           action,
+          targetTenantId: tenantId,
+          actor: "admin",
           details: {
             ...details,
             at: new Date().toISOString(),
             traceId: randomUUID(),
           },
         }),
-      catch: (cause) => new Error(`audit write failed: ${String(cause)}`),
+      catch: (cause) => new Error(`admin audit write failed: ${String(cause)}`),
     });
   });
 

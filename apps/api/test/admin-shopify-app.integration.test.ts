@@ -10,13 +10,14 @@ import {
   type OrderPiiPresence,
 } from "@support-agent/services";
 import {
-  auditLog,
+  adminAuditLog,
   connectorConnections,
   DbClientLive,
   ShopifyAppProvisioningStoreLive,
   makeDbClient,
   shopifyAppProvisioning,
   tenants,
+  withTransaction,
 } from "@support-agent/db";
 import { eq } from "drizzle-orm";
 import { startServer, type ServerHandle } from "../src/server.js";
@@ -81,8 +82,8 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
     if (!raw) return;
     if (handle) await handle.close();
     await raw.db
-      .delete(auditLog)
-      .where(sql`${auditLog.tenantId} = ${tenantId}`);
+      .delete(adminAuditLog)
+      .where(sql`${adminAuditLog.targetTenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     await raw.close();
   });
@@ -143,12 +144,57 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
       .where(sql`${shopifyAppProvisioning.tenantId} = ${tenantId}`);
     expect(rows[0]!.clientSecretEncrypted.toString("utf8")).not.toContain(SECRET);
 
-    // An audit row records the provisioning.
+    // A SURVIVING admin-audit row records the provisioning (re-audit #3) —
+    // in admin_audit_log, not the tenant-scoped audit_log that's wiped on
+    // tenant deletion.
     const audits = await raw!.db
       .select()
-      .from(auditLog)
-      .where(sql`${auditLog.tenantId} = ${tenantId}`);
-    expect(audits.some((a) => a.action === "shopify_app.provisioned")).toBe(true);
+      .from(adminAuditLog)
+      .where(sql`${adminAuditLog.targetTenantId} = ${tenantId}`);
+    expect(audits.some((a) => a.action === "shopify_app.provisioned")).toBe(
+      true,
+    );
+    expect(audits.every((a) => a.actor === "admin")).toBe(true);
+  });
+
+  it("rolls the provisioning write back when the shared transaction fails (re-audit #3)", async () => {
+    if (!raw) return;
+    const rollbackTenant = randomUUID();
+    await raw.db
+      .insert(tenants)
+      .values({ id: rollbackTenant, name: "rollback-test" });
+
+    const txLayer = ShopifyAppProvisioningStoreLive(encryptionKey).pipe(
+      Layer.provideMerge(DbClientLive({ databaseUrl: databaseUrl! })),
+    );
+
+    // Real store.put inside withTransaction, then fail — the SAME mechanism
+    // the admin audit write relies on. The provisioning row must NOT persist.
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        withTransaction(
+          Effect.gen(function* () {
+            const store = yield* ShopifyAppProvisioningStore;
+            yield* store.put({
+              tenantId: TenantId(rollbackTenant),
+              clientId: "rollback-client",
+              clientSecret: "rollback-secret",
+            });
+            return yield* Effect.fail(new Error("boom after put"));
+          }),
+        ),
+        txLayer,
+      ).pipe(Effect.scoped),
+    );
+    expect(exit._tag).toBe("Failure");
+
+    const after = await raw.db
+      .select()
+      .from(shopifyAppProvisioning)
+      .where(sql`${shopifyAppProvisioning.tenantId} = ${rollbackTenant}`);
+    expect(after).toHaveLength(0);
+
+    await raw.db.delete(tenants).where(sql`${tenants.id} = ${rollbackTenant}`);
   });
 
   it("GET reports provisioned without leaking the secret", async () => {
@@ -330,7 +376,9 @@ describeIfDb("apps/api — admin provisioning shop_domain capture (A4)", () => {
       await raw.db
         .delete(shopifyAppProvisioning)
         .where(eq(shopifyAppProvisioning.tenantId, id));
-      await raw.db.delete(auditLog).where(eq(auditLog.tenantId, id));
+      await raw.db
+        .delete(adminAuditLog)
+        .where(eq(adminAuditLog.targetTenantId, id));
       await raw.db.delete(tenants).where(eq(tenants.id, id));
     }
     await raw.close();
