@@ -25,6 +25,7 @@ import type {
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
 import { LEGAL_ACCEPTED_AT_KEY, hasAcceptedAtSignup } from "./legal-consent";
+import { ONBOARDING_PATH, SIGN_UP_PATH } from "./auth-redirect";
 
 // ============================================================
 // Dashboard → apps/api client (Path B)
@@ -166,10 +167,10 @@ const fetchTenant = async (
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId } = await withAuth();
-  if (!user) redirect("/sign-up");
-  if (!organizationId) redirect("/onboarding");
+  if (!user) redirect(SIGN_UP_PATH);
+  if (!organizationId) redirect(ONBOARDING_PATH);
   const tenant = await fetchTenant(organizationId);
-  if (!tenant) redirect("/onboarding");
+  if (!tenant) redirect(ONBOARDING_PATH);
   return {
     organizationId,
     userId: user.id,
@@ -205,7 +206,7 @@ export interface OrgContext {
 export const requireOrganization = async (): Promise<OrgContext> => {
   const { user, organizationId } = await withAuth();
   // Legal-gated front door (audit B2) — see getDashboardContext.
-  if (!user) redirect("/sign-up");
+  if (!user) redirect(SIGN_UP_PATH);
   const tenant = organizationId ? await fetchTenant(organizationId) : null;
   const metadata = user.metadata ?? {};
   const acceptedAt = metadata[LEGAL_ACCEPTED_AT_KEY] ?? null;
