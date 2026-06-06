@@ -181,12 +181,17 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
       const revoke = (tenantId: TenantId) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
-          yield* wrap(
+          // `.returning` so we can report whether a row actually existed —
+          // lets the admin path detect a concurrently-deleted tenant instead
+          // of recording a false successful revoke (5th-audit #2).
+          const rows = yield* wrap(
             db
               .update(shopifyAppProvisioning)
               .set({ status: "revoked", updatedAt: new Date() })
-              .where(eq(shopifyAppProvisioning.tenantId, tenantId)),
+              .where(eq(shopifyAppProvisioning.tenantId, tenantId))
+              .returning({ id: shopifyAppProvisioning.id }),
           );
+          return rows.length > 0;
         });
 
       return ShopifyAppProvisioningStore.of({

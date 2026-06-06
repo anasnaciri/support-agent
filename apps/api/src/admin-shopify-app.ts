@@ -216,7 +216,13 @@ export const revokeAdminShopifyApp = (
     return yield* withTransaction(
       Effect.gen(function* () {
         const s = yield* ShopifyAppProvisioningStore;
-        yield* s.revoke(TenantId(tenantId));
+        const revoked = yield* s.revoke(TenantId(tenantId));
+        if (!revoked) {
+          // The provisioning row vanished between the pre-tx read and now
+          // (e.g. the tenant was deleted concurrently). Do NOT write a false
+          // success audit (5th-audit #2).
+          return { kind: "not_provisioned" } as const;
+        }
         yield* writeAudit(tenantId, "shopify_app.revoked", {});
         return {
           kind: "ok",

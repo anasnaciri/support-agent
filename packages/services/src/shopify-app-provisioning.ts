@@ -93,10 +93,16 @@ export class ShopifyAppProvisioningStore extends Context.Tag(
       shopDomain: string,
     ) => Effect.Effect<void, ConnectorStoreDbError>;
 
-    /** Flip status to `revoked` (uninstall / admin). Idempotent. */
+    /**
+     * Flip status to `revoked` (uninstall / admin). Idempotent. Returns
+     * `true` if a row was updated, `false` if no provisioning row exists for
+     * the tenant (e.g. it was deleted concurrently) — so a caller in a
+     * transaction can avoid recording a false successful revocation
+     * (5th-audit #2).
+     */
     readonly revoke: (
       tenantId: TenantId,
-    ) => Effect.Effect<void, ConnectorStoreDbError>;
+    ) => Effect.Effect<boolean, ConnectorStoreDbError>;
   }
 >() {}
 
@@ -193,16 +199,16 @@ export const ShopifyAppProvisioningStoreTest = (
 
     const revoke: (
       tenantId: TenantId,
-    ) => Effect.Effect<void, ConnectorStoreDbError> = (tenantId) =>
+    ) => Effect.Effect<boolean, ConnectorStoreDbError> = (tenantId) =>
       Effect.sync(() => {
         const prior = store.get(tenantId);
-        if (prior) {
-          store.set(tenantId, {
-            ...prior,
-            status: "revoked",
-            updatedAt: new Date(),
-          });
-        }
+        if (!prior) return false;
+        store.set(tenantId, {
+          ...prior,
+          status: "revoked",
+          updatedAt: new Date(),
+        });
+        return true;
       });
 
     return ShopifyAppProvisioningStore.of({

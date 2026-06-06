@@ -124,15 +124,27 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     expect(fetched!.status).toBe("connected");
   });
 
-  it("revoke flips status to revoked", async () => {
-    const fetched = await run(
+  it("revoke flips status to revoked and reports a row was affected", async () => {
+    const result = await run(
       Effect.gen(function* () {
         const store = yield* ShopifyAppProvisioningStore;
-        yield* store.revoke(TenantId(tenantId));
-        return yield* store.get(TenantId(tenantId));
+        const revoked = yield* store.revoke(TenantId(tenantId));
+        const row = yield* store.get(TenantId(tenantId));
+        return { revoked, row };
       }),
     );
-    expect(fetched!.status).toBe("revoked");
+    expect(result.revoked).toBe(true);
+    expect(result.row!.status).toBe("revoked");
+  });
+
+  it("revoke returns false when no provisioning row exists (5th-audit #2)", async () => {
+    const revoked = await run(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        return yield* store.revoke(TenantId(blankTenantId));
+      }),
+    );
+    expect(revoked).toBe(false);
   });
 
   it("put reactivates a revoked row back to ready and clears the stale shop_domain (A2/A3)", async () => {
