@@ -1001,6 +1001,16 @@ const handleAdminShopifyAppPut = async (
     }
     shopDomain = normalized;
   }
+  // F1: in pilot mode the store domain is REQUIRED at provisioning. The
+  // merchant install flow needs it to build the proven OAuth authorize URL —
+  // without it the only fallback is the admin.shopify.com managed-install
+  // store picker, whose re-entry needs the global app secret to verify its
+  // HMAC, which pure-pilot mode forbids. So an un-installable shop-less row
+  // must be refused here rather than created. (SaaS mode keeps it optional.)
+  if (cfg.shopifyConnectRequiresProvisioning && !shopDomain) {
+    sendJson(res, 400, { error: "shop_domain_required" });
+    return;
+  }
   const exit = await Effect.runPromiseExit(
     Effect.provide(
       putAdminShopifyApp({
@@ -1948,6 +1958,19 @@ const handleShopifyInstall = async (
         "Set-Cookie": clearShopifyInstallCookie(
           cfg.shopify.callbackUrl.startsWith("https://"),
         ),
+      });
+      return;
+    }
+    // F1: in pilot mode the managed-install store picker is non-functional —
+    // its re-entry verifies the HMAC with the global app secret, which
+    // pure-pilot mode forbids, so it dead-ends at 400. New provisioning
+    // requires a shop (see handleAdminShopifyAppPut), so this only fires for a
+    // legacy shop-less row: refuse with the same operator-action family as the
+    // other provisioning gates rather than redirect to a dead end.
+    if (cfg.shopifyConnectRequiresProvisioning) {
+      sendJson(res, 403, {
+        error: "shopify_provisioning_required",
+        reason: "shop_not_recorded",
       });
       return;
     }

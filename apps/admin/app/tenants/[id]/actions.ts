@@ -24,7 +24,20 @@ export async function provisionShopifyAppAction(
     shopDomain || undefined,
   );
   if (res.status === 404) redirect(`/tenants/${id}?error=tenant_not_found`);
-  if (res.status === 400) redirect(`/tenants/${id}?error=invalid_shop`);
+  if (res.status === 400) {
+    // A 400 is either an unparseable/invalid shop domain or, in pilot mode, a
+    // missing-but-required one (F1). Surface them distinctly so the operator
+    // knows to add the store rather than "fix" a domain that was never wrong.
+    const code = await res
+      .json()
+      .then((b) => (b as { error?: string }).error)
+      .catch(() => undefined);
+    redirect(
+      `/tenants/${id}?error=${
+        code === "shop_domain_required" ? "shop_domain_required" : "invalid_shop"
+      }`,
+    );
+  }
   if (res.status === 409) redirect(`/tenants/${id}?error=shop_conflict`);
   if (!res.ok) redirect(`/tenants/${id}?error=provision_failed`);
   revalidatePath(`/tenants/${id}`);

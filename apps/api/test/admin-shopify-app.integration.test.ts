@@ -439,3 +439,96 @@ describeIfDb("apps/api — admin provisioning shop_domain capture (A4)", () => {
     expect(prov).toHaveLength(0);
   });
 });
+
+// F1 — in pilot mode (SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true) the store
+// domain is REQUIRED at provisioning. Without it the merchant install flow has
+// no proven OAuth authorize URL to build and falls back to the managed-install
+// store picker, which is non-functional in pure-pilot mode. So a pilot PUT with
+// no shopDomain must be refused rather than create an un-installable row. In
+// SaaS mode shopDomain stays optional (covered by the blocks above).
+describeIfDb("apps/api — admin provisioning requires shop in pilot mode (F1)", () => {
+  const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
+  const adminToken = "admin-f1-token";
+  const encryptionKey = randomBytes(32);
+  const t = randomUUID();
+  const shop = "f1-pilot.myshopify.com";
+
+  // Pilot config: provisioning required. A global app may still be configured
+  // in the test cfg — the per-tenant gate is what's under test.
+  const cfg = {
+    port: 0,
+    databaseUrl: databaseUrl!,
+    encryptionKey,
+    stateSigningKey: "k",
+    shopify: {
+      clientId: "c",
+      clientSecret: "s",
+      callbackUrl: "http://localhost/shopify/auth/callback",
+      apiVersion: "2025-01",
+    },
+    google: null,
+    approvalSigningKey: "a",
+    dashboardBaseUrl: null,
+    dashboardApiToken: "dash",
+    adminApiToken: adminToken,
+    shopifyConnectRequiresProvisioning: true,
+  } as ApiConfig;
+
+  let handle: ServerHandle | null = null;
+  let baseUrl = "";
+  const url = (id: string) => `${baseUrl}/admin/tenants/${id}/shopify-app`;
+  const authed = {
+    authorization: `Bearer ${adminToken}`,
+    "content-type": "application/json",
+  };
+
+  beforeAll(async () => {
+    if (!raw) return;
+    await raw.db.insert(tenants).values({ id: t, name: "f1-pilot" });
+    handle = await startServer(cfg);
+    baseUrl = `http://localhost:${handle.port}`;
+  });
+
+  afterAll(async () => {
+    if (!raw) return;
+    if (handle) await handle.close();
+    await raw.db
+      .delete(shopifyAppProvisioning)
+      .where(eq(shopifyAppProvisioning.tenantId, t));
+    await raw.db
+      .delete(adminAuditLog)
+      .where(eq(adminAuditLog.targetTenantId, t));
+    await raw.db.delete(tenants).where(eq(tenants.id, t));
+    await raw.close();
+  });
+
+  it("PUT without a shopDomain returns 400 and provisions nothing", async () => {
+    const res = await fetch(url(t), {
+      method: "PUT",
+      headers: authed,
+      body: JSON.stringify({ clientId: "cid", clientSecret: "csecret" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("shop_domain_required");
+    const prov = await raw!.db
+      .select()
+      .from(shopifyAppProvisioning)
+      .where(eq(shopifyAppProvisioning.tenantId, t));
+    expect(prov).toHaveLength(0);
+  });
+
+  it("PUT with a shopDomain provisions normally in pilot mode", async () => {
+    const res = await fetch(url(t), {
+      method: "PUT",
+      headers: authed,
+      body: JSON.stringify({
+        clientId: "cid",
+        clientSecret: "csecret",
+        shopDomain: shop,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.provisioning.shopDomain).toBe(shop);
+  });
+});

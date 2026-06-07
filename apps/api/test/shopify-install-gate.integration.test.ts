@@ -194,4 +194,22 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     expect(location).toContain("client_id=pilot-client");
     expect(location).not.toContain("admin.shopify.com");
   });
+
+  // F1 — a no-shop install for a pilot tenant whose row has NO recorded shop
+  // must be refused, not redirected to the admin.shopify.com managed-install
+  // store picker: that picker's re-entry needs the global app secret to verify
+  // its HMAC, which pure-pilot mode forbids, so it dead-ends at 400. The fix
+  // refuses up front (new provisioning requires a shop; this guards legacy rows
+  // like readyTenantId, which was provisioned without one).
+  it("refuses a no-shop install when the pilot row has no recorded shop (F1)", async () => {
+    const res = await fetch(
+      `${pilotUrl}/shopify/install?grant=${grant(readyTenantId)}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "shopify_provisioning_required",
+      reason: "shop_not_recorded",
+    });
+  });
 });

@@ -20,6 +20,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_fields: "Client ID and secret are both required.",
   provision_failed: "Saving the credentials failed. Try again.",
   invalid_shop: "Store domain must be a valid *.myshopify.com domain.",
+  shop_domain_required:
+    "Store domain is required for a pilot install — enter the *.myshopify.com store this app is for.",
   shop_conflict: "That store is already connected to another tenant.",
   revoke_failed: "Revoking failed. Try again.",
   tenant_not_found: "Tenant not found.",
@@ -187,7 +189,9 @@ export default async function TenantDetailPage({
               <div className="space-y-1.5 sm:col-span-2">
                 <label htmlFor="shopDomain" className="text-sm text-zinc-300">
                   Store domain{" "}
-                  <span className="text-zinc-500">(optional)</span>
+                  <span className="text-zinc-500">
+                    (required for pilot installs)
+                  </span>
                 </label>
                 <input
                   id="shopDomain"
