@@ -1,6 +1,6 @@
 # Caddy reverse proxy for the support-agent api.
 #
-# API_DOMAIN + ACME_EMAIL are injected from .env.prod via the caddy
+# API_DOMAIN + ACME_EMAIL are injected from deploy/compose/.env via the caddy
 # service's `environment:` block in docker-compose.prod.yml. Caddy
 # provisions and renews a Let's Encrypt cert for {$API_DOMAIN}
 # automatically (HTTP-01 challenge on :80, serves on :443).

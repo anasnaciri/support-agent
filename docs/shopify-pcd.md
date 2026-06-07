@@ -145,7 +145,8 @@ Test and production environments use distinct databases, distinct API credential
 **Answer:** Yes.
 
 - Customer data never leaves the per-tenant Postgres database except (a) for the merchant-authorised LLM provider's inference call (disclosed subprocessor) and (b) in support replies sent through the merchant's own messaging connector to the originating customer.
-- All `.env*` files are gitignored except `.env.example` (no secrets in source control).
+- Real `.env*` files are gitignored; only app/package/deploy-local
+  `.env.example` templates are committed (no secrets in source control).
 - Every runtime access to customer data is recorded in an immutable `audit_log` table (`packages/db/src/audit-log-live.ts`).
 - Audit-log PII redaction is implemented and enabled with `AUDIT_LOG_REDACT_PII=1`. OTel trace-side redaction remains a separate hardening follow-up.
 

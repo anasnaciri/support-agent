@@ -3,9 +3,9 @@
 # deploys to Cloudflare Workers separately (see DEPLOY.md, "Dashboard").
 #
 # Always pass --env-file so the compose-level ${VARS} below resolve:
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod build
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm migrate
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#   docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env build
+#   docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env run --rm migrate
+#   docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env up -d
 
 name: support-agent
 
@@ -29,14 +29,14 @@ services:
   # ---- One-shot DB migration (drizzle-kit migrate) ------------------------
   # Not started by `up` (tools profile). Run explicitly before bringing the
   # app up, and after every deploy that adds migrations:
-  #   docker compose ... --env-file .env.prod run --rm migrate
+  #   docker compose ... --env-file deploy/compose/.env run --rm migrate
   migrate:
     build:
       context: .
       target: migrate
     profiles: ["tools"]
     restart: "no"
-    env_file: [.env.prod]
+    env_file: [deploy/compose/.env]
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
       context: .
       target: api
     restart: unless-stopped
-    env_file: [.env.prod]
+    env_file: [deploy/compose/.env]
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,7 +69,7 @@ services:
       context: .
       target: worker
     restart: unless-stopped
-    env_file: [.env.prod]
+    env_file: [deploy/compose/.env]
     depends_on:
       postgres:
         condition: service_healthy

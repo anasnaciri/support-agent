@@ -7,12 +7,9 @@ dist/
 .dev.vars
 cloudflare-env.d.ts
 *.tsbuildinfo
-.env
-.env.local
-# Production secrets file for docker-compose.prod.yml — never commit.
-# The committed template is .env.prod.example.
-.env.prod
-.env.*.local
+# Real env files stay local; only ownership-scoped templates are committed.
+.env*
+!**/.env.example
 .DS_Store
 .turbo/
 coverage/

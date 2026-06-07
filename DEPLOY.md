@@ -134,7 +134,7 @@ Production topology for the pilot:
   Cloudflare Workers and talks to the api over HTTPS (see
   [Dashboard](#dashboard-cloudflare-workers)).
 
-Files: [`Dockerfile`](./Dockerfile) · [`docker-compose.prod.yml`](./docker-compose.prod.yml) · [`deploy/Caddyfile`](./deploy/Caddyfile) · [`.env.prod.example`](./.env.prod.example)
+Files: [`Dockerfile`](./Dockerfile) · [`docker-compose.prod.yml`](./docker-compose.prod.yml) · [`deploy/Caddyfile`](./deploy/Caddyfile) · [`deploy/compose/.env.example`](./deploy/compose/.env.example)
 
 ---
 
@@ -186,11 +186,11 @@ this box.
 
 ```sh
 git clone <repo-url> support-agent && cd support-agent
-cp .env.prod.example .env.prod
+cp deploy/compose/.env.example deploy/compose/.env
 ```
 
-Edit `.env.prod` — fill every `CHANGE_ME`. Generation commands are in the file
-header. Critical invariants:
+Edit `deploy/compose/.env` — fill every `CHANGE_ME`. Generation commands are
+in the file header. Critical invariants:
 
 - `DATABASE_URL` host is `postgres` (the compose service); its user/password
   must match `POSTGRES_USER`/`POSTGRES_PASSWORD`.
@@ -199,12 +199,12 @@ header. Critical invariants:
 - `API_DOMAIN` + the `*_CALLBACK_URL` / `*_BASE_URL` values all use the real
   `api.<domain>`; `DASHBOARD_BASE_URL` uses the Workers URL.
 
-`.env.prod` is git-ignored — keep it on the box, never commit it.
+`deploy/compose/.env` is git-ignored — keep it on the box, never commit it.
 
 ## 5. First deploy
 
 ```sh
-C="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+C="docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env"
 
 $C build                 # builds images on the box (matches its arch)
 $C run --rm migrate      # applies drizzle migrations against fresh Postgres
@@ -240,7 +240,7 @@ The box is now reachable; finish the provider side (also tracked in
 ## 7. Updating
 
 ```sh
-C="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+C="docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env"
 git pull
 $C build
 $C run --rm migrate      # no-op if no new migrations
@@ -264,7 +264,7 @@ Two layers:
 ## 9. Ops
 
 ```sh
-C="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+C="docker compose -f docker-compose.prod.yml --env-file deploy/compose/.env"
 $C logs -f api worker        # tail
 $C restart api               # restart one service
 $C exec postgres psql -U support_agent support_agent   # DB shell

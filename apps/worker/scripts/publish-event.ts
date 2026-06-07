@@ -4,8 +4,7 @@
  * smoke testing without the (not yet built) Gmail inbound webhook.
  *
  * Usage (from repo root):
- *   set -a; source .env.local; set +a
- *   pnpm --filter @support-agent/worker exec tsx scripts/publish-event.ts \
+ *   pnpm --filter @support-agent/worker publish:event -- \
  *     --tenant <tenantId> \
  *     --subject "where is my order?" \
  *     --body "Hi, my order #1001 was shipped a week ago and I haven't received it."

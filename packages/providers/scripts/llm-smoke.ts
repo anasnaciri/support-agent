@@ -2,7 +2,7 @@
  * One-shot CLI smoke test for LLMServiceLive against OpenRouter.
  *
  * Usage (from repo root):
- *   set -a; source .env.local; set +a
+ *   cp packages/providers/.env.example packages/providers/.env.local
  *   pnpm llm:smoke
  *
  * Or one-shot:

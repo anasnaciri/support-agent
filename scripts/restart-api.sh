@@ -4,13 +4,8 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [ -f ".env.local" ]; then
-  set -a
-  . "./.env.local"
-  set +a
-fi
-
-PORT="${API_PORT:-4000}"
+PORT="$(node --env-file-if-exists=apps/api/.env.local -p \
+  'process.env.API_PORT || "4000"')"
 PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
 
 if [ -n "$PIDS" ]; then
