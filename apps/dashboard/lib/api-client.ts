@@ -1,6 +1,6 @@
 import "server-only";
 import { redirect } from "next/navigation";
-import { withAuth } from "@workos-inc/authkit-nextjs";
+import { getSession } from "./session";
 import type { ShopifyCustomer, ShopifyOrder } from "@support-agent/agent-core";
 import type {
   AgentOverrideRow,
@@ -166,7 +166,7 @@ const fetchTenant = async (
  * airtight net for anyone who still reaches the hosted sign-up.
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
-  const { user, organizationId } = await withAuth();
+  const { user, organizationId } = await getSession();
   if (!user) redirect(SIGN_UP_PATH);
   if (!organizationId) redirect(ONBOARDING_PATH);
   const tenant = await fetchTenant(organizationId);
@@ -204,7 +204,7 @@ export interface OrgContext {
  * both. Only the session (a signed-in user) is required.
  */
 export const requireOrganization = async (): Promise<OrgContext> => {
-  const { user, organizationId } = await withAuth();
+  const { user, organizationId } = await getSession();
   // Legal-gated front door (audit B2) — see getDashboardContext.
   if (!user) redirect(SIGN_UP_PATH);
   const tenant = organizationId ? await fetchTenant(organizationId) : null;

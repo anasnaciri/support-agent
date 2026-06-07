@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { getSession } from "@/lib/session";
 import { dataProcessingNoticeUrl } from "@/lib/legal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -10,7 +10,7 @@ import { SignUpForm } from "./SignUpForm";
 // enforce it); ticking it gates the Google handoff. Already-signed-in users
 // have no business here — send them to onboarding/dashboard.
 export default async function SignUpPage() {
-  const { user } = await withAuth();
+  const { user } = await getSession();
   if (user) {
     redirect("/onboarding");
   }

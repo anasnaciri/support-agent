@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { getSession } from "@/lib/session";
 import { api, getDashboardContext } from "@/lib/api-client";
 
 // GET /connect/:provider — the Connect/Reconnect button target. Authenticates
@@ -21,7 +21,7 @@ export const GET = async (
   if (!SUPPORTED.has(provider)) redirect("/settings/integrations");
 
   const ctx = await getDashboardContext();
-  const { user } = await withAuth();
+  const { user } = await getSession();
   const { url } = await api.connectUrl(ctx, provider);
 
   // Prefill the Google account on the consent screen (UX only; Shopify uses

@@ -1,4 +1,4 @@
-import { withAuth } from "@workos-inc/authkit-nextjs";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/api-client";
 
 // ============================================================
@@ -17,7 +17,7 @@ interface RouteParams {
 
 export async function GET(req: Request, { params }: RouteParams) {
   const { id } = await params;
-  const { user, organizationId } = await withAuth();
+  const { user, organizationId } = await getSession();
   if (!user || !organizationId) {
     return new Response("unauthorized", { status: 401 });
   }

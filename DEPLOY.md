@@ -296,28 +296,36 @@ No middleware, so `cf:build` succeeds today. Secrets: `ADMIN_API_BASE_URL`,
 `ADMIN_SESSION_SECRET`. **Gate the deployed Worker behind Cloudflare Access or a
 non-public hostname** — it's operator-only. Run `cf:deploy` with your account.
 
-### `apps/dashboard` — merchant dashboard ⚠️ blocked on AuthKit middleware
+### `apps/dashboard` — merchant dashboard ✅ deployable (middleware-less AuthKit)
 
-Config is in place (`wrangler.jsonc`, `open-next.config.ts`, scripts), and the
-normal `next build` is green — but `cf:build` currently **fails** with:
+`cf:build` is green. The historical blocker was WorkOS **AuthKit**: its
+`authkitProxy()` ran as Next middleware, but **Next 16's proxy is Node-only**
+(it rejects `runtime: "edge"`) and `@opennextjs/cloudflare` (≤ 1.19.11, the
+latest) refuses Node middleware — so OpenNext aborted with *"Node.js middleware
+is not currently supported."*
 
-> `Node.js middleware is not currently supported. Consider switching to Edge Middleware.`
+Resolved by removing the proxy and reading the WorkOS session **directly from
+its cookie** (`lib/session.ts` `getSession()`): it unseals the `wos-session`
+cookie with `iron-session` (the same library + `WORKOS_COOKIE_PASSWORD` AuthKit
+seals it with, so unsealing authenticates it) and decodes the access-token
+claims via AuthKit's public `getTokenClaims`. OpenNext sees **no middleware** →
+the build proceeds. Page-level auth is unchanged: every tenant page calls
+`getDashboardContext()`, which redirects logged-out users to `/sign-up`. The
+cookie-writing flows (`/sign-in`, `/callback`, sign-out) are untouched.
 
-Root cause: WorkOS **AuthKit** (`authkitProxy()` in `proxy.ts`) requires the
-Next middleware — `withAuth()` throws if the middleware isn't running — and
-**Next 16's `proxy` runs only on the Node.js runtime** (it rejects
-`runtime: "edge"`). `@opennextjs/cloudflare` ≤ 1.19.x refuses Node middleware.
-So the dashboard can't ship on Workers via OpenNext with this exact stack until
-**one** of these clears (do NOT remove the middleware — it breaks auth):
+**Trade-off (accepted):** there's no token refresh on the request path (a proxy
+did that). `getSession()` honors the access token's `exp` and treats an expired
+token as logged-out, so the user is redirected to re-auth once it lapses —
+WorkOS still holds the SSO session, so it's a silent round-trip. Tune the access
+token lifetime in the WorkOS dashboard if the re-auth cadence is too tight.
 
-1. `@opennextjs/cloudflare` adds Node-middleware support (track upstream), or
-2. AuthKit offers an Edge-compatible middleware / a middleware-less mode, or
-3. host the dashboard on a Node runtime instead (`next start` on a small VM /
-   Railway Next service) — it's still a pure api client, so only
-   `DASHBOARD_API_BASE_URL` + `DASHBOARD_API_TOKEN` + the WorkOS vars are needed.
-
-The two api↔dashboard link points are unchanged either way: `DASHBOARD_BASE_URL`
-(api → dashboard redirects) and the api's public origin (dashboard → api fetches).
+Secrets (set with `wrangler secret put`, except `NEXT_PUBLIC_*` which are build
+-time): `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_COOKIE_PASSWORD` (≥32
+chars), `NEXT_PUBLIC_WORKOS_REDIRECT_URI` (= `https://app.<domain>/callback`),
+`DASHBOARD_API_BASE_URL` (the api origin), and `DASHBOARD_API_TOKEN` (must equal
+the api's). Map `app.<domain>` to the Worker, then run `cf:deploy`. The two
+api↔dashboard link points: `DASHBOARD_BASE_URL` (api → dashboard redirects) and
+the api's public origin (dashboard → api fetches).
 
 ## Note: image size
 

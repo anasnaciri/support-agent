@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
-import { withAuth } from "@workos-inc/authkit-nextjs";
 
+import { getSession } from "@/lib/session";
 import { SidebarShell } from "./SidebarShell";
 import "./globals.css";
 
@@ -15,7 +15,7 @@ export default async function RootLayout({
 }: {
   readonly children: ReactNode;
 }) {
-  const { user } = await withAuth();
+  const { user } = await getSession();
   const cookieStore = await cookies();
   // Default to open on first visit; the SidebarShell client component
   // updates the cookie on every toggle so subsequent reloads land in
