@@ -228,6 +228,15 @@ The box is now reachable; finish the provider side (also tracked in
   push subscription to
   `https://api.<domain>/webhooks/conversations/gmail/<tenantId>?token=<GMAIL_PUSH_TOKEN>`.
 
+> **Known behavior — compliance webhooks after a tenant is deleted.** In pilot
+> mode each shop's webhooks are HMAC-verified with that tenant's own provisioned
+> app secret. Deleting a tenant cascades away its `shopify_app_provisioning`
+> row, so a *late* `shop/redact` (Shopify sends it ~48h after uninstall) can no
+> longer be verified and the api returns `401`. This is safe — the tenant's data
+> was already wiped at deletion, so there's nothing left to redact — but Shopify
+> may log the delivery as failed. Nothing to action; don't mistake it for a
+> live-tenant webhook failure.
+
 ## 7. Updating
 
 ```sh
@@ -293,8 +302,18 @@ are inlined at **build** time, so set them in the shell for `cf:build`/`cf:deplo
 
 No middleware, so `cf:build` succeeds today. Secrets: `ADMIN_API_BASE_URL`,
 `ADMIN_API_TOKEN` (must equal the api's), `ADMIN_DASHBOARD_PASSWORD`,
-`ADMIN_SESSION_SECRET`. **Gate the deployed Worker behind Cloudflare Access or a
-non-public hostname** — it's operator-only. Run `cf:deploy` with your account.
+`ADMIN_SESSION_SECRET`. Run `cf:deploy` with your account.
+
+> **⚠️ Network-gate this app — required, not optional.** The operator console
+> authenticates with a **single shared password** and has **no login
+> rate-limiting or lockout**, yet it holds the `ADMIN_API_TOKEN` and can
+> provision Shopify credentials, revoke connectors, and **delete any tenant**.
+> A public login is brute-forceable. Put it behind **Cloudflare Access** (SSO /
+> email allowlist) or an IP allowlist / non-public hostname **before** exposing
+> it, and set a long, random `ADMIN_DASHBOARD_PASSWORD` (never the dev value).
+> Per-operator identity is still on the roadmap (audit rows record actor
+> `admin`, not an individual) — Cloudflare Access in front gives you the
+> per-person identity + MFA the app itself doesn't yet enforce.
 
 ### `apps/dashboard` — merchant dashboard ✅ deployable (middleware-less AuthKit)
 
