@@ -15,7 +15,14 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import { signInstallGrant } from "../src/install-grant.js";
 import type { ApiConfig } from "../src/bootstrap.js";
+
+// Dashboard-initiated installs carry a signed grant (key "k" matches pilotCfg).
+const grant = (tid: string): string =>
+  encodeURIComponent(
+    signInstallGrant("k", { tenantId: tid, provider: "shopify" }, Date.now() + 600_000),
+  );
 
 // A1 — the pilot provisioning gate must be enforced at the INSTALL endpoint,
 // not just the dashboard overview. In pilot mode an unprovisioned (or revoked)
@@ -131,7 +138,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("refuses an unprovisioned tenant with 403 (no global fallback)", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&tenant=${unprovisionedTenantId}`,
+      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&grant=${grant(unprovisionedTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
@@ -143,7 +150,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("refuses a revoked tenant with 403 (reason revoked)", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&tenant=${revokedTenantId}`,
+      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&grant=${grant(revokedTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
@@ -155,7 +162,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("refuses the no-shop store-picker path for an unprovisioned tenant", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?tenant=${unprovisionedTenantId}`,
+      `${pilotUrl}/shopify/install?grant=${grant(unprovisionedTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
@@ -164,7 +171,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("redirects a provisioned tenant to its OWN app (pilot-client), not the global app", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=gate-ready-uniq.myshopify.com&tenant=${readyTenantId}`,
+      `${pilotUrl}/shopify/install?shop=gate-ready-uniq.myshopify.com&grant=${grant(readyTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);
@@ -178,7 +185,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
   // (not the unverified admin.shopify.com managed-install store picker).
   it("uses the provisioned shop's authorize URL for a no-shop install", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?tenant=${shopBoundTenantId}`,
+      `${pilotUrl}/shopify/install?grant=${grant(shopBoundTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);

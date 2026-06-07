@@ -17,6 +17,7 @@ import {
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import { startServer, type ServerHandle } from "../src/server.js";
+import { signInstallGrant, verifyInstallGrant } from "../src/install-grant.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -407,10 +408,18 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   });
 
   it("GET /google/install rejects tenants without current legal acceptance", async () => {
-    const res = await fetch(
-      `${baseUrl}/google/install?tenant=${blockedTenantId}`,
-      { redirect: "manual" },
+    // Install now requires a signed grant; mint a valid one for the blocked
+    // tenant so the request reaches the legal check (which must reject it).
+    const grant = encodeURIComponent(
+      signInstallGrant(
+        "k",
+        { tenantId: blockedTenantId, provider: "gmail" },
+        Date.now() + 600_000,
+      ),
     );
+    const res = await fetch(`${baseUrl}/google/install?grant=${grant}`, {
+      redirect: "manual",
+    });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "legal_acceptance_required" });
   });
@@ -565,6 +574,44 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  // ---- Connector connect (authenticated install grant, 5th-audit #2) ----
+
+  it("POST /dashboard/connect/:provider mints a grant bound to the session's tenant", async () => {
+    const res = await post("/dashboard/connect/shopify");
+    expect(res.status).toBe(200);
+    const { url } = (await res.json()) as { url: string };
+    expect(url).toContain("/shopify/install?grant=");
+    const grant = new URL(url).searchParams.get("grant");
+    const decoded = verifyInstallGrant("k", grant ?? "");
+    // The tenant is derived from the authenticated session (x-org-id →
+    // tenant), NOT supplied by the client.
+    expect(decoded).toEqual({ tenantId, provider: "shopify" });
+  });
+
+  it("POST /dashboard/connect/:provider mints a google grant for gmail", async () => {
+    const res = await post("/dashboard/connect/gmail");
+    expect(res.status).toBe(200);
+    const { url } = (await res.json()) as { url: string };
+    expect(url).toContain("/google/install?grant=");
+    const decoded = verifyInstallGrant(
+      "k",
+      new URL(url).searchParams.get("grant") ?? "",
+    );
+    expect(decoded).toEqual({ tenantId, provider: "gmail" });
+  });
+
+  it("POST /dashboard/connect/:provider 400s on an unknown provider", async () => {
+    const res = await post("/dashboard/connect/stripe");
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /dashboard/connect/:provider rejects an unauthenticated request", async () => {
+    const res = await fetch(`${baseUrl}/dashboard/connect/shopify`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
   });
 
   // ---- Connector disconnect ----

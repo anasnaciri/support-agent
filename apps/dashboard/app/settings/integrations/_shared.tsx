@@ -145,24 +145,13 @@ export const getApiBaseUrl = (): string | null =>
   originFromEnvUrl(process.env["APPROVAL_BASE_URL"]);
 
 /**
- * The OAuth/install href for a provider's Connect / Reconnect / Reinstall
- * button. Shared so the overview and manage page stay in lockstep.
+ * The Connect / Reconnect / Reinstall href for a provider. Points at the
+ * dashboard's OWN `/connect/<provider>` route (same origin), NOT the api
+ * install URL with a raw `?tenant=`. That route authenticates the user via
+ * their WorkOS session, has the api mint a short-lived signed install grant
+ * for THEIR tenant, then redirects to the provider OAuth — so the tenant is
+ * never client-supplied and one merchant can't start an install for another
+ * (5th-audit #2).
  */
-export const connectHref = (
-  provider: SupportedProvider,
-  apiBaseUrl: string,
-  tenantId: string,
-  loginHint: string | null,
-): string => {
-  const hint = loginHint
-    ? `&login_hint=${encodeURIComponent(loginHint)}`
-    : "";
-  switch (provider) {
-    case "shopify":
-      return `${apiBaseUrl}/shopify/install?tenant=${encodeURIComponent(tenantId)}`;
-    case "gmail":
-      return `${apiBaseUrl}/google/install?tenant=${encodeURIComponent(tenantId)}${hint}`;
-    case "google_sheets":
-      return `${apiBaseUrl}/google/install?tenant=${encodeURIComponent(tenantId)}&provider=google_sheets${hint}`;
-  }
-};
+export const connectHref = (provider: SupportedProvider): string =>
+  `/connect/${provider}`;

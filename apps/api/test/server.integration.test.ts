@@ -25,6 +25,10 @@ import {
   signState,
   verifyState,
 } from "../src/shopify-install.js";
+import {
+  signInstallGrant,
+  type InstallGrantProvider,
+} from "../src/install-grant.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -36,6 +40,19 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
   const encryptionKey = randomBytes(32);
   const encryptionKeyB64 = encryptionKey.toString("base64");
   const stateSigningKey = "test-state-key";
+
+  // The dashboard-initiated install now carries a signed grant, not ?tenant=.
+  const installGrant = (
+    tid: string,
+    provider: InstallGrantProvider = "shopify",
+  ): string =>
+    encodeURIComponent(
+      signInstallGrant(
+        stateSigningKey,
+        { tenantId: tid, provider },
+        Date.now() + 600_000,
+      ),
+    );
   const autoCreatedShopDomains = [
     "custom-dist-shop.myshopify.com",
     "signed-install-shop.myshopify.com",
@@ -181,7 +198,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
 
   it("GET /shopify/install redirects to Shopify's authorize URL", async () => {
     const res = await fetch(
-      `${baseUrl}/shopify/install?shop=acme.myshopify.com&tenant=${tenantId}`,
+      `${baseUrl}/shopify/install?shop=acme.myshopify.com&grant=${installGrant(tenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);
@@ -197,7 +214,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
 
   it("GET /shopify/install without a shop redirects to Shopify's store picker", async () => {
     const res = await fetch(
-      `${baseUrl}/shopify/install?tenant=${tenantId}`,
+      `${baseUrl}/shopify/install?grant=${installGrant(tenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);
@@ -225,6 +242,41 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /shopify/install rejects an invalid install grant", async () => {
+    const res = await fetch(
+      `${baseUrl}/shopify/install?shop=acme.myshopify.com&grant=not-a-real-grant`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("invalid_install_grant");
+  });
+
+  it("GET /shopify/install ignores a raw ?tenant= (cross-tenant injection blocked, 5th-audit #2)", async () => {
+    // A raw tenant id is no longer trusted. With a shop but no signed grant
+    // this falls through to the Shopify-initiated path, which requires a valid
+    // HMAC — so it can't start an install for an arbitrary tenant.
+    const res = await fetch(
+      `${baseUrl}/shopify/install?shop=acme.myshopify.com&tenant=${tenantId}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /shopify/install rejects a grant signed with the wrong key", async () => {
+    const forged = encodeURIComponent(
+      signInstallGrant(
+        "attacker-key",
+        { tenantId, provider: "shopify" },
+        Date.now() + 600_000,
+      ),
+    );
+    const res = await fetch(
+      `${baseUrl}/shopify/install?shop=acme.myshopify.com&grant=${forged}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("GET /shopify/install rejects a tenant without legal acceptance", async () => {
     const noLegalTenantId = randomUUID();
     extraTenantIds.push(noLegalTenantId);
@@ -233,7 +285,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
       .values({ id: noLegalTenantId, name: "no-legal-shopify" });
 
     const res = await fetch(
-      `${baseUrl}/shopify/install?shop=no-legal.myshopify.com&tenant=${noLegalTenantId}`,
+      `${baseUrl}/shopify/install?shop=no-legal.myshopify.com&grant=${installGrant(noLegalTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
@@ -250,7 +302,7 @@ describeIfDb("apps/api — Shopify install + callback (integration)", () => {
     await seedShopifyConnection(ownerTenantId, shop);
 
     const res = await fetch(
-      `${baseUrl}/shopify/install?shop=${shop}&tenant=${tenantId}`,
+      `${baseUrl}/shopify/install?shop=${shop}&grant=${installGrant(tenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(409);

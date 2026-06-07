@@ -1,4 +1,3 @@
-import { withAuth } from "@workos-inc/authkit-nextjs";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ClipboardList } from "lucide-react";
 
@@ -54,10 +53,7 @@ export default async function ConnectorManagePage({
   if (!isSupportedProvider(provider)) notFound();
 
   const ctx = await getDashboardContext();
-  const tenantId = ctx.tenantId;
   const apiBaseUrl = getApiBaseUrl();
-  const { user } = await withAuth();
-  const loginHint = user?.email ?? null;
 
   const label = PROVIDER_LABELS[provider] ?? provider;
   const description = PROVIDER_DESCRIPTIONS[provider] ?? "";
@@ -217,7 +213,7 @@ export default async function ConnectorManagePage({
             legalAccepted &&
             missingCapability ? (
               <Button variant="outline" asChild>
-                <a href={connectHref("shopify", apiBaseUrl, tenantId, loginHint)}>
+                <a href={connectHref("shopify")}>
                   Reinstall to update scopes
                 </a>
               </Button>
@@ -237,7 +233,7 @@ export default async function ConnectorManagePage({
               </div>
             ) : showConnect && apiBaseUrl ? (
               <Button asChild>
-                <a href={connectHref(provider, apiBaseUrl, tenantId, loginHint)}>
+                <a href={connectHref(provider)}>
                   {tone === "revoked" ? `Reconnect ${label}` : `Connect ${label}`}
                 </a>
               </Button>

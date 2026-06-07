@@ -1,4 +1,3 @@
-import { withAuth } from "@workos-inc/authkit-nextjs";
 import Link from "next/link";
 import { AlertTriangle, Settings2 } from "lucide-react";
 
@@ -48,7 +47,6 @@ interface PageProps {
 
 export default async function IntegrationsPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
-  const tenantId = ctx.tenantId;
   const params = (await searchParams) ?? {};
   const shopifyParam = params["shopify"];
   const shopifyBanner =
@@ -71,8 +69,6 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
     ? (PROVIDER_LABELS[connectedValue] ?? null)
     : null;
   const apiBaseUrl = getApiBaseUrl();
-  const { user } = await withAuth();
-  const loginHint = user?.email ?? null;
 
   const [rows, settings, shopifyGate] = await Promise.all([
     api.connections(ctx),
@@ -233,7 +229,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   ) : apiBaseUrl ? (
                     <Button asChild>
                       <a
-                        href={connectHref(p, apiBaseUrl, tenantId, loginHint)}
+                        href={connectHref(p)}
                       >
                         {tone === "revoked"
                           ? `Reconnect ${label}`

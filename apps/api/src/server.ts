@@ -80,6 +80,12 @@ import {
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
 import {
+  INSTALL_GRANT_TTL_MS,
+  isInstallGrantProvider,
+  signInstallGrant,
+  verifyInstallGrant,
+} from "./install-grant.js";
+import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
   type GlobalShopifyApp,
@@ -1640,6 +1646,35 @@ const revokeConnectorProviderGrants = (
     return { revoked: active.length, providerRevoked };
   });
 
+// POST /dashboard/connect/:provider — mint a signed, short-lived install
+// grant for the AUTHENTICATED tenant and return the provider install URL
+// (5th-audit #2). Authorization comes from the dashboard's bearer token +
+// x-org-id (→ org→tenant), so the tenant is derived server-side from the
+// session, never supplied by the client. The install endpoints then require
+// this grant instead of a raw `?tenant=`.
+const handleDashboardConnect = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { provider } = req.params as { provider: string };
+  if (!isInstallGrantProvider(provider)) {
+    return sendJson(res, 400, { error: "bad_provider" });
+  }
+  const grant = signInstallGrant(
+    cfg.stateSigningKey,
+    { tenantId: auth.tenantId, provider },
+    Date.now() + INSTALL_GRANT_TTL_MS,
+  );
+  const apiOrigin = new URL(cfg.shopify.callbackUrl).origin;
+  const path = provider === "shopify" ? "/shopify/install" : "/google/install";
+  const url = `${apiOrigin}${path}?grant=${encodeURIComponent(grant)}`;
+  return sendJson(res, 200, { url });
+};
+
 // POST /dashboard/connections/:provider/disconnect — revoke a connector.
 const handleDashboardDisconnect = async (
   cfg: ApiConfig,
@@ -1864,7 +1899,21 @@ const handleShopifyInstall = async (
   const { params } = readQuery(req);
   const shopParam = params["shop"];
   const shop = shopParam ? normalizeShopDomain(shopParam) : null;
-  let tenant = params["tenant"];
+  // The dashboard-initiated install carries a SIGNED grant (minted by the
+  // authenticated /dashboard/connect endpoint), not a raw tenant id — so an
+  // attacker can't start an install that binds their store to a victim tenant
+  // (5th-audit #2). A raw `?tenant=` is no longer accepted. The Shopify-
+  // initiated path (no grant, has `hmac`) is unchanged below.
+  let tenant: string | undefined;
+  const grantParam = params["grant"];
+  if (grantParam) {
+    const grant = verifyInstallGrant(cfg.stateSigningKey, grantParam);
+    if (!grant || grant.provider !== "shopify") {
+      sendJson(res, 401, { error: "invalid_install_grant" });
+      return;
+    }
+    tenant = grant.tenantId;
+  }
   if (shopParam && !shop) {
     sendJson(res, 400, { error: "missing_or_invalid_shop" });
     return;
@@ -2686,21 +2735,23 @@ const handleGoogleInstall = async (
     return;
   }
   const { params } = readQuery(req);
-  const tenant = params["tenant"];
-  if (!tenant) {
-    sendJson(res, 400, { error: "missing_tenant" });
+  // Require a signed install grant (minted by the authenticated
+  // /dashboard/connect endpoint) — never a raw `?tenant=` (5th-audit #2).
+  // The grant carries BOTH the tenant and the Google connector.
+  const grantParam = params["grant"];
+  if (!grantParam) {
+    sendJson(res, 400, { error: "missing_install_grant" });
     return;
   }
+  const grant = verifyInstallGrant(cfg.stateSigningKey, grantParam);
+  if (!grant || !isGoogleOAuthProvider(grant.provider)) {
+    sendJson(res, 401, { error: "invalid_install_grant" });
+    return;
+  }
+  const tenant = grant.tenantId;
+  const providerParam = grant.provider;
   if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
     sendLegalAcceptanceRequired(res);
-    return;
-  }
-  const providerParam = params["provider"] ?? params["connector"] ?? "gmail";
-  if (!isGoogleOAuthProvider(providerParam)) {
-    sendJson(res, 400, {
-      error: "unsupported_google_provider",
-      provider: providerParam,
-    });
     return;
   }
   const state = signGoogleInstallState(cfg.stateSigningKey, {
@@ -3547,6 +3598,11 @@ export const startServer = async (
     "/dashboard/supplier-sheet/clear",
     "Clear the supplier-escalation sheet",
     handleDashboardSupplierSheetClear,
+  );
+  dashboardPost(
+    "/dashboard/connect/:provider",
+    "Mint a signed install grant + return the provider install URL",
+    handleDashboardConnect,
   );
   dashboardPost(
     "/dashboard/connections/:provider/disconnect",

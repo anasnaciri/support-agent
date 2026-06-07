@@ -447,6 +447,23 @@ export const api = {
       ctx,
     }),
 
+  // Mint a signed install grant for the authenticated tenant and get the
+  // provider OAuth install URL (5th-audit #2). The tenant is derived
+  // server-side from the session, never client-supplied.
+  connectUrl: async (
+    ctx: CallCtx,
+    provider: string,
+  ): Promise<{ readonly url: string }> => {
+    const { status, body } = await call(
+      `/connect/${encodeURIComponent(provider)}`,
+      { method: "POST", ctx },
+    );
+    if (status !== 200 || typeof (body as { url?: unknown })?.url !== "string") {
+      throw new Error(`dashboard api ${status} on /connect/${provider}`);
+    }
+    return body as { url: string };
+  },
+
   approveApproval: async (
     ctx: CallCtx,
     id: string,
