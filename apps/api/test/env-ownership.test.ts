@@ -36,9 +36,19 @@ describe("environment file ownership", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("loads command-specific env from the owning app or package", () => {
-    expect(readRepoFile("scripts/restart-api.sh")).toContain(
-      "apps/api/.env.local",
+  it("uses owning app and package commands without a root API wrapper", () => {
+    expect(existsSync(`${repoRoot}/scripts/restart-api.sh`)).toBe(false);
+
+    const rootPackage = JSON.parse(readRepoFile("package.json")) as {
+      scripts: Record<string, string>;
+    };
+    expect(rootPackage.scripts["api:restart"]).toBeUndefined();
+
+    const apiPackage = JSON.parse(readRepoFile("apps/api/package.json")) as {
+      scripts: Record<string, string>;
+    };
+    expect(apiPackage.scripts["start:dev"]).toContain(
+      "--env-file=.env.local",
     );
 
     const dbPackage = JSON.parse(readRepoFile("packages/db/package.json")) as {

@@ -12,7 +12,6 @@
     "ci:local": "sh scripts/ci-local.sh",
     "typecheck": "tsc -b",
     "clean": "tsc -b --clean",
-    "api:restart": "sh scripts/restart-api.sh",
     "hooks:install": "sh scripts/install-git-hooks.sh --required",
     "prepare": "sh scripts/install-git-hooks.sh",
     "test": "vitest run",
