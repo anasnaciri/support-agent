@@ -20,7 +20,7 @@ WORKDIR /app
 
 FROM base AS build
 COPY . .
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,id=support-agent-pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm build
 ENV NODE_ENV=production

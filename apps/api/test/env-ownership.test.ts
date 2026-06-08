@@ -71,4 +71,11 @@ describe("environment file ownership", () => {
     expect(compose).not.toContain(".env.prod");
     expect(compose).toContain("deploy/compose/.env");
   });
+
+  it("gives the Railway BuildKit cache mount an explicit id", () => {
+    const dockerfile = readRepoFile("deploy/railway/Dockerfile");
+    expect(dockerfile).toContain(
+      "--mount=type=cache,id=support-agent-pnpm,target=/root/.local/share/pnpm/store",
+    );
+  });
 });
