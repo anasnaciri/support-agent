@@ -1415,6 +1415,70 @@ const handleDashboardAgentModelClear = async (
   return sendJson(res, 200, { ok: true });
 };
 
+// POST /dashboard/agents/:id/system-prompt — set the tenant's custom prompt
+// (appended to the agent's built-in prompt). A blank body clears it, so the
+// dashboard can "save empty" to revert without a separate request.
+const handleDashboardAgentSystemPromptSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!ALL_AGENTS.some((a) => a.id === id)) {
+    return sendJson(res, 404, { error: "unknown_agent" });
+  }
+  const body = parseJsonBody(req);
+  const systemPrompt =
+    typeof body["systemPrompt"] === "string" ? body["systemPrompt"].trim() : "";
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        if (systemPrompt) {
+          yield* svc.setSystemPrompt(
+            TenantId(auth.tenantId),
+            AgentId(id),
+            systemPrompt,
+          );
+        } else {
+          yield* svc.clearSystemPrompt(TenantId(auth.tenantId), AgentId(id));
+        }
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/agents/:id/system-prompt/clear — drop the custom prompt
+// (→ bare AgentConfig prompt). Keeps any model override on the same row.
+const handleDashboardAgentSystemPromptClear = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!ALL_AGENTS.some((a) => a.id === id)) {
+    return sendJson(res, 404, { error: "unknown_agent" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        yield* svc.clearSystemPrompt(TenantId(auth.tenantId), AgentId(id));
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
 // POST /dashboard/llm — connect a BYOK LLM credential (api encrypts + stores).
 const handleDashboardLlmConnect = async (
   cfg: ApiConfig,
@@ -3596,6 +3660,16 @@ export const startServer = async (
     "/dashboard/agents/:id/model/clear",
     "Clear a per-agent model override",
     handleDashboardAgentModelClear,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/system-prompt",
+    "Set a per-agent system prompt (appended to the built-in prompt)",
+    handleDashboardAgentSystemPromptSet,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/system-prompt/clear",
+    "Clear a per-agent system prompt",
+    handleDashboardAgentSystemPromptClear,
   );
   dashboardPost(
     "/dashboard/llm",

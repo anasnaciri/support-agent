@@ -589,10 +589,15 @@ export const agentOverrides = async (
     .select({
       agentId: tenantAgentOverrides.agentId,
       model: tenantAgentOverrides.model,
+      systemPrompt: tenantAgentOverrides.systemPrompt,
     })
     .from(tenantAgentOverrides)
     .where(eq(tenantAgentOverrides.tenantId, tenantId));
-  return rows.map((r) => ({ agentId: r.agentId, model: r.model }));
+  return rows.map((r) => ({
+    agentId: r.agentId,
+    model: r.model,
+    systemPrompt: r.systemPrompt,
+  }));
 };
 
 /** Shop domain of the tenant's active Shopify connection, or null. */

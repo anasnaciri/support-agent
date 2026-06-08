@@ -50,3 +50,48 @@ export const clearAgentModelAction = async (
   revalidatePath("/settings/agents");
   redirect(`/settings/agents/${encodeURIComponent(agentId)}?model=reset`);
 };
+
+export const setAgentSystemPromptAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const ctx = await getDashboardContext();
+
+  const agentIdRaw = formData.get("agentId");
+  const promptRaw = formData.get("systemPrompt");
+  const agentId = typeof agentIdRaw === "string" ? agentIdRaw.trim() : "";
+  const systemPrompt = typeof promptRaw === "string" ? promptRaw.trim() : "";
+
+  if (!agentId) redirect("/settings/agents");
+  // Catalog-side guard: only touch overrides for an agent that exists.
+  const catalog = await api.catalog(ctx);
+  const agent = findAgent(catalog, agentId);
+  if (!agent) redirect("/settings/agents");
+
+  // Saving an empty prompt reverts to the built-in prompt (the api treats a
+  // blank body as a clear too; we mirror it here so the banner reads "reset").
+  if (systemPrompt === "") {
+    await api.clearAgentSystemPrompt(ctx, agentId);
+  } else {
+    await api.setAgentSystemPrompt(ctx, agentId, systemPrompt);
+  }
+
+  revalidatePath(`/settings/agents/${agentId}`);
+  redirect(
+    `/settings/agents/${encodeURIComponent(agentId)}?prompt=${systemPrompt === "" ? "reset" : "updated"}`,
+  );
+};
+
+export const clearAgentSystemPromptAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const ctx = await getDashboardContext();
+
+  const agentIdRaw = formData.get("agentId");
+  const agentId = typeof agentIdRaw === "string" ? agentIdRaw.trim() : "";
+  if (!agentId) redirect("/settings/agents");
+
+  await api.clearAgentSystemPrompt(ctx, agentId);
+
+  revalidatePath(`/settings/agents/${agentId}`);
+  redirect(`/settings/agents/${encodeURIComponent(agentId)}?prompt=reset`);
+};

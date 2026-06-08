@@ -280,10 +280,15 @@ export const AgentRuntimeDefault = Layer.effect(
 
     /**
      * Apply per-tenant per-agent overrides on top of the in-code
-     * AgentConfig. Today only `model` is overridable; future fields
-     * (temperature, prompt suffix, …) plug in here. Returns the same
-     * object reference when no override applies, so the hot path doesn't
-     * allocate.
+     * AgentConfig:
+     *   - `model` replaces `AgentConfig.model`.
+     *   - `systemPrompt` is appended to `AgentConfig.promptTemplate` as extra
+     *     instructions (brand voice / policy / tone) — the built-in prompt is
+     *     kept so the agent's tool / handoff / approval scaffolding survives.
+     *     `buildSystemPrompt` reads the patched `promptTemplate`, so the
+     *     append flows through for the initial agent and any handoff.
+     * Returns the same object reference when no override applies, so the hot
+     * path doesn't allocate. Future fields (temperature, …) plug in here.
      */
     const applyOverride = (
       agent: AgentConfig,
@@ -291,10 +296,18 @@ export const AgentRuntimeDefault = Layer.effect(
     ): AgentConfig => {
       const o = overrideMap.get(agent.id);
       if (!o) return agent;
+      let next = agent;
       if (o.model && o.model !== agent.model) {
-        return { ...agent, model: o.model };
+        next = { ...next, model: o.model };
       }
-      return agent;
+      const extra = o.systemPrompt?.trim();
+      if (extra) {
+        next = {
+          ...next,
+          promptTemplate: `${agent.promptTemplate}\n\n${extra}`,
+        };
+      }
+      return next;
     };
 
     const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>

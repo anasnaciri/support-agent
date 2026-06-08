@@ -392,6 +392,141 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(empty.status).toBe(400);
   });
 
+  // ---- Agent system prompt override ----
+
+  it("POST /dashboard/agents/:id/system-prompt sets + clears a custom prompt", async () => {
+    if (!raw) return;
+    const set = await post("/dashboard/agents/support-triage/system-prompt", {
+      systemPrompt: "Always greet customers as Acme.",
+    });
+    expect(set.status).toBe(200);
+    const [row] = await raw.db
+      .select({ systemPrompt: tenantAgentOverrides.systemPrompt })
+      .from(tenantAgentOverrides)
+      .where(
+        and(
+          eq(tenantAgentOverrides.tenantId, tenantId),
+          eq(tenantAgentOverrides.agentId, "support-triage"),
+        ),
+      )
+      .limit(1);
+    expect(row?.systemPrompt).toBe("Always greet customers as Acme.");
+
+    const clear = await post(
+      "/dashboard/agents/support-triage/system-prompt/clear",
+    );
+    expect(clear.status).toBe(200);
+    const after = await raw.db
+      .select({ agentId: tenantAgentOverrides.agentId })
+      .from(tenantAgentOverrides)
+      .where(
+        and(
+          eq(tenantAgentOverrides.tenantId, tenantId),
+          eq(tenantAgentOverrides.agentId, "support-triage"),
+        ),
+      );
+    expect(after.length).toBe(0);
+  });
+
+  it("POST /dashboard/agents/:id/system-prompt 404s unknown agent; blank body clears", async () => {
+    const unknown = await post("/dashboard/agents/nope/system-prompt", {
+      systemPrompt: "x",
+    });
+    expect(unknown.status).toBe(404);
+    // Blank/whitespace prompt is treated as a clear (idempotent → 200, no row).
+    const blank = await post(
+      "/dashboard/agents/order-status-agent/system-prompt",
+      { systemPrompt: "   " },
+    );
+    expect(blank.status).toBe(200);
+    if (!raw) return;
+    const after = await raw.db
+      .select({ agentId: tenantAgentOverrides.agentId })
+      .from(tenantAgentOverrides)
+      .where(
+        and(
+          eq(tenantAgentOverrides.tenantId, tenantId),
+          eq(tenantAgentOverrides.agentId, "order-status-agent"),
+        ),
+      );
+    expect(after.length).toBe(0);
+  });
+
+  it("system prompt and model override coexist; clearing one keeps the other", async () => {
+    if (!raw) return;
+    const agentId = "damaged-product-agent";
+    const selectRow = () =>
+      raw.db
+        .select({
+          model: tenantAgentOverrides.model,
+          systemPrompt: tenantAgentOverrides.systemPrompt,
+        })
+        .from(tenantAgentOverrides)
+        .where(
+          and(
+            eq(tenantAgentOverrides.tenantId, tenantId),
+            eq(tenantAgentOverrides.agentId, agentId),
+          ),
+        )
+        .limit(1);
+
+    expect(
+      (
+        await post(`/dashboard/agents/${agentId}/model`, {
+          model: "anthropic/claude-opus-4-8",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await post(`/dashboard/agents/${agentId}/system-prompt`, {
+          systemPrompt: "Be kind.",
+        })
+      ).status,
+    ).toBe(200);
+    const [both] = await selectRow();
+    expect(both?.model).toBe("anthropic/claude-opus-4-8");
+    expect(both?.systemPrompt).toBe("Be kind.");
+
+    // Clearing the model must NOT wipe the system prompt.
+    expect(
+      (await post(`/dashboard/agents/${agentId}/model/clear`)).status,
+    ).toBe(200);
+    const [afterModelClear] = await selectRow();
+    expect(afterModelClear?.model).toBeNull();
+    expect(afterModelClear?.systemPrompt).toBe("Be kind.");
+
+    // Clearing the prompt now empties the row entirely.
+    expect(
+      (await post(`/dashboard/agents/${agentId}/system-prompt/clear`)).status,
+    ).toBe(200);
+    const after = await selectRow();
+    expect(after.length).toBe(0);
+  });
+
+  it("GET /dashboard/agent-overrides includes the system prompt", async () => {
+    const agentId = "missing-package-agent";
+    expect(
+      (
+        await post(`/dashboard/agents/${agentId}/system-prompt`, {
+          systemPrompt: "House style.",
+        })
+      ).status,
+    ).toBe(200);
+    const res = await get("/dashboard/agent-overrides");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      overrides: ReadonlyArray<{
+        agentId: string;
+        model: string | null;
+        systemPrompt: string | null;
+      }>;
+    };
+    const row = body.overrides.find((o) => o.agentId === agentId);
+    expect(row?.systemPrompt).toBe("House style.");
+    await post(`/dashboard/agents/${agentId}/system-prompt/clear`);
+  });
+
   // ---- LLM credential ----
 
   it("POST /dashboard/llm rejects tenants without current legal acceptance", async () => {

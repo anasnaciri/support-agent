@@ -1,0 +1,1 @@
+ALTER TABLE "tenant_agent_overrides" ADD COLUMN "system_prompt" text;

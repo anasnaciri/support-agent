@@ -280,15 +280,20 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(typeof body.rows[0]?.occurredAt).toBe("string");
   });
 
-  it("GET /dashboard/agent-overrides — per-agent model overrides", async () => {
+  it("GET /dashboard/agent-overrides — per-agent overrides", async () => {
     if (!raw) return;
     const body = (await (await get("/dashboard/agent-overrides")).json()) as {
-      overrides: ReadonlyArray<{ agentId: string; model: string | null }>;
+      overrides: ReadonlyArray<{
+        agentId: string;
+        model: string | null;
+        systemPrompt: string | null;
+      }>;
     };
     expect(body.overrides).toHaveLength(1);
     expect(body.overrides[0]).toEqual({
       agentId: "refund-review-agent",
       model: "anthropic/claude-opus-4-8",
+      systemPrompt: null,
     });
   });
 

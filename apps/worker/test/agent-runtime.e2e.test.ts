@@ -3398,6 +3398,72 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
     expect(captured.model).not.toBe(supportTriage.model);
   });
 
+  it("appends the tenant system prompt to the agent prompt at LLM call time", async () => {
+    const captured: { system: string | null } = { system: null };
+    const customPrompt =
+      "ACME house style: greet with 'Hi there!' and sign off '— The Acme Team'.";
+
+    const overrideLayer = TenantAgentOverridesServiceTest([
+      {
+        tenantId: TenantId("tenant-prompt-acme"),
+        agentId: supportTriage.id,
+        systemPrompt: customPrompt,
+        updatedAt: new Date(),
+      },
+    ]);
+
+    const captureLlm = LLMServiceFromFn((req) => {
+      captured.system = req.system;
+      return Eff.succeed<LLMDecision>({
+        type: "final_message",
+        text: "ok",
+      });
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        trackingLookup as never,
+      ]),
+      PermissionServiceDefault,
+      captureLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      overrideLayer,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(AgentRuntime, (runtime) =>
+          runtime.handleEvent(ticketCreated("hello", "tenant-prompt-acme")),
+        ),
+        layer,
+      ),
+    );
+
+    // The built-in prompt is preserved (tool/handoff scaffolding intact) AND
+    // the tenant's text is appended after it.
+    expect(captured.system).toContain(supportTriage.promptTemplate);
+    expect(captured.system).toContain(customPrompt);
+    expect(captured.system?.indexOf(customPrompt) ?? -1).toBeGreaterThan(
+      captured.system?.indexOf(supportTriage.promptTemplate) ?? -1,
+    );
+  });
+
   it("falls through to AgentConfig.model when no override exists for the agent", async () => {
     const captured: { model: string | null } = { model: null };
 

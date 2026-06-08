@@ -14,6 +14,8 @@ import {
   ModelCombobox,
   type ModelOption,
 } from "@/components/ui/model-combobox";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -24,7 +26,9 @@ import {
 } from "@/components/ui/table";
 import {
   clearAgentModelAction,
+  clearAgentSystemPromptAction,
   setAgentModelAction,
+  setAgentSystemPromptAction,
 } from "./actions";
 
 interface Props {
@@ -71,9 +75,13 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
 
   const sp = (await searchParams) ?? {};
   const modelBanner = Array.isArray(sp["model"]) ? sp["model"][0] : sp["model"];
+  const promptBanner = Array.isArray(sp["prompt"])
+    ? sp["prompt"][0]
+    : sp["prompt"];
 
-  const overrides = new Map(overrideRows.map((o) => [o.agentId, o.model]));
-  const override = overrides.get(agent.id) ?? null;
+  const overrideRow = overrideRows.find((o) => o.agentId === agent.id) ?? null;
+  const override = overrideRow?.model ?? null;
+  const systemPromptOverride = overrideRow?.systemPrompt ?? null;
   const effectiveModel = override ?? agent.model;
 
   // The api resolves the tenant's LLM credential server-side and returns the
@@ -118,6 +126,18 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
         <Alert variant="success">
           <AlertDescription>
             Model reset to the agent default.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {promptBanner === "updated" ? (
+        <Alert variant="success">
+          <AlertDescription>System prompt saved.</AlertDescription>
+        </Alert>
+      ) : null}
+      {promptBanner === "reset" ? (
+        <Alert variant="success">
+          <AlertDescription>
+            System prompt reset to the built-in prompt.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -326,13 +346,59 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
       ) : null}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Prompt</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">System prompt</CardTitle>
         </CardHeader>
-        <CardContent>
-          <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
-            {agent.promptTemplate}
-          </pre>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Add your own instructions for this agent — brand voice, policies,
+            tone. Your text is <strong>appended</strong> to the built-in prompt,
+            so the agent keeps its tools, handoffs, and approval steps. Leave it
+            empty to use the built-in prompt only.
+          </p>
+
+          <form action={setAgentSystemPromptAction} className="space-y-3">
+            <input type="hidden" name="agentId" value={agent.id} />
+            <div className="space-y-1.5">
+              <Label htmlFor="systemPrompt">Your instructions</Label>
+              <Textarea
+                id="systemPrompt"
+                name="systemPrompt"
+                defaultValue={systemPromptOverride ?? ""}
+                placeholder={
+                  "e.g. Greet customers warmly and sign off as “The Acme Team.” We offer free returns within 45 days."
+                }
+                className="min-h-[160px] font-mono text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button type="submit">Save</Button>
+              {systemPromptOverride ? (
+                <Badge variant="info">custom prompt active</Badge>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  using built-in prompt
+                </span>
+              )}
+            </div>
+          </form>
+
+          {systemPromptOverride ? (
+            <form action={clearAgentSystemPromptAction}>
+              <input type="hidden" name="agentId" value={agent.id} />
+              <Button type="submit" variant="outline" size="sm">
+                <RotateCcw className="size-3.5" aria-hidden />
+                Reset to built-in prompt
+              </Button>
+            </form>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <Label>Built-in prompt (read-only)</Label>
+            <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
+              {agent.promptTemplate}
+            </pre>
+          </div>
         </CardContent>
       </Card>
     </div>

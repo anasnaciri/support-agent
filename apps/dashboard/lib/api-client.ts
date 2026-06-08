@@ -405,6 +405,26 @@ export const api = {
       ctx,
     }),
 
+  setAgentSystemPrompt: (
+    ctx: CallCtx,
+    agentId: string,
+    systemPrompt: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/system-prompt`, {
+      method: "POST",
+      body: { systemPrompt },
+      ctx,
+    }),
+
+  clearAgentSystemPrompt: (
+    ctx: CallCtx,
+    agentId: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/system-prompt/clear`, {
+      method: "POST",
+      ctx,
+    }),
+
   connectLlm: (
     ctx: CallCtx,
     input: {

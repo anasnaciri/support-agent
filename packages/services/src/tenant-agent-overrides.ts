@@ -10,15 +10,23 @@ import {
 // ============================================================
 
 /**
- * Per-tenant per-agent override row. The agent's hardcoded
- * `AgentConfig.model` is used unless this row exists and supplies a
- * different value. Today only the model is overridable, but this shape
- * is structured to grow (temperature, maxTurns, prompt suffix, …) without
- * a new Tag.
+ * Per-tenant per-agent override row. Each field overlays the in-code
+ * `AgentConfig`:
+ *   - `model` overrides `AgentConfig.model` (null → use the config default).
+ *   - `systemPrompt` is tenant-authored text **appended** to
+ *     `AgentConfig.promptTemplate` as extra instructions (brand voice,
+ *     policy, tone) — not a replacement, so the agent keeps its tool /
+ *     handoff / approval scaffolding (null → no extra instructions).
+ *
+ * Both fields share ONE row per (tenant, agent), so clears are field-aware:
+ * setting one field preserves the other, and the row is removed only when
+ * both are null. The shape is still structured to grow (temperature,
+ * maxTurns, …) without a new Tag.
  */
 export interface AgentOverride {
   readonly agentId: AgentId;
   readonly model: string | null;
+  readonly systemPrompt: string | null;
   readonly updatedAt: Date;
 }
 
@@ -49,15 +57,42 @@ export class TenantAgentOverridesService extends Context.Tag(
       ConnectorStoreDbError
     >;
 
-    /** Upsert the model override for one (tenant, agent) pair. */
+    /**
+     * Upsert the model override for one (tenant, agent) pair. Preserves any
+     * existing `systemPrompt` on the same row.
+     */
     readonly setModel: (
       tenantId: TenantId,
       agentId: AgentId,
       model: string,
     ) => Effect.Effect<void, ConnectorStoreDbError>;
 
-    /** Drop the override row entirely (revert to AgentConfig default). */
+    /**
+     * Clear the model override (revert to AgentConfig default). Preserves any
+     * `systemPrompt` on the same row; the row is removed only when both
+     * fields become null.
+     */
     readonly clearModel: (
+      tenantId: TenantId,
+      agentId: AgentId,
+    ) => Effect.Effect<void, ConnectorStoreDbError>;
+
+    /**
+     * Upsert the tenant-authored system prompt for one (tenant, agent) pair.
+     * Preserves any existing `model` override on the same row.
+     */
+    readonly setSystemPrompt: (
+      tenantId: TenantId,
+      agentId: AgentId,
+      systemPrompt: string,
+    ) => Effect.Effect<void, ConnectorStoreDbError>;
+
+    /**
+     * Clear the system prompt (revert to the bare AgentConfig prompt).
+     * Preserves any `model` override on the same row; the row is removed only
+     * when both fields become null.
+     */
+    readonly clearSystemPrompt: (
       tenantId: TenantId,
       agentId: AgentId,
     ) => Effect.Effect<void, ConnectorStoreDbError>;
@@ -76,7 +111,13 @@ interface TestKey {
 const keyStr = (k: TestKey): string => `${k.tenantId}\x00${k.agentId}`;
 
 export const TenantAgentOverridesServiceTest = (
-  seed: ReadonlyArray<{ readonly tenantId: TenantId } & AgentOverride> = [],
+  seed: ReadonlyArray<{
+    readonly tenantId: TenantId;
+    readonly agentId: AgentId;
+    readonly model?: string | null;
+    readonly systemPrompt?: string | null;
+    readonly updatedAt: Date;
+  }> = [],
 ) =>
   Layer.sync(TenantAgentOverridesService, () => {
     const store = new Map<string, { tenantId: TenantId; override: AgentOverride }>();
@@ -85,11 +126,33 @@ export const TenantAgentOverridesServiceTest = (
         tenantId: row.tenantId,
         override: {
           agentId: row.agentId,
-          model: row.model,
+          model: row.model ?? null,
+          systemPrompt: row.systemPrompt ?? null,
           updatedAt: row.updatedAt,
         },
       });
     }
+
+    // Read the current override for a key, defaulting to an all-null shape so
+    // a partial set/clear can merge against it.
+    const current = (tenantId: TenantId, agentId: AgentId): AgentOverride =>
+      store.get(keyStr({ tenantId, agentId }))?.override ?? {
+        agentId,
+        model: null,
+        systemPrompt: null,
+        updatedAt: new Date(),
+      };
+
+    // Persist a merged override, removing the row entirely when both
+    // overridable fields are null (so an empty row never lingers).
+    const put = (tenantId: TenantId, override: AgentOverride): void => {
+      const key = keyStr({ tenantId, agentId: override.agentId });
+      if (override.model === null && override.systemPrompt === null) {
+        store.delete(key);
+        return;
+      }
+      store.set(key, { tenantId, override });
+    };
 
     return TenantAgentOverridesService.of({
       getForTenant: (tenantId) =>
@@ -105,15 +168,36 @@ export const TenantAgentOverridesServiceTest = (
 
       setModel: (tenantId, agentId, model) =>
         Effect.sync(() => {
-          store.set(keyStr({ tenantId, agentId }), {
-            tenantId,
-            override: { agentId, model, updatedAt: new Date() },
-          });
+          const prev = current(tenantId, agentId);
+          put(tenantId, { ...prev, agentId, model, updatedAt: new Date() });
         }),
 
       clearModel: (tenantId, agentId) =>
         Effect.sync(() => {
-          store.delete(keyStr({ tenantId, agentId }));
+          const prev = current(tenantId, agentId);
+          put(tenantId, { ...prev, agentId, model: null, updatedAt: new Date() });
+        }),
+
+      setSystemPrompt: (tenantId, agentId, systemPrompt) =>
+        Effect.sync(() => {
+          const prev = current(tenantId, agentId);
+          put(tenantId, {
+            ...prev,
+            agentId,
+            systemPrompt,
+            updatedAt: new Date(),
+          });
+        }),
+
+      clearSystemPrompt: (tenantId, agentId) =>
+        Effect.sync(() => {
+          const prev = current(tenantId, agentId);
+          put(tenantId, {
+            ...prev,
+            agentId,
+            systemPrompt: null,
+            updatedAt: new Date(),
+          });
         }),
     });
   });

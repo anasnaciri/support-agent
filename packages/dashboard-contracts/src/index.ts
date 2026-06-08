@@ -265,12 +265,14 @@ export interface AdminTenantDetail {
 }
 
 // ============================================================
-// Per-agent model overrides (settings/agents)
+// Per-agent overrides (settings/agents) — model + system prompt
 // ============================================================
 
 export interface AgentOverrideRow {
   readonly agentId: string;
   readonly model: string | null;
+  // Tenant-authored text appended to the agent's built-in prompt (null → none).
+  readonly systemPrompt: string | null;
 }
 
 // ============================================================

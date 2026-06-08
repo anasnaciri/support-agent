@@ -318,12 +318,16 @@ export type ShopifyAppProvisioningRow =
 export type ShopifyAppProvisioningInsert =
   typeof shopifyAppProvisioning.$inferInsert;
 
-// Per-tenant per-agent overrides. Today only `model` is overridable, but
-// the table is structured to grow (temperature, maxTurns, prompt suffix,
-// …) without another migration. `agent_id` is text (no FK) because agent
-// configs live in code; this row carries a string that maps to
-// AgentConfig.id at runtime. Composite PK on (tenant_id, agent_id) makes
-// upserts race-safe.
+// Per-tenant per-agent overrides applied on top of the in-code AgentConfig.
+// `model` overrides AgentConfig.model; `system_prompt` is tenant-authored text
+// appended to AgentConfig.promptTemplate (extra instructions — brand voice,
+// policy, tone — not a replacement, so the agent keeps its tool/handoff/
+// approval scaffolding). Both are nullable and share ONE row per pair, so
+// clears are field-aware (null one column; the row is removed only when both
+// are null). The table is still structured to grow (temperature, maxTurns, …)
+// without another migration. `agent_id` is text (no FK) because agent configs
+// live in code; this row carries a string that maps to AgentConfig.id at
+// runtime. Composite PK on (tenant_id, agent_id) makes upserts race-safe.
 export const tenantAgentOverrides = pgTable(
   "tenant_agent_overrides",
   {
@@ -332,6 +336,7 @@ export const tenantAgentOverrides = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     agentId: text("agent_id").notNull(),
     model: text("model"),
+    systemPrompt: text("system_prompt"),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
