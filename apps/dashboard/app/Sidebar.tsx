@@ -116,6 +116,7 @@ export function Sidebar({ email, onToggle }: Props) {
           </div>
           <Link
             href="/sign-out"
+            prefetch={false}
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
             aria-label="Sign out"
             title="Sign out"

@@ -17,4 +17,12 @@ describe("sign-up OAuth handoff", () => {
     expect(startRoute).toContain("getSignUpUrl");
     expect(startRoute).toContain('returnTo: "/onboarding"');
   });
+
+  it("never prefetches the sign-out route that clears verifier cookies", () => {
+    const sidebar = readDashboardFile("app/Sidebar.tsx");
+
+    expect(sidebar).toMatch(
+      /<Link\s+href="\/sign-out"\s+prefetch=\{false\}/,
+    );
+  });
 });
