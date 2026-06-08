@@ -54,8 +54,9 @@ Create **two** services in the project, both deploying from this repo:
 Both build `deploy/railway/Dockerfile`. The `api.json` sets the start command,
 a **Pre-Deploy Command** that runs `pnpm db:migrate` (drizzle-kit ships in the
 image), and a `/healthz` healthcheck. `worker.json` just sets the worker start
-command. If your Railway version ignores `preDeployCommand` from config, set it
-in the api service's Settings → Deploy → Pre-Deploy Command instead.
+command. The image also defaults to the api role and runs migrations before api
+startup so local `railway up` uploads remain safe when Railway does not apply
+the per-service config paths. Set `DEPLOY_ROLE=worker` on the worker service.
 
 ### 3. Variables
 

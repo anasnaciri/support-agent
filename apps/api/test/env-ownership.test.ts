@@ -76,4 +76,16 @@ describe("environment file ownership", () => {
     const dockerfile = readRepoFile("deploy/railway/Dockerfile");
     expect(dockerfile).not.toContain("--mount=type=cache");
   });
+
+  it("starts Railway services by role and migrates before the api", () => {
+    const dockerfile = readRepoFile("deploy/railway/Dockerfile");
+    const startScript = readRepoFile("deploy/railway/start.sh");
+
+    expect(dockerfile).toContain('CMD ["sh", "deploy/railway/start.sh"]');
+    expect(startScript).toContain('case "${DEPLOY_ROLE:-api}"');
+    expect(startScript.indexOf("pnpm db:migrate")).toBeLessThan(
+      startScript.indexOf("exec node apps/api/dist/server.js"),
+    );
+    expect(startScript).toContain("exec node apps/worker/dist/index.js");
+  });
 });

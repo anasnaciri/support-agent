@@ -2,16 +2,15 @@
 #
 # Railway image for the support-agent backend (apps/api + apps/worker).
 #
-# Railway builds ONE image and runs each role from it as a per-service Start
-# Command (api / worker), with migrations as the api service's Pre-Deploy
-# Command — see DEPLOY.md "Railway (primary)". Unlike the root ./Dockerfile
-# (which exposes explicit api/worker/migrate targets for docker-compose),
-# Railway's Dockerfile builder has no stage selector, so this image just stops
-# at the full build and lets the start command pick the role.
+# Railway builds ONE image and selects the runtime role in start.sh. This also
+# supports CLI uploads, where Railway does not apply the repo's per-service
+# config-as-code paths. Unlike the root ./Dockerfile (which exposes explicit
+# api/worker/migrate targets for docker-compose), Railway's Dockerfile builder
+# has no stage selector.
 #
 # Dev deps (typescript, drizzle-kit) are kept on purpose: drizzle-kit runs the
-# migrations in the api Pre-Deploy Command. Slimming is the same follow-up
-# noted for the root Dockerfile.
+# api migrations at startup and in config-as-code Pre-Deploy. Slimming is the
+# same follow-up noted for the root Dockerfile.
 
 FROM node:24-bookworm-slim AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -23,7 +22,5 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 ENV NODE_ENV=production
-# Default role is the api; the worker service overrides this in worker.json.
-# WORKDIR stays /app so the per-service start commands use workspace-relative
-# paths (node apps/api/dist/server.js, node apps/worker/dist/index.js).
-CMD ["node", "apps/api/dist/server.js"]
+# DEPLOY_ROLE defaults to api. Set DEPLOY_ROLE=worker on the worker service.
+CMD ["sh", "deploy/railway/start.sh"]
