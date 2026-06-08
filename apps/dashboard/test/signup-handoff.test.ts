@@ -19,9 +19,10 @@ describe("sign-up OAuth handoff", () => {
   });
 
   it("never prefetches the sign-out route that clears verifier cookies", () => {
-    const sidebar = readDashboardFile("app/Sidebar.tsx");
+    // The sign-out link lives in the icon rail of the app shell.
+    const iconRail = readDashboardFile("app/IconRail.tsx");
 
-    expect(sidebar).toMatch(
+    expect(iconRail).toMatch(
       /<Link\s+href="\/sign-out"\s+prefetch=\{false\}/,
     );
   });
