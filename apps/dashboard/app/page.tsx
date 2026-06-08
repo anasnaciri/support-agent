@@ -81,7 +81,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
         </p>
       </div>
 
-      <Card className="border-warning/40">
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div className="flex items-center gap-2">
             <ClipboardCheck className="size-4 text-warning" />
@@ -139,7 +139,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/30">
+      <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-4 text-destructive" />
