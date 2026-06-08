@@ -20,8 +20,7 @@ WORKDIR /app
 
 FROM base AS build
 COPY . .
-RUN --mount=type=cache,id=support-agent-pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 RUN pnpm build
 ENV NODE_ENV=production
 # Default role is the api; the worker service overrides this in worker.json.
