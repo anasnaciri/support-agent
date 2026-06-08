@@ -53,20 +53,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
       {
         href: "/settings/integrations",
         label: "Integrations",
-        // Covers every provider page EXCEPT the Sheets/supplier one, which
-        // is surfaced as its own entry below.
+        // Covers every provider, including the Google Sheets connector that
+        // hosts supplier escalation (reached via Integrations → manage) and
+        // its legacy /settings/supplier-escalation redirect URL.
         match: (pathname) =>
-          (pathname === "/settings/integrations" ||
-            pathname.startsWith("/settings/integrations/")) &&
-          pathname !== "/settings/integrations/google_sheets",
-      },
-      {
-        href: "/settings/integrations/google_sheets",
-        label: "Supplier escalation",
-        // /settings/supplier-escalation permanently redirects here, so keep
-        // the entry active for either URL.
-        match: (pathname) =>
-          pathname === "/settings/integrations/google_sheets" ||
+          pathname === "/settings/integrations" ||
+          pathname.startsWith("/settings/integrations/") ||
           pathname === "/settings/supplier-escalation" ||
           pathname.startsWith("/settings/supplier-escalation/"),
       },

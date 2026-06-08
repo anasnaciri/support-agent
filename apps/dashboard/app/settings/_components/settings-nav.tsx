@@ -6,7 +6,6 @@ import {
   Banknote,
   BarChart3,
   Bot,
-  ClipboardList,
   FileText,
   KeyRound,
   LayoutGrid,
@@ -28,7 +27,6 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings/refund-policy": Banknote,
   "/settings/usage": BarChart3,
   "/settings/integrations": Plug,
-  "/settings/integrations/google_sheets": ClipboardList,
   "/settings/legal": FileText,
   "/settings/account": Trash2,
 };

@@ -3,7 +3,6 @@ import {
   Banknote,
   BarChart3,
   Bot,
-  ClipboardList,
   FileText,
   KeyRound,
   Plug,
@@ -69,13 +68,6 @@ const TILES = [
       "Tenant-wide LLM tokens by day and model with estimated OpenRouter spend.",
   },
   {
-    href: "/settings/integrations/google_sheets",
-    icon: ClipboardList,
-    title: "Supplier escalation",
-    description:
-      "Google Sheet target for the missing-package agent — configured on the Google Sheets connector. Leave unset to skip the sheet write entirely.",
-  },
-  {
     href: "/settings/account",
     icon: Trash2,
     title: "Delete account",
@@ -94,7 +86,6 @@ export default async function SettingsLanding() {
     if (href === "/settings/legal") return "DPA";
     if (href === "/settings/refund-policy") return "$";
     if (href === "/settings/usage") return "LLM";
-    if (href === "/settings/integrations/google_sheets") return "📋";
     return null;
   };
 
