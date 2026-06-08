@@ -151,7 +151,13 @@ export const assertProductionServicesConfigured = (
   env: Record<string, string | undefined>,
 ): void => {
   if (env["NODE_ENV"] !== "production") return;
-  const missing = WORKER_REQUIRED_PROD_ENV.filter((name) => !env[name]);
+  const platformMailEnabled = env["PLATFORM_MAIL_ENABLED"] !== "false";
+  const missing = WORKER_REQUIRED_PROD_ENV.filter(
+    (name) =>
+      !env[name] &&
+      (platformMailEnabled ||
+        (name !== "RESEND_API_KEY" && name !== "RESEND_FROM_ADDRESS")),
+  );
   if (missing.length > 0) {
     throw new Error(
       `Worker production startup requires ${missing.join(", ")} — refusing to boot with no-op fallbacks (account deletion / email / approval signing would silently break). 5th-audit #6.`,
@@ -289,20 +295,27 @@ export const buildWorker = async (
     Layer.provide(Layer.mergeAll(ShopifyHttpLive, credentialStoreLayer)),
   );
 
-  // Platform mail (approval-link emails to the operator). When
-  // RESEND_API_KEY + RESEND_FROM_ADDRESS are set, use the live Resend
-  // layer. Otherwise fall back to the in-memory Test layer so the worker
-  // still boots — useful for local dev without a Resend account.
+  // Platform mail (approval-link emails to the operator). Production requires
+  // Resend by default; PLATFORM_MAIL_ENABLED=false is the explicit pilot
+  // opt-out when dashboard approvals are sufficient and no platform-originated
+  // email should be sent.
+  const platformMailEnabled = process.env["PLATFORM_MAIL_ENABLED"] !== "false";
   const resendApiKey = process.env["RESEND_API_KEY"];
   const resendFrom = process.env["RESEND_FROM_ADDRESS"];
   const mail =
-    resendApiKey && resendFrom
+    platformMailEnabled && resendApiKey && resendFrom
       ? PlatformMailServiceLive.pipe(
           Layer.provide(
             Layer.mergeAll(TenantRepositoryLive, ResendConfigFromEnv),
           ),
         )
       : PlatformMailServiceTest({});
+  if (isProd && !platformMailEnabled) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[worker] platform mail is explicitly disabled — approval-link, account-deletion, and system emails will not be sent.",
+    );
+  }
 
   // Org directory (WorkOS) — used by the account-cleanup consumer to delete
   // a tenant's organization after self-service / admin account deletion.

@@ -73,6 +73,12 @@ specifics:
 `CREDENTIAL_ENCRYPTION_KEY` and `APPROVAL_SIGNING_KEY` must be **identical** on
 api + worker — set them as shared variables once.
 
+The worker requires Resend in production by default. For an initial pilot that
+intentionally uses dashboard approvals only, set
+`PLATFORM_MAIL_ENABLED=false` on the worker. This disables approval-link,
+account-deletion-confirmation, and other platform-originated emails; customer
+replies still use the tenant's configured conversation connector.
+
 ### 4. Deploy
 
 ```sh

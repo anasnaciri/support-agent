@@ -45,6 +45,34 @@ describe("assertProductionServicesConfigured", () => {
     expect(() => assertProductionServicesConfigured(allSet)).not.toThrow();
   });
 
+  it("allows production to explicitly disable platform mail without Resend", () => {
+    const {
+      RESEND_API_KEY: _apiKey,
+      RESEND_FROM_ADDRESS: _from,
+      ...withoutResend
+    } = allSet;
+    expect(() =>
+      assertProductionServicesConfigured({
+        ...withoutResend,
+        PLATFORM_MAIL_ENABLED: "false",
+      }),
+    ).not.toThrow();
+  });
+
+  it("still requires Resend when platform mail is enabled explicitly", () => {
+    const {
+      RESEND_API_KEY: _apiKey,
+      RESEND_FROM_ADDRESS: _from,
+      ...withoutResend
+    } = allSet;
+    expect(() =>
+      assertProductionServicesConfigured({
+        ...withoutResend,
+        PLATFORM_MAIL_ENABLED: "true",
+      }),
+    ).toThrow(/RESEND_API_KEY.*RESEND_FROM_ADDRESS|RESEND_FROM_ADDRESS/);
+  });
+
   it("never throws outside production (dev/CI may use no-op fallbacks)", () => {
     expect(() =>
       assertProductionServicesConfigured({ NODE_ENV: "test" }),
