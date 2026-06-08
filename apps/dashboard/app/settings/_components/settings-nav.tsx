@@ -52,9 +52,11 @@ export function SettingsNav() {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                  // Active = an elevated neutral surface (depth via shadow, not a
+                  // colored indicator), matching the cases sidebar.
                   active
-                    ? "bg-primary/10 font-medium text-primary"
+                    ? "bg-card font-medium text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10"
                     : "text-foreground/80 hover:bg-accent hover:text-foreground",
                 )}
               >

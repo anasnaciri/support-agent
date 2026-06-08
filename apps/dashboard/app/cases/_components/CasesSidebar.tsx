@@ -197,23 +197,23 @@ export function CasesSidebar() {
               {visible.map((row) => {
                 const active = row.id === activeId;
                 return (
-                  <li key={row.id} style={{ height: ROW_HEIGHT }}>
+                  <li key={row.id} style={{ height: ROW_HEIGHT }} className="py-1">
                     <Link
                       href={`/cases/${row.id}`}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex h-full flex-col justify-center gap-1 rounded-md border-l-2 px-3 transition-colors",
+                        "flex h-full flex-col justify-center gap-1 rounded-lg px-3 transition-colors",
+                        // Active = an elevated neutral surface (depth via shadow,
+                        // not a colored indicator); inactive recesses on hover.
                         active
-                          ? "border-primary bg-primary/10"
-                          : "border-transparent hover:bg-accent",
+                          ? "bg-card shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10"
+                          : "hover:bg-accent",
                       )}
                     >
                       <span
                         className={cn(
-                          "truncate text-sm",
-                          active
-                            ? "font-medium text-primary"
-                            : "text-foreground",
+                          "truncate text-sm text-foreground",
+                          active && "font-medium",
                         )}
                       >
                         {row.subject ?? "(no subject)"}

@@ -139,7 +139,7 @@ export function AppShell({
               style={{ width: open ? width : 0 }}
             >
               <aside
-                className="relative flex h-full flex-col border-r border-border"
+                className="relative flex h-full flex-col border-r border-border/50"
                 style={{ width }}
               >
                 <div className="flex items-center justify-between px-5 pb-2 pt-5">
@@ -189,7 +189,16 @@ export function AppShell({
             </div>
           ) : null}
 
-          <main className="relative min-w-0 flex-1 overflow-y-auto px-8 py-8">
+          <main
+            className={cn(
+              "relative min-w-0 flex-1 overflow-y-auto px-8 py-8",
+              // Content reads as a raised plane casting a soft shadow toward
+              // the secondary sidebar — depth at the seam, no hard divider.
+              secondary && open
+                ? "shadow-[-6px_0_20px_-14px_rgba(0,0,0,0.12)]"
+                : "",
+            )}
+          >
             {secondary ? (
               <button
                 type="button"
