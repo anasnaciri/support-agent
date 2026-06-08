@@ -2,7 +2,6 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSignUpUrl } from "@workos-inc/authkit-nextjs";
 
 import { LEGAL_CONSENT_COOKIE } from "@/lib/legal-consent";
 
@@ -32,6 +31,8 @@ export const startGoogleSignUp = async (
     maxAge: 600,
   });
 
-  // After Google + /callback, land the new user on onboarding.
-  redirect(await getSignUpUrl({ returnTo: "/onboarding" }));
+  // OpenNext/Cloudflare does not propagate the AuthKit PKCE Set-Cookie header
+  // when a server action redirects directly off-origin. Hand off to a
+  // same-origin GET route so the browser receives the verifier cookie first.
+  redirect("/sign-up/start");
 };
