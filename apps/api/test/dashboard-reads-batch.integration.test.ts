@@ -88,7 +88,10 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
         resolvedAt: new Date(),
       }),
       mkCase(caseB, tenantId, "waiting_for_approval", { subject: "Case B" }),
-      mkCase(caseC, tenantId, "human_takeover", { subject: "Case C" }),
+      mkCase(caseC, tenantId, "human_takeover", {
+        subject: "Case C",
+        summary: "priority widget escalation",
+      }),
       mkCase(caseX, otherTenantId, "resolved", { subject: "Case X" }),
     ]);
     await raw.db.insert(auditLog).values([
@@ -152,6 +155,31 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     };
     expect(body.totalRows).toBe(3); // excludes other tenant's case X
     expect(body.rows.map((r) => r.id)).not.toContain(caseX);
+  });
+
+  it("GET /dashboard/cases?q= — case-insensitive search over subject, summary, category", async () => {
+    if (!raw) return;
+    const ids = async (path: string) =>
+      (
+        (await (await get(path)).json()) as {
+          rows: ReadonlyArray<{ id: string }>;
+        }
+      ).rows.map((r) => r.id);
+
+    // category match
+    expect(await ids("/dashboard/cases?q=where_is_order")).toEqual([caseA]);
+    // subject match, case-insensitive ("Case B")
+    expect(await ids("/dashboard/cases?q=case+b")).toEqual([caseB]);
+    // summary match (caseC's seeded summary)
+    expect(await ids("/dashboard/cases?q=widget")).toEqual([caseC]);
+
+    // a broad term narrows totalRows yet stays tenant-scoped (no caseX)
+    const broad = (await (await get("/dashboard/cases?q=case")).json()) as {
+      totalRows: number;
+      rows: ReadonlyArray<{ id: string }>;
+    };
+    expect(broad.totalRows).toBe(3);
+    expect(broad.rows.map((r) => r.id)).not.toContain(caseX);
   });
 
   it("GET /dashboard/cases/:id — detail with timeline + approvals", async () => {

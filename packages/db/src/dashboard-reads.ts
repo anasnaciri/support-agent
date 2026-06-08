@@ -1,4 +1,17 @@
-import { and, asc, desc, eq, gt, gte, like, lt, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  like,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import {
   clampPage,
   type AgentOverrideRow,
@@ -9,6 +22,7 @@ import {
   type AuditEntry,
   type AuditFilter,
   type CaseDetail,
+  type CasesFilter,
   type CaseEventsResult,
   type CaseListRow,
   type ConnectorConnectionView,
@@ -224,17 +238,35 @@ export const todaySummary = async (
 // Cases
 // ============================================================
 
+/** Postgres LIKE/ILIKE wildcards, so a user typing `%` or `_` stays literal. */
+const escapeLike = (raw: string): string => raw.replace(/[\\%_]/g, "\\$&");
+
 /** Paginated cases list for one tenant, newest activity first. */
 export const casesList = async (
   db: DrizzleDb,
   tenantId: string,
+  filter: CasesFilter,
   requestedPage: number,
   pageSize: number,
 ): Promise<Page<CaseListRow>> => {
+  const whereParts: SQL[] = [eq(cases.tenantId, tenantId)];
+  const q = filter.q?.trim();
+  if (q) {
+    const term = `%${escapeLike(q)}%`;
+    whereParts.push(
+      or(
+        ilike(cases.subject, term),
+        ilike(cases.summary, term),
+        ilike(cases.category, term),
+      )!,
+    );
+  }
+  const whereExpr = and(...whereParts);
+
   const [countRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(cases)
-    .where(eq(cases.tenantId, tenantId));
+    .where(whereExpr);
   const totalRows = countRow?.count ?? 0;
   const page = clampPage(requestedPage, totalRows, pageSize);
   const rows = await db
@@ -248,7 +280,7 @@ export const casesList = async (
       updatedAt: cases.updatedAt,
     })
     .from(cases)
-    .where(eq(cases.tenantId, tenantId))
+    .where(whereExpr)
     .orderBy(desc(cases.updatedAt), desc(cases.id))
     .limit(pageSize)
     .offset((page - 1) * pageSize);

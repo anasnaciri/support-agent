@@ -245,10 +245,17 @@ export const api = {
   today: (ctx: CallCtx): Promise<TodaySummary> =>
     okBody("/today", ctx) as Promise<TodaySummary>,
 
-  cases: (ctx: CallCtx, page: number, limit: number): Promise<Page<CaseListRow>> =>
-    okBody(`/cases?page=${page}&limit=${limit}`, ctx) as Promise<
-      Page<CaseListRow>
-    >,
+  cases: (
+    ctx: CallCtx,
+    page: number,
+    limit: number,
+    q?: string,
+  ): Promise<Page<CaseListRow>> => {
+    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+    const trimmed = q?.trim();
+    if (trimmed) qs.set("q", trimmed);
+    return okBody(`/cases?${qs.toString()}`, ctx) as Promise<Page<CaseListRow>>;
+  },
 
   caseDetail: async (ctx: CallCtx, id: string): Promise<CaseDetail | null> => {
     const { status, body } = await call(`/cases/${encodeURIComponent(id)}`, { ctx });

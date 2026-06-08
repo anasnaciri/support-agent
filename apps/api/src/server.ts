@@ -383,7 +383,7 @@ const handleDashboardToday = async (
   return sendJson(res, 200, summary);
 };
 
-// GET /dashboard/cases?page=&limit= — paginated cases list.
+// GET /dashboard/cases?q=&page=&limit= — paginated cases list, optional search.
 const handleDashboardCases = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -397,6 +397,7 @@ const handleDashboardCases = async (
     casesList(
       db,
       auth.tenantId,
+      { q: strField(q, "q") },
       parsePageNumber(strField(q, "page")),
       parsePageSize(strField(q, "limit")),
     ),

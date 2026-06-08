@@ -7,6 +7,8 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconRail } from "./IconRail";
 import { SettingsNav } from "./settings/_components/settings-nav";
+import { CasesSidebar } from "./cases/_components/CasesSidebar";
+import { caseIdFromPathname } from "./cases/_components/cases-sidebar-data";
 
 const SIDEBAR_COOKIE = "sidebar:state";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
@@ -26,11 +28,14 @@ export function AppShell({ email, defaultOpen, children }: Props) {
   const pathname = usePathname() ?? "/";
   const [open, setOpen] = useState(defaultOpen);
 
-  // Section-aware secondary sidebar. Settings is the first section to get
-  // one; add more entries here as other sections grow sub-navigation.
+  // Section-aware secondary sidebar. Settings was the first section to get
+  // one; case-detail pages get a searchable case switcher. Add more entries
+  // here as other sections grow sub-navigation.
   const secondary: SecondarySection | null = pathname.startsWith("/settings")
     ? { title: "Settings", node: <SettingsNav /> }
-    : null;
+    : caseIdFromPathname(pathname)
+      ? { title: "Cases", node: <CasesSidebar /> }
+      : null;
 
   const setOpenPersisted = (next: boolean) => {
     setOpen(next);

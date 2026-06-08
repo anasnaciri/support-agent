@@ -98,6 +98,14 @@ export interface CaseListRow {
   readonly updatedAt: string;
 }
 
+export interface CasesFilter {
+  /**
+   * Free-text query matched (case-insensitive substring) against a case's
+   * subject, summary, and category. Empty/absent means no filter.
+   */
+  readonly q?: string | undefined;
+}
+
 export interface CaseDetailCase {
   readonly id: string;
   readonly subject: string | null;
