@@ -258,6 +258,9 @@ export const casesList = async (
         ilike(cases.subject, term),
         ilike(cases.summary, term),
         ilike(cases.category, term),
+        // Whatever order identifier was extracted onto the case — often the
+        // human order name like "#1001", which a merchant would type.
+        ilike(cases.shopifyOrderId, term),
       )!,
     );
   }

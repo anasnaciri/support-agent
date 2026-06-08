@@ -87,7 +87,10 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
         category: "where_is_order",
         resolvedAt: new Date(),
       }),
-      mkCase(caseB, tenantId, "waiting_for_approval", { subject: "Case B" }),
+      mkCase(caseB, tenantId, "waiting_for_approval", {
+        subject: "Case B",
+        shopifyOrderId: "#1001",
+      }),
       mkCase(caseC, tenantId, "human_takeover", {
         subject: "Case C",
         summary: "priority widget escalation",
@@ -172,6 +175,8 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(await ids("/dashboard/cases?q=case+b")).toEqual([caseB]);
     // summary match (caseC's seeded summary)
     expect(await ids("/dashboard/cases?q=widget")).toEqual([caseC]);
+    // order-number match (caseB's seeded shopify order name "#1001")
+    expect(await ids("/dashboard/cases?q=1001")).toEqual([caseB]);
 
     // a broad term narrows totalRows yet stays tenant-scoped (no caseX)
     const broad = (await (await get("/dashboard/cases?q=case")).json()) as {
