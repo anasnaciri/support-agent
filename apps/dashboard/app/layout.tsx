@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 
 import { getSession } from "@/lib/session";
+import { parseSidebarWidth } from "@/lib/sidebar-width";
 import { AppShell } from "./AppShell";
 import "./globals.css";
 
@@ -22,6 +23,7 @@ export default async function RootLayout({
   // reloads land in the same state without a server round-trip.
   const sidebarCookie = cookieStore.get("sidebar:state");
   const defaultOpen = sidebarCookie?.value !== "closed";
+  const defaultWidth = parseSidebarWidth(cookieStore.get("sidebar:width")?.value);
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -29,7 +31,11 @@ export default async function RootLayout({
         className="min-h-screen bg-sidebar text-foreground antialiased"
         suppressHydrationWarning
       >
-        <AppShell email={user?.email ?? null} defaultOpen={defaultOpen}>
+        <AppShell
+          email={user?.email ?? null}
+          defaultOpen={defaultOpen}
+          defaultWidth={defaultWidth}
+        >
           {children}
         </AppShell>
       </body>

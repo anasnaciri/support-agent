@@ -1,17 +1,30 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import {
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  clampSidebarWidth,
+} from "@/lib/sidebar-width";
 import { IconRail } from "./IconRail";
 import { SettingsNav } from "./settings/_components/settings-nav";
 import { CasesSidebar } from "./cases/_components/CasesSidebar";
 import { caseIdFromPathname } from "./cases/_components/cases-sidebar-data";
 
 const SIDEBAR_COOKIE = "sidebar:state";
+const WIDTH_COOKIE = "sidebar:width";
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+const RESIZE_STEP = 16;
 
 interface SecondarySection {
   readonly title: string;
@@ -21,12 +34,24 @@ interface SecondarySection {
 interface Props {
   readonly email: string | null;
   readonly defaultOpen: boolean;
+  readonly defaultWidth: number;
   readonly children: ReactNode;
 }
 
-export function AppShell({ email, defaultOpen, children }: Props) {
+export function AppShell({
+  email,
+  defaultOpen,
+  defaultWidth,
+  children,
+}: Props) {
   const pathname = usePathname() ?? "/";
   const [open, setOpen] = useState(defaultOpen);
+  const [width, setWidth] = useState(defaultWidth);
+  const [resizing, setResizing] = useState(false);
+  // Latest width without re-subscribing the drag listeners; read on pointer-up
+  // to persist, and as the base for each drag.
+  const widthRef = useRef(defaultWidth);
+  const dragOriginRef = useRef<{ x: number; width: number } | null>(null);
 
   // Section-aware secondary sidebar. Settings was the first section to get
   // one; case-detail pages get a searchable case switcher. Add more entries
@@ -44,6 +69,54 @@ export function AppShell({ email, defaultOpen, children }: Props) {
     }; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`;
   };
 
+  const persistWidth = (w: number) => {
+    document.cookie = `${WIDTH_COOKIE}=${w}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`;
+  };
+
+  // Keyboard nudges on the resize handle (arrow keys), persisted immediately.
+  const setWidthPersisted = (next: number) => {
+    const w = clampSidebarWidth(next);
+    widthRef.current = w;
+    setWidth(w);
+    persistWidth(w);
+  };
+
+  const onResizeStart = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    dragOriginRef.current = { x: e.clientX, width: widthRef.current };
+    setResizing(true);
+  };
+
+  // While dragging, follow the pointer on the window (so the cursor can leave
+  // the 6px handle) and persist once on release.
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: PointerEvent) => {
+      const origin = dragOriginRef.current;
+      if (!origin) return;
+      const w = clampSidebarWidth(origin.width + (e.clientX - origin.x));
+      widthRef.current = w;
+      setWidth(w);
+    };
+    const onUp = () => {
+      dragOriginRef.current = null;
+      setResizing(false);
+      persistWidth(widthRef.current);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [resizing]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-sidebar">
       <IconRail email={email} />
@@ -59,11 +132,16 @@ export function AppShell({ email, defaultOpen, children }: Props) {
             <div
               aria-hidden={!open}
               className={cn(
-                "shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out",
-                open ? "w-64" : "w-0",
+                "shrink-0 overflow-hidden",
+                // No width transition mid-drag, or the panel lags the pointer.
+                resizing ? "" : "transition-[width] duration-300 ease-in-out",
               )}
+              style={{ width: open ? width : 0 }}
             >
-              <aside className="flex h-full w-64 flex-col border-r border-border">
+              <aside
+                className="relative flex h-full flex-col border-r border-border"
+                style={{ width }}
+              >
                 <div className="flex items-center justify-between px-5 pb-2 pt-5">
                   <h2 className="text-lg font-semibold tracking-tight">
                     {secondary.title}
@@ -82,6 +160,31 @@ export function AppShell({ email, defaultOpen, children }: Props) {
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {secondary.node}
                 </div>
+
+                {/* Drag handle on the right edge; also keyboard-resizable. */}
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize sidebar"
+                  aria-valuenow={width}
+                  aria-valuemin={SIDEBAR_MIN_WIDTH}
+                  aria-valuemax={SIDEBAR_MAX_WIDTH}
+                  tabIndex={open ? 0 : -1}
+                  onPointerDown={onResizeStart}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowLeft") {
+                      e.preventDefault();
+                      setWidthPersisted(widthRef.current - RESIZE_STEP);
+                    } else if (e.key === "ArrowRight") {
+                      e.preventDefault();
+                      setWidthPersisted(widthRef.current + RESIZE_STEP);
+                    }
+                  }}
+                  className={cn(
+                    "absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/40 focus-visible:bg-primary/40 focus-visible:outline-none",
+                    resizing ? "bg-primary/40" : "bg-transparent",
+                  )}
+                />
               </aside>
             </div>
           ) : null}
