@@ -31,108 +31,125 @@
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Dark is the default scheme. The `.light` class on <html> opts into
-   light surfaces; nothing toggles it today but the tokens are in
-   place for a future preference switch. The look targets near-black
-   surfaces with whisper-thin borders — avocado is reserved for
-   primary actions, active nav, focus ring, and badges that have to
-   pop. Don't bleed the accent into incidental UI. */
-:root,
-.dark {
+/* Light is the default scheme — a 60/30/10 system:
+     60%  off-white field  (#f7f7f7 background, #fff cards)
+     30%  near-black surface (#191919 — primarily the nav rail)
+     10%  brand blue        (#0057ff — primary actions, active nav,
+                             links, focus ring; the only saturated hue)
+   The rail is a real dark surface, so it carries its own scoped
+   `--sidebar-*` tokens: a brightened blue and an off-white text ramp
+   that stay legible on near-black. Don't bleed the blue into
+   incidental UI. `.dark` is a coherent opt-in variant for a future
+   preference switch; nothing toggles it today. */
+:root {
   --radius: 0.625rem;
 
-  --background: oklch(0.165 0.004 110);
-  --foreground: oklch(0.95 0.005 110);
+  /* 60% — off-white field */
+  --background: #f7f7f7;
+  --foreground: #191919;
 
-  --sidebar: oklch(0.195 0.004 110);
-  --sidebar-foreground: oklch(0.9 0.005 110);
+  /* 30% — the near-black nav rail, with its own legible-on-dark ramp */
+  --sidebar: #191919;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #5b8cff;
+  --sidebar-accent: #ffffff14;
+  --sidebar-border: #ffffff1f;
 
-  --card: oklch(0.21 0.005 110);
-  --card-foreground: oklch(0.94 0.005 110);
+  /* Cards lift just above the field with pure white + a hairline */
+  --card: #ffffff;
+  --card-foreground: #191919;
 
-  --popover: oklch(0.22 0.005 110);
-  --popover-foreground: oklch(0.94 0.005 110);
+  --popover: #ffffff;
+  --popover-foreground: #191919;
 
-  /* Ripe avocado — locked. Brightened slightly in dark mode so the
-     pill on a near-black surface reads at the same perceptual weight
-     as it does on the light theme. */
-  --primary: oklch(0.78 0.14 125);
-  --primary-foreground: oklch(0.16 0.04 125);
+  /* 10% — brand blue, exact. Reserved for primary actions, links,
+     active nav, focus ring. */
+  --primary: #0057ff;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.26 0.006 110);
-  --secondary-foreground: oklch(0.94 0.005 110);
+  --secondary: #ececec;
+  --secondary-foreground: #191919;
 
-  --muted: oklch(0.24 0.005 110);
-  --muted-foreground: oklch(0.62 0.005 110);
+  --muted: #f0f0f0;
+  --muted-foreground: #6b6b6b;
 
-  --accent: oklch(0.3 0.04 125);
-  --accent-foreground: oklch(0.94 0.005 110);
+  /* Neutral hover/active wash (ghost & outline buttons, menu items) —
+     NOT the brand blue. */
+  --accent: #e8e8e8;
+  --accent-foreground: #191919;
 
-  --destructive: oklch(0.66 0.21 27);
-  --destructive-foreground: oklch(0.98 0 0);
+  --destructive: #d92d20;
+  --destructive-foreground: #ffffff;
 
-  --success: oklch(0.74 0.13 150);
-  --success-foreground: oklch(0.16 0.04 150);
+  --success: #15924f;
+  --success-foreground: #ffffff;
 
-  --warning: oklch(0.78 0.14 75);
-  --warning-foreground: oklch(0.22 0.08 75);
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
 
-  --info: oklch(0.72 0.12 240);
-  --info-foreground: oklch(0.16 0.04 240);
+  /* Info shares the brand-blue family for cohesion */
+  --info: #0057ff;
+  --info-foreground: #ffffff;
 
-  /* Whisper-thin borders. Less is more — most surfaces should sit on
-     the background by darkness contrast, not by a hard line. */
-  --border: oklch(0.27 0.005 110);
-  --input: oklch(0.27 0.005 110);
-  --ring: oklch(0.78 0.14 125 / 0.55);
+  /* Whisper-thin hairlines — surfaces separate by tone, not hard lines */
+  --border: #e4e4e4;
+  --input: #e0e0e0;
+  --ring: rgb(0 87 255 / 0.45);
 }
 
-.light {
-  --background: oklch(0.99 0.003 110);
-  --foreground: oklch(0.18 0.01 110);
+.dark {
+  --background: #191919;
+  --foreground: #f2f2f2;
 
-  --sidebar: oklch(0.97 0.003 110);
-  --sidebar-foreground: oklch(0.18 0.01 110);
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #5b8cff;
+  --sidebar-accent: #ffffff14;
+  --sidebar-border: #ffffff1f;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.01 110);
+  --card: #1f1f1f;
+  --card-foreground: #f2f2f2;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.01 110);
+  --popover: #1f1f1f;
+  --popover-foreground: #f2f2f2;
 
-  --primary: oklch(0.72 0.14 125);
-  --primary-foreground: oklch(0.16 0.04 125);
+  /* Brand blue brightened so it carries the same weight on near-black */
+  --primary: #3d7bff;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.96 0.01 125);
-  --secondary-foreground: oklch(0.25 0.03 125);
+  --secondary: #2a2a2a;
+  --secondary-foreground: #f2f2f2;
 
-  --muted: oklch(0.965 0.005 110);
-  --muted-foreground: oklch(0.52 0.01 110);
+  --muted: #242424;
+  --muted-foreground: #a1a1a1;
 
-  --accent: oklch(0.94 0.04 125);
-  --accent-foreground: oklch(0.25 0.05 125);
+  --accent: #2a2a2a;
+  --accent-foreground: #f2f2f2;
 
-  --destructive: oklch(0.6 0.22 27);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
 
-  --success: oklch(0.65 0.16 150);
-  --success-foreground: oklch(0.99 0.005 110);
+  --success: #30a46c;
+  --success-foreground: #ffffff;
 
-  --warning: oklch(0.78 0.14 75);
-  --warning-foreground: oklch(0.25 0.08 75);
+  --warning: #e0991a;
+  --warning-foreground: #191919;
 
-  --info: oklch(0.7 0.12 240);
-  --info-foreground: oklch(0.99 0.005 110);
+  --info: #3d7bff;
+  --info-foreground: #ffffff;
 
-  --border: oklch(0.91 0.008 110);
-  --input: oklch(0.91 0.008 110);
-  --ring: oklch(0.72 0.14 125 / 0.55);
+  --border: #2c2c2c;
+  --input: #2c2c2c;
+  --ring: rgb(61 123 255 / 0.5);
 }
 
 @layer base {

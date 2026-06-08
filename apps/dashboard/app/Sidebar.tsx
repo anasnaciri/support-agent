@@ -48,8 +48,8 @@ const NavLink = ({
       className={cn(
         "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
         active
-          ? "bg-primary/15 text-primary"
-          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+          ? "bg-sidebar-primary/15 text-sidebar-primary"
+          : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground",
       )}
     >
       <Icon className="size-4 shrink-0" aria-hidden />
@@ -82,7 +82,7 @@ export function Sidebar({ email, onToggle }: Props) {
         <button
           type="button"
           onClick={onToggle}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+          className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
         >
@@ -107,17 +107,17 @@ export function Sidebar({ email, onToggle }: Props) {
         />
       </div>
 
-      <div className="border-t border-border/60 px-3 py-3">
+      <div className="border-t border-sidebar-border px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 text-xs">
-            <div className="truncate text-muted-foreground">
+            <div className="truncate text-sidebar-foreground/55">
               {email ?? "Not signed in"}
             </div>
           </div>
           <Link
             href="/sign-out"
             prefetch={false}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+            className="rounded-md p-1.5 text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
             aria-label="Sign out"
             title="Sign out"
           >

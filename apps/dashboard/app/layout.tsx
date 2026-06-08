@@ -24,7 +24,7 @@ export default async function RootLayout({
   const defaultOpen = sidebarCookie?.value !== "closed";
 
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body
         className="min-h-screen bg-sidebar text-foreground antialiased"
         suppressHydrationWarning
