@@ -161,7 +161,9 @@ export function AppShell({
                   {secondary.node}
                 </div>
 
-                {/* Drag handle on the right edge; also keyboard-resizable. */}
+                {/* Invisible drag handle on the right edge — the col-resize
+                    cursor is the only affordance (no colored indicator);
+                    keyboard-resizable with a neutral focus hint for a11y. */}
                 <div
                   role="separator"
                   aria-orientation="vertical"
@@ -180,10 +182,7 @@ export function AppShell({
                       setWidthPersisted(widthRef.current + RESIZE_STEP);
                     }
                   }}
-                  className={cn(
-                    "absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/40 focus-visible:bg-primary/40 focus-visible:outline-none",
-                    resizing ? "bg-primary/40" : "bg-transparent",
-                  )}
+                  className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none bg-transparent outline-none focus-visible:bg-foreground/10"
                 />
               </aside>
             </div>
