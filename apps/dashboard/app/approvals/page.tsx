@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { TablePagination } from "@/components/TablePagination";
@@ -128,6 +129,8 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb current="Approvals" />
+
       {banner ? (
         <Alert variant={banner.tone}>
           <AlertDescription>{banner.text}</AlertDescription>

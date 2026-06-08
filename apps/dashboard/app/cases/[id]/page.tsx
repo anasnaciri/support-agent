@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
@@ -387,6 +388,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb
+        items={[{ href: "/cases", label: "Cases" }]}
+        current={caseRow.subject ?? "(no subject)"}
+      />
+
       {banner ? (
         <Alert variant={toneToVariant(banner.tone)}>
           <AlertDescription>{banner.text}</AlertDescription>

@@ -5,6 +5,7 @@ import { parsePageNumber, parsePageSize } from "@/lib/pagination";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { TablePagination } from "@/components/TablePagination";
 import {
   Table,
@@ -36,6 +37,8 @@ export default async function CasesPage({ searchParams }: SearchParams) {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb current="Cases" />
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Cases</h1>
         <p className="mt-1 text-sm text-muted-foreground">

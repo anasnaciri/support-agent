@@ -10,6 +10,7 @@ import { actorVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { TablePagination } from "@/components/TablePagination";
@@ -97,6 +98,8 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb current="Audit log" />
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Audit log</h1>
         <p className="mt-1 text-sm text-muted-foreground">

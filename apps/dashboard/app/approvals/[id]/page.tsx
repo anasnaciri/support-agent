@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 import { approveAction, rejectAction } from "./actions";
 
@@ -35,6 +36,11 @@ export default async function ApprovalDetailPage({ params }: Params) {
 
   return (
     <div className="space-y-6">
+      <PageBreadcrumb
+        items={[{ href: "/approvals", label: "Approvals" }]}
+        current={row.tool}
+      />
+
       <div>
         <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
           Approval
