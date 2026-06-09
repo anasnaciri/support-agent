@@ -55,6 +55,7 @@ import {
   knowledgeDocuments,
   parsePageNumber,
   parsePageSize,
+  resumeCase,
   takeOverCase,
   tenantByWorkosOrg,
   tenantDeletionSnapshot,
@@ -130,6 +131,10 @@ import {
   type AccountCleanupJobData,
   type EncryptedConnectorGrant,
 } from "./account-deletion.js";
+import {
+  makePgBossShopifyPolicyImportPublisher,
+  type ShopifyPolicyImportJobData,
+} from "./shopify-policy-import-queue.js";
 import {
   buildGoogleAuthorizeUrl,
   isGoogleOAuthProvider,
@@ -744,6 +749,35 @@ const handleDashboardTakeover = async (
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
 };
 
+// POST /dashboard/cases/:id/resume — manager hands a taken-over case back
+// to the agent. The status flips out of `human_takeover` so the runtime's
+// takeover guard stops holding events and the agent resumes on the next
+// inbound message.
+const handleDashboardResume = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const managerId = auth.userId;
+  const outcome = await runWithDb(layer, (db) =>
+    resumeCase(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId,
+      reason,
+    }),
+  );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
 // ---- Account deletion (tenant self-service + admin) ----
 
 type DeleteAccountResult =
@@ -778,6 +812,23 @@ const accountCleanupPublisher = (
     );
   }
   return cachedCleanupPublisher;
+};
+
+// Lazily-built, process-memoized publisher for the post-connect Shopify policy
+// import. Reuses the shared pg-boss instance (same as the approval + cleanup
+// publishers).
+let cachedPolicyImportPublisher:
+  | ((data: ShopifyPolicyImportJobData) => Promise<string | null>)
+  | null = null;
+const shopifyPolicyImportPublisher = (
+  databaseUrl: string,
+): ((data: ShopifyPolicyImportJobData) => Promise<string | null>) => {
+  if (!cachedPolicyImportPublisher) {
+    cachedPolicyImportPublisher = makePgBossShopifyPolicyImportPublisher(() =>
+      acquireApprovalBoss(databaseUrl),
+    );
+  }
+  return cachedPolicyImportPublisher;
 };
 
 /**
@@ -2790,6 +2841,21 @@ const handleShopifyCallback = async (
     return;
   }
 
+  // Best-effort: kick off the shop-policy import so the tenant's knowledge base
+  // is seeded with their shipping + refund policies. Off the request path (a
+  // pg-boss job) and fully swallowed — a publish failure must never turn a
+  // successful connect into an error.
+  try {
+    await shopifyPolicyImportPublisher(cfg.databaseUrl)({ tenantId });
+  } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[shopify-policy-import] enqueue failed for tenant=${tenantId}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+
   // Install succeeded. JSON callers (tests, curl with
   // `Accept: application/json`) get a structured success body so
   // assertions don't have to follow redirects.
@@ -4060,6 +4126,11 @@ export const startServer = async (
     "/dashboard/cases/:id/takeover",
     "Take over a case (manager)",
     handleDashboardTakeover,
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/resume",
+    "Hand a taken-over case back to the agent (manager)",
+    handleDashboardResume,
   );
   dashboardPost(
     "/dashboard/onboarding",

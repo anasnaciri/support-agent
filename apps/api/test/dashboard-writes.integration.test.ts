@@ -21,6 +21,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const caseApprove = randomUUID();
   const caseReject = randomUUID();
   const caseTakeover = randomUUID();
+  const caseResume = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
@@ -108,6 +109,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseApprove, tenantId, "waiting_for_approval"),
       mkCase(caseReject, tenantId, "waiting_for_approval"),
       mkCase(caseTakeover, tenantId, "waiting_for_approval"),
+      mkCase(caseResume, tenantId, "human_takeover"),
     ]);
     await raw.db.insert(approvals).values([
       mkApproval(pApprove, caseApprove, tenantId),
@@ -175,6 +177,45 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(body.canceledApprovals).toBe(1);
     expect(await caseStatus(caseTakeover)).toBe("human_takeover");
     expect((await approvalRow(pTakeover))?.status).toBe("rejected");
+  });
+
+  it("resume hands a human_takeover case back to the agent (in_progress)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseResume}/resume`, {
+      reason: "handing back to the agent",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; toStatus?: string };
+    expect(body.kind).toBe("resumed");
+    expect(body.toStatus).toBe("in_progress");
+    expect(await caseStatus(caseResume)).toBe("in_progress");
+  });
+
+  it("resuming a case that isn't in human_takeover is a no-op", async () => {
+    if (!raw) return;
+    // caseResume is now in_progress from the previous test.
+    const res = await post(`/dashboard/cases/${caseResume}/resume`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; status?: string };
+    expect(body.kind).toBe("not_in_takeover");
+    expect(body.status).toBe("in_progress");
+    expect(await caseStatus(caseResume)).toBe("in_progress");
+  });
+
+  it("resume 404s for a case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const otherHeaders = {
+      authorization: `Bearer ${token}`,
+      "x-org-id": otherOrgId,
+      "x-user-id": managerId,
+      "content-type": "application/json",
+    };
+    const r = await post(
+      `/dashboard/cases/${caseResume}/resume`,
+      {},
+      otherHeaders,
+    );
+    expect(r.status).toBe(404);
   });
 
   it("400 when x-user-id is missing", async () => {

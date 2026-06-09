@@ -17,7 +17,7 @@ import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
-import { takeOverAction } from "./actions";
+import { resumeAction, takeOverAction } from "./actions";
 import {
   RECOMMENDATION_LABEL,
   extractRefundRecommendation,
@@ -32,6 +32,7 @@ interface Params {
   }>;
   readonly searchParams: Promise<{
     readonly takenOver?: string;
+    readonly resumed?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -56,6 +57,23 @@ const takeOverBanner = (kind: string | undefined): Banner | null => {
     return {
       tone: "info",
       text: "This case was already in a terminal state — no change.",
+    };
+  }
+  return null;
+};
+
+const resumeBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "resumed") {
+    return {
+      tone: "success",
+      text: "Handed back to the agent. It will resume on the customer's next reply.",
+    };
+  }
+  if (kind === "not_in_takeover") {
+    return {
+      tone: "info",
+      text: "This case wasn't under human takeover — no change.",
     };
   }
   return null;
@@ -299,7 +317,10 @@ const RefundRecommendationBlock = ({
 export default async function CaseDetailPage({ params, searchParams }: Params) {
   const { id } = await params;
   const sp = await searchParams;
-  const banner = takeOverBanner(sp.takenOver) ?? approvalBanner(sp);
+  const banner =
+    takeOverBanner(sp.takenOver) ??
+    resumeBanner(sp.resumed) ??
+    approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify] = await Promise.all([
     api.caseDetail(ctx, id),
@@ -336,6 +357,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     : [];
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
+  const canResume = caseRow.status === "human_takeover";
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .slice()
@@ -419,6 +441,18 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                 title="Stop the agent on this case and handle it manually"
               >
                 Take over
+              </Button>
+            </form>
+          ) : null}
+          {canResume ? (
+            <form action={resumeAction} className="ml-auto">
+              <input type="hidden" name="caseId" value={caseRow.id} />
+              <Button
+                type="submit"
+                variant="outline"
+                title="Let the agent handle this case again — it resumes on the customer's next reply"
+              >
+                Hand back to agent
               </Button>
             </form>
           ) : null}

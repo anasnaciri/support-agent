@@ -241,6 +241,11 @@ export interface TakeOverOutcomeView {
   readonly kind: string;
   readonly canceledApprovals?: number;
 }
+export interface ResumeOutcomeView {
+  readonly kind: string;
+  readonly toStatus?: string;
+  readonly status?: string;
+}
 
 export interface CaseShopifyPanels {
   readonly customer: ShopifyCustomer | null;
@@ -622,5 +627,18 @@ export const api = {
       ctx,
     });
     return (body as TakeOverOutcomeView | null) ?? { kind: "error" };
+  },
+
+  resume: async (
+    ctx: CallCtx,
+    caseId: string,
+    reason?: string,
+  ): Promise<ResumeOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resume`, {
+      method: "POST",
+      body: reason !== undefined ? { reason } : {},
+      ctx,
+    });
+    return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },
 };

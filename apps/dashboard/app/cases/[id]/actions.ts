@@ -23,3 +23,14 @@ export const takeOverAction = async (formData: FormData): Promise<void> => {
   revalidatePath("/approvals");
   redirect(`/cases/${caseId}?takenOver=${result.kind}`);
 };
+
+export const resumeAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  const result = await api.resume(ctx, caseId);
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?resumed=${result.kind}`);
+};

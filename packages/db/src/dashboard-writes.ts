@@ -30,6 +30,22 @@ export interface TakeOverInput {
   readonly reason?: string | undefined;
 }
 
+export type ResumeOutcome =
+  | { readonly kind: "resumed"; readonly toStatus: string }
+  | { readonly kind: "case_not_found" }
+  | { readonly kind: "not_in_takeover"; readonly status: string };
+
+export interface ResumeInput {
+  readonly caseId: string;
+  readonly tenantId: string;
+  readonly managerId: string;
+  /** Free-text reason saved into the transition + audit details. */
+  readonly reason?: string | undefined;
+}
+
+/** Status a resumed case lands in: actively owned by automation again. */
+const RESUME_TO_STATUS = "in_progress";
+
 const TERMINAL_STATES: ReadonlySet<string> = new Set([
   "resolved",
   "human_takeover",
@@ -102,6 +118,59 @@ export const takeOverCase = async (
       .returning({ id: approvals.id });
 
     return { kind: "taken_over", canceledApprovals: canceled.length };
+  });
+
+/**
+ * Hand a `human_takeover` case back to the agent: transition it to
+ * `in_progress` and write the transition + audit rows in one tx. The case
+ * re-enters automation on its next inbound event — the runtime's takeover
+ * guard only holds events while the status is `human_takeover`, so flipping
+ * the status is all that's needed (the runtime has no message-history replay,
+ * so we deliberately don't re-trigger the agent on the already-seen reply).
+ * Only acts from `human_takeover`; any other status is a no-op
+ * (`not_in_takeover`). Cross-tenant ids surface as `case_not_found`.
+ */
+export const resumeCase = async (
+  db: DrizzleDb,
+  input: ResumeInput,
+): Promise<ResumeOutcome> =>
+  db.transaction(async (tx) => {
+    const [caseRow] = await tx
+      .select({ id: cases.id, status: cases.status })
+      .from(cases)
+      .where(
+        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
+      )
+      .limit(1);
+    if (!caseRow) return { kind: "case_not_found" } as ResumeOutcome;
+    if (caseRow.status !== "human_takeover") {
+      return { kind: "not_in_takeover", status: caseRow.status } as ResumeOutcome;
+    }
+
+    const reason = input.reason ?? "manager handed the case back from dashboard";
+
+    await tx
+      .update(cases)
+      .set({ status: RESUME_TO_STATUS, updatedAt: sql`now()` })
+      .where(eq(cases.id, input.caseId));
+
+    await tx.insert(caseStateTransitions).values({
+      caseId: input.caseId as never,
+      fromStatus: caseRow.status,
+      toStatus: RESUME_TO_STATUS,
+      reason,
+    });
+
+    await tx.insert(auditLog).values({
+      tenantId: input.tenantId as never,
+      caseId: input.caseId as never,
+      actorType: "user",
+      actorId: input.managerId,
+      action: "case.resumed",
+      details: { reason, fromStatus: caseRow.status },
+    });
+
+    return { kind: "resumed", toStatus: RESUME_TO_STATUS };
   });
 
 /**
