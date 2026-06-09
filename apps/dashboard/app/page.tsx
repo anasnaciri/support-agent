@@ -84,10 +84,10 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div className="flex items-center gap-2">
-            <ClipboardCheck className="size-4 text-warning" />
+            <ClipboardCheck className="size-4 text-warning-vivid" />
             <CardTitle>Need your approval</CardTitle>
           </div>
-          <Badge variant="warning">{waitingApproval}</Badge>
+          <Badge variant="warningBright">{waitingApproval}</Badge>
         </CardHeader>
         <CardContent className="pt-0">
           {pendingApprovals.length === 0 ? (

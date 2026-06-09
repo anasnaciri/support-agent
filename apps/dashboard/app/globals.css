@@ -107,7 +107,7 @@
      Reserved for the bright status tags on cases / audit / approvals so the
      colors read with more punch and contrast than the calmer base tints. */
   --success-vivid: #07a651;
-  --warning-vivid: #e06c00;
+  --warning-vivid: #eab308;
   --destructive-vivid: #ec2317;
 
   /* Whisper-thin hairlines — surfaces separate by tone, not hard lines */
@@ -159,7 +159,7 @@
 
   /* Vivid ramp brightened for near-black surfaces */
   --success-vivid: #43c47e;
-  --warning-vivid: #f2b134;
+  --warning-vivid: #facc15;
   --destructive-vivid: #ff5b5f;
 
   --border: #2c2c2c;
