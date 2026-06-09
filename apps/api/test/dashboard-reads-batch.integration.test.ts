@@ -30,6 +30,8 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
   const caseC = randomUUID(); // human_takeover
   const caseX = randomUUID(); // OTHER tenant
   const approvalId = randomUUID();
+  const approvedApprovalId = randomUUID(); // approved, low risk
+  const rejectedApprovalId = randomUUID(); // rejected, medium risk
 
   const cfg = {
     port: 0,
@@ -103,17 +105,43 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       mkAudit(caseB, tenantId, "llm.decision", "agent"),
       mkAudit(caseX, otherTenantId, "event.received", "system"),
     ]);
-    await raw.db.insert(approvals).values({
-      id: approvalId,
-      tenantId,
-      caseId: caseB,
-      agentId: "refund-review-agent",
-      tool: "refund.create",
-      proposedInput: { amount: 500 },
-      riskLevel: "high",
-      status: "pending",
-      expiresAt: new Date(Date.now() + 86_400_000),
-    });
+    await raw.db.insert(approvals).values([
+      {
+        id: approvalId,
+        tenantId,
+        caseId: caseB,
+        agentId: "refund-review-agent",
+        tool: "refund.create",
+        proposedInput: { amount: 500 },
+        riskLevel: "high",
+        status: "pending",
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+      {
+        id: approvedApprovalId,
+        tenantId,
+        caseId: caseC,
+        agentId: "refund-review-agent",
+        tool: "refund.create",
+        proposedInput: { amount: 100 },
+        riskLevel: "low",
+        status: "approved",
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+      {
+        id: rejectedApprovalId,
+        tenantId,
+        caseId: caseC,
+        agentId: "refund-review-agent",
+        tool: "refund.create",
+        proposedInput: { amount: 200 },
+        riskLevel: "medium",
+        status: "rejected",
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    ]);
     await raw.db.insert(connectorConnections).values({
       id: randomUUID(),
       tenantId,
@@ -234,11 +262,41 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       toolFacets: ReadonlyArray<string>;
       agentFacets: ReadonlyArray<string>;
     };
-    expect(body.totalRows).toBe(1);
+    expect(body.totalRows).toBe(1); // only the pending row
     expect(body.rows[0]?.id).toBe(approvalId);
     expect(body.statusCounts["pending"]).toBe(1);
+    expect(body.statusCounts["approved"]).toBe(1);
+    expect(body.statusCounts["rejected"]).toBe(1);
     expect(body.toolFacets).toContain("refund.create");
     expect(body.agentFacets).toContain("refund-review-agent");
+  });
+
+  it("GET /dashboard/approvals — multi-select status + risk filters", async () => {
+    if (!raw) return;
+    const ids = async (path: string) =>
+      (
+        (await (await get(path)).json()) as {
+          rows: ReadonlyArray<{ id: string }>;
+        }
+      ).rows.map((r) => r.id);
+
+    // Repeated status keys OR together (the "Any status" select-all sends all
+    // three): approved + rejected returns exactly those two rows.
+    const both = await ids("/dashboard/approvals?status=approved&status=rejected");
+    expect(both).toHaveLength(2);
+    expect(both).toContain(approvedApprovalId);
+    expect(both).toContain(rejectedApprovalId);
+
+    // A second filter narrows by AND: of those two, only the low-risk one stays.
+    expect(
+      await ids("/dashboard/approvals?status=approved&status=rejected&risk=low"),
+    ).toEqual([approvedApprovalId]);
+
+    // Repeated risk keys OR: medium + high spans the rejected and pending rows.
+    const risky = await ids("/dashboard/approvals?status=pending&status=rejected&risk=medium&risk=high");
+    expect(risky).toHaveLength(2);
+    expect(risky).toContain(approvalId);
+    expect(risky).toContain(rejectedApprovalId);
   });
 
   it("GET /dashboard/approvals/:id — detail, 404 cross-tenant", async () => {

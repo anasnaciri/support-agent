@@ -36,7 +36,8 @@ const buildPageHref = (
 ): string => {
   const qs = new URLSearchParams();
   for (const [key, value] of hiddenParams) {
-    if (value) qs.set(key, value);
+    // append (not set): multi-select filters carry repeated keys.
+    if (value) qs.append(key, value);
   }
   if (page > 1) qs.set("page", String(page));
   if (pageSize !== defaultPageSize) qs.set("limit", String(pageSize));
@@ -131,7 +132,12 @@ export function TablePagination({
         <form method="get" className="flex flex-wrap items-end gap-2">
           {hiddenParams.map(([key, value]) =>
             value ? (
-              <input key={key} type="hidden" name={key} value={value} />
+              <input
+                key={`${key}=${value}`}
+                type="hidden"
+                name={key}
+                value={value}
+              />
             ) : null,
           )}
           <div className="w-24 space-y-1.5">

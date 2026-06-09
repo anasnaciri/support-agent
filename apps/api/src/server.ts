@@ -319,6 +319,20 @@ const strField = (
 };
 
 /**
+ * Read a repeatable query value as a list. Fastify's parser yields a string for
+ * a single key, a string[] for a repeated key, and undefined when absent —
+ * normalize all three, dropping empties. Used by the multi-select filters.
+ */
+export const strList = (
+  source: Record<string, unknown>,
+  key: string,
+): string[] => {
+  const v = source[key];
+  const arr = Array.isArray(v) ? v : v === undefined ? [] : [v];
+  return arr.filter((x): x is string => typeof x === "string" && x.length > 0);
+};
+
+/**
  * Parse a JSON request body. The Fastify instance registers a single buffer
  * content-type parser (so webhook HMAC sees raw bytes), so POST handlers must
  * decode JSON themselves. Malformed/empty bodies yield {}.
@@ -447,6 +461,7 @@ const handleDashboardCaseEvents = async (
 };
 
 // GET /dashboard/approvals?status=&risk=&tool=&agent=&page=&limit=
+// status/risk/tool/agent are repeatable (multi-select); absent status → pending.
 const handleDashboardApprovals = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -461,10 +476,10 @@ const handleDashboardApprovals = async (
       db,
       auth.tenantId,
       {
-        status: strField(q, "status"),
-        risk: strField(q, "risk"),
-        tool: strField(q, "tool"),
-        agent: strField(q, "agent"),
+        status: strList(q, "status"),
+        risk: strList(q, "risk"),
+        tool: strList(q, "tool"),
+        agent: strList(q, "agent"),
       },
       parsePageNumber(strField(q, "page")),
       parsePageSize(strField(q, "limit")),

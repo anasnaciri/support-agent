@@ -2,6 +2,12 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 
 import { api, getDashboardContext } from "@/lib/api-client";
+import {
+  approvalsHiddenParams,
+  isDefaultApprovalsFilter,
+  resolveStatusValues,
+  toFilterValues,
+} from "@/lib/approvals-filters";
 import { formatRelativeTime } from "@/lib/format";
 import {
   parsePageNumber,
@@ -18,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { Label } from "@/components/ui/label";
-import { NativeSelect } from "@/components/ui/native-select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { TablePagination } from "@/components/TablePagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -35,24 +41,25 @@ interface SearchParams {
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
-    readonly status?: string;
-    readonly risk?: string;
-    readonly tool?: string;
-    readonly agent?: string;
+    readonly status?: string | string[];
+    readonly risk?: string | string[];
+    readonly tool?: string | string[];
+    readonly agent?: string | string[];
     readonly page?: string;
     readonly limit?: string;
   }>;
 }
 
+// The status picker offers the three decision states; its "Any status"
+// select-all (see MultiSelect.allLabel) checks all three at once. A bare
+// (absent) status defaults to pending — the actionable landing view.
 const STATUS_FILTERS = [
   { label: "Pending", value: "pending" },
   { label: "Approved", value: "approved" },
   { label: "Rejected", value: "rejected" },
-  { label: "Any status", value: "any" },
 ] as const;
 
 const RISK_FILTERS = [
-  { label: "Any risk", value: "" },
   { label: "Low", value: "low" },
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
@@ -94,42 +101,29 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   const sp = await searchParams;
   const banner = bannerFor(sp);
 
-  const statusFilter = sp.status ?? "pending";
-  const riskFilter = sp.risk ?? "";
-  const toolFilter = sp.tool ?? "";
-  const agentFilter = sp.agent ?? "";
+  const statusValues = resolveStatusValues(sp.status);
+  const riskValues = toFilterValues(sp.risk);
+  const toolValues = toFilterValues(sp.tool);
+  const agentValues = toFilterValues(sp.agent);
+  const filterValues = {
+    status: statusValues,
+    risk: riskValues,
+    tool: toolValues,
+    agent: agentValues,
+  };
   const cookieRows = (await cookies()).get(ROWS_COOKIE)?.value;
   const defaultPageSize = resolveDefaultPageSize(cookieRows);
   const pageSize = resolvePageSize(sp.limit, cookieRows);
   const requestedPage = parsePageNumber(sp.page);
 
   const { totalRows, page, rows, statusCounts, toolFacets, agentFacets } =
-    await api.approvals(
-      ctx,
-      {
-        status: statusFilter,
-        ...(riskFilter ? { risk: riskFilter } : {}),
-        ...(toolFilter ? { tool: toolFilter } : {}),
-        ...(agentFilter ? { agent: agentFilter } : {}),
-      },
-      requestedPage,
-      pageSize,
-    );
+    await api.approvals(ctx, filterValues, requestedPage, pageSize);
 
   const countOf = (s: string): number => statusCounts[s] ?? 0;
 
-  const isReset =
-    !riskFilter &&
-    !toolFilter &&
-    !agentFilter &&
-    statusFilter === "pending";
+  const isReset = isDefaultApprovalsFilter(filterValues);
 
-  const paginationParams: ReadonlyArray<readonly [string, string]> = [
-    ["status", statusFilter !== "pending" ? statusFilter : ""],
-    ["risk", riskFilter],
-    ["tool", toolFilter],
-    ["agent", agentFilter],
-  ];
+  const paginationParams = approvalsHiddenParams(filterValues);
 
   return (
     <div className="space-y-6">
@@ -168,17 +162,17 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               >
                 Status
               </Label>
-              <NativeSelect
+              <MultiSelect
                 id="status"
                 name="status"
-                defaultValue={statusFilter}
-              >
-                {STATUS_FILTERS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </NativeSelect>
+                values={statusValues}
+                placeholder="Status"
+                allLabel="Any status"
+                options={STATUS_FILTERS.map((o) => ({
+                  label: o.label,
+                  value: o.value,
+                }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label
@@ -187,13 +181,16 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               >
                 Risk
               </Label>
-              <NativeSelect id="risk" name="risk" defaultValue={riskFilter}>
-                {RISK_FILTERS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </NativeSelect>
+              <MultiSelect
+                id="risk"
+                name="risk"
+                values={riskValues}
+                placeholder="Any risk"
+                options={RISK_FILTERS.map((o) => ({
+                  label: o.label,
+                  value: o.value,
+                }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label
@@ -202,14 +199,13 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               >
                 Tool
               </Label>
-              <NativeSelect id="tool" name="tool" defaultValue={toolFilter}>
-                <option value="">Any tool</option>
-                {toolFacets.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </NativeSelect>
+              <MultiSelect
+                id="tool"
+                name="tool"
+                values={toolValues}
+                placeholder="Any tool"
+                options={toolFacets.map((t) => ({ label: t, value: t }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label
@@ -218,18 +214,13 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               >
                 Agent
               </Label>
-              <NativeSelect
+              <MultiSelect
                 id="agent"
                 name="agent"
-                defaultValue={agentFilter}
-              >
-                <option value="">Any agent</option>
-                {agentFacets.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </NativeSelect>
+                values={agentValues}
+                placeholder="Any agent"
+                options={agentFacets.map((a) => ({ label: a, value: a }))}
+              />
             </div>
             <div className="flex items-end gap-2">
               <Button type="submit">Apply</Button>

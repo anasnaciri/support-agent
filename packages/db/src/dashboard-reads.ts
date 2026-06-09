@@ -6,6 +6,7 @@ import {
   gt,
   gte,
   ilike,
+  inArray,
   like,
   lt,
   or,
@@ -432,12 +433,16 @@ export const approvalsList = async (
   requestedPage: number,
   pageSize: number,
 ): Promise<ApprovalsListResult> => {
-  const status = filter.status ?? "pending";
+  // Absent/empty status defaults to pending (the actionable landing view).
+  const status = filter.status?.length ? filter.status : ["pending"];
   const whereParts: SQL[] = [eq(approvals.tenantId, tenantId)];
-  if (status !== "any") whereParts.push(eq(approvals.status, status));
-  if (filter.risk) whereParts.push(eq(approvals.riskLevel, filter.risk));
-  if (filter.tool) whereParts.push(eq(approvals.tool, filter.tool));
-  if (filter.agent) whereParts.push(eq(approvals.agentId, filter.agent));
+  whereParts.push(inArray(approvals.status, [...status]));
+  if (filter.risk?.length)
+    whereParts.push(inArray(approvals.riskLevel, [...filter.risk]));
+  if (filter.tool?.length)
+    whereParts.push(inArray(approvals.tool, [...filter.tool]));
+  if (filter.agent?.length)
+    whereParts.push(inArray(approvals.agentId, [...filter.agent]));
   const whereExpr = and(...whereParts);
 
   const [toolFacets, agentFacets, counts, matchingCount] = await Promise.all([

@@ -168,11 +168,14 @@ export interface CaseEventsResult {
 // ============================================================
 
 export interface ApprovalsFilter {
-  /** "pending" (default), a concrete status, or "any" to skip the filter. */
-  readonly status?: string | undefined;
-  readonly risk?: string | undefined;
-  readonly tool?: string | undefined;
-  readonly agent?: string | undefined;
+  /**
+   * Status values to include; absent/empty defaults to `["pending"]`. All four
+   * filters narrow by membership — OR within a field, AND across fields.
+   */
+  readonly status?: ReadonlyArray<string> | undefined;
+  readonly risk?: ReadonlyArray<string> | undefined;
+  readonly tool?: ReadonlyArray<string> | undefined;
+  readonly agent?: ReadonlyArray<string> | undefined;
 }
 
 export interface ApprovalListRow {

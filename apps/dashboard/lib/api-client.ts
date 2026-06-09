@@ -298,10 +298,10 @@ export const api = {
     limit: number,
   ): Promise<ApprovalsListResult> => {
     const qs = new URLSearchParams();
-    if (filter.status) qs.set("status", filter.status);
-    if (filter.risk) qs.set("risk", filter.risk);
-    if (filter.tool) qs.set("tool", filter.tool);
-    if (filter.agent) qs.set("agent", filter.agent);
+    for (const v of filter.status ?? []) qs.append("status", v);
+    for (const v of filter.risk ?? []) qs.append("risk", v);
+    for (const v of filter.tool ?? []) qs.append("tool", v);
+    for (const v of filter.agent ?? []) qs.append("agent", v);
     qs.set("page", String(page));
     qs.set("limit", String(limit));
     return okBody(`/approvals?${qs.toString()}`, ctx) as Promise<ApprovalsListResult>;
