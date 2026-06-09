@@ -2,21 +2,24 @@ import type { BadgeProps } from "@/components/ui/badge";
 
 type Variant = NonNullable<BadgeProps["variant"]>;
 
+// Cases, audit, and approvals use the brighter, more-saturated *Bright badge
+// variants so status colors pop. Neutral/waiting states stay quiet (muted) for
+// hierarchy. The settings helpers below keep the calmer base tints.
 export const caseStatusVariant = (status: string): Variant => {
   switch (status) {
     case "resolved":
-      return "success";
+      return "successBright";
     case "human_takeover":
-      return "destructive";
+      return "destructiveBright";
     case "waiting_for_approval":
-      return "warning";
+      return "warningBright";
     case "waiting_for_customer":
     case "waiting_for_supplier":
       return "muted";
     case "new":
     case "triaging":
     case "in_progress":
-      return "info";
+      return "infoBright";
     default:
       return "secondary";
   }
@@ -25,11 +28,11 @@ export const caseStatusVariant = (status: string): Variant => {
 export const approvalStatusVariant = (status: string): Variant => {
   switch (status) {
     case "pending":
-      return "warning";
+      return "warningBright";
     case "approved":
-      return "success";
+      return "successBright";
     case "rejected":
-      return "destructive";
+      return "destructiveBright";
     default:
       return "secondary";
   }
@@ -40,12 +43,12 @@ export const riskVariant = (
 ): Variant => {
   switch (risk) {
     case "low":
-      return "success";
+      return "successBright";
     case "medium":
-      return "warning";
+      return "warningBright";
     case "high":
     case "critical":
-      return "destructive";
+      return "destructiveBright";
     default:
       return "muted";
   }
@@ -82,9 +85,9 @@ export const actorVariant = (actorType: string): Variant => {
     case "system":
       return "muted";
     case "agent":
-      return "info";
+      return "infoBright";
     case "user":
-      return "success";
+      return "successBright";
     default:
       return "secondary";
   }

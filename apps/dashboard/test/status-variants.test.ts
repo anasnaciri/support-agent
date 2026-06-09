@@ -1,0 +1,62 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  actorVariant,
+  approvalStatusVariant,
+  caseStatusVariant,
+  integrationStatusVariant,
+  permissionVariant,
+  riskVariant,
+} from "../lib/status-variants.js";
+
+// Cases, audit, and approvals use brighter, more saturated (Bright) tags so the
+// status colors pop — same soft pill style, vivid hue ramp. The settings pages
+// (permissions, integrations) keep the calmer base tints — those must not
+// regress.
+describe("status badge variants", () => {
+  describe("cases / audit / approvals use the bright saturated variants", () => {
+    it("case status maps colored states to bright variants", () => {
+      expect(caseStatusVariant("resolved")).toBe("successBright");
+      expect(caseStatusVariant("human_takeover")).toBe("destructiveBright");
+      expect(caseStatusVariant("waiting_for_approval")).toBe("warningBright");
+      expect(caseStatusVariant("in_progress")).toBe("infoBright");
+    });
+
+    it("keeps waiting states quiet", () => {
+      expect(caseStatusVariant("waiting_for_customer")).toBe("muted");
+      expect(caseStatusVariant("waiting_for_supplier")).toBe("muted");
+    });
+
+    it("approval status maps to bright variants", () => {
+      expect(approvalStatusVariant("pending")).toBe("warningBright");
+      expect(approvalStatusVariant("approved")).toBe("successBright");
+      expect(approvalStatusVariant("rejected")).toBe("destructiveBright");
+    });
+
+    it("risk maps to bright variants", () => {
+      expect(riskVariant("low")).toBe("successBright");
+      expect(riskVariant("medium")).toBe("warningBright");
+      expect(riskVariant("high")).toBe("destructiveBright");
+      expect(riskVariant("critical")).toBe("destructiveBright");
+    });
+
+    it("audit actor maps colored actors to bright variants", () => {
+      expect(actorVariant("agent")).toBe("infoBright");
+      expect(actorVariant("user")).toBe("successBright");
+      expect(actorVariant("system")).toBe("muted");
+    });
+  });
+
+  describe("settings tags stay on the calmer base variants", () => {
+    it("permission variant is unchanged", () => {
+      expect(permissionVariant("allow")).toBe("success");
+      expect(permissionVariant("ask")).toBe("warning");
+      expect(permissionVariant("deny")).toBe("destructive");
+    });
+
+    it("integration status variant is unchanged", () => {
+      expect(integrationStatusVariant("active")).toBe("success");
+      expect(integrationStatusVariant("revoked")).toBe("destructive");
+    });
+  });
+});

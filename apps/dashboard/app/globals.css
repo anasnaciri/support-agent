@@ -26,6 +26,9 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-success-vivid: var(--success-vivid);
+  --color-warning-vivid: var(--warning-vivid);
+  --color-destructive-vivid: var(--destructive-vivid);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -100,6 +103,13 @@
   --info: #0057ff;
   --info-foreground: #ffffff;
 
+  /* Vivid hue ramp — brighter, more saturated cousins of the status colors.
+     Reserved for the bright status tags on cases / audit / approvals so the
+     colors read with more punch and contrast than the calmer base tints. */
+  --success-vivid: #07a651;
+  --warning-vivid: #e06c00;
+  --destructive-vivid: #ec2317;
+
   /* Whisper-thin hairlines — surfaces separate by tone, not hard lines */
   --border: #e4e4e4;
   --input: #e0e0e0;
@@ -146,6 +156,11 @@
 
   --info: #3d7bff;
   --info-foreground: #ffffff;
+
+  /* Vivid ramp brightened for near-black surfaces */
+  --success-vivid: #43c47e;
+  --warning-vivid: #f2b134;
+  --destructive-vivid: #ff5b5f;
 
   --border: #2c2c2c;
   --input: #2c2c2c;

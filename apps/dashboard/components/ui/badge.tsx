@@ -21,6 +21,18 @@ const badgeVariants = cva(
         info: "border-info/25 bg-info/10 text-info dark:border-transparent dark:bg-info/25",
         muted:
           "border-border bg-muted text-muted-foreground dark:border-transparent",
+        // Brighter, more saturated soft tints — same pill style as above but
+        // with the vivid hue ramp and a touch more tint/border contrast. Used
+        // for case/audit/approval status tags so the colors pop. The settings
+        // pages keep the calmer base tints.
+        successBright:
+          "border-success-vivid/35 bg-success-vivid/15 text-success-vivid dark:border-transparent dark:bg-success-vivid/25",
+        warningBright:
+          "border-warning-vivid/35 bg-warning-vivid/15 text-warning-vivid dark:border-transparent dark:bg-warning-vivid/25",
+        destructiveBright:
+          "border-destructive-vivid/35 bg-destructive-vivid/15 text-destructive-vivid dark:border-transparent dark:bg-destructive-vivid/25",
+        infoBright:
+          "border-info/35 bg-info/15 text-info dark:border-transparent dark:bg-info/25",
       },
     },
     defaultVariants: {
