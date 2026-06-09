@@ -17,8 +17,10 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **2026-06-09 — Checklist maintenance:** Collapsed 78 verbose session entries into date-grouped summaries;
   detailed implementation and audit records remain in the phase checklist and audit section below.
 - **2026-06-09 — Dashboard controls:** Added branded Auto-confirmation, per-agent outward-action controls,
-  hidden internal agent details, return-to-page re-auth, multi-select approval filters, and persisted 10-row
-  pagination. Recent presentational changes still need authenticated pixel verification.
+  hidden internal agent details, return-to-page re-auth, multi-select approval filters, persisted 10-row
+  pagination, and a branded "?" hint on the home "In progress" tile (clarifies it counts only cases the agent
+  is actively handling — new/triaging/in_progress — not ones parked waiting for approval). Recent
+  presentational changes still need authenticated pixel verification.
 - **2026-06-09 — Refund policy:** Replaced the temporary Always-deny switch with
   `thresholds | always_ask | always_deny`, added a Shopify currency-mismatch warning, and removed the unused
   `alwaysDeny` compatibility shim after confirming the local DB had no legacy rows.

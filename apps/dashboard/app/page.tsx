@@ -4,6 +4,7 @@ import {
   ArrowRight,
   CheckCircle2,
   ClipboardCheck,
+  HelpCircle,
   Sprout,
 } from "lucide-react";
 
@@ -199,7 +200,11 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile label="Waiting for customer" value={waitingCustomer} />
           <StatTile label="Waiting for supplier" value={waitingSupplier} />
-          <StatTile label="In progress" value={inProgress} />
+          <StatTile
+            label="In progress"
+            value={inProgress}
+            hint="Cases the agent is actively handling right now (new, triaging, in progress) — not cases parked waiting for approval, a customer, or a supplier to be resolved."
+          />
           <StatTile
             label="Resolved (all-time)"
             value={countOf("resolved")}
@@ -215,10 +220,12 @@ function StatTile({
   label,
   value,
   icon,
+  hint,
 }: {
   readonly label: string;
   readonly value: number;
   readonly icon?: React.ReactNode;
+  readonly hint?: string;
 }) {
   return (
     <Card>
@@ -226,9 +233,33 @@ function StatTile({
         <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
           {icon}
           {label}
+          {hint ? <InfoHint text={hint} /> : null}
         </div>
         <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
       </CardContent>
     </Card>
+  );
+}
+
+// A branded "?" help affordance for a metric: hovering or focusing the icon
+// reveals a themed bubble. CSS-only (Tailwind group utilities) so it works in
+// this server component without a client island — and accessible via the icon's
+// aria-label.
+function InfoHint({ text }: { readonly text: string }) {
+  return (
+    <span className="group/hint relative inline-flex">
+      <HelpCircle
+        role="img"
+        aria-label={text}
+        tabIndex={0}
+        className="size-3.5 cursor-help text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+      />
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-56 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-popover-foreground opacity-0 shadow-md transition-opacity duration-150 group-hover/hint:opacity-100 group-focus-within/hint:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
   );
 }
