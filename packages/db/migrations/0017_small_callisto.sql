@@ -1,0 +1,2 @@
+ALTER TABLE "connector_connections" DROP CONSTRAINT "connector_connections_provider_check";--> statement-breakpoint
+ALTER TABLE "connector_connections" ADD CONSTRAINT "connector_connections_provider_check" CHECK ("connector_connections"."provider" IN ('shopify','gmail','google_sheets','outlook','imap','openrouter','anthropic','openai'));

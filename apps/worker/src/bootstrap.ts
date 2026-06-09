@@ -58,6 +58,7 @@ import {
   ConversationRouterLive,
   makeGmailConversation,
   makeGraphConversation,
+  makeImapSmtpConversation,
   LLMConfigFromEnv,
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
@@ -385,6 +386,12 @@ export const buildWorker = async (
             }),
           ],
         ] as const)
+      : []),
+    // Generic IMAP/SMTP needs no platform OAuth env — only the per-tenant
+    // credentials in the store — so it's always available once the store is
+    // wired (credKeyB64 present).
+    ...(credKeyB64
+      ? ([["imap", makeImapSmtpConversation()]] as const)
       : []),
   ];
   const conversation =

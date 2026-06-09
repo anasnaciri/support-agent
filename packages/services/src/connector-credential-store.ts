@@ -21,6 +21,7 @@ export type ConnectorProvider =
   | "gmail"
   | "google_sheets"
   | "outlook"
+  | "imap"
   | "openrouter"
   | "anthropic"
   | "openai";

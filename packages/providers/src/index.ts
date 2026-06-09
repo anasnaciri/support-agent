@@ -9,6 +9,8 @@ export * from "./gmail-conversation-live.js";
 export * from "./graph-http.js";
 export * from "./graph-token.js";
 export * from "./graph-conversation-live.js";
+export * from "./imap-smtp.js";
+export * from "./imap-smtp-conversation-live.js";
 export * from "./conversation-router-live.js";
 export * from "./gmail-attachments.js";
 export * from "./image-exif.js";
