@@ -47,6 +47,10 @@ export const conversationAskCustomer = defineTool({
   name: "conversation.ask_customer",
   description:
     "Ask the customer a clarifying question. After this tool runs, the case will transition to `waiting_for_customer` and the workflow tick ends; when the customer replies, a new `customer.replied` event resumes the case. Use this when you genuinely need information you cannot derive (an order number you couldn't find, a clarification on what went wrong) — do NOT use it to delay a reply you could already write. `draftId` is the idempotency key. `remindAfterHours`, if set, schedules an SLA follow-up timer.",
+  displayName: "Ask the customer a question",
+  displayDescription:
+    "The agent sends a clarifying question to the customer to move the case forward.",
+  tenantControl: "permission-toggle",
   inputSchema: Input,
   outputSchema: Output,
   risk: "communicate",

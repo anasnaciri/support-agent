@@ -378,6 +378,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
         agentId: string;
         model: string | null;
         systemPrompt: string | null;
+        toolPermissions: Record<string, string> | null;
       }>;
     };
     expect(body.overrides).toHaveLength(1);
@@ -385,6 +386,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       agentId: "refund-review-agent",
       model: "anthropic/claude-opus-4-8",
       systemPrompt: null,
+      toolPermissions: null,
     });
   });
 

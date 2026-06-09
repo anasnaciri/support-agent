@@ -41,6 +41,19 @@ export interface ToolConnectorScopeRequirement {
   readonly scopes: ReadonlyArray<string>;
 }
 
+/**
+ * How a tenant gets to configure this tool from the dashboard. Tools WITHOUT
+ * a `tenantControl` are internal plumbing (lookups, handoff, case bookkeeping)
+ * and never surface on the tenant-facing agent page. The value picks the
+ * control:
+ *   - `permission-toggle` — a simple "ask first" vs "auto" switch backed by a
+ *     per-agent permission override (e.g. send a customer reply).
+ *   - `refund-threshold` — governed by the richer $-amount thresholds on the
+ *     dedicated refund-policy page, not a binary toggle. The agent page shows
+ *     it read-only with a link.
+ */
+export type TenantToolControl = "permission-toggle" | "refund-threshold";
+
 export interface Tool<I, O> {
   readonly name: string;
   readonly description: string;
@@ -49,6 +62,23 @@ export interface Tool<I, O> {
   readonly risk: ToolRisk;
   readonly defaultPermission: Permission;
   readonly sideEffectClass: ToolSideEffectClass;
+  /**
+   * Friendly, tenant-facing label for the dashboard (e.g. "Send customer
+   * reply"). `description` stays LLM-facing/technical; this is the human copy.
+   * Only set on tools that carry a `tenantControl`.
+   */
+  readonly displayName?: string;
+  /**
+   * Short, plain-language blurb shown under the `displayName` on the agent
+   * page. Distinct from the LLM-facing `description`.
+   */
+  readonly displayDescription?: string;
+  /**
+   * Marks a tool as tenant-configurable and picks its dashboard control.
+   * Absent ⇒ internal ⇒ hidden from the tenant agent page. See
+   * {@link TenantToolControl}.
+   */
+  readonly tenantControl?: TenantToolControl;
   readonly idempotencyKey?: (input: I) => string;
   readonly timeout?: Duration.Duration;
   readonly retrySchedule?: Schedule.Schedule<unknown, unknown>;

@@ -39,6 +39,13 @@ export const toToolDto = (t: AnyTool): ToolDto => ({
   ...(t.requiredConnectorScopes !== undefined
     ? { requiredConnectorScopes: t.requiredConnectorScopes }
     : {}),
+  ...(t.displayName !== undefined ? { displayName: t.displayName } : {}),
+  ...(t.displayDescription !== undefined
+    ? { displayDescription: t.displayDescription }
+    : {}),
+  ...(t.tenantControl !== undefined
+    ? { tenantControl: t.tenantControl }
+    : {}),
 });
 
 export const buildCatalogResponse = (

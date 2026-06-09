@@ -40,6 +40,23 @@ describe("buildCatalogResponse", () => {
     expect("requiredConnectorScopes" in updateCtx!).toBe(false);
   });
 
+  it("passes through tenant-facing metadata (displayName + tenantControl)", () => {
+    const reply = catalog.tools.find((t) => t.name === "conversation.reply");
+    expect(reply!.displayName).toBe("Send customer reply");
+    expect(reply!.tenantControl).toBe("permission-toggle");
+    expect(reply!.displayDescription).toBeTruthy();
+
+    const refund = catalog.tools.find((t) => t.name === "refund.create");
+    expect(refund!.tenantControl).toBe("refund-threshold");
+
+    // Internal tools stay unlabelled so the dashboard never surfaces them.
+    const updateCtx = catalog.tools.find(
+      (t) => t.name === "case.update_context",
+    );
+    expect("tenantControl" in updateCtx!).toBe(false);
+    expect("displayName" in updateCtx!).toBe(false);
+  });
+
   it("produces a JSON-serializable snapshot (no functions/schemas leak)", () => {
     const round = JSON.parse(JSON.stringify(catalog));
     expect(round.tools[0]).not.toHaveProperty("execute");

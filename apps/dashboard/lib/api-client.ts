@@ -442,6 +442,29 @@ export const api = {
       ctx,
     }),
 
+  setAgentToolPermission: (
+    ctx: CallCtx,
+    agentId: string,
+    tool: string,
+    permission: "ask" | "allow",
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/tool-permission`, {
+      method: "POST",
+      body: { tool, permission },
+      ctx,
+    }),
+
+  clearAgentToolPermission: (
+    ctx: CallCtx,
+    agentId: string,
+    tool: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/tool-permission/clear`, {
+      method: "POST",
+      body: { tool },
+      ctx,
+    }),
+
   connectLlm: (
     ctx: CallCtx,
     input: {

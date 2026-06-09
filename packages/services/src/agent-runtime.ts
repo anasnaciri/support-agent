@@ -239,6 +239,52 @@ const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
   }
 };
 
+/**
+ * Apply per-tenant per-agent overrides on top of the in-code AgentConfig:
+ *   - `model` replaces `AgentConfig.model`.
+ *   - `systemPrompt` is appended to `AgentConfig.promptTemplate` as extra
+ *     instructions (brand voice / policy / tone) — the built-in prompt is kept
+ *     so the agent's tool / handoff / approval scaffolding survives.
+ *     `buildSystemPrompt` reads the patched `promptTemplate`, so the append
+ *     flows through for the initial agent and any handoff.
+ *   - `toolPermissions` overlays the tenant's per-tool "ask first" vs "auto"
+ *     choices onto `permissionOverrides`. The tenant value wins over any in-code
+ *     pin (e.g. an agent that statically pins a tool to `allow`), since the
+ *     merchant's explicit choice is the more specific intent. `PermissionService`
+ *     then reads the merged map unchanged.
+ * Returns the same object reference when no override applies, so the hot path
+ * doesn't allocate. Pure + exported so it can be unit-tested without booting the
+ * runtime layer. Future fields (temperature, …) plug in here.
+ */
+export const applyOverride = (
+  agent: AgentConfig,
+  overrideMap: ReadonlyMap<AgentConfig["id"], AgentOverride>,
+): AgentConfig => {
+  const o = overrideMap.get(agent.id);
+  if (!o) return agent;
+  let next = agent;
+  if (o.model && o.model !== agent.model) {
+    next = { ...next, model: o.model };
+  }
+  const extra = o.systemPrompt?.trim();
+  if (extra) {
+    next = {
+      ...next,
+      promptTemplate: `${agent.promptTemplate}\n\n${extra}`,
+    };
+  }
+  if (o.toolPermissions && Object.keys(o.toolPermissions).length > 0) {
+    next = {
+      ...next,
+      permissionOverrides: {
+        ...next.permissionOverrides,
+        ...o.toolPermissions,
+      },
+    };
+  }
+  return next;
+};
+
 // ============================================================
 // Tag
 // ============================================================
@@ -278,37 +324,9 @@ export const AgentRuntimeDefault = Layer.effect(
     // is simply skipped.
     const maybeImageHashStore = yield* Effect.serviceOption(ImageHashStore);
 
-    /**
-     * Apply per-tenant per-agent overrides on top of the in-code
-     * AgentConfig:
-     *   - `model` replaces `AgentConfig.model`.
-     *   - `systemPrompt` is appended to `AgentConfig.promptTemplate` as extra
-     *     instructions (brand voice / policy / tone) — the built-in prompt is
-     *     kept so the agent's tool / handoff / approval scaffolding survives.
-     *     `buildSystemPrompt` reads the patched `promptTemplate`, so the
-     *     append flows through for the initial agent and any handoff.
-     * Returns the same object reference when no override applies, so the hot
-     * path doesn't allocate. Future fields (temperature, …) plug in here.
-     */
-    const applyOverride = (
-      agent: AgentConfig,
-      overrideMap: ReadonlyMap<AgentConfig["id"], AgentOverride>,
-    ): AgentConfig => {
-      const o = overrideMap.get(agent.id);
-      if (!o) return agent;
-      let next = agent;
-      if (o.model && o.model !== agent.model) {
-        next = { ...next, model: o.model };
-      }
-      const extra = o.systemPrompt?.trim();
-      if (extra) {
-        next = {
-          ...next,
-          promptTemplate: `${agent.promptTemplate}\n\n${extra}`,
-        };
-      }
-      return next;
-    };
+    // `applyOverride` (a pure module-level helper, defined above) overlays the
+    // per-(tenant, agent) override row onto the in-code AgentConfig before each
+    // turn — model, appended system prompt, and per-tool permission toggles.
 
     const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {

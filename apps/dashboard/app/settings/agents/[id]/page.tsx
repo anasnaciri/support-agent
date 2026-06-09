@@ -3,8 +3,11 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { findAgent, findTool, effectivePermission } from "@/lib/catalog";
-import { permissionVariant } from "@/lib/status-variants";
+import {
+  findAgent,
+  tenantConfigurableActions,
+  currentToolPermission,
+} from "@/lib/catalog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,21 +17,15 @@ import {
   ModelCombobox,
   type ModelOption,
 } from "@/components/ui/model-combobox";
+import { PermissionToggle } from "@/components/ui/permission-toggle";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   clearAgentModelAction,
   clearAgentSystemPromptAction,
   setAgentModelAction,
   setAgentSystemPromptAction,
+  setAgentToolPermissionAction,
 } from "./actions";
 
 interface Props {
@@ -62,13 +59,16 @@ const PROVIDER_LABEL: Readonly<Record<string, string>> = {
   openai: "OpenAI",
 };
 
+const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
+
 export default async function AgentDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
   const ctx = await getDashboardContext();
-  const [catalogResp, overrideRows, models] = await Promise.all([
+  const [catalogResp, overrideRows, models, settings] = await Promise.all([
     api.catalog(ctx),
     api.agentOverrides(ctx),
     api.models(ctx),
+    api.settings(ctx),
   ]);
   const agent = findAgent(catalogResp, id);
   if (!agent) notFound();
@@ -78,11 +78,16 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
   const promptBanner = Array.isArray(sp["prompt"])
     ? sp["prompt"][0]
     : sp["prompt"];
+  const permBanner = Array.isArray(sp["perm"]) ? sp["perm"][0] : sp["perm"];
 
   const overrideRow = overrideRows.find((o) => o.agentId === agent.id) ?? null;
   const override = overrideRow?.model ?? null;
   const systemPromptOverride = overrideRow?.systemPrompt ?? null;
   const effectiveModel = override ?? agent.model;
+  // The tenant-configurable outward actions for this agent (reply, refund, …).
+  // Internal plumbing tools are filtered out by `tenantConfigurableActions`.
+  const actions = tenantConfigurableActions(agent, catalogResp);
+  const refundPolicy = settings.refundPolicy;
 
   // The api resolves the tenant's LLM credential server-side and returns the
   // model list (the decrypted key never reaches the browser).
@@ -139,6 +144,11 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
           <AlertDescription>
             System prompt reset to the built-in prompt.
           </AlertDescription>
+        </Alert>
+      ) : null}
+      {permBanner === "updated" ? (
+        <Alert variant="success">
+          <AlertDescription>Action permission updated.</AlertDescription>
         </Alert>
       ) : null}
 
@@ -264,56 +274,76 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Tools</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Actions</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Tool</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Permission</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {agent.tools.map((toolName) => {
-                const tool = findTool(catalogResp, toolName);
-                const perm = effectivePermission(agent, catalogResp, toolName);
-                const overridden =
-                  agent.permissionOverrides[toolName] !== undefined;
-                return (
-                  <TableRow key={toolName}>
-                    <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                        {toolName}
-                      </code>
-                      {!tool ? (
-                        <div className="mt-0.5 text-xs italic text-muted-foreground">
-                          (not in catalog)
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {tool?.description ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      {perm ? (
-                        <Badge variant={permissionVariant(perm)}>{perm}</Badge>
-                      ) : (
-                        "—"
-                      )}
-                      {overridden ? (
-                        <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          overridden
-                        </div>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+        <CardContent className="space-y-1">
+          <p className="pb-2 text-sm text-muted-foreground">
+            Decide which actions this agent does on its own and which wait for
+            your approval first.
+          </p>
+          {actions.length === 0 ? (
+            <p className="py-2 text-sm text-muted-foreground">
+              This agent has no customer-facing actions to configure.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {actions.map(({ tool }) => (
+                <li
+                  key={tool.name}
+                  className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="min-w-0 sm:pr-6">
+                    <div className="text-sm font-medium">
+                      {tool.displayName ?? tool.name}
+                    </div>
+                    {tool.displayDescription ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {tool.displayDescription}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0">
+                    {tool.tenantControl === "refund-threshold" ? (
+                      <div className="sm:text-right">
+                        <p className="text-xs text-muted-foreground">
+                          Auto up to {refundPolicy.currencyCode}{" "}
+                          {minorToMajor(refundPolicy.askAboveMinorUnits)} · asks{" "}
+                          {minorToMajor(refundPolicy.askAboveMinorUnits)}–
+                          {minorToMajor(refundPolicy.denyAboveMinorUnits)} ·
+                          blocked above {refundPolicy.currencyCode}{" "}
+                          {minorToMajor(refundPolicy.denyAboveMinorUnits)}
+                        </p>
+                        <Link
+                          href="/settings/refund-policy"
+                          className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+                        >
+                          Manage refund limits →
+                        </Link>
+                      </div>
+                    ) : (
+                      <PermissionToggle
+                        action={setAgentToolPermissionAction}
+                        agentId={agent.id}
+                        tool={tool.name}
+                        label={tool.displayName ?? tool.name}
+                        current={
+                          currentToolPermission(
+                            agent,
+                            catalogResp,
+                            overrideRow,
+                            tool.name,
+                          ) === "allow"
+                            ? "allow"
+                            : "ask"
+                        }
+                      />
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
 

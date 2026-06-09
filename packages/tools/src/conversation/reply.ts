@@ -41,6 +41,10 @@ export const conversationReply = defineTool({
   name: "conversation.reply",
   description:
     "Send a customer-facing reply on an existing thread. Threading is handled by `threadId` — the same connector that delivered the inbound message is the one that sends the reply, so the customer sees a natural continuation in their inbox / portal. Set `subject` to null to inherit the thread subject (`Re: <original>`). `draftId` is the idempotency key: re-running this tool with the same draftId returns the prior send instead of double-sending. Permission policy: `ask` by default — every reply requires a human approval until the agent has earned trust per-tenant.",
+  displayName: "Send customer reply",
+  displayDescription:
+    "When a customer writes in, the agent drafts and sends the reply on the existing email thread.",
+  tenantControl: "permission-toggle",
   inputSchema: Input,
   outputSchema: Output,
   risk: "communicate",

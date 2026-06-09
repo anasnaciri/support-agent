@@ -1,0 +1,1 @@
+ALTER TABLE "tenant_agent_overrides" ADD COLUMN "tool_permissions" jsonb;

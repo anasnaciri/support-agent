@@ -18,6 +18,7 @@ import type {
   ToolRisk,
   ToolSideEffectClass,
   ToolConnectorScopeRequirement,
+  TenantToolControl,
 } from "@support-agent/agent-core";
 
 // ============================================================
@@ -284,6 +285,11 @@ export interface AgentOverrideRow {
   readonly model: string | null;
   // Tenant-authored text appended to the agent's built-in prompt (null → none).
   readonly systemPrompt: string | null;
+  // Per-tool "ask first" vs "auto" choices for this agent, keyed by tool name
+  // (null/absent → the tool's agent default applies). Only `permission-toggle`
+  // tools ever appear here; the runtime overlays this onto the agent's
+  // permissionOverrides.
+  readonly toolPermissions: Readonly<Record<string, Permission>> | null;
 }
 
 // ============================================================
@@ -310,6 +316,11 @@ export interface ToolDto {
   readonly defaultPermission: Permission;
   readonly sideEffectClass: ToolSideEffectClass;
   readonly requiredConnectorScopes?: ToolConnectorScopeRequirement;
+  // Tenant-facing metadata. Present only on tools a merchant can configure; the
+  // dashboard renders its "Actions" card from tools that carry a `tenantControl`.
+  readonly displayName?: string;
+  readonly displayDescription?: string;
+  readonly tenantControl?: TenantToolControl;
 }
 
 export interface AgentDto {

@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import {
   type AgentId,
   type ConnectorStoreDbError,
+  type Permission,
   type TenantId,
 } from "@support-agent/agent-core";
 
@@ -18,15 +19,20 @@ import {
  *     policy, tone) — not a replacement, so the agent keeps its tool /
  *     handoff / approval scaffolding (null → no extra instructions).
  *
- * Both fields share ONE row per (tenant, agent), so clears are field-aware:
- * setting one field preserves the other, and the row is removed only when
- * both are null. The shape is still structured to grow (temperature,
+ *   - `toolPermissions` is a per-tool "ask first" vs "auto" map keyed by tool
+ *     name (e.g. `{ "conversation.reply": "allow" }`); the runtime overlays it
+ *     onto `AgentConfig.permissionOverrides` (null / empty → no overrides).
+ *
+ * All three fields share ONE row per (tenant, agent), so clears are field-aware:
+ * setting one field preserves the others, and the row is removed only when
+ * all are empty. The shape is still structured to grow (temperature,
  * maxTurns, …) without a new Tag.
  */
 export interface AgentOverride {
   readonly agentId: AgentId;
   readonly model: string | null;
   readonly systemPrompt: string | null;
+  readonly toolPermissions: Readonly<Record<string, Permission>> | null;
   readonly updatedAt: Date;
 }
 
@@ -96,6 +102,29 @@ export class TenantAgentOverridesService extends Context.Tag(
       tenantId: TenantId,
       agentId: AgentId,
     ) => Effect.Effect<void, ConnectorStoreDbError>;
+
+    /**
+     * Set the "ask first" vs "auto" choice for one tool on one (tenant, agent)
+     * pair. Merges into the existing `toolPermissions` map (other tools and the
+     * model/systemPrompt fields are preserved).
+     */
+    readonly setToolPermission: (
+      tenantId: TenantId,
+      agentId: AgentId,
+      toolName: string,
+      permission: Permission,
+    ) => Effect.Effect<void, ConnectorStoreDbError>;
+
+    /**
+     * Drop the per-agent override for one tool (revert to the agent default).
+     * Removes just that key from the `toolPermissions` map; the row is removed
+     * only when model, systemPrompt, and the whole map are all empty.
+     */
+    readonly clearToolPermission: (
+      tenantId: TenantId,
+      agentId: AgentId,
+      toolName: string,
+    ) => Effect.Effect<void, ConnectorStoreDbError>;
   }
 >() {}
 
@@ -116,6 +145,7 @@ export const TenantAgentOverridesServiceTest = (
     readonly agentId: AgentId;
     readonly model?: string | null;
     readonly systemPrompt?: string | null;
+    readonly toolPermissions?: Readonly<Record<string, Permission>> | null;
     readonly updatedAt: Date;
   }> = [],
 ) =>
@@ -128,10 +158,18 @@ export const TenantAgentOverridesServiceTest = (
           agentId: row.agentId,
           model: row.model ?? null,
           systemPrompt: row.systemPrompt ?? null,
+          toolPermissions: row.toolPermissions ?? null,
           updatedAt: row.updatedAt,
         },
       });
     }
+
+    // Collapse an empty/absent tool-permission map to null so the field-aware
+    // delete below treats "no tools left" identically to "never had any".
+    const normalizeTp = (
+      tp: Readonly<Record<string, Permission>> | null,
+    ): Readonly<Record<string, Permission>> | null =>
+      tp && Object.keys(tp).length > 0 ? tp : null;
 
     // Read the current override for a key, defaulting to an all-null shape so
     // a partial set/clear can merge against it.
@@ -140,18 +178,24 @@ export const TenantAgentOverridesServiceTest = (
         agentId,
         model: null,
         systemPrompt: null,
+        toolPermissions: null,
         updatedAt: new Date(),
       };
 
-    // Persist a merged override, removing the row entirely when both
-    // overridable fields are null (so an empty row never lingers).
+    // Persist a merged override, removing the row entirely when ALL overridable
+    // fields are empty (so an empty row never lingers).
     const put = (tenantId: TenantId, override: AgentOverride): void => {
       const key = keyStr({ tenantId, agentId: override.agentId });
-      if (override.model === null && override.systemPrompt === null) {
+      const tp = normalizeTp(override.toolPermissions);
+      if (
+        override.model === null &&
+        override.systemPrompt === null &&
+        tp === null
+      ) {
         store.delete(key);
         return;
       }
-      store.set(key, { tenantId, override });
+      store.set(key, { tenantId, override: { ...override, toolPermissions: tp } });
     };
 
     return TenantAgentOverridesService.of({
@@ -196,6 +240,32 @@ export const TenantAgentOverridesServiceTest = (
             ...prev,
             agentId,
             systemPrompt: null,
+            updatedAt: new Date(),
+          });
+        }),
+
+      setToolPermission: (tenantId, agentId, toolName, permission) =>
+        Effect.sync(() => {
+          const prev = current(tenantId, agentId);
+          put(tenantId, {
+            ...prev,
+            agentId,
+            toolPermissions: {
+              ...(prev.toolPermissions ?? {}),
+              [toolName]: permission,
+            },
+            updatedAt: new Date(),
+          });
+        }),
+
+      clearToolPermission: (tenantId, agentId, toolName) =>
+        Effect.sync(() => {
+          const prev = current(tenantId, agentId);
+          const { [toolName]: _removed, ...rest } = prev.toolPermissions ?? {};
+          put(tenantId, {
+            ...prev,
+            agentId,
+            toolPermissions: rest,
             updatedAt: new Date(),
           });
         }),

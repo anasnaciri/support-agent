@@ -15,6 +15,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { Permission } from "@support-agent/agent-core";
 
 // Postgres `bytea` is not in drizzle-orm/pg-core's first-class set; defining a
 // minimal custom type keeps the column typed as `Buffer` in TS so we don't
@@ -337,6 +338,13 @@ export const tenantAgentOverrides = pgTable(
     agentId: text("agent_id").notNull(),
     model: text("model"),
     systemPrompt: text("system_prompt"),
+    // Per-tool "ask first" vs "auto" choices for this agent, keyed by tool
+    // name (e.g. { "conversation.reply": "allow" }). Null when the tenant
+    // hasn't overridden any tool. The runtime overlays this onto the agent's
+    // permissionOverrides; only `permission-toggle` tools ever land here.
+    toolPermissions: jsonb("tool_permissions").$type<
+      Record<string, Permission>
+    >(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

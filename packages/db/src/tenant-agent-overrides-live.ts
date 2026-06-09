@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   TenantAgentOverridesService,
   type AgentOverride,
@@ -8,6 +8,7 @@ import {
   AgentId as makeAgentId,
   ConnectorStoreDbError,
   type AgentId,
+  type Permission,
   type TenantId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -32,6 +33,7 @@ const rowToOverride = (r: TenantAgentOverrideRow): AgentOverride => ({
   agentId: makeAgentId(r.agentId),
   model: r.model,
   systemPrompt: r.systemPrompt,
+  toolPermissions: r.toolPermissions,
   updatedAt: r.updatedAt,
 });
 
@@ -101,7 +103,11 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
             db
               .delete(tenantAgentOverrides)
               .where(
-                and(where, isNull(tenantAgentOverrides.systemPrompt)),
+                and(
+                  where,
+                  isNull(tenantAgentOverrides.systemPrompt),
+                  isNull(tenantAgentOverrides.toolPermissions),
+                ),
               ),
           );
         }),
@@ -150,7 +156,82 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
           yield* wrap(
             db
               .delete(tenantAgentOverrides)
-              .where(and(where, isNull(tenantAgentOverrides.model))),
+              .where(
+                and(
+                  where,
+                  isNull(tenantAgentOverrides.model),
+                  isNull(tenantAgentOverrides.toolPermissions),
+                ),
+              ),
+          );
+        }),
+
+      // Merge one tool's permission into the jsonb map without a read-modify-
+      // write round trip: Postgres `||` shallow-merges the patch into the
+      // existing map (or `{}` when the row/column is absent). Mirrors the
+      // refund-policy merge in tenant-repository-live.
+      setToolPermission: (
+        tenantId: TenantId,
+        agentId: AgentId,
+        toolName: string,
+        permission: Permission,
+      ) =>
+        Effect.gen(function* () {
+          const db = yield* useDb(defaultDb);
+          const now = new Date();
+          const patch: Record<string, Permission> = { [toolName]: permission };
+          const patchJson = JSON.stringify(patch);
+          yield* wrap(
+            db
+              .insert(tenantAgentOverrides)
+              .values({ tenantId, agentId, toolPermissions: patch, updatedAt: now })
+              .onConflictDoUpdate({
+                target: [
+                  tenantAgentOverrides.tenantId,
+                  tenantAgentOverrides.agentId,
+                ],
+                set: {
+                  toolPermissions: sql`coalesce(${tenantAgentOverrides.toolPermissions}, '{}'::jsonb) || ${patchJson}::jsonb`,
+                  updatedAt: now,
+                },
+              }),
+          );
+        }),
+
+      // Drop one key from the map. `nullif(… - key, '{}')` collapses an emptied
+      // map back to NULL so the field-aware row delete (below) can fire when
+      // model + systemPrompt are also null.
+      clearToolPermission: (
+        tenantId: TenantId,
+        agentId: AgentId,
+        toolName: string,
+      ) =>
+        Effect.gen(function* () {
+          const db = yield* useDb(defaultDb);
+          const where = and(
+            eq(tenantAgentOverrides.tenantId, tenantId),
+            eq(tenantAgentOverrides.agentId, agentId),
+          );
+          yield* wrap(
+            db
+              .update(tenantAgentOverrides)
+              .set({
+                toolPermissions: sql`nullif(coalesce(${tenantAgentOverrides.toolPermissions}, '{}'::jsonb) - ${toolName}, '{}'::jsonb)`,
+                updatedAt: new Date(),
+              })
+              .where(where),
+          );
+          yield* wrap(
+            db
+              .delete(tenantAgentOverrides)
+              .where(
+                and(
+                  where,
+                  isNull(tenantAgentOverrides.model),
+                  isNull(tenantAgentOverrides.systemPrompt),
+                  isNull(tenantAgentOverrides.toolPermissions),
+                ),
+              ),
           );
         }),
     });

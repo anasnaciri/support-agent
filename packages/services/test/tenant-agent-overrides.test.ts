@@ -203,4 +203,143 @@ describe("TenantAgentOverridesServiceTest", () => {
     );
     expect(out.size).toBe(0);
   });
+
+  it("setToolPermission stores a per-tool choice keyed by tool name", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.get(agentX)?.toolPermissions).toEqual({
+      "conversation.reply": "allow",
+    });
+    expect(out.get(agentX)?.model).toBeNull();
+  });
+
+  it("setToolPermission merges multiple tools and overwrites the same tool", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "ask");
+          yield* s.setToolPermission(
+            tenantA,
+            agentX,
+            "supplier.add_sheet_row",
+            "allow",
+          );
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.get(agentX)?.toolPermissions).toEqual({
+      "conversation.reply": "allow",
+      "supplier.add_sheet_row": "allow",
+    });
+  });
+
+  it("clearToolPermission drops one key but keeps the rest (row survives)", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          yield* s.setToolPermission(
+            tenantA,
+            agentX,
+            "supplier.add_sheet_row",
+            "allow",
+          );
+          yield* s.clearToolPermission(tenantA, agentX, "conversation.reply");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.size).toBe(1);
+    expect(out.get(agentX)?.toolPermissions).toEqual({
+      "supplier.add_sheet_row": "allow",
+    });
+  });
+
+  it("clearing the last tool permission removes the row (nothing else set)", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          yield* s.clearToolPermission(tenantA, agentX, "conversation.reply");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.size).toBe(0);
+  });
+
+  it("clearToolPermission keeps the row when a model override remains", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setModel(tenantA, agentX, "google/gemini-3.5-flash");
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          yield* s.clearToolPermission(tenantA, agentX, "conversation.reply");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.size).toBe(1);
+    expect(out.get(agentX)?.model).toBe("google/gemini-3.5-flash");
+    expect(out.get(agentX)?.toolPermissions).toBeNull();
+  });
+
+  it("clearModel keeps an existing tool permission (row survives)", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setModel(tenantA, agentX, "google/gemini-3.5-flash");
+          yield* s.setToolPermission(tenantA, agentX, "conversation.reply", "allow");
+          yield* s.clearModel(tenantA, agentX);
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.size).toBe(1);
+    expect(out.get(agentX)?.model).toBeNull();
+    expect(out.get(agentX)?.toolPermissions).toEqual({
+      "conversation.reply": "allow",
+    });
+  });
+
+  it("a model-only override reports a null toolPermissions", async () => {
+    const layer = TenantAgentOverridesServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const s = yield* TenantAgentOverridesService;
+          yield* s.setModel(tenantA, agentX, "google/gemini-3.5-flash");
+          return yield* s.getForTenant(tenantA);
+        }),
+        layer,
+      ),
+    );
+    expect(out.get(agentX)?.toolPermissions).toBeNull();
+  });
 });

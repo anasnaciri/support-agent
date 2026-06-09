@@ -1495,6 +1495,102 @@ const handleDashboardAgentSystemPromptClear = async (
   return sendJson(res, 200, { ok: true });
 };
 
+// Resolve a tenant-configurable tool for an agent, or an error code. Guards the
+// tool-permission endpoints: the tool must be bound to the agent AND carry the
+// `permission-toggle` control (so `refund.create`, governed by the refund-policy
+// page, and internal plumbing tools are both rejected here).
+const resolveConfigurableTool = (
+  agentId: string,
+  toolName: unknown,
+):
+  | { ok: true; tool: string }
+  | { ok: false; status: number; error: string } => {
+  const agent = ALL_AGENTS.find((a) => a.id === agentId);
+  if (!agent) return { ok: false, status: 404, error: "unknown_agent" };
+  if (typeof toolName !== "string" || toolName.length === 0) {
+    return { ok: false, status: 400, error: "missing_tool" };
+  }
+  if (!agent.tools.includes(toolName)) {
+    return { ok: false, status: 400, error: "tool_not_on_agent" };
+  }
+  const tool = ALL_TOOLS.find((t) => t.name === toolName);
+  if (!tool || tool.tenantControl !== "permission-toggle") {
+    return { ok: false, status: 400, error: "tool_not_configurable" };
+  }
+  return { ok: true, tool: toolName };
+};
+
+// POST /dashboard/agents/:id/tool-permission — set a per-agent "ask first" vs
+// "auto" choice for one tool. Body: { tool, permission } where permission is
+// "ask" | "allow" (tenants can never set "deny" here — that stays a policy
+// outcome). The runtime overlays this onto the agent's permissionOverrides.
+const handleDashboardAgentToolPermissionSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const resolved = resolveConfigurableTool(id, body["tool"]);
+  if (!resolved.ok) {
+    return sendJson(res, resolved.status, { error: resolved.error });
+  }
+  const permission = body["permission"];
+  if (permission !== "ask" && permission !== "allow") {
+    return sendJson(res, 400, { error: "invalid_permission" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        yield* svc.setToolPermission(
+          TenantId(auth.tenantId),
+          AgentId(id),
+          resolved.tool,
+          permission,
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/agents/:id/tool-permission/clear — drop the per-agent override
+// for one tool (revert to the agent default). Body: { tool }.
+const handleDashboardAgentToolPermissionClear = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const resolved = resolveConfigurableTool(id, body["tool"]);
+  if (!resolved.ok) {
+    return sendJson(res, resolved.status, { error: resolved.error });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* TenantAgentOverridesService;
+        yield* svc.clearToolPermission(
+          TenantId(auth.tenantId),
+          AgentId(id),
+          resolved.tool,
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
 // POST /dashboard/llm — connect a BYOK LLM credential (api encrypts + stores).
 const handleDashboardLlmConnect = async (
   cfg: ApiConfig,
@@ -3686,6 +3782,16 @@ export const startServer = async (
     "/dashboard/agents/:id/system-prompt/clear",
     "Clear a per-agent system prompt",
     handleDashboardAgentSystemPromptClear,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/tool-permission",
+    "Set a per-agent tool permission (ask first vs auto)",
+    handleDashboardAgentToolPermissionSet,
+  );
+  dashboardPost(
+    "/dashboard/agents/:id/tool-permission/clear",
+    "Clear a per-agent tool permission override",
+    handleDashboardAgentToolPermissionClear,
   );
   dashboardPost(
     "/dashboard/llm",

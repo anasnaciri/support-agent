@@ -630,6 +630,7 @@ export const agentOverrides = async (
       agentId: tenantAgentOverrides.agentId,
       model: tenantAgentOverrides.model,
       systemPrompt: tenantAgentOverrides.systemPrompt,
+      toolPermissions: tenantAgentOverrides.toolPermissions,
     })
     .from(tenantAgentOverrides)
     .where(eq(tenantAgentOverrides.tenantId, tenantId));
@@ -637,6 +638,7 @@ export const agentOverrides = async (
     agentId: r.agentId,
     model: r.model,
     systemPrompt: r.systemPrompt,
+    toolPermissions: r.toolPermissions,
   }));
 };
 

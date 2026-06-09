@@ -4,10 +4,12 @@ import {
   type AgentConfig,
 } from "@support-agent/agent-core";
 import {
+  applyOverride,
   buildSystemPrompt,
   defaultRefundPolicy,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
+  type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
 
@@ -77,5 +79,88 @@ describe("buildSystemPrompt", () => {
     expect(got).toContain(
       "[Supplier escalation sheet: spreadsheetId=abc123, range=Escalations!A:F]",
     );
+  });
+});
+
+describe("applyOverride — tool permissions", () => {
+  const agentId = AgentId("test-agent");
+
+  const override = (o: Partial<AgentOverride>): AgentOverride => ({
+    agentId,
+    model: null,
+    systemPrompt: null,
+    toolPermissions: null,
+    updatedAt: new Date(),
+    ...o,
+  });
+
+  const mapOf = (o: AgentOverride): ReadonlyMap<AgentConfig["id"], AgentOverride> =>
+    new Map([[o.agentId, o]]);
+
+  it("merges tenant toolPermissions onto the agent's permissionOverrides", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    const next = applyOverride(
+      agent,
+      mapOf(override({ toolPermissions: { "conversation.reply": "allow" } })),
+    );
+    expect(next.permissionOverrides).toEqual({ "conversation.reply": "allow" });
+  });
+
+  it("lets the tenant choice win over an in-code permission pin", () => {
+    // missing-package-agent pins supplier.add_sheet_row to `allow` in code; a
+    // tenant who flips it to "ask first" must win.
+    const agent = baseAgent({
+      tools: ["supplier.add_sheet_row"],
+      permissionOverrides: { "supplier.add_sheet_row": "allow" },
+    });
+    const next = applyOverride(
+      agent,
+      mapOf(override({ toolPermissions: { "supplier.add_sheet_row": "ask" } })),
+    );
+    expect(next.permissionOverrides["supplier.add_sheet_row"]).toBe("ask");
+  });
+
+  it("keeps unrelated in-code pins while overriding one tool", () => {
+    const agent = baseAgent({
+      permissionOverrides: {
+        "supplier.read_sheet_columns": "allow",
+        "supplier.add_sheet_row": "allow",
+      },
+    });
+    const next = applyOverride(
+      agent,
+      mapOf(override({ toolPermissions: { "supplier.add_sheet_row": "ask" } })),
+    );
+    expect(next.permissionOverrides).toEqual({
+      "supplier.read_sheet_columns": "allow",
+      "supplier.add_sheet_row": "ask",
+    });
+  });
+
+  it("is a no-op (same reference) when the agent has no override row", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    expect(applyOverride(agent, new Map())).toBe(agent);
+  });
+
+  it("is a no-op (same reference) when toolPermissions is empty and nothing else is set", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    expect(applyOverride(agent, mapOf(override({ toolPermissions: {} })))).toBe(
+      agent,
+    );
+  });
+
+  it("applies a model override and a tool permission together", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    const next = applyOverride(
+      agent,
+      mapOf(
+        override({
+          model: "google/gemini-3.5-flash",
+          toolPermissions: { "conversation.reply": "allow" },
+        }),
+      ),
+    );
+    expect(next.model).toBe("google/gemini-3.5-flash");
+    expect(next.permissionOverrides).toEqual({ "conversation.reply": "allow" });
   });
 });
