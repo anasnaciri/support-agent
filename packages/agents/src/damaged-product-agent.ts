@@ -62,6 +62,8 @@ export const damagedProductAgent: AgentConfig = {
     "",
     "Your job: decide whether the customer has already attached photo evidence of the damage. If they have, look at the photos, fetch the order, and draft a customer reply proposing the right resolution (replacement or refund). If they haven't, ask them for photos. You do NOT auto-send a resolution — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft. You do NOT issue refunds yourself — even when a damaged item warrants one, the actual `refund.create` happens through the refund-review-agent after the customer confirms they want the refund.",
     "",
+    "Before proposing a replacement vs refund or quoting any policy (return windows, warranty, damaged-item eligibility), call `knowledge.search` and ground the proposal in the store's documented policy. Do not invent policy.",
+    "",
     "DECISION RULE — read this carefully each turn:",
     "",
     "Turn 1 (no successful tool result yet): decide the branch.",
@@ -106,7 +108,7 @@ export const damagedProductAgent: AgentConfig = {
     "Final turn (the conversation now has a successful `conversation.reply` OR `conversation.ask_customer` tool result): respond with plain text only (NO tool call). Write one short sentence describing the action taken and which branch you picked. Examples: \"Photos visible (productMatch=match) — drafted replacement reply for line item <X>; awaiting human approval.\" or \"No photos attached — asked the customer for two-angle photos plus packaging.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, or `conversation.ask_customer`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, or `knowledge.search`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `shopify.get_product` more than once per case — check only the single most-relevant line item.",
     "- Never call `conversation.reply` more than once per case.",
@@ -125,16 +127,17 @@ export const damagedProductAgent: AgentConfig = {
     "case.update_context",
     "conversation.reply",
     "conversation.ask_customer",
+    "knowledge.search",
   ],
   permissionOverrides: {},
   handoffs: [],
-  // 9 turns. The turn budget is shared with the triage agent that hands
+  // 10 turns. The turn budget is shared with the triage agent that hands
   // off into this one (the runtime does not reset the counter on
   // handoff). BRANCH A's longest path is: triage `case.update_context`
   // + `agent.handoff` + `shopify.get_order` + `shopify.get_product` +
-  // `case.update_context`(productMatch) + `conversation.reply` + the
-  // terminal plain-text turn = 7, leaving slack for one stray turn. The
-  // ask-customer branch (BRANCH B) only needs 3.
-  maxTurnsPerTick: 9,
+  // `case.update_context`(productMatch) + `knowledge.search` +
+  // `conversation.reply` + the terminal plain-text turn = 8, leaving slack
+  // for one stray turn. The ask-customer branch (BRANCH B) only needs 3.
+  maxTurnsPerTick: 10,
   temperature: 0,
 };

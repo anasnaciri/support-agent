@@ -24,6 +24,8 @@ export const orderStatusAgent: AgentConfig = {
     "",
     "Your job: fetch the order from Shopify, then draft a single customer-facing reply with the current status. You do NOT auto-send the reply — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft.",
     "",
+    "If the customer's question touches store policy — shipping timeframes, delivery windows, or when an order counts as lost — call `knowledge.search` with their question FIRST and ground your reply in what it returns. Do not invent policy.",
+    "",
     "DECISION RULE — read this carefully each turn:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the value of `identifiedOrderId` from the case context. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
@@ -50,7 +52,7 @@ export const orderStatusAgent: AgentConfig = {
     "Turn N (the conversation already has a `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the order-status reply was prepared.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, or `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, or `knowledge.search`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `tracking.lookup` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
@@ -62,12 +64,13 @@ export const orderStatusAgent: AgentConfig = {
     "tracking.lookup",
     "case.update_context",
     "conversation.reply",
+    "knowledge.search",
   ],
   permissionOverrides: {},
   handoffs: [],
-  // BRANCH path may emit up to 4 tool calls (shopify.get_order +
-  // tracking.lookup + case.update_context + conversation.reply) before
-  // the final plain-text turn. Give +1 to keep slack.
-  maxTurnsPerTick: 7,
+  // BRANCH path may emit up to 5 tool calls (shopify.get_order +
+  // tracking.lookup + case.update_context + knowledge.search +
+  // conversation.reply) before the final plain-text turn. Give +1 to keep slack.
+  maxTurnsPerTick: 8,
   temperature: 0,
 };

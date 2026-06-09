@@ -293,6 +293,31 @@ export interface AgentOverrideRow {
 }
 
 // ============================================================
+// Knowledge base (settings/knowledge) — tenant policy / reference documents
+// the support agents consult via the knowledge.search tool. Dates are ISO
+// strings so the type stays Worker-safe.
+// ============================================================
+
+export type KnowledgeSourceType = "text" | "url";
+
+export interface KnowledgeDocumentSummaryView {
+  readonly id: string;
+  readonly title: string;
+  readonly sourceType: KnowledgeSourceType;
+  // The fetched page for a `url` doc; null for a pasted `text` doc.
+  readonly sourceUrl: string | null;
+  // Last successful snapshot time for a `url` doc; null for `text`.
+  readonly fetchedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface KnowledgeDocumentView extends KnowledgeDocumentSummaryView {
+  // The full readable text (pasted verbatim, or extracted from the URL).
+  readonly content: string;
+}
+
+// ============================================================
 // LLM usage (settings/usage)
 // ============================================================
 

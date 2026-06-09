@@ -13,6 +13,7 @@ import { conversationAskCustomer } from "./conversation/ask-customer.js";
 import { supplierAddSheetRow } from "./supplier/add-sheet-row.js";
 import { supplierReadSheetColumns } from "./supplier/read-sheet-columns.js";
 import { trackingLookup } from "./tracking/lookup.js";
+import { knowledgeSearch } from "./knowledge/search.js";
 
 export * from "./case/update-status.js";
 export * from "./case/update-context.js";
@@ -28,6 +29,7 @@ export * from "./conversation/ask-customer.js";
 export * from "./supplier/add-sheet-row.js";
 export * from "./supplier/read-sheet-columns.js";
 export * from "./tracking/lookup.js";
+export * from "./knowledge/search.js";
 
 /**
  * Canonical list of every tool the platform ships with. Same pattern
@@ -60,4 +62,5 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   supplierReadSheetColumns as AnyTool,
   supplierAddSheetRow as AnyTool,
   trackingLookup as AnyTool,
+  knowledgeSearch as AnyTool,
 ];

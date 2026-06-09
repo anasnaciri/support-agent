@@ -26,6 +26,7 @@ import {
   type ShopifyService,
   type SheetsService,
   type TenantRepository,
+  type KnowledgeBaseService,
   type TimerService,
   type TrackingService,
   type TransactionRunner,
@@ -43,6 +44,7 @@ import {
   DbClient,
   DbClientLive,
   ImageHashStoreLive,
+  KnowledgeBaseServiceLive,
   LLMCredentialResolverLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
@@ -94,6 +96,7 @@ export interface WorkerBootstrap {
     | TrackingService
     | ConversationService
     | TenantRepository
+    | KnowledgeBaseService
     | TransactionRunner
     | BlobStorage
     | OrgDirectoryService
@@ -245,6 +248,9 @@ export const buildWorker = async (
     ApprovalServiceLive,
     TransactionRunnerLive,
     TenantAgentOverridesServiceLive,
+    // Backs both the agent prompt's knowledge-doc title header and the
+    // `knowledge.search` tool the specialists call.
+    KnowledgeBaseServiceLive,
     TimerServiceLive,
     // Exposed so workers like the retention-sweep cron can read
     // per-tenant settings (`retentionDays`). Other services that need

@@ -36,6 +36,8 @@ export const refundReviewAgent: AgentConfig = {
     "",
     "You can either issue a refund directly (`refund.create`) or draft a customer reply (`conversation.reply`). Pick ONE path per case based on the order state.",
     "",
+    "Before deciding PATH A vs PATH B or quoting any refund or return terms (windows, restocking fees, eligibility), call `knowledge.search` (e.g. \"refund policy\", \"return window\") and follow the store's documented policy. Do not invent policy.",
+    "",
     "DECISION RULE — follow these steps in order:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
@@ -74,7 +76,7 @@ export const refundReviewAgent: AgentConfig = {
     "  • After `conversation.reply` success: \"Draft refund-review reply prepared; awaiting human approval.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, or `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, or `knowledge.search`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `refund.create` more than once per case.",
     "- Never call `refund.recommend` more than once per case. Only inside PATH B.",
@@ -98,11 +100,12 @@ export const refundReviewAgent: AgentConfig = {
     "conversation.reply",
     "refund.create",
     "refund.recommend",
+    "knowledge.search",
   ],
   permissionOverrides: {},
   handoffs: [],
-  // PATH B now emits an extra tool call (refund.recommend before the
-  // reply) so give the agent +1 to keep tail slack.
-  maxTurnsPerTick: 7,
+  // PATH B may emit two extra tool calls (knowledge.search + refund.recommend
+  // before the reply) so give the agent +1 more to keep tail slack.
+  maxTurnsPerTick: 8,
   temperature: 0,
 };

@@ -46,6 +46,8 @@ export const missingPackageAgent: AgentConfig = {
     "",
     "Your job: fetch the order from Shopify, then draft a single customer-facing reply that proposes the next step based on the order's fulfillment state. You do NOT auto-send the reply — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft. You do NOT issue refunds — even when a missing package warrants one, that's a separate workflow handled when the customer confirms they want a refund.",
     "",
+    "If your reply would state a reshipment, lost-package, claim-window, or refund policy, call `knowledge.search` FIRST and use the store's documented policy. Do not invent policy.",
+    "",
     "DECISION RULE — read this carefully each turn:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
@@ -81,7 +83,7 @@ export const missingPackageAgent: AgentConfig = {
     "Turn 3 (the conversation has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the draft was prepared and which branch was picked. Example: \"Draft missing-package reply prepared (branch A: marked delivered); awaiting human approval.\"",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, or `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, `conversation.reply`, or `knowledge.search`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `supplier.read_sheet_columns` or `supplier.add_sheet_row` more than once per case. Only call them inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present. Always read columns before appending.",
@@ -102,6 +104,7 @@ export const missingPackageAgent: AgentConfig = {
     "supplier.read_sheet_columns",
     "supplier.add_sheet_row",
     "conversation.reply",
+    "knowledge.search",
   ],
   permissionOverrides: {
     // The reply is still operator-gated (ask); the supplier-sheet read +
@@ -114,10 +117,11 @@ export const missingPackageAgent: AgentConfig = {
     "supplier.add_sheet_row": "allow",
   },
   handoffs: [],
-  // Baseline branch is get_order → conversation.reply. BRANCH A now emits
-  // up to TWO extra tools (read_sheet_columns, then add_sheet_row) before
-  // the reply, so give the agent headroom: get_order + read + append +
-  // reply + final-text = 5 turns, +slack.
-  maxTurnsPerTick: 9,
+  // Baseline branch is get_order → conversation.reply. BRANCH A may emit
+  // up to THREE extra tools (read_sheet_columns, add_sheet_row, and
+  // knowledge.search) before the reply, so give the agent headroom:
+  // get_order + read + append + knowledge + reply + final-text = 6 turns,
+  // +slack.
+  maxTurnsPerTick: 10,
   temperature: 0,
 };

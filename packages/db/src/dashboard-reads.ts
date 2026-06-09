@@ -27,6 +27,8 @@ import {
   type CaseEventsResult,
   type CaseListRow,
   type ConnectorConnectionView,
+  type KnowledgeDocumentSummaryView,
+  type KnowledgeSourceType,
   type Page,
   type TodaySummary,
   type UsageDecisionRow,
@@ -38,6 +40,7 @@ import {
   cases,
   connectorConnections,
   tenantAgentOverrides,
+  tenantKnowledgeDocuments,
   tenants,
 } from "./schema.js";
 
@@ -76,6 +79,7 @@ export type {
   AuditFilter,
   ConnectorConnectionView,
   AgentOverrideRow,
+  KnowledgeDocumentSummaryView,
   UsageDecisionRow,
 } from "@support-agent/dashboard-contracts";
 
@@ -639,6 +643,39 @@ export const agentOverrides = async (
     model: r.model,
     systemPrompt: r.systemPrompt,
     toolPermissions: r.toolPermissions,
+  }));
+};
+
+/**
+ * Knowledge-base document summaries for settings/knowledge (no `content` — the
+ * list view doesn't need the potentially-large body; the editor fetches one
+ * full doc via the service-backed GET). Oldest first (creation order).
+ */
+export const knowledgeDocuments = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<ReadonlyArray<KnowledgeDocumentSummaryView>> => {
+  const rows = await db
+    .select({
+      id: tenantKnowledgeDocuments.id,
+      title: tenantKnowledgeDocuments.title,
+      sourceType: tenantKnowledgeDocuments.sourceType,
+      sourceUrl: tenantKnowledgeDocuments.sourceUrl,
+      fetchedAt: tenantKnowledgeDocuments.fetchedAt,
+      createdAt: tenantKnowledgeDocuments.createdAt,
+      updatedAt: tenantKnowledgeDocuments.updatedAt,
+    })
+    .from(tenantKnowledgeDocuments)
+    .where(eq(tenantKnowledgeDocuments.tenantId, tenantId))
+    .orderBy(asc(tenantKnowledgeDocuments.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    sourceType: r.sourceType as KnowledgeSourceType,
+    sourceUrl: r.sourceUrl,
+    fetchedAt: r.fetchedAt ? r.fetchedAt.toISOString() : null,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
   }));
 };
 

@@ -35,6 +35,7 @@ import {
   TenantRepository,
   type TenantSettings,
 } from "./tenant-repository.js";
+import { KnowledgeBaseService } from "./knowledge-base.js";
 
 // ============================================================
 // Helpers
@@ -101,10 +102,14 @@ const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
 /**
  * Build the system prompt the runtime hands to the LLM each turn.
  *
- * Today the prompt is just `agent.promptTemplate`, optionally with a
- * `[Supplier escalation sheet: ...]` header appended when:
+ * The prompt is `agent.promptTemplate`, optionally with one or more bracketed
+ * headers appended. The `[Supplier escalation sheet: ...]` header is added when:
  *   1. The agent declares `supplier.add_sheet_row` in its tools array, AND
  *   2. The tenant has configured a `supplierEscalationSheet` in settings.
+ * The `[Store knowledge base — ...]` header (listing the tenant's document
+ * titles) is added under the same shape when the agent declares
+ * `knowledge.search` AND the tenant has at least one knowledge document
+ * (`knowledgeTitles`, loaded once per tick).
  *
  * Missing-package-agent's BRANCH A is the first user of this header — its
  * prompt checks for the bracketed line and conditionally calls
@@ -118,16 +123,38 @@ const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
 export const buildSystemPrompt = (
   agent: Pick<AgentConfig, "tools" | "promptTemplate">,
   tenantSettings: TenantSettings | null,
+  knowledgeTitles: ReadonlyArray<string> = [],
 ): string => {
+  const headers: string[] = [];
+
   const sheet = tenantSettings?.supplierEscalationSheet ?? null;
   const usesSheetTool = agent.tools.some(
     (t) => (t as string) === "supplier.add_sheet_row",
   );
-  if (!sheet || !usesSheetTool) {
+  if (sheet && usesSheetTool) {
+    headers.push(
+      `[Supplier escalation sheet: spreadsheetId=${sheet.spreadsheetId}, range=${sheet.range}]`,
+    );
+  }
+
+  // Knowledge base: list the tenant's document titles so an agent that holds
+  // the `knowledge.search` tool knows what's available and pulls full text on
+  // demand. Same gating shape as the supplier header — only agents that
+  // declare the tool see it, and only when the tenant actually has documents.
+  const usesKnowledgeTool = agent.tools.some(
+    (t) => (t as string) === "knowledge.search",
+  );
+  if (usesKnowledgeTool && knowledgeTitles.length > 0) {
+    const titles = knowledgeTitles.map((t) => `"${t}"`).join(", ");
+    headers.push(
+      `[Store knowledge base — call knowledge.search to read: ${titles}]`,
+    );
+  }
+
+  if (headers.length === 0) {
     return agent.promptTemplate;
   }
-  const header = `[Supplier escalation sheet: spreadsheetId=${sheet.spreadsheetId}, range=${sheet.range}]`;
-  return `${agent.promptTemplate}\n\n${header}`;
+  return `${agent.promptTemplate}\n\n${headers.join("\n\n")}`;
 };
 
 // Build a user-role ChatMessage from a text body + the inbound message's
@@ -318,6 +345,11 @@ export const AgentRuntimeDefault = Layer.effect(
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
     const tenantRepo = yield* TenantRepository;
+    // Optional — like ImageHashStore below. Present in the worker (which wires
+    // KnowledgeBaseServiceLive); absent in the many runtime test layers that
+    // don't, in which case the knowledge-base title header is simply omitted.
+    // The `knowledge.search` tool resolves the service itself at execute time.
+    const maybeKnowledge = yield* Effect.serviceOption(KnowledgeBaseService);
     // Optional — captured at layer-build time so `tick` can close over it.
     // Present in the worker (which wires ImageHashStoreLive); absent in the
     // many test layers that don't, in which case duplicate-photo detection
@@ -692,6 +724,22 @@ export const AgentRuntimeDefault = Layer.effect(
         const tenantSettings: TenantSettings | null = yield* tenantRepo
           .getSettings(working.tenantId)
           .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        // Knowledge-base document titles for the system-prompt header. Loaded
+        // once per tick (titles only — the `knowledge.search` tool pulls the
+        // bodies on demand). Absent service (test layers) → no titles; DB
+        // failures fall back to an empty list so the runtime keeps going with
+        // the bare prompt.
+        const knowledgeTitles: ReadonlyArray<string> = Option.isSome(
+          maybeKnowledge,
+        )
+          ? yield* maybeKnowledge.value
+              .listTitles(working.tenantId)
+              .pipe(
+                Effect.catchAll(() =>
+                  Effect.succeed([] as ReadonlyArray<string>),
+                ),
+              )
+          : [];
         let agent: AgentConfig = applyOverride(
           yield* registry.resolve(working.currentAgentId),
           overrideMap,
@@ -711,7 +759,7 @@ export const AgentRuntimeDefault = Layer.effect(
             .runToolCalling({
               tenantId: current.tenantId,
               model: agent.model,
-              system: buildSystemPrompt(agent, tenantSettings),
+              system: buildSystemPrompt(agent, tenantSettings, knowledgeTitles),
               messages,
               tools: schemas,
               ...(agent.temperature !== undefined

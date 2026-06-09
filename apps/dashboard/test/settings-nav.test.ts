@@ -14,6 +14,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["/settings/permissions", "/settings/permissions"],
   ["/settings/llm", "/settings/llm"],
   ["/settings/refund-policy", "/settings/refund-policy"],
+  ["/settings/knowledge", "/settings/knowledge"],
+  ["/settings/knowledge/3f2504e0-4f89-41d3-9a0c-0305e82c3301", "/settings/knowledge"],
   ["/settings/usage", "/settings/usage"],
   ["/settings/integrations", "/settings/integrations"],
   ["/settings/integrations/shopify", "/settings/integrations"],

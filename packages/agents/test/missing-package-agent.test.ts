@@ -21,6 +21,7 @@ describe("missing-package-agent config", () => {
       "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
       "conversation.reply",
+      "knowledge.search",
     ]);
     expect(missingPackageAgent.tools).not.toContain("refund.create");
     expect(missingPackageAgent.tools).not.toContain("agent.handoff");

@@ -19,6 +19,7 @@ describe("order-status-agent config", () => {
       "tracking.lookup",
       "case.update_context",
       "conversation.reply",
+      "knowledge.search",
     ]);
     expect(orderStatusAgent.handoffs).toEqual([]);
     expect(orderStatusAgent.maxTurnsPerTick).toBeGreaterThan(1);

@@ -359,6 +359,52 @@ export type TenantAgentOverrideRow =
 export type TenantAgentOverrideInsert =
   typeof tenantAgentOverrides.$inferInsert;
 
+// Tenant-authored knowledge base: store policy / reference documents (shipping
+// policy, returns policy, FAQs, …) the support agents consult at runtime via
+// the `knowledge.search` tool. Dedicated table (NOT the `tenants.settings`
+// JSONB blob) because `content` can be large. `source_type` distinguishes a
+// raw pasted document from a URL the platform fetched + snapshotted: for a
+// `url` doc, `source_url` is the fetched page and `content` is the extracted
+// readable text, `fetched_at` stamps the last successful snapshot, and
+// `content_hash` lets a re-sync no-op when the page is unchanged. Tenant-wide
+// scope: every doc is available to all of the tenant's agents (no per-agent
+// column). Cascade-deleted with the tenant.
+export const tenantKnowledgeDocuments = pgTable(
+  "tenant_knowledge_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    sourceType: text("source_type").notNull(),
+    sourceUrl: text("source_url"),
+    contentHash: text("content_hash"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "tenant_knowledge_documents_source_type_check",
+      sql`${t.sourceType} IN ('text','url')`,
+    ),
+    // Every read is `WHERE tenant_id = $1` (per-tick title load + dashboard
+    // list + the tool's listFull).
+    index("tenant_knowledge_documents_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export type TenantKnowledgeDocumentRow =
+  typeof tenantKnowledgeDocuments.$inferSelect;
+export type TenantKnowledgeDocumentInsert =
+  typeof tenantKnowledgeDocuments.$inferInsert;
+
 // Platform-operator audit log. Deliberately NOT tenant-scoped and with NO
 // FK to `tenants` — these rows must SURVIVE a tenant wipe so a privileged
 // action (above all, deleting a tenant) leaves a permanent record. The

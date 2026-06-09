@@ -15,6 +15,8 @@ import type {
   CaseListRow,
   CatalogResponse,
   ConnectorConnectionView,
+  KnowledgeDocumentSummaryView,
+  KnowledgeDocumentView,
   ModelsResponse,
   OnboardingResult,
   Page,
@@ -462,6 +464,58 @@ export const api = {
     call(`/agents/${encodeURIComponent(agentId)}/tool-permission/clear`, {
       method: "POST",
       body: { tool },
+      ctx,
+    }),
+
+  knowledge: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<KnowledgeDocumentSummaryView>> =>
+    (
+      (await okBody("/knowledge", ctx)) as {
+        documents: ReadonlyArray<KnowledgeDocumentSummaryView>;
+      }
+    ).documents,
+
+  knowledgeDoc: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<KnowledgeDocumentView | null> => {
+    const { status, body } = await call(
+      `/knowledge/${encodeURIComponent(id)}`,
+      { ctx },
+    );
+    if (status !== 200) return null;
+    return (body as { document: KnowledgeDocumentView }).document;
+  },
+
+  createKnowledge: (
+    ctx: CallCtx,
+    input:
+      | { readonly title: string; readonly sourceType: "text"; readonly content: string }
+      | { readonly title: string; readonly sourceType: "url"; readonly sourceUrl: string },
+  ): Promise<CallResult> =>
+    call("/knowledge", { method: "POST", body: input, ctx }),
+
+  updateKnowledge: (
+    ctx: CallCtx,
+    id: string,
+    input: { readonly title?: string; readonly content?: string },
+  ): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: input,
+      ctx,
+    }),
+
+  deleteKnowledge: (ctx: CallCtx, id: string): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
+
+  resyncKnowledge: (ctx: CallCtx, id: string): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}/resync`, {
+      method: "POST",
       ctx,
     }),
 

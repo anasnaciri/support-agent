@@ -23,6 +23,7 @@ describe("damaged-product-agent config", () => {
       "case.update_context",
       "conversation.reply",
       "conversation.ask_customer",
+      "knowledge.search",
     ]);
     expect(damagedProductAgent.tools).not.toContain("refund.create");
     expect(damagedProductAgent.tools).not.toContain("agent.handoff");

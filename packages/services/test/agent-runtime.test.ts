@@ -80,6 +80,50 @@ describe("buildSystemPrompt", () => {
       "[Supplier escalation sheet: spreadsheetId=abc123, range=Escalations!A:F]",
     );
   });
+
+  it("ignores knowledge titles when the agent doesn't use knowledge.search", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    expect(buildSystemPrompt(agent, null, ["Shipping policy"])).toBe(
+      "Base prompt for testing.",
+    );
+  });
+
+  it("omits the knowledge-base header when the tenant has no documents", () => {
+    const agent = baseAgent({ tools: ["knowledge.search"] });
+    expect(buildSystemPrompt(agent, null, [])).toBe("Base prompt for testing.");
+  });
+
+  it("appends the knowledge-base header listing titles when the agent uses knowledge.search", () => {
+    const agent = baseAgent({
+      tools: ["knowledge.search", "conversation.reply"],
+    });
+    const got = buildSystemPrompt(agent, null, [
+      "Shipping policy",
+      "Returns policy",
+    ]);
+    expect(got).toContain("Base prompt for testing.");
+    expect(got).toContain(
+      '[Store knowledge base — call knowledge.search to read: "Shipping policy", "Returns policy"]',
+    );
+  });
+
+  it("appends both the supplier and knowledge headers when applicable", () => {
+    const agent = baseAgent({
+      tools: ["supplier.add_sheet_row", "knowledge.search"],
+    });
+    const settings = makeSettings({
+      spreadsheetId: "s1",
+      range: "Escalations!A:F",
+      description: null,
+    });
+    const got = buildSystemPrompt(agent, settings, ["Shipping policy"]);
+    expect(got).toContain(
+      "[Supplier escalation sheet: spreadsheetId=s1, range=Escalations!A:F]",
+    );
+    expect(got).toContain(
+      '[Store knowledge base — call knowledge.search to read: "Shipping policy"]',
+    );
+  });
 });
 
 describe("applyOverride — tool permissions", () => {

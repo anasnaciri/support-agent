@@ -4,18 +4,21 @@ import {
   BlobStorage,
   BlobStorageTest,
   ConnectorCredentialStore,
+  KnowledgeBaseService,
   parseKey,
   ShopifyAppProvisioningStore,
   ShopifyService,
   TenantAgentOverridesService,
   TenantRepository,
   TransactionRunner,
+  UrlFetchService,
 } from "@support-agent/services";
 import {
   ApprovalServiceLive,
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  KnowledgeBaseServiceLive,
   ShopifyAppProvisioningStoreLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
@@ -27,6 +30,7 @@ import {
   ShopifyCredentialStoreFromConnector,
   ShopifyHttpLive,
   ShopifyServiceLive,
+  UrlFetchServiceLive,
 } from "@support-agent/providers";
 
 // ============================================================
@@ -286,6 +290,10 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const agentOverridesSvc = TenantAgentOverridesServiceLive.pipe(
     Layer.provide(dbLayer),
   );
+  // Knowledge base: CRUD for the settings/knowledge endpoints. UrlFetchService
+  // (SSRF-guarded) backs the "add from URL" / resync paths; it has no deps.
+  const knowledge = KnowledgeBaseServiceLive.pipe(Layer.provide(dbLayer));
+  const urlFetch = UrlFetchServiceLive;
   return Layer.mergeAll(
     store,
     appProvisioning,
@@ -296,6 +304,8 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     shopify,
     tenantRepo,
     agentOverridesSvc,
+    knowledge,
+    urlFetch,
   );
 };
 
@@ -308,7 +318,9 @@ export type ApiLayer = Layer.Layer<
   | BlobStorage
   | ShopifyService
   | TenantRepository
-  | TenantAgentOverridesService,
+  | TenantAgentOverridesService
+  | KnowledgeBaseService
+  | UrlFetchService,
   never,
   never
 >;
