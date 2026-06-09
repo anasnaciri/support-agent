@@ -388,6 +388,13 @@ export const api = {
   settings: (ctx: CallCtx): Promise<TenantSettingsView> =>
     okBody("/settings", ctx) as Promise<TenantSettingsView>,
 
+  shopCurrency: (
+    ctx: CallCtx,
+  ): Promise<{ readonly currencyCode: string | null }> =>
+    okBody("/shop-currency", ctx) as Promise<{
+      readonly currencyCode: string | null;
+    }>,
+
   // ---- Writes ----
   onboarding: async (
     ctx: CallCtx,

@@ -1,6 +1,7 @@
 import { Banknote } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
+import { refundCurrencyMismatch } from "@/lib/refund-currency";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
@@ -17,8 +18,20 @@ interface PageProps {
 
 export default async function RefundPolicyPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
-  const { refundPolicy: policy } = await api.settings(ctx);
+  const [{ refundPolicy: policy }, shopCurrency] = await Promise.all([
+    api.settings(ctx),
+    // Best-effort — the warning is omitted if the store currency is unknown.
+    api
+      .shopCurrency(ctx)
+      .catch(() => ({ currencyCode: null as string | null })),
+  ]);
   const params = (await searchParams) ?? {};
+
+  const showCurrencyWarning = refundCurrencyMismatch(
+    policy.currencyCode,
+    shopCurrency.currencyCode,
+    policy.mode,
+  );
 
   const savedBanner =
     (Array.isArray(params["saved"]) ? params["saved"][0] : params["saved"]) ===
@@ -50,6 +63,17 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
       {savedBanner ? (
         <Alert variant="success">
           <AlertDescription>Refund policy saved.</AlertDescription>
+        </Alert>
+      ) : null}
+      {showCurrencyWarning ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            Your Shopify store charges in{" "}
+            <strong>{shopCurrency.currencyCode}</strong>, but this policy is set
+            to <strong>{policy.currencyCode}</strong>. Refunds won&apos;t match
+            your thresholds and will all pause for approval &mdash; set the
+            currency to {shopCurrency.currencyCode} to fix this.
+          </AlertDescription>
         </Alert>
       ) : null}
       {errorRaw === "bad_currency" ? (

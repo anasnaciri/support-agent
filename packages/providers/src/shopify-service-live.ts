@@ -503,6 +503,12 @@ const SEARCH_PRODUCTS_QUERY = `
   }
 `;
 
+const SHOP_INFO_QUERY = `
+  query ShopInfo {
+    shop { currencyCode }
+  }
+`;
+
 const SEARCH_CUSTOMER_QUERY = `
   query SearchCustomer($q: String!) {
     customers(first: 1, query: $q) {
@@ -744,6 +750,19 @@ export const ShopifyServiceLive = Layer.effect(
             { q: query, n: Math.min(Math.max(limit, 1), 50) },
           ).pipe(
             Effect.map((data) => data.products.nodes.map(mapProductSearchNode)),
+          ),
+        ),
+
+      getShopInfo: (tenantId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{ shop: { currencyCode: string } }>(
+            http,
+            creds,
+            tenantId,
+            SHOP_INFO_QUERY,
+            {},
+          ).pipe(
+            Effect.map((data) => ({ currencyCode: data.shop.currencyCode })),
           ),
         ),
 

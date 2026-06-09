@@ -269,6 +269,27 @@ describe("ShopifyServiceLive — getOrder", () => {
   });
 });
 
+describe("ShopifyServiceLive — getShopInfo", () => {
+  it("queries shop currency and maps the response", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { shop: { currencyCode: "EUR" } } }),
+      ]),
+    );
+    const info = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) => s.getShopInfo(tenantId)),
+        layer,
+      ),
+    );
+    expect(info).toEqual({ currencyCode: "EUR" });
+    expect(captures).toHaveLength(1);
+    const body = JSON.parse(captures[0]!.body) as { query: string };
+    expect(body.query).toContain("query ShopInfo");
+  });
+});
+
 describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", () => {
   it("getCustomer maps the GraphQL response", async () => {
     reset();

@@ -15,6 +15,7 @@ import {
   OrderNotFound,
   ProductNotFound,
   RefundFailed,
+  ShopifyAuthMissing,
 } from "@support-agent/agent-core";
 
 /**
@@ -83,6 +84,17 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       query: string,
       limit: number,
     ) => Effect.Effect<ReadonlyArray<ShopifyProductSearchResult>, ShopifyError>;
+
+    /**
+     * Read the connected store's basic info — currently just its default
+     * currency. Backs the dashboard refund-policy page's "your policy
+     * currency doesn't match your store" warning. `ShopifyAuthMissing`
+     * when the tenant has no live Shopify connection; callers that only
+     * want a best-effort hint catch it and fall back to "unknown".
+     */
+    readonly getShopInfo: (
+      tenantId: TenantId,
+    ) => Effect.Effect<ShopInfo, ShopifyError>;
 
     readonly searchByEmail: (
       tenantId: TenantId,
@@ -180,6 +192,16 @@ export interface OrderPiiPresence {
 }
 
 /**
+ * Minimal store metadata. `currencyCode` is the shop's default currency
+ * (ISO 4217) — the currency Shopify denominates the store's prices and
+ * refunds in. Used to flag a refund policy configured for a different
+ * currency.
+ */
+export interface ShopInfo {
+  readonly currencyCode: string;
+}
+
+/**
  * Aggregated refund history for a single customer.
  *
  * `totalRefundedAmount` is `null` when the customer has no refunds —
@@ -252,6 +274,12 @@ export interface ShopifyTestFixtures {
    * impl returns an empty list (the "no orders on the store yet" case).
    */
   readonly recentOrderPiiPresence?: ReadonlyArray<OrderPiiPresence>;
+  /**
+   * Fixture for `getShopInfo`. When unset the default Test impl fails with
+   * `ShopifyAuthMissing` — the "no Shopify connection" case, which best-
+   * effort callers treat as "store currency unknown".
+   */
+  readonly shopInfo?: ShopInfo;
 }
 
 /**
@@ -289,6 +317,10 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
             Math.max(0, limit),
           ),
         ),
+      getShopInfo: (tenantId) =>
+        fixtures.shopInfo
+          ? Effect.succeed(fixtures.shopInfo)
+          : Effect.fail(new ShopifyAuthMissing({ tenantId })),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
       findOrderByName: (_tenantId, name) => {

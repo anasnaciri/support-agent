@@ -72,6 +72,7 @@ import {
 import {
   resolveCustomerForContext,
   resolveOrderForContext,
+  resolveShopCurrencyCode,
 } from "./dashboard-shopify.js";
 import {
   buildInstallUrl,
@@ -1265,6 +1266,23 @@ const handleDashboardTenant = async (
   return sendJson(res, 200, {
     tenant: tenant ? { tenantId: tenant.id, name: tenant.name } : null,
   });
+};
+
+// GET /dashboard/shop-currency — best-effort store currency (ISO 4217) for
+// the refund-policy page's currency-mismatch warning. Null when there's no
+// live Shopify connection or the lookup fails; the page just omits the hint.
+const handleDashboardShopCurrency = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const currencyCode = await Effect.runPromise(
+    Effect.provide(resolveShopCurrencyCode(TenantId(auth.tenantId)), layer),
+  );
+  return sendJson(res, 200, { currencyCode });
 };
 
 // GET /dashboard/settings — resolved tenant settings (refund policy +
@@ -3999,6 +4017,11 @@ export const startServer = async (
     "/dashboard/settings",
     "Resolved tenant settings (refund policy + supplier sheet)",
     handleDashboardSettings,
+  );
+  dashboardGet(
+    "/dashboard/shop-currency",
+    "Best-effort Shopify store currency (ISO 4217) or null",
+    handleDashboardShopCurrency,
   );
 
   // Mutations. No response serializer (default JSON.stringify) so the

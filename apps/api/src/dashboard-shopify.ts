@@ -45,6 +45,22 @@ export const resolveOrderForContext = (
   });
 
 /**
+ * Best-effort store currency (ISO 4217) for the refund-policy currency
+ * warning. Any failure — no Shopify connection, network, auth — resolves
+ * to null ("unknown"), so the page just omits the warning.
+ */
+export const resolveShopCurrencyCode = (
+  tenantId: TenantId,
+): Effect.Effect<string | null, never, ShopifyService> =>
+  Effect.gen(function* () {
+    const shopify = yield* ShopifyService;
+    return yield* shopify.getShopInfo(tenantId).pipe(
+      Effect.map((info) => info.currencyCode),
+      Effect.catchAll(() => Effect.succeed(null)),
+    );
+  });
+
+/**
  * Best-effort customer for a case's `shopifyCustomerId` (preferred) or
  * `customerEmail`. Errors map to null.
  */
