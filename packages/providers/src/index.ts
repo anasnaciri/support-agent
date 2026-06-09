@@ -6,6 +6,7 @@ export * from "./gmail-token.js";
 export * from "./gmail-watch.js";
 export * from "./oauth-revocation.js";
 export * from "./gmail-conversation-live.js";
+export * from "./conversation-router-live.js";
 export * from "./gmail-attachments.js";
 export * from "./image-exif.js";
 export * from "./image-phash.js";

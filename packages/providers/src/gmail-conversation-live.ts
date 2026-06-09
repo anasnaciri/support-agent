@@ -18,6 +18,7 @@ import {
   ConnectorCredentialStore,
   ConversationService,
   type ConnectorConnection,
+  type ConversationServiceShape,
 } from "@support-agent/services";
 import {
   buildGmailMime,
@@ -112,12 +113,10 @@ const mapHttpError = (
  * yield `ConversationService` and get a `ConversationThread` /
  * `SentMessage` back.
  */
-export const GmailConversationLive = (
+export const makeGmailConversation = (
   cfg: GmailProviderConfig,
-): Layer.Layer<ConversationService, never, ConnectorCredentialStore> =>
-  Layer.effect(
-    ConversationService,
-    Effect.gen(function* () {
+): Effect.Effect<ConversationServiceShape, never, ConnectorCredentialStore> =>
+  Effect.gen(function* () {
       const store = yield* ConnectorCredentialStore;
       const skew = cfg.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
 
@@ -303,5 +302,14 @@ export const GmailConversationLive = (
         reply,
         askCustomer,
       });
-    }),
-  );
+    });
+
+/**
+ * Live `ConversationService` over Gmail as a standalone Layer — a thin wrapper
+ * over {@link makeGmailConversation}. The per-tenant router uses the builder
+ * directly; this Layer is for single-connector deployments / existing wiring.
+ */
+export const GmailConversationLive = (
+  cfg: GmailProviderConfig,
+): Layer.Layer<ConversationService, never, ConnectorCredentialStore> =>
+  Layer.effect(ConversationService, makeGmailConversation(cfg));

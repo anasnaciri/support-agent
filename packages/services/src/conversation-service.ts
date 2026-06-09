@@ -61,6 +61,15 @@ export class ConversationService extends Context.Tag("ConversationService")<
   }
 >() {}
 
+/**
+ * The service shape behind the `ConversationService` Tag. A connector's inner
+ * builder returns this object (e.g. `makeGmailConversation`), so the
+ * per-tenant router can hold several built impls in one Map and dispatch
+ * between them — two `Layer`s can't both provide the same Tag, but plain
+ * shapes compose freely.
+ */
+export type ConversationServiceShape = Context.Tag.Service<ConversationService>;
+
 // ============================================================
 // Test layer — in-memory, single-tenant, deterministic ids
 // ============================================================

@@ -55,7 +55,8 @@ import { parseKey } from "@support-agent/services";
 import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
-  GmailConversationLive,
+  ConversationRouterLive,
+  makeGmailConversation,
   LLMConfigFromEnv,
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
@@ -346,25 +347,32 @@ export const buildWorker = async (
     ttlMs: 7 * 24 * 60 * 60 * 1000,
   });
 
-  // Conversation connector. When Google OAuth env is set we use
-  // `GmailConversationLive` over the DB-backed `ConnectorCredentialStore`
-  // (the same store the OAuth callback writes to). Otherwise we fall back
-  // to the in-memory Test layer so the worker still boots — useful for
-  // single-tenant dev runs that only exercise non-Gmail surfaces.
-  // Adding a second connector (Outlook, IMAP, …) means another branch
-  // here; tools, runtime, and agents stay untouched.
+  // Conversation connector. The worker boots ONE `ConversationService`, but
+  // each tenant connects their own mailbox, possibly on a different provider.
+  // `ConversationRouterLive` resolves which connector a tenant installed (from
+  // `connector_connections`) and delegates to the matching impl. We register
+  // the builder for every connector this deployment has env for; adding
+  // Outlook / IMAP means pushing another `[provider, make…Conversation(cfg)]`
+  // pair below — tools, runtime, and agents stay untouched. When no connector
+  // is configured we fall back to the in-memory Test layer so the worker still
+  // boots for dev runs that only exercise non-mailbox surfaces.
   const googleClientId = process.env["GOOGLE_OAUTH_CLIENT_ID"];
   const googleClientSecret = process.env["GOOGLE_OAUTH_CLIENT_SECRET"];
   const conversation =
     credKeyB64 && googleClientId && googleClientSecret
-      ? GmailConversationLive({
-          clientId: googleClientId,
-          clientSecret: googleClientSecret,
-        }).pipe(
+      ? ConversationRouterLive([
+          [
+            "gmail",
+            makeGmailConversation({
+              clientId: googleClientId,
+              clientSecret: googleClientSecret,
+            }),
+          ],
+        ]).pipe(
           Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
         )
       : (warnProdFallback(
-          "Gmail conversation connector",
+          "conversation connector",
           "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET",
         ),
         ConversationServiceTest({}));
