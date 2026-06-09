@@ -8,6 +8,7 @@ export const SUPPORTED_PROVIDERS = [
   "shopify",
   "gmail",
   "google_sheets",
+  "outlook",
 ] as const;
 
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
@@ -31,7 +32,8 @@ export const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Inbound customer threads + outbound replies on this connection. Installed via Google OAuth.",
   google_sheets:
     "Spreadsheet read/write access for Sheets-backed workflows. Installed via Google OAuth.",
-  outlook: "Microsoft 365 mailbox connector (not yet implemented).",
+  outlook:
+    "Inbound customer threads + outbound replies on this connection (Outlook / Microsoft 365). Installed via Microsoft OAuth.",
 };
 
 const ShopifyIcon = () => (
@@ -122,10 +124,39 @@ const GoogleSheetsIcon = () => (
   </svg>
 );
 
+const OutlookIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 32 32"
+    className="size-5 shrink-0"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path
+      d="M28 6.5H15.5v19H28a1.5 1.5 0 0 0 1.5-1.5V8A1.5 1.5 0 0 0 28 6.5Z"
+      fill="#0A2767"
+    />
+    <path d="M30 16l-7 4.5-7.5-4.5V10l7.5 4.5L30 10v6Z" fill="#1490DF" />
+    <path d="M15.5 9h7v7h-7V9Z" fill="#28A8EA" />
+    <path d="M22.5 9H30v7h-7.5V9Z" fill="#0078D4" />
+    <path d="M22.5 16H30v7h-7.5v-7Z" fill="#0364B8" />
+    <path d="M15.5 16h7v7h-7v-7Z" fill="#14447D" />
+    <path
+      d="M3 7.5h12A1.5 1.5 0 0 1 16.5 9v14A1.5 1.5 0 0 1 15 24.5H3A1.5 1.5 0 0 1 1.5 23V9A1.5 1.5 0 0 1 3 7.5Z"
+      fill="#0078D4"
+    />
+    <path
+      d="M9 11.2c-2.4 0-4 1.9-4 4.7s1.6 4.7 4 4.7 4-1.9 4-4.7-1.6-4.7-4-4.7Zm0 7.6c-1.3 0-2.1-1.1-2.1-2.9s.8-2.9 2.1-2.9 2.1 1.1 2.1 2.9-.8 2.9-2.1 2.9Z"
+      fill="#fff"
+    />
+  </svg>
+);
+
 export const PROVIDER_ICONS = {
   shopify: ShopifyIcon,
   gmail: GmailIcon,
   google_sheets: GoogleSheetsIcon,
+  outlook: OutlookIcon,
 } satisfies Readonly<Record<SupportedProvider, typeof ShopifyIcon>>;
 
 const originFromEnvUrl = (raw: string | undefined): string | null => {
