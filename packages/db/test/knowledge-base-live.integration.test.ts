@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
+import { inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { TenantId } from "@support-agent/agent-core";
 import { KnowledgeBaseService } from "@support-agent/services";
@@ -20,7 +21,15 @@ describeIfDb("KnowledgeBaseServiceLive", () => {
   const client = makeDbClient({ databaseUrl: databaseUrl! });
   const { db } = client;
 
+  // Every seeded tenant is tracked and deleted in afterAll; the FK cascade
+  // takes its tenant_knowledge_documents with it. Without this, each run
+  // leaves a pile of dangling "KB Test" tenants in the database.
+  const seededTenants: string[] = [];
+
   afterAll(async () => {
+    if (seededTenants.length > 0) {
+      await db.delete(tenants).where(inArray(tenants.id, seededTenants));
+    }
     await client.close();
   });
 
@@ -34,6 +43,7 @@ describeIfDb("KnowledgeBaseServiceLive", () => {
   const seedTenant = async (): Promise<TenantId> => {
     const id = randomUUID();
     await db.insert(tenants).values({ id, name: "KB Test" });
+    seededTenants.push(id);
     return TenantId(id);
   };
 

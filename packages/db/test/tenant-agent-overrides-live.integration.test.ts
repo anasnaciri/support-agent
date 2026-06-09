@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { AgentId, TenantId } from "@support-agent/agent-core";
 import { TenantAgentOverridesService } from "@support-agent/services";
 import {
@@ -23,7 +23,15 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
   const client = makeDbClient({ databaseUrl: databaseUrl! });
   const { db } = client;
 
+  // Every seeded tenant is tracked and deleted in afterAll; the FK cascade
+  // takes its tenant_agent_overrides with it. Without this, each run leaves a
+  // pile of dangling "Tool Perm Test" tenants in the database.
+  const seededTenants: string[] = [];
+
   afterAll(async () => {
+    if (seededTenants.length > 0) {
+      await db.delete(tenants).where(inArray(tenants.id, seededTenants));
+    }
     await client.close();
   });
 
@@ -36,6 +44,7 @@ describeIfDb("TenantAgentOverridesServiceLive — tool permissions", () => {
   const seedTenant = async (): Promise<TenantId> => {
     const id = randomUUID();
     await db.insert(tenants).values({ id, name: "Tool Perm Test" });
+    seededTenants.push(id);
     return TenantId(id);
   };
 
