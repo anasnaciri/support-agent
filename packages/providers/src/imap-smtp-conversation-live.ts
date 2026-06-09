@@ -15,11 +15,11 @@ import {
 import {
   ConnectorCredentialStore,
   ConversationService,
-  type ConnectorConnection,
   type ConversationServiceShape,
 } from "@support-agent/services";
 import {
   buildThread,
+  imapConfigFromConnection,
   makeImapSmtpOps,
   stripBrackets,
   type ImapSmtpConfig,
@@ -37,37 +37,6 @@ export interface ImapSmtpProviderConfig {
    */
   readonly opsFactory?: (config: ImapSmtpConfig) => ImapSmtpOps;
 }
-
-const numFromMeta = (v: unknown, fallback: number): number =>
-  typeof v === "number" && Number.isFinite(v) ? v : fallback;
-
-const boolFromMeta = (v: unknown, fallback: boolean): boolean =>
-  typeof v === "boolean" ? v : fallback;
-
-/**
- * Build the transport config from a stored connection. Credentials live as:
- * app-password in `accessToken`, host/port/security in `metadata`, mailbox
- * address in `shopDomain` (also the default login user). Returns `null` when
- * the host metadata is incomplete.
- */
-const configFromConnection = (conn: ConnectorConnection): ImapSmtpConfig | null => {
-  const m = conn.metadata;
-  const imapHost = m["imapHost"];
-  const smtpHost = m["smtpHost"];
-  if (typeof imapHost !== "string" || typeof smtpHost !== "string") return null;
-  if (!imapHost || !smtpHost) return null;
-  const user = typeof m["user"] === "string" && m["user"] ? (m["user"] as string) : conn.shopDomain;
-  return {
-    imapHost,
-    imapPort: numFromMeta(m["imapPort"], 993),
-    imapSecure: boolFromMeta(m["imapSecure"], true),
-    smtpHost,
-    smtpPort: numFromMeta(m["smtpPort"], 465),
-    smtpSecure: boolFromMeta(m["smtpSecure"], numFromMeta(m["smtpPort"], 465) === 465),
-    user,
-    password: conn.accessToken,
-  };
-};
 
 const replySubject = (subject: string): string => {
   const trimmed = subject.trim();
@@ -103,7 +72,7 @@ export const makeImapSmtpConversation = (
               new ConversationAuthMissing({ tenantId, provider: "imap" }),
           ),
         );
-        const config = configFromConnection(conn);
+        const config = imapConfigFromConnection(conn);
         if (!config) {
           return yield* Effect.fail(
             new ConversationAuthMissing({ tenantId, provider: "imap" }),

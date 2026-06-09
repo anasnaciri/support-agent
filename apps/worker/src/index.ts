@@ -15,6 +15,7 @@ import {
   GRAPH_SUBSCRIPTION_RENEWAL_QUEUE,
   registerGraphSubscriptionRenewal,
 } from "./graph-subscription-renewal-schedule.js";
+import { IMAP_POLL_QUEUE, registerImapPoll } from "./imap-poll-schedule.js";
 import {
   RETENTION_SWEEP_QUEUE,
   registerRetentionSweep,
@@ -119,6 +120,13 @@ const main = async (): Promise<void> => {
     console.log(
       `[worker] scheduled graph-subscription-renewal cron on queue=${GRAPH_SUBSCRIPTION_RENEWAL_QUEUE}`,
     );
+  }
+
+  // Schedule the IMAP inbound poll cron. No-ops when CREDENTIAL_ENCRYPTION_KEY
+  // is missing (no generic-mailbox decryption possible).
+  const imapPollRegistered = await registerImapPoll({ boss, runtimeLayer });
+  if (imapPollRegistered) {
+    console.log(`[worker] scheduled imap-poll cron on queue=${IMAP_POLL_QUEUE}`);
   }
 
   // Daily retention sweep: deletes resolved cases (and their audit /

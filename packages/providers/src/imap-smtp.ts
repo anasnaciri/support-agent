@@ -20,6 +20,7 @@ import type {
   MessageParticipant,
 } from "@support-agent/agent-core";
 import { ThreadId as makeThreadId } from "@support-agent/agent-core";
+import type { ConnectorConnection } from "@support-agent/services";
 
 // ============================================================
 // Config + wire types
@@ -73,6 +74,8 @@ export interface ImapSmtpOps {
   readonly listSince: (
     sinceUid: number,
   ) => Promise<{ readonly messages: ReadonlyArray<RawImapMessage>; readonly latestUid: number }>;
+  /** Highest INBOX UID, without fetching bodies — used to seed the poll cursor. */
+  readonly latestUid: () => Promise<number>;
   /** Send a message; returns the assigned Message-ID (brackets stripped). */
   readonly send: (input: ImapSendInput) => Promise<{ readonly messageId: string }>;
   /** Throws if IMAP or SMTP login fails — used by the connect endpoint. */
@@ -137,6 +140,44 @@ export const buildThread = (
     }
   }
   return { id: makeThreadId(threadId), subject, participants, messages };
+};
+
+// ============================================================
+// Config from a stored connection
+// ============================================================
+
+const numFromMeta = (v: unknown, fallback: number): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : fallback;
+
+const boolFromMeta = (v: unknown, fallback: boolean): boolean =>
+  typeof v === "boolean" ? v : fallback;
+
+/**
+ * Build transport config from a stored `imap` connection: app-password in
+ * `accessToken`, host/port/security in `metadata`, mailbox in `shopDomain`
+ * (also the default login user). Returns `null` when host metadata is missing.
+ */
+export const imapConfigFromConnection = (
+  conn: ConnectorConnection,
+): ImapSmtpConfig | null => {
+  const m = conn.metadata;
+  const imapHost = m["imapHost"];
+  const smtpHost = m["smtpHost"];
+  if (typeof imapHost !== "string" || !imapHost) return null;
+  if (typeof smtpHost !== "string" || !smtpHost) return null;
+  const user =
+    typeof m["user"] === "string" && m["user"] ? (m["user"] as string) : conn.shopDomain;
+  const smtpPort = numFromMeta(m["smtpPort"], 465);
+  return {
+    imapHost,
+    imapPort: numFromMeta(m["imapPort"], 993),
+    imapSecure: boolFromMeta(m["imapSecure"], true),
+    smtpHost,
+    smtpPort,
+    smtpSecure: boolFromMeta(m["smtpSecure"], smtpPort === 465),
+    user,
+    password: conn.accessToken,
+  };
 };
 
 // ============================================================
@@ -288,6 +329,19 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
     }
   };
 
+  const latestUid = async (): Promise<number> => {
+    const client = newImap();
+    await client.connect();
+    try {
+      const mb = await client.mailboxOpen("INBOX");
+      // `uidNext` is the UID the next message will get, so the highest current
+      // UID is one less (0 when the mailbox is empty / uidNext is 1).
+      return Math.max(0, Number(mb.uidNext) - 1);
+    } finally {
+      await client.logout();
+    }
+  };
+
   const send = async (
     input: ImapSendInput,
   ): Promise<{ messageId: string }> => {
@@ -322,5 +376,5 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
     }
   };
 
-  return { fetchThread, listSince, send, verify };
+  return { fetchThread, listSince, latestUid, send, verify };
 };
