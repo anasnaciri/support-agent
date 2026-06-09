@@ -1,7 +1,13 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { parsePageNumber, parsePageSize } from "@/lib/pagination";
+import {
+  parsePageNumber,
+  resolveDefaultPageSize,
+  resolvePageSize,
+  ROWS_COOKIE,
+} from "@/lib/pagination";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -26,7 +32,9 @@ interface SearchParams {
 export default async function CasesPage({ searchParams }: SearchParams) {
   const ctx = await getDashboardContext();
   const sp = await searchParams;
-  const pageSize = parsePageSize(sp.limit);
+  const cookieRows = (await cookies()).get(ROWS_COOKIE)?.value;
+  const defaultPageSize = resolveDefaultPageSize(cookieRows);
+  const pageSize = resolvePageSize(sp.limit, cookieRows);
   const requestedPage = parsePageNumber(sp.page);
 
   const { totalRows, page, rows } = await api.cases(
@@ -104,6 +112,7 @@ export default async function CasesPage({ searchParams }: SearchParams) {
         page={page}
         pageSize={pageSize}
         totalRows={totalRows}
+        defaultPageSize={defaultPageSize}
       />
     </div>
   );

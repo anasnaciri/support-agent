@@ -4,20 +4,26 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import {
-  DEFAULT_PAGE_SIZE,
   hrefWithQuery,
   PAGE_SIZE_OPTIONS,
+  ROWS_COOKIE,
   totalPagesFor,
 } from "@/lib/pagination";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 
+const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+
 interface TablePaginationProps {
   readonly pathname: string;
   readonly page: number;
   readonly pageSize: number;
   readonly totalRows: number;
+  // The manager's effective default size (saved cookie, else the built-in
+  // default). `limit` is omitted from URLs when the active size matches it,
+  // since the server resolves the same size from the cookie.
+  readonly defaultPageSize: number;
   readonly hiddenParams?: ReadonlyArray<readonly [string, string]>;
 }
 
@@ -26,14 +32,19 @@ const buildPageHref = (
   hiddenParams: ReadonlyArray<readonly [string, string]>,
   page: number,
   pageSize: number,
+  defaultPageSize: number,
 ): string => {
   const qs = new URLSearchParams();
   for (const [key, value] of hiddenParams) {
     if (value) qs.set(key, value);
   }
   if (page > 1) qs.set("page", String(page));
-  if (pageSize !== DEFAULT_PAGE_SIZE) qs.set("limit", String(pageSize));
+  if (pageSize !== defaultPageSize) qs.set("limit", String(pageSize));
   return hrefWithQuery(pathname, qs.toString());
+};
+
+const persistRows = (pageSize: string) => {
+  document.cookie = `${ROWS_COOKIE}=${pageSize}; path=/; max-age=${ONE_YEAR_SECONDS}; samesite=lax`;
 };
 
 type PageOption =
@@ -77,13 +88,26 @@ export function TablePagination({
   page,
   pageSize,
   totalRows,
+  defaultPageSize,
   hiddenParams = [],
 }: TablePaginationProps) {
   const totalPages = totalPagesFor(totalRows, pageSize);
   const firstRow = totalRows === 0 ? 0 : (page - 1) * pageSize + 1;
   const lastRow = Math.min(totalRows, page * pageSize);
-  const prevHref = buildPageHref(pathname, hiddenParams, page - 1, pageSize);
-  const nextHref = buildPageHref(pathname, hiddenParams, page + 1, pageSize);
+  const prevHref = buildPageHref(
+    pathname,
+    hiddenParams,
+    page - 1,
+    pageSize,
+    defaultPageSize,
+  );
+  const nextHref = buildPageHref(
+    pathname,
+    hiddenParams,
+    page + 1,
+    pageSize,
+    defaultPageSize,
+  );
   const pageOptions = pageOptionsFor(page, totalPages);
 
   return (
@@ -150,6 +174,9 @@ export function TablePagination({
               defaultValue={String(pageSize)}
               className="h-9 tabular-nums"
               onChange={(event) => {
+                // Persist the choice so it carries to other tables and future
+                // sessions, then jump back to the first page and reload.
+                persistRows(event.currentTarget.value);
                 const pageSelect = event.currentTarget.form?.elements.namedItem(
                   "page",
                 );

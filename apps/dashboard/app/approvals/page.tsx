@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import {
-  DEFAULT_PAGE_SIZE,
   parsePageNumber,
-  parsePageSize,
+  resolveDefaultPageSize,
+  resolvePageSize,
+  ROWS_COOKIE,
 } from "@/lib/pagination";
 import {
   approvalStatusVariant,
@@ -96,7 +98,9 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
   const riskFilter = sp.risk ?? "";
   const toolFilter = sp.tool ?? "";
   const agentFilter = sp.agent ?? "";
-  const pageSize = parsePageSize(sp.limit);
+  const cookieRows = (await cookies()).get(ROWS_COOKIE)?.value;
+  const defaultPageSize = resolveDefaultPageSize(cookieRows);
+  const pageSize = resolvePageSize(sp.limit, cookieRows);
   const requestedPage = parsePageNumber(sp.page);
 
   const { totalRows, page, rows, statusCounts, toolFacets, agentFacets } =
@@ -152,7 +156,7 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
             method="get"
             className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
           >
-            {pageSize !== DEFAULT_PAGE_SIZE ? (
+            {pageSize !== defaultPageSize ? (
               <input type="hidden" name="limit" value={pageSize} />
             ) : null}
             <div className="space-y-1.5">
@@ -314,6 +318,7 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
         page={page}
         pageSize={pageSize}
         totalRows={totalRows}
+        defaultPageSize={defaultPageSize}
         hiddenParams={paginationParams}
       />
     </div>
