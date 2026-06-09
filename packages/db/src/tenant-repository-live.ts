@@ -45,23 +45,18 @@ const decodeRefundPolicy = (raw: unknown): RefundPolicy => {
     askAboveMinorUnits: ask,
     denyAboveMinorUnits: deny,
     currencyCode: ccy.toUpperCase(),
-    mode: decodeRefundMode(r["mode"], r["alwaysDeny"]),
+    mode: decodeRefundMode(r["mode"]),
   };
 };
 
 /**
- * Resolve the persisted `mode`, tolerating legacy rows. Pre-mode rows have
- * no `mode`; rows from the short-lived `alwaysDeny` boolean map `true` →
- * `always_deny`. Anything unrecognised ⇒ `thresholds` (the safe default).
+ * Resolve the persisted `mode`. Rows written before the mode field carry no
+ * `mode` and fall through to `thresholds` (the safe default).
  */
-const decodeRefundMode = (
-  raw: unknown,
-  legacyAlwaysDeny: unknown,
-): RefundPolicyMode => {
+const decodeRefundMode = (raw: unknown): RefundPolicyMode => {
   if (raw === "thresholds" || raw === "always_ask" || raw === "always_deny") {
     return raw;
   }
-  if (legacyAlwaysDeny === true) return "always_deny";
   return "thresholds";
 };
 
