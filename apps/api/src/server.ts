@@ -169,7 +169,14 @@ import {
   revokeConnectorGrant,
   graphCreateSubscription,
   GRAPH_SUBSCRIPTION_TTL_MS,
+  makeImapSmtpOps,
+  type ImapSmtpConfig,
+  type ImapSmtpOps,
 } from "@support-agent/providers";
+import {
+  parseImapConnectBody,
+  imapConnectionMetadata,
+} from "./imap-connect.js";
 import {
   backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
@@ -2227,6 +2234,64 @@ const handleDashboardConnect = async (
         : "/google/install";
   const url = `${apiOrigin}${path}?grant=${encodeURIComponent(grant)}`;
   return sendJson(res, 200, { url });
+};
+
+// POST /dashboard/connections/imap — connect a generic IMAP/SMTP mailbox.
+// Unlike the OAuth connectors there's no redirect: the merchant submits
+// host/port/security + an app password, we connectivity-check both IMAP and
+// SMTP, then persist. Authorization is the dashboard session (→ tenant).
+const handleDashboardConnectImap = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+  opsFactory: (config: ImapSmtpConfig) => ImapSmtpOps = makeImapSmtpOps,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!(await tenantHasCurrentLegalAcceptance(auth.tenantId, layer))) {
+    return sendLegalAcceptanceRequired(res);
+  }
+  const parsed = parseImapConnectBody(parseJsonBody(req));
+  if (!parsed.ok) return sendJson(res, 400, { error: parsed.error });
+  const { config, mailbox } = parsed.value;
+
+  // Fail closed if we can't actually log in — better a 400 now than a
+  // silently-dead connector that only errors when the agent tries to reply.
+  try {
+    await opsFactory(config).verify();
+  } catch (cause) {
+    return sendJson(res, 400, {
+      error: "imap_connect_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+
+  const putExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.put({
+          tenantId: TenantId(auth.tenantId),
+          provider: "imap",
+          shopDomain: mailbox,
+          accessToken: config.password,
+          refreshToken: null,
+          tokenExpiresAt: null,
+          scopes: [],
+          metadata: imapConnectionMetadata(config),
+        });
+      }),
+      layer,
+    ),
+  );
+  if (putExit._tag !== "Success") {
+    return sendJson(res, 500, {
+      error: "persist_failed",
+      detail: String(putExit.cause),
+    });
+  }
+  return sendJson(res, 200, { ok: true, provider: "imap", mailbox });
 };
 
 // POST /dashboard/connections/:provider/disconnect — revoke a connector.
@@ -4576,6 +4641,11 @@ export const startServer = async (
     "/dashboard/connect/:provider",
     "Mint a signed install grant + return the provider install URL",
     handleDashboardConnect,
+  );
+  dashboardPost(
+    "/dashboard/connections/imap",
+    "Connect a generic IMAP/SMTP mailbox (credentials, no OAuth)",
+    handleDashboardConnectImap,
   );
   dashboardPost(
     "/dashboard/connections/:provider/disconnect",
