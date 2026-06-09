@@ -57,6 +57,7 @@ import {
   BlobStorageLive,
   ConversationRouterLive,
   makeGmailConversation,
+  makeGraphConversation,
   LLMConfigFromEnv,
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
@@ -358,9 +359,12 @@ export const buildWorker = async (
   // boots for dev runs that only exercise non-mailbox surfaces.
   const googleClientId = process.env["GOOGLE_OAUTH_CLIENT_ID"];
   const googleClientSecret = process.env["GOOGLE_OAUTH_CLIENT_SECRET"];
-  const conversation =
-    credKeyB64 && googleClientId && googleClientSecret
-      ? ConversationRouterLive([
+  const msClientId = process.env["MICROSOFT_OAUTH_CLIENT_ID"];
+  const msClientSecret = process.env["MICROSOFT_OAUTH_CLIENT_SECRET"];
+  const msTenant = process.env["MICROSOFT_OAUTH_TENANT"];
+  const connectorBuilders = [
+    ...(googleClientId && googleClientSecret
+      ? ([
           [
             "gmail",
             makeGmailConversation({
@@ -368,12 +372,29 @@ export const buildWorker = async (
               clientSecret: googleClientSecret,
             }),
           ],
-        ]).pipe(
+        ] as const)
+      : []),
+    ...(msClientId && msClientSecret
+      ? ([
+          [
+            "outlook",
+            makeGraphConversation({
+              clientId: msClientId,
+              clientSecret: msClientSecret,
+              ...(msTenant ? { tenant: msTenant } : {}),
+            }),
+          ],
+        ] as const)
+      : []),
+  ];
+  const conversation =
+    credKeyB64 && connectorBuilders.length > 0
+      ? ConversationRouterLive(connectorBuilders).pipe(
           Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
         )
       : (warnProdFallback(
           "conversation connector",
-          "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET",
+          "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET or MICROSOFT_OAUTH_CLIENT_ID/SECRET",
         ),
         ConversationServiceTest({}));
 

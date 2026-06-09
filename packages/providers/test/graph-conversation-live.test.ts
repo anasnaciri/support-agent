@@ -1,0 +1,227 @@
+import { Effect, Layer } from "effect";
+import { describe, expect, it, vi } from "vitest";
+import {
+  ConversationAuthMissing,
+  ThreadNotFound,
+  TenantId,
+  ThreadId,
+  type ConversationReply,
+} from "@support-agent/agent-core";
+import {
+  ConnectorCredentialStore,
+  ConversationService,
+} from "@support-agent/services";
+import { GraphConversationLive } from "../src/graph-conversation-live.js";
+
+const okJson = (body: unknown): Response =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+    headers: new Headers(),
+  }) as unknown as Response;
+
+const noContent = (): Response =>
+  ({
+    ok: true,
+    status: 202,
+    json: async () => ({}),
+    text: async () => "",
+    headers: new Headers(),
+  }) as unknown as Response;
+
+const fail = (status: number, body = ""): Response =>
+  ({
+    ok: false,
+    status,
+    json: async () => ({}),
+    text: async () => body,
+    headers: new Headers(),
+  }) as unknown as Response;
+
+const tenantId = TenantId("11111111-1111-1111-1111-111111111111");
+const mailbox = "support@merchant.com";
+
+const seededStore = (tokenExpiresAt?: Date) =>
+  Layer.sync(ConnectorCredentialStore, () => {
+    const row = {
+      tenantId,
+      provider: "outlook" as const,
+      shopDomain: mailbox,
+      accessToken: "live-token",
+      refreshToken: "refresh-token",
+      tokenExpiresAt: tokenExpiresAt ?? new Date(Date.now() + 60 * 60_000),
+      metadata: {} as Readonly<Record<string, unknown>>,
+      scopes: [] as ReadonlyArray<string>,
+      apiVersion: null,
+      installedAt: new Date(),
+      status: "active" as const,
+    };
+    return ConnectorCredentialStore.of({
+      get: () => Effect.succeed(row),
+      put: () => Effect.succeed(row),
+      revoke: () => Effect.void,
+      listForTenant: () => Effect.succeed([row]),
+      patchTokens: (input) =>
+        Effect.succeed({
+          ...row,
+          accessToken: input.accessToken,
+          tokenExpiresAt: input.tokenExpiresAt,
+          refreshToken:
+            input.refreshToken !== undefined ? input.refreshToken : row.refreshToken,
+        }),
+      patchMetadata: (input) =>
+        Effect.succeed({ ...row, metadata: { ...row.metadata, ...input.metadata } }),
+    });
+  });
+
+const emptyStore = () =>
+  Layer.sync(ConnectorCredentialStore, () =>
+    ConnectorCredentialStore.of({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      get: () => Effect.fail({ _tag: "ConnectorNotFound" } as any),
+      put: () => Effect.die("unused"),
+      revoke: () => Effect.die("unused"),
+      listForTenant: () => Effect.succeed([]),
+      patchTokens: () => Effect.die("unused"),
+      patchMetadata: () => Effect.die("unused"),
+    }),
+  );
+
+const conversationList = (messages: ReadonlyArray<unknown>): Response =>
+  okJson({ value: messages });
+
+const oneInboundMessage = {
+  id: "m-1",
+  conversationId: "conv-1",
+  subject: "Where is my order?",
+  from: { emailAddress: { name: "Jane", address: "jane@example.com" } },
+  toRecipients: [{ emailAddress: { address: mailbox } }],
+  body: { contentType: "text", content: "Still waiting." },
+  receivedDateTime: "2026-06-01T10:00:00Z",
+  sentDateTime: "2026-06-01T10:00:00Z",
+};
+
+const runFetchThread = (
+  fetchImpl: typeof fetch,
+  store: Layer.Layer<ConnectorCredentialStore>,
+) =>
+  Effect.runPromiseExit(
+    Effect.provide(
+      Effect.flatMap(ConversationService, (s) =>
+        s.fetchThread(tenantId, ThreadId("conv-1")),
+      ),
+      GraphConversationLive({
+        clientId: "cid",
+        clientSecret: "csec",
+        fetchImpl,
+      }).pipe(Layer.provide(store)),
+    ),
+  );
+
+describe("GraphConversationLive — fetchThread", () => {
+  it("normalises a conversation into a provider-neutral thread", async () => {
+    const fetchImpl = vi.fn(async () =>
+      conversationList([oneInboundMessage]),
+    ) as unknown as typeof fetch;
+    const exit = await runFetchThread(fetchImpl, seededStore());
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.subject).toBe("Where is my order?");
+    expect(exit.value.messages).toHaveLength(1);
+    expect(exit.value.messages[0]!.direction).toBe("inbound");
+    expect(exit.value.messages[0]!.bodyText).toBe("Still waiting.");
+  });
+
+  it("returns ThreadNotFound when the conversation has no messages", async () => {
+    const fetchImpl = vi.fn(async () => conversationList([])) as unknown as typeof fetch;
+    const exit = await runFetchThread(fetchImpl, seededStore());
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    expect((exit.cause as { error?: unknown }).error).toBeInstanceOf(ThreadNotFound);
+  });
+
+  it("maps a missing connection to ConversationAuthMissing", async () => {
+    const fetchImpl = vi.fn(async () => fail(500)) as unknown as typeof fetch;
+    const exit = await runFetchThread(fetchImpl, emptyStore());
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    expect((exit.cause as { error?: unknown }).error).toBeInstanceOf(
+      ConversationAuthMissing,
+    );
+  });
+
+  it("refreshes an expired access token (and uses the rotated one)", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("login.microsoftonline.com")) {
+        return okJson({
+          access_token: "new-token",
+          refresh_token: "new-refresh",
+          expires_in: 3600,
+        });
+      }
+      expect(
+        (init?.headers as Record<string, string> | undefined)?.["Authorization"],
+      ).toBe("Bearer new-token");
+      return conversationList([oneInboundMessage]);
+    }) as unknown as typeof fetch;
+    const exit = await runFetchThread(
+      fetchImpl,
+      seededStore(new Date(Date.now() - 1000)),
+    );
+    expect(exit._tag).toBe("Success");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("login.microsoftonline.com"),
+      expect.anything(),
+    );
+  });
+});
+
+describe("GraphConversationLive — reply", () => {
+  it("createReply → patch body → send, returning the draft id as the SentMessage", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (url.includes("/me/messages?$filter")) {
+        return conversationList([oneInboundMessage]);
+      }
+      if (url.endsWith("/createReply")) {
+        return okJson({ id: "draft-9", conversationId: "conv-1" });
+      }
+      if (method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as {
+          body: { contentType: string; content: string };
+        };
+        expect(body.body.content).toContain("We shipped it yesterday.");
+        expect(url).toContain("/me/messages/draft-9");
+        return okJson({ id: "draft-9" });
+      }
+      if (url.endsWith("/send")) return noContent();
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const input: ConversationReply = {
+      threadId: ThreadId("conv-1"),
+      to: [{ name: "Jane", email: "jane@example.com" }],
+      subject: null,
+      bodyText: "We shipped it yesterday.",
+      bodyHtml: null,
+      attachments: [],
+      inReplyToMessageId: null,
+      draftId: "d-1",
+    };
+
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) => s.reply(tenantId, input)),
+        GraphConversationLive({
+          clientId: "cid",
+          clientSecret: "csec",
+          fetchImpl,
+        }).pipe(Layer.provide(seededStore())),
+      ),
+    );
+    expect(sent.id).toBe("draft-9");
+    expect(sent.threadId).toBe("conv-1");
+  });
+});
