@@ -41,8 +41,9 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
           tool. Refunds at or below the <strong>ask threshold</strong> auto-run.
           Refunds between the two thresholds pause for human approval. Refunds
           above the <strong>deny threshold</strong> are blocked and the agent
-          falls back to drafting a reply. Turn on <strong>always deny</strong>{" "}
-          to block every refund regardless of amount.
+          falls back to drafting a reply. Or skip the amounts entirely:{" "}
+          <strong>always ask</strong> holds every refund for approval, and{" "}
+          <strong>always deny</strong> blocks them all.
         </p>
       </div>
 
@@ -87,13 +88,20 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
       </Card>
 
       <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
-        <p className="mb-2 font-medium text-foreground">Current zones</p>
-        {policy.alwaysDeny ? (
+        <p className="mb-2 font-medium text-foreground">Current behaviour</p>
+        {policy.mode === "always_deny" ? (
           <p>
             <strong className="text-foreground">Always deny is on.</strong> Every
             refund is blocked regardless of amount &mdash; the agent falls back
-            to a drafted reply. The thresholds above are ignored until you turn
-            it off.
+            to a drafted reply. The thresholds are ignored until you switch back
+            to <em>Use thresholds</em>.
+          </p>
+        ) : policy.mode === "always_ask" ? (
+          <p>
+            <strong className="text-foreground">Always ask is on.</strong> Every
+            refund waits for your approval regardless of amount &mdash; the
+            agent drafts it and a human approves before it runs. The thresholds
+            are ignored until you switch back to <em>Use thresholds</em>.
           </p>
         ) : (
           <ul className="list-disc space-y-1 pl-5">

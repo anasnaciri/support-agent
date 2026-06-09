@@ -420,12 +420,17 @@ export interface OnboardingResult {
 // Resolved view of `tenants.settings` (defaults already applied by the api),
 // backing the refund-policy + supplier-escalation (Google Sheets) pages.
 
+export type RefundPolicyMode = "thresholds" | "always_ask" | "always_deny";
+
 export interface RefundPolicyView {
   readonly askAboveMinorUnits: number;
   readonly denyAboveMinorUnits: number;
   readonly currencyCode: string;
-  /** Hard kill-switch — when true every refund is denied, thresholds ignored. */
-  readonly alwaysDeny: boolean;
+  /**
+   * How the policy behaves: amount `thresholds`, `always_ask` (every refund
+   * waits for approval), or `always_deny` (every refund blocked).
+   */
+  readonly mode: RefundPolicyMode;
 }
 
 export interface SupplierEscalationSheetView {

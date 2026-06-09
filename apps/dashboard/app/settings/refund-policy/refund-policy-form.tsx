@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Ban } from "lucide-react";
+import { Ban, HandCoins, SlidersHorizontal } from "lucide-react";
 
-import type { RefundPolicyView } from "@support-agent/dashboard-contracts";
+import type {
+  RefundPolicyMode,
+  RefundPolicyView,
+} from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,20 +17,28 @@ import { saveRefundPolicyAction } from "./actions";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
-// The thresholds card is a client component because the "always deny"
-// kill-switch toggles the threshold inputs between active and disabled in
-// the browser. Disabled inputs don't post, so we mirror their (controlled)
-// values into hidden inputs while disabled — that way flipping the switch on
-// and saving still preserves the merchant's thresholds for when they turn it
-// back off.
+// The refund-policy control is a client component because the mode selector
+// toggles the threshold inputs between active and disabled in the browser.
+// Disabled inputs don't post, so in the non-threshold modes we mirror their
+// (controlled) values into hidden inputs — that way switching to always-ask /
+// always-deny and saving still preserves the merchant's thresholds for when
+// they switch back.
 export const RefundPolicyForm = ({ policy }: { policy: RefundPolicyView }) => {
-  const [alwaysDeny, setAlwaysDeny] = useState(policy.alwaysDeny);
+  const [mode, setMode] = useState<RefundPolicyMode>(policy.mode);
   const [askAbove, setAskAbove] = useState(
     minorToMajor(policy.askAboveMinorUnits),
   );
   const [denyAbove, setDenyAbove] = useState(
     minorToMajor(policy.denyAboveMinorUnits),
   );
+
+  const thresholdsActive = mode === "thresholds";
+
+  const optionClass = (selected: boolean) =>
+    cn(
+      "flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors",
+      selected ? "border-primary bg-primary/5" : "border-input hover:bg-accent",
+    );
 
   return (
     <form action={saveRefundPolicyAction} className="space-y-4">
@@ -49,80 +60,131 @@ export const RefundPolicyForm = ({ policy }: { policy: RefundPolicyView }) => {
         </p>
       </div>
 
-      <label className="flex items-start gap-3 rounded-md border border-input p-3">
-        <input
-          type="checkbox"
-          name="alwaysDeny"
-          checked={alwaysDeny}
-          onChange={(e) => setAlwaysDeny(e.target.checked)}
-          className="mt-0.5 size-4 shrink-0 rounded border-input text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-        />
-        <span className="grid gap-1">
-          <span className="flex items-center gap-1.5 text-sm font-medium">
-            <Ban className="size-4 text-destructive" aria-hidden />
-            Always deny refunds
-          </span>
-          <span className="text-xs text-muted-foreground">
-            Block every refund regardless of amount. The agent never runs{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-              refund.create
-            </code>{" "}
-            and falls back to drafting a reply. Thresholds below are ignored
-            while this is on.
-          </span>
-        </span>
-      </label>
+      <fieldset className="grid gap-2">
+        <legend className="mb-1 text-sm font-medium">Refund handling</legend>
 
-      <div className="grid gap-4 sm:grid-cols-2 sm:max-w-lg">
-        <div className="grid gap-2">
-          <Label
-            htmlFor="askAbove"
-            className={cn(alwaysDeny && "text-muted-foreground")}
-          >
-            Ask above
-          </Label>
-          <Input
-            id="askAbove"
-            name="askAbove"
-            type="text"
-            inputMode="decimal"
-            value={askAbove}
-            onChange={(e) => setAskAbove(e.target.value)}
-            disabled={alwaysDeny}
-            required={!alwaysDeny}
-            aria-describedby="ask-hint"
+        {/* Use thresholds */}
+        <label className={optionClass(thresholdsActive)}>
+          <input
+            type="radio"
+            name="mode"
+            value="thresholds"
+            checked={thresholdsActive}
+            onChange={() => setMode("thresholds")}
+            className="mt-0.5 size-4 shrink-0"
           />
-          <p id="ask-hint" className="text-xs text-muted-foreground">
-            Refunds at or below this amount auto-run.
-          </p>
-        </div>
-        <div className="grid gap-2">
-          <Label
-            htmlFor="denyAbove"
-            className={cn(alwaysDeny && "text-muted-foreground")}
-          >
-            Deny above
-          </Label>
-          <Input
-            id="denyAbove"
-            name="denyAbove"
-            type="text"
-            inputMode="decimal"
-            value={denyAbove}
-            onChange={(e) => setDenyAbove(e.target.value)}
-            disabled={alwaysDeny}
-            required={!alwaysDeny}
-            aria-describedby="deny-hint"
+          <span className="grid w-full gap-3">
+            <span className="grid gap-1">
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <SlidersHorizontal className="size-4" aria-hidden />
+                Use thresholds
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Auto-run small refunds, pause mid-size ones for approval, block
+                large ones — by amount.
+              </span>
+            </span>
+
+            <span className="grid gap-4 sm:grid-cols-2 sm:max-w-lg">
+              <span className="grid gap-2">
+                <Label
+                  htmlFor="askAbove"
+                  className={cn(!thresholdsActive && "text-muted-foreground")}
+                >
+                  Ask above
+                </Label>
+                <Input
+                  id="askAbove"
+                  name="askAbove"
+                  type="text"
+                  inputMode="decimal"
+                  value={askAbove}
+                  onChange={(e) => setAskAbove(e.target.value)}
+                  disabled={!thresholdsActive}
+                  required={thresholdsActive}
+                  aria-describedby="ask-hint"
+                />
+                <span id="ask-hint" className="text-xs text-muted-foreground">
+                  At or below this amount auto-runs.
+                </span>
+              </span>
+              <span className="grid gap-2">
+                <Label
+                  htmlFor="denyAbove"
+                  className={cn(!thresholdsActive && "text-muted-foreground")}
+                >
+                  Deny above
+                </Label>
+                <Input
+                  id="denyAbove"
+                  name="denyAbove"
+                  type="text"
+                  inputMode="decimal"
+                  value={denyAbove}
+                  onChange={(e) => setDenyAbove(e.target.value)}
+                  disabled={!thresholdsActive}
+                  required={thresholdsActive}
+                  aria-describedby="deny-hint"
+                />
+                <span id="deny-hint" className="text-xs text-muted-foreground">
+                  Hard cap. Above this never runs, even with approval.
+                </span>
+              </span>
+            </span>
+          </span>
+        </label>
+
+        {/* Always ask */}
+        <label className={optionClass(mode === "always_ask")}>
+          <input
+            type="radio"
+            name="mode"
+            value="always_ask"
+            checked={mode === "always_ask"}
+            onChange={() => setMode("always_ask")}
+            className="mt-0.5 size-4 shrink-0"
           />
-          <p id="deny-hint" className="text-xs text-muted-foreground">
-            Hard cap. Refunds above this never run, even with approval.
-          </p>
-        </div>
-      </div>
+          <span className="grid gap-1">
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <HandCoins className="size-4" aria-hidden />
+              Always ask
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Every refund waits for your approval, regardless of amount. The
+              agent drafts it; a human approves before it runs.
+            </span>
+          </span>
+        </label>
+
+        {/* Always deny */}
+        <label className={optionClass(mode === "always_deny")}>
+          <input
+            type="radio"
+            name="mode"
+            value="always_deny"
+            checked={mode === "always_deny"}
+            onChange={() => setMode("always_deny")}
+            className="mt-0.5 size-4 shrink-0"
+          />
+          <span className="grid gap-1">
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <Ban className="size-4 text-destructive" aria-hidden />
+              Always deny
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Block every refund. The agent never runs{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+                refund.create
+              </code>{" "}
+              and falls back to a drafted reply — you handle refunds yourself.
+            </span>
+          </span>
+        </label>
+      </fieldset>
 
       {/* Disabled inputs don't post — mirror the retained thresholds so the
-          server keeps them while the kill-switch is on. */}
-      {alwaysDeny ? (
+          server keeps them while a non-threshold mode is selected. */}
+      {!thresholdsActive ? (
         <>
           <input type="hidden" name="askAbove" value={askAbove} />
           <input type="hidden" name="denyAbove" value={denyAbove} />

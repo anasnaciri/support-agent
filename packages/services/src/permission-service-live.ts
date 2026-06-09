@@ -90,9 +90,14 @@ export const applyRefundPolicy = (
   policy: RefundPolicy,
   amount: { amountMinorUnits: number; currencyCode: string } | null,
 ): Permission => {
+  // Mode sits above the amount zones.
+  const mode = policy.mode ?? "thresholds";
   // Hard kill-switch — deny every refund, no matter the amount, currency,
-  // or static decision. Sits above all other zones so it can't be relaxed.
-  if (policy.alwaysDeny) return "deny";
+  // or static decision. Can't be relaxed.
+  if (mode === "always_deny") return "deny";
+  // Every refund waits for a human, regardless of amount. Never auto-allow;
+  // never relax an existing `deny`.
+  if (mode === "always_ask") return staticPermission === "deny" ? "deny" : "ask";
 
   // Malformed payload: stay at the static decision. The tool's input
   // schema will reject the call anyway, but if it somehow slipped

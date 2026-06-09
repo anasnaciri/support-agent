@@ -28,19 +28,27 @@ import type { TenantId } from "@support-agent/agent-core";
  *   - askAboveMinorUnits < amountMinorUnits ≤ denyAboveMinorUnits → ask
  *   - amountMinorUnits > denyAboveMinorUnits       → deny (escalate)
  *
- * `alwaysDeny` is a hard kill-switch that sits above the zones: when set,
- * every refund is denied regardless of amount, currency, or the static
- * tool/agent decision. The thresholds are retained (so the merchant can
- * turn the switch off and get them back) but ignored while it's on.
+ * `mode` selects how the policy behaves and sits above the zones:
+ *   - `thresholds`  — the amount-based zones above (the normal case)
+ *   - `always_ask`  — every refund waits for human approval (never
+ *     auto-allows), no matter the amount; the thresholds are ignored
+ *   - `always_deny` — every refund is blocked regardless of amount,
+ *     currency, or the static decision (the agent can never refund)
+ *
+ * In the two non-threshold modes the thresholds are retained (so the
+ * merchant can switch back to `thresholds` and get them back) but unused.
+ * Absent/undefined ⇒ `thresholds` (back-compat with legacy rows).
  *
  * Defaults are conservative — see `defaultRefundPolicy` below.
  */
+export type RefundPolicyMode = "thresholds" | "always_ask" | "always_deny";
+
 export interface RefundPolicy {
   readonly askAboveMinorUnits: number;
   readonly denyAboveMinorUnits: number;
   readonly currencyCode: string;
-  /** Hard kill-switch — deny every refund. Absent/undefined ⇒ false. */
-  readonly alwaysDeny?: boolean;
+  /** How the policy behaves. Absent/undefined ⇒ `"thresholds"`. */
+  readonly mode?: RefundPolicyMode;
 }
 
 /**
@@ -54,7 +62,7 @@ export const defaultRefundPolicy: RefundPolicy = {
   askAboveMinorUnits: 0,
   denyAboveMinorUnits: 50_000, // $500 hard cap
   currencyCode: "USD",
-  alwaysDeny: false,
+  mode: "thresholds",
 };
 
 /**

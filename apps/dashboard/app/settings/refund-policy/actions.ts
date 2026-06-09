@@ -30,18 +30,22 @@ export const saveRefundPolicyAction = async (
     typeof currencyRaw === "string" ? currencyRaw.trim().toUpperCase() : "";
   const ask = typeof askRaw === "string" ? askRaw : "";
   const deny = typeof denyRaw === "string" ? denyRaw : "";
-  const alwaysDeny = formData.get("alwaysDeny") === "on";
+  const modeRaw = formData.get("mode");
+  const mode =
+    modeRaw === "always_ask" || modeRaw === "always_deny"
+      ? modeRaw
+      : "thresholds";
 
   if (!/^[A-Z]{3}$/.test(currency)) {
     redirect("/settings/refund-policy?error=bad_currency");
   }
   const askMinor = parseMajorUnits(ask);
   const denyMinor = parseMajorUnits(deny);
-  // While the kill-switch is on the thresholds are ignored, so don't block
-  // the save on them — fall back to 0 if they didn't come through cleanly.
-  // We still persist whatever was entered so turning the switch back off
-  // restores the merchant's thresholds.
-  if (!alwaysDeny) {
+  // The thresholds only govern behaviour in `thresholds` mode. In the
+  // always-ask / always-deny modes they're ignored, so don't block the save
+  // on them — but we still persist whatever was entered so switching back to
+  // `thresholds` restores the merchant's numbers.
+  if (mode === "thresholds") {
     if (askMinor === null || denyMinor === null) {
       redirect("/settings/refund-policy?error=bad_amount");
     }
@@ -54,7 +58,7 @@ export const saveRefundPolicyAction = async (
     currencyCode: currency,
     askAboveMinorUnits: askMinor ?? 0,
     denyAboveMinorUnits: denyMinor ?? 0,
-    alwaysDeny,
+    mode,
   });
 
   revalidatePath("/settings/refund-policy");

@@ -219,7 +219,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       refundPolicy: {
         currencyCode: string;
         denyAboveMinorUnits: number;
-        alwaysDeny: boolean;
+        mode: string;
       };
       retentionDays: number;
       supplierEscalationSheet: unknown;
@@ -228,7 +228,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     };
     expect(body.refundPolicy.currencyCode).toBe("USD");
     expect(body.refundPolicy.denyAboveMinorUnits).toBe(50000);
-    expect(body.refundPolicy.alwaysDeny).toBe(false);
+    expect(body.refundPolicy.mode).toBe("thresholds");
     expect(body.retentionDays).toBe(730);
     expect(body.supplierEscalationSheet).toBeNull();
     expect(body.legalAcceptance).toBeNull();
@@ -620,7 +620,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       currencyCode: "usd",
       askAboveMinorUnits: 2500,
       denyAboveMinorUnits: 20000,
-      alwaysDeny: true,
+      mode: "always_deny",
     });
     expect(res.status).toBe(200);
     const [row] = await raw.db
@@ -630,11 +630,11 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       .limit(1);
     const policy = (
       row?.settings as {
-        refundPolicy?: { currencyCode?: string; alwaysDeny?: boolean };
+        refundPolicy?: { currencyCode?: string; mode?: string };
       }
     )?.refundPolicy;
     expect(policy?.currencyCode).toBe("USD");
-    expect(policy?.alwaysDeny).toBe(true);
+    expect(policy?.mode).toBe("always_deny");
   });
 
   it("POST /dashboard/refund-policy 400s on bad currency / amount / ordering", async () => {

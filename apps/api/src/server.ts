@@ -27,6 +27,7 @@ import {
   verifyShopifyWebhookHmac,
   type LLMProvider,
   type LegalAcceptance,
+  type RefundPolicyMode,
 } from "@support-agent/services";
 import {
   AgentId,
@@ -1962,7 +1963,11 @@ const handleDashboardRefundPolicy = async (
       : "";
   const ask = body["askAboveMinorUnits"];
   const deny = body["denyAboveMinorUnits"];
-  const alwaysDeny = body["alwaysDeny"] === true;
+  const modeRaw = body["mode"];
+  const mode: RefundPolicyMode =
+    modeRaw === "always_ask" || modeRaw === "always_deny"
+      ? modeRaw
+      : "thresholds";
   if (!/^[A-Z]{3}$/.test(currency)) {
     return sendJson(res, 400, { error: "bad_currency" });
   }
@@ -1985,7 +1990,7 @@ const handleDashboardRefundPolicy = async (
           askAboveMinorUnits: ask,
           denyAboveMinorUnits: deny,
           currencyCode: currency,
-          alwaysDeny,
+          mode,
         });
       }),
       layer,

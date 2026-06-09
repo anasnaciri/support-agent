@@ -7,6 +7,7 @@ import type {
   AgentOverrideRow,
   ApprovalDetail,
   ApprovalsFilter,
+  RefundPolicyMode,
   ApprovalsListResult,
   AuditEntry,
   AuditFilter,
@@ -538,7 +539,7 @@ export const api = {
       readonly currencyCode: string;
       readonly askAboveMinorUnits: number;
       readonly denyAboveMinorUnits: number;
-      readonly alwaysDeny: boolean;
+      readonly mode: RefundPolicyMode;
     },
   ): Promise<CallResult> =>
     call("/refund-policy", { method: "POST", body: input, ctx }),

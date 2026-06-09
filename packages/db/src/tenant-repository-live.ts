@@ -9,6 +9,7 @@ import {
   TenantSettings,
   type LegalAcceptance,
   type RefundPolicy,
+  type RefundPolicyMode,
   type SupplierEscalationSheet,
 } from "@support-agent/services";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -44,9 +45,24 @@ const decodeRefundPolicy = (raw: unknown): RefundPolicy => {
     askAboveMinorUnits: ask,
     denyAboveMinorUnits: deny,
     currencyCode: ccy.toUpperCase(),
-    // Only literal `true` enables the kill-switch; missing/legacy rows ⇒ false.
-    alwaysDeny: r["alwaysDeny"] === true,
+    mode: decodeRefundMode(r["mode"], r["alwaysDeny"]),
   };
+};
+
+/**
+ * Resolve the persisted `mode`, tolerating legacy rows. Pre-mode rows have
+ * no `mode`; rows from the short-lived `alwaysDeny` boolean map `true` →
+ * `always_deny`. Anything unrecognised ⇒ `thresholds` (the safe default).
+ */
+const decodeRefundMode = (
+  raw: unknown,
+  legacyAlwaysDeny: unknown,
+): RefundPolicyMode => {
+  if (raw === "thresholds" || raw === "always_ask" || raw === "always_deny") {
+    return raw;
+  }
+  if (legacyAlwaysDeny === true) return "always_deny";
+  return "thresholds";
 };
 
 /**

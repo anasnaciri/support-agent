@@ -148,8 +148,8 @@ describe("applyRefundPolicy", () => {
     ).toBe("deny");
   });
 
-  it("denies unconditionally when alwaysDeny is set", () => {
-    const denyAll: RefundPolicy = { ...policy, alwaysDeny: true };
+  it("denies unconditionally when mode is always_deny", () => {
+    const denyAll: RefundPolicy = { ...policy, mode: "always_deny" };
     // Even a refund the thresholds would auto-allow is blocked.
     expect(
       applyRefundPolicy("allow", denyAll, {
@@ -169,6 +169,32 @@ describe("applyRefundPolicy", () => {
       applyRefundPolicy("allow", denyAll, {
         amountMinorUnits: 1,
         currencyCode: "EUR",
+      }),
+    ).toBe("deny");
+  });
+
+  it("always asks (never auto-allows) when mode is always_ask", () => {
+    const askAll: RefundPolicy = { ...policy, mode: "always_ask" };
+    // A refund the thresholds would auto-allow still waits for approval.
+    expect(
+      applyRefundPolicy("allow", askAll, {
+        amountMinorUnits: 0,
+        currencyCode: "USD",
+      }),
+    ).toBe("ask");
+    expect(
+      applyRefundPolicy("ask", askAll, {
+        amountMinorUnits: 100,
+        currencyCode: "USD",
+      }),
+    ).toBe("ask");
+    // Amount is irrelevant — even a malformed/missing amount asks.
+    expect(applyRefundPolicy("allow", askAll, null)).toBe("ask");
+    // A static `deny` is never relaxed to ask.
+    expect(
+      applyRefundPolicy("deny", askAll, {
+        amountMinorUnits: 0,
+        currencyCode: "USD",
       }),
     ).toBe("deny");
   });
