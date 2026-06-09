@@ -44,6 +44,8 @@ const decodeRefundPolicy = (raw: unknown): RefundPolicy => {
     askAboveMinorUnits: ask,
     denyAboveMinorUnits: deny,
     currencyCode: ccy.toUpperCase(),
+    // Only literal `true` enables the kill-switch; missing/legacy rows ⇒ false.
+    alwaysDeny: r["alwaysDeny"] === true,
   };
 };
 

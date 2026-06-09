@@ -2,13 +2,10 @@ import { Banknote } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
-import { saveRefundPolicyAction } from "./actions";
+import { RefundPolicyForm } from "./refund-policy-form";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
@@ -44,7 +41,8 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
           tool. Refunds at or below the <strong>ask threshold</strong> auto-run.
           Refunds between the two thresholds pause for human approval. Refunds
           above the <strong>deny threshold</strong> are blocked and the agent
-          falls back to drafting a reply.
+          falls back to drafting a reply. Turn on <strong>always deny</strong>{" "}
+          to block every refund regardless of amount.
         </p>
       </div>
 
@@ -84,83 +82,39 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <form action={saveRefundPolicyAction} className="space-y-4">
-            <div className="grid gap-2 sm:max-w-xs">
-              <Label htmlFor="currencyCode">Currency</Label>
-              <Input
-                id="currencyCode"
-                name="currencyCode"
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                maxLength={3}
-                defaultValue={policy.currencyCode}
-                required
-                aria-describedby="currency-hint"
-              />
-              <p id="currency-hint" className="text-xs text-muted-foreground">
-                ISO 4217. Refunds in other currencies always pause for approval.
-              </p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 sm:max-w-lg">
-              <div className="grid gap-2">
-                <Label htmlFor="askAbove">Ask above</Label>
-                <Input
-                  id="askAbove"
-                  name="askAbove"
-                  type="text"
-                  inputMode="decimal"
-                  defaultValue={minorToMajor(policy.askAboveMinorUnits)}
-                  required
-                  aria-describedby="ask-hint"
-                />
-                <p id="ask-hint" className="text-xs text-muted-foreground">
-                  Refunds at or below this amount auto-run.
-                </p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="denyAbove">Deny above</Label>
-                <Input
-                  id="denyAbove"
-                  name="denyAbove"
-                  type="text"
-                  inputMode="decimal"
-                  defaultValue={minorToMajor(policy.denyAboveMinorUnits)}
-                  required
-                  aria-describedby="deny-hint"
-                />
-                <p id="deny-hint" className="text-xs text-muted-foreground">
-                  Hard cap. Refunds above this never run, even with approval.
-                </p>
-              </div>
-            </div>
-
-            <Button type="submit">Save</Button>
-          </form>
+          <RefundPolicyForm policy={policy} />
         </CardContent>
       </Card>
 
       <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
         <p className="mb-2 font-medium text-foreground">Current zones</p>
-        <ul className="list-disc space-y-1 pl-5">
-          <li>
-            <strong className="text-foreground">Allow:</strong> 0 &ndash;{" "}
-            {minorToMajor(policy.askAboveMinorUnits)} {policy.currencyCode}{" "}
-            &mdash; auto-runs.
-          </li>
-          <li>
-            <strong className="text-foreground">Ask:</strong>{" "}
-            {minorToMajor(policy.askAboveMinorUnits)} &ndash;{" "}
-            {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
-            &mdash; pauses for approval.
-          </li>
-          <li>
-            <strong className="text-foreground">Deny:</strong> &gt;{" "}
-            {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
-            &mdash; falls back to a drafted reply.
-          </li>
-        </ul>
+        {policy.alwaysDeny ? (
+          <p>
+            <strong className="text-foreground">Always deny is on.</strong> Every
+            refund is blocked regardless of amount &mdash; the agent falls back
+            to a drafted reply. The thresholds above are ignored until you turn
+            it off.
+          </p>
+        ) : (
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong className="text-foreground">Allow:</strong> 0 &ndash;{" "}
+              {minorToMajor(policy.askAboveMinorUnits)} {policy.currencyCode}{" "}
+              &mdash; auto-runs.
+            </li>
+            <li>
+              <strong className="text-foreground">Ask:</strong>{" "}
+              {minorToMajor(policy.askAboveMinorUnits)} &ndash;{" "}
+              {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
+              &mdash; pauses for approval.
+            </li>
+            <li>
+              <strong className="text-foreground">Deny:</strong> &gt;{" "}
+              {minorToMajor(policy.denyAboveMinorUnits)} {policy.currencyCode}{" "}
+              &mdash; falls back to a drafted reply.
+            </li>
+          </ul>
+        )}
       </div>
     </div>
   );

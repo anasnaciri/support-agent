@@ -147,6 +147,31 @@ describe("applyRefundPolicy", () => {
       }),
     ).toBe("deny");
   });
+
+  it("denies unconditionally when alwaysDeny is set", () => {
+    const denyAll: RefundPolicy = { ...policy, alwaysDeny: true };
+    // Even a refund the thresholds would auto-allow is blocked.
+    expect(
+      applyRefundPolicy("allow", denyAll, {
+        amountMinorUnits: 0,
+        currencyCode: "USD",
+      }),
+    ).toBe("deny");
+    expect(
+      applyRefundPolicy("ask", denyAll, {
+        amountMinorUnits: 100,
+        currencyCode: "USD",
+      }),
+    ).toBe("deny");
+    // Wins even when the amount payload is malformed or cross-currency.
+    expect(applyRefundPolicy("allow", denyAll, null)).toBe("deny");
+    expect(
+      applyRefundPolicy("allow", denyAll, {
+        amountMinorUnits: 1,
+        currencyCode: "EUR",
+      }),
+    ).toBe("deny");
+  });
 });
 
 // ============================================================

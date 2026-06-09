@@ -424,6 +424,8 @@ export interface RefundPolicyView {
   readonly askAboveMinorUnits: number;
   readonly denyAboveMinorUnits: number;
   readonly currencyCode: string;
+  /** Hard kill-switch — when true every refund is denied, thresholds ignored. */
+  readonly alwaysDeny: boolean;
 }
 
 export interface SupplierEscalationSheetView {

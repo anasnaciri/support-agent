@@ -90,6 +90,10 @@ export const applyRefundPolicy = (
   policy: RefundPolicy,
   amount: { amountMinorUnits: number; currencyCode: string } | null,
 ): Permission => {
+  // Hard kill-switch — deny every refund, no matter the amount, currency,
+  // or static decision. Sits above all other zones so it can't be relaxed.
+  if (policy.alwaysDeny) return "deny";
+
   // Malformed payload: stay at the static decision. The tool's input
   // schema will reject the call anyway, but if it somehow slipped
   // through (e.g. raw permission check on unparsed input), be safe.

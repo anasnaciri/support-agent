@@ -28,12 +28,19 @@ import type { TenantId } from "@support-agent/agent-core";
  *   - askAboveMinorUnits < amountMinorUnits ≤ denyAboveMinorUnits → ask
  *   - amountMinorUnits > denyAboveMinorUnits       → deny (escalate)
  *
+ * `alwaysDeny` is a hard kill-switch that sits above the zones: when set,
+ * every refund is denied regardless of amount, currency, or the static
+ * tool/agent decision. The thresholds are retained (so the merchant can
+ * turn the switch off and get them back) but ignored while it's on.
+ *
  * Defaults are conservative — see `defaultRefundPolicy` below.
  */
 export interface RefundPolicy {
   readonly askAboveMinorUnits: number;
   readonly denyAboveMinorUnits: number;
   readonly currencyCode: string;
+  /** Hard kill-switch — deny every refund. Absent/undefined ⇒ false. */
+  readonly alwaysDeny?: boolean;
 }
 
 /**
@@ -47,6 +54,7 @@ export const defaultRefundPolicy: RefundPolicy = {
   askAboveMinorUnits: 0,
   denyAboveMinorUnits: 50_000, // $500 hard cap
   currencyCode: "USD",
+  alwaysDeny: false,
 };
 
 /**

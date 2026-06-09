@@ -538,6 +538,7 @@ export const api = {
       readonly currencyCode: string;
       readonly askAboveMinorUnits: number;
       readonly denyAboveMinorUnits: number;
+      readonly alwaysDeny: boolean;
     },
   ): Promise<CallResult> =>
     call("/refund-policy", { method: "POST", body: input, ctx }),

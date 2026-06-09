@@ -1962,6 +1962,7 @@ const handleDashboardRefundPolicy = async (
       : "";
   const ask = body["askAboveMinorUnits"];
   const deny = body["denyAboveMinorUnits"];
+  const alwaysDeny = body["alwaysDeny"] === true;
   if (!/^[A-Z]{3}$/.test(currency)) {
     return sendJson(res, 400, { error: "bad_currency" });
   }
@@ -1984,6 +1985,7 @@ const handleDashboardRefundPolicy = async (
           askAboveMinorUnits: ask,
           denyAboveMinorUnits: deny,
           currencyCode: currency,
+          alwaysDeny,
         });
       }),
       layer,
