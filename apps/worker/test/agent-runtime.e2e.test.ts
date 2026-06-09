@@ -3242,6 +3242,145 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // circuited execution.
     expect(convoTest.handle.sent).toHaveLength(0);
   });
+
+  // ----------------------------------------------------------------
+  // Regression: a case parked in `waiting_for_approval` must NOT be
+  // resolved (or otherwise mutated) by the agent loop when an unrelated
+  // event lands while the manager's approval is still pending — e.g. the
+  // customer replies again on the same thread, or a follow-up timer
+  // fires. Before the guard, ANY such event re-entered the agent loop;
+  // a `final_message` decision then transitioned the case straight to
+  // `resolved`, abandoning the still-pending approval (the manager never
+  // decided, yet the case reads "resolved"). The runtime must instead
+  // leave the case parked and re-report PausedWaitingForApproval. The
+  // only legitimate ways out of `waiting_for_approval` are the
+  // approval.approved / approval.rejected events (handled above the loop)
+  // and an out-of-band human takeover — none of which run the agent.
+  // ----------------------------------------------------------------
+  it("does not resolve a case awaiting approval when a new event arrives while the approval is pending", async () => {
+    const parkedAgent: AgentConfig = {
+      id: AgentId("parked-agent"),
+      name: "Parked",
+      description: "Minimal agent for the awaiting-approval guard test.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "noop",
+      tools: [],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+
+    // The scripted LLM's only decision is `final_message` — under the old
+    // behavior that resolved whatever case the loop ran on. The guard must
+    // short-circuit BEFORE the LLM is ever consulted, so this counter must
+    // stay at zero.
+    let llmCalls = 0;
+    const llmFn = LLMServiceFromFn(() => {
+      llmCalls += 1;
+      return Eff.succeed({
+        type: "final_message" as const,
+        text: "All set — closing this out.",
+      });
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([parkedAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+      ]),
+      PermissionServiceDefault,
+      llmFn,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvalsSvc = yield* ApprovalService;
+
+          // Seed a case already parked for approval, with a live pending
+          // approval row (the manager has NOT decided yet).
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: parkedAgent.id,
+            subject: "Refund please",
+          });
+          const approval = yield* approvalsSvc.create({
+            tenantId: TenantId("tenant-acme"),
+            caseId: created.id,
+            agentId: parkedAgent.id,
+            tool: "conversation.reply",
+            proposedInput: { threadId: "thread-park", bodyText: "draft" },
+            reasoning: "drafted a refund reply",
+            riskLevel: "medium",
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          });
+          yield* repo.transitionStatus(created.id, "waiting_for_approval", {
+            reason: "tool conversation.reply pending approval",
+          });
+
+          // The customer replies again while the approval is still pending.
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-park" as never,
+              messageId: "msg-park-2",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Refund please",
+              bodyText: "Any update on my refund?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, pending, approvalId: approval.id };
+        }),
+        layer,
+      ),
+    );
+
+    // The case stays parked — it is NOT resolved out from under the
+    // pending approval.
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    // The pending approval is untouched.
+    expect(out.pending).toHaveLength(1);
+    expect(out.pending[0]!.id).toBe(out.approvalId);
+    expect(out.pending[0]!.status).toBe("pending");
+    // The runtime re-reports the case as parked for that same approval.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    if (out.result.type === "PausedWaitingForApproval") {
+      expect(out.result.approvalId).toBe(out.approvalId);
+    }
+    // The agent loop never ran — the LLM was never consulted.
+    expect(llmCalls).toBe(0);
+  });
 });
 
 // BYOK: when the tenant has no LLM credential the runtime must park the

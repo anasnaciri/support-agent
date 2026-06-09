@@ -618,6 +618,42 @@ export const AgentRuntimeDefault = Layer.effect(
           }
         }
 
+        // 2.9. Hold events that arrive while an approval is still pending.
+        // A case parked in `waiting_for_approval` must stay parked until
+        // the manager decides (`approval.approved` / `approval.rejected`,
+        // short-circuited above) or a human takes over out-of-band (which
+        // cancels the approval without running the agent). ANY other event
+        // that reaches here — the customer replying again on the same
+        // thread, a follow-up timer firing — must NOT re-enter the agent
+        // loop: a `final_message` (or a `case.update_status`) decision would
+        // then resolve the case out from under the still-pending approval,
+        // so the manager would see "resolved" for a draft they never
+        // approved. We re-park instead. (If the status says
+        // `waiting_for_approval` but no pending row exists — a stale /
+        // inconsistent case — we fall through so the agent can still make
+        // progress; the pending approval row is the source of truth.)
+        if (working.status === "waiting_for_approval") {
+          const pendingForCase = yield* approvals
+            .listPending(working.tenantId)
+            .pipe(Effect.catchAll(() => Effect.succeed([])));
+          const open = pendingForCase.find((a) => a.caseId === working.id);
+          if (open) {
+            yield* tx.run(
+              audit.record({
+                tenantId: working.tenantId,
+                caseId: working.id,
+                actor: { type: "system", id: "runtime" },
+                action: "event.held_pending_approval",
+                details: { eventType: event.type, approvalId: open.id },
+              }),
+            );
+            return {
+              type: "PausedWaitingForApproval",
+              approvalId: open.id,
+            } as const;
+          }
+        }
+
         // 3. Run the workflow loop.
         // Load per-tenant overrides once per tick. A handoff later in the
         // same tick reuses this map — overrides don't change mid-tick.
