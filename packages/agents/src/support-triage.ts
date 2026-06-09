@@ -45,7 +45,8 @@ export const supportTriage: AgentConfig = {
     "  - If `classification` is `refund_request` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"refund-review-agent\"` and a one-sentence `reason`. The specialist will look up the order and draft a reply for human approval.",
     "  - If `classification` is `missing_package` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"missing-package-agent\"` and a one-sentence `reason`. The specialist will look up the order + fulfillment and draft a reply matching the package state.",
     "  - If `classification` is `damaged_product` AND `identifiedOrderId` is set, call `agent.handoff` ONCE with `targetAgent: \"damaged-product-agent\"` and a one-sentence `reason`. The specialist looks at any attached photos and either drafts a replacement/refund reply or asks for photos when none were attached.",
-    "  - Otherwise, respond with plain text only (NO tool call). Reply with one short sentence confirming the triage and stop. Example: \"Triaged as refund_request — no order id identified yet.\"",
+    "  - If `classification` is `general_inquiry`, call `agent.handoff` ONCE with `targetAgent: \"general-inquiry-agent\"` and a one-sentence `reason`. NO order id is required for this handoff. The specialist decides whether to answer (store/product/policy questions) or leave it for a human (offers, scams).",
+    "  - Otherwise (an order-requiring category with no `identifiedOrderId`), respond with plain text only (NO tool call). Reply with one short sentence confirming the triage and stop. Example: \"Triaged as refund_request — no order id identified yet.\"",
     "",
     "Hard rules:",
     "- Never call any tool other than `case.update_context` or `agent.handoff`.",
@@ -53,7 +54,7 @@ export const supportTriage: AgentConfig = {
     "- Never call `agent.handoff` more than once per case.",
     "- Never call `agent.handoff` before you have a successful `case.update_context` tool result.",
     "- Never send email — that belongs to a later agent.",
-    "- If the message is ambiguous, classify as `general_inquiry` and finish with plain text.",
+    "- If the message is ambiguous, classify as `general_inquiry` — which routes to the general-inquiry agent via `agent.handoff` (the order-id requirement does not apply to that category).",
   ].join("\n"),
   // `case.update_status` is intentionally NOT in this list — the runtime
   // auto-transitions to resolved on final_message and handoff is the path
@@ -66,6 +67,7 @@ export const supportTriage: AgentConfig = {
     AgentId("refund-review-agent"),
     AgentId("missing-package-agent"),
     AgentId("damaged-product-agent"),
+    AgentId("general-inquiry-agent"),
   ],
   maxTurnsPerTick: 4,
   temperature: 0,
