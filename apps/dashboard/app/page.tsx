@@ -191,15 +191,21 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Waiting for customer" value={waitingCustomer} />
-        <StatTile label="Waiting for supplier" value={waitingSupplier} />
-        <StatTile label="In progress" value={inProgress} />
-        <StatTile
-          label="Resolved (all-time)"
-          value={countOf("resolved")}
-          icon={<CheckCircle2 className="size-3.5 text-primary" />}
-        />
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight">Cases by status</h2>
+        <p className="mt-0.5 mb-2 text-xs text-muted-foreground">
+          Current totals across all cases — not limited to today.
+        </p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="Waiting for customer" value={waitingCustomer} />
+          <StatTile label="Waiting for supplier" value={waitingSupplier} />
+          <StatTile label="In progress" value={inProgress} />
+          <StatTile
+            label="Resolved (all-time)"
+            value={countOf("resolved")}
+            icon={<CheckCircle2 className="size-3.5 text-primary" />}
+          />
+        </div>
       </div>
     </div>
   );

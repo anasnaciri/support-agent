@@ -27,6 +27,8 @@ import {
   setAgentSystemPromptAction,
   setAgentToolPermissionAction,
 } from "./actions";
+import { AgentSwitcher } from "./agent-switcher";
+import { agentSwitcherOptions } from "./agent-switcher-data";
 
 interface Props {
   readonly params: Promise<{ readonly id: string }>;
@@ -112,7 +114,10 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
       />
 
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">{agent.name}</h1>
+        <AgentSwitcher
+          options={agentSwitcherOptions(catalogResp.agents, agent.id)}
+          currentName={agent.name}
+        />
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
             {agent.id}
