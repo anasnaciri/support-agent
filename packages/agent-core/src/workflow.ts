@@ -8,6 +8,12 @@ export type WorkflowResult =
       readonly approvalId: ApprovalId;
     }
   | { readonly type: "PausedWaitingForSupplier" }
+  // A manager took the case over from the dashboard. The runtime holds
+  // every event (customer replies, timers) without running the agent until
+  // a human hands the case back (which transitions it out of
+  // `human_takeover`). Distinct from `HumanTakeoverRequired`, which is the
+  // runtime *escalating* a case it could not finish.
+  | { readonly type: "PausedForHumanTakeover" }
   | {
       readonly type: "Failed";
       readonly reason: string;

@@ -1371,6 +1371,76 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(eventReceivedCount).toBe(2);
   });
 
+  it("holds an inbound reply on a human_takeover case instead of running the agent", async () => {
+    // After a manager takes a case over, an inbound customer reply must NOT
+    // wake the agent — answering would step on the human handling it. The
+    // empty LLM script IS the assertion: if the guard regresses and the
+    // agent loop runs, the runtime consults the LLM and the empty script
+    // dies, failing the test.
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted([]), // must never be consulted
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          // Seed a taken-over case already bound to the thread.
+          const seeded = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            subject: "Where is my order?",
+            threadId: "thread-HT" as never,
+            status: "human_takeover",
+          });
+
+          const result = yield* runtime.handleEvent(
+            messageReceived("thread-HT", "any update on my refund?"),
+          );
+          const fetched = yield* repo.getById(seeded.id);
+          const entries = yield* audit.forCase(seeded.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedForHumanTakeover");
+    // The agent never acted — the case stays parked under the human.
+    expect(out.fetched.status).toBe("human_takeover");
+    // The held reply is recorded for the audit trail.
+    expect(
+      out.entries.some((e) => e.action === "event.held_human_takeover"),
+    ).toBe(true);
+  });
+
   it("stamps customerEmail + shopifyCustomerId onto the case context when message.received creates a new case", async () => {
     // Seed a Shopify customer keyed by the inbound sender's email so the
     // runtime's post-create searchByEmail lookup returns a hit.

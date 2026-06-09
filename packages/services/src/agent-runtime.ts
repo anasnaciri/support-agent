@@ -704,6 +704,28 @@ export const AgentRuntimeDefault = Layer.effect(
           }
         }
 
+        // 2.95. Hold every event once a human has taken the case over.
+        // `human_takeover` means a person owns this conversation; an inbound
+        // customer reply, a follow-up timer, or any other event must NOT
+        // re-enter the agent loop and answer over the human (the runtime
+        // also has no message-history replay, so it would respond with only
+        // the latest message as context — doubly wrong). The case stays
+        // parked until a manager hands it back from the dashboard, which
+        // transitions it out of `human_takeover` so subsequent events flow
+        // through normally. We record the held event for the audit trail.
+        if (working.status === "human_takeover") {
+          yield* tx.run(
+            audit.record({
+              tenantId: working.tenantId,
+              caseId: working.id,
+              actor: { type: "system", id: "runtime" },
+              action: "event.held_human_takeover",
+              details: { eventType: event.type },
+            }),
+          );
+          return { type: "PausedForHumanTakeover" } as const;
+        }
+
         // 3. Run the workflow loop.
         // Load per-tenant overrides once per tick. A handoff later in the
         // same tick reuses this map — overrides don't change mid-tick.
