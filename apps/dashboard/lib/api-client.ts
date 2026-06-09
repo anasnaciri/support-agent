@@ -1,4 +1,5 @@
 import "server-only";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "./session";
 import type { ShopifyCustomer, ShopifyOrder } from "@support-agent/agent-core";
@@ -25,7 +26,16 @@ import type {
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
 import { LEGAL_ACCEPTED_AT_KEY, hasAcceptedAtSignup } from "./legal-consent";
-import { ONBOARDING_PATH, SIGN_UP_PATH } from "./auth-redirect";
+import { ONBOARDING_PATH, buildSignUpRedirect } from "./auth-redirect";
+
+// The page a logged-out request landed on, stamped by middleware.ts into the
+// `x-pathname` request header. Used to build a `returnTo` so re-auth lands the
+// user back where they were. Null when middleware didn't run (e.g. an auth
+// route excluded from the matcher) — callers fall back to the bare /sign-up.
+const currentPathname = async (): Promise<string | null> => {
+  const h = await headers();
+  return h.get("x-pathname");
+};
 
 // ============================================================
 // Dashboard → apps/api client (Path B)
@@ -167,7 +177,7 @@ const fetchTenant = async (
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId } = await getSession();
-  if (!user) redirect(SIGN_UP_PATH);
+  if (!user) redirect(buildSignUpRedirect(await currentPathname()));
   if (!organizationId) redirect(ONBOARDING_PATH);
   const tenant = await fetchTenant(organizationId);
   if (!tenant) redirect(ONBOARDING_PATH);
@@ -206,7 +216,7 @@ export interface OrgContext {
 export const requireOrganization = async (): Promise<OrgContext> => {
   const { user, organizationId } = await getSession();
   // Legal-gated front door (audit B2) — see getDashboardContext.
-  if (!user) redirect(SIGN_UP_PATH);
+  if (!user) redirect(buildSignUpRedirect(await currentPathname()));
   const tenant = organizationId ? await fetchTenant(organizationId) : null;
   const metadata = user.metadata ?? {};
   const acceptedAt = metadata[LEGAL_ACCEPTED_AT_KEY] ?? null;

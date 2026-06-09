@@ -9,16 +9,30 @@ import { startGoogleSignUp } from "./actions";
 
 interface Props {
   readonly legalUrl: string | null;
+  /**
+   * The page to return to after auth (a session-expired user re-signing in).
+   * Forwarded to the action as a hidden field; empty for a fresh sign-up.
+   */
+  readonly returnTo?: string;
 }
 
-export const SignUpForm = ({ legalUrl }: Props) => {
+export const SignUpForm = ({ legalUrl, returnTo }: Props) => {
   const [state, formAction, pending] = useActionState(
     startGoogleSignUp,
     null as { readonly error?: string } | null,
   );
 
+  // A returning user clicks "Sign in" rather than the Google sign-up button;
+  // carry returnTo to the hosted-sign-in route so re-auth lands them back too.
+  const signInHref = returnTo
+    ? `/sign-in?returnTo=${encodeURIComponent(returnTo)}`
+    : "/sign-in";
+
   return (
     <form action={formAction} className="space-y-4">
+      {returnTo ? (
+        <input type="hidden" name="returnTo" value={returnTo} />
+      ) : null}
       <label className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3 text-sm">
         <input
           type="checkbox"
@@ -56,7 +70,10 @@ export const SignUpForm = ({ legalUrl }: Props) => {
       </Button>
       <p className="text-center text-xs text-muted-foreground">
         Already have an account?{" "}
-        <a href="/sign-in" className="font-medium text-primary hover:underline">
+        <a
+          href={signInHref}
+          className="font-medium text-primary hover:underline"
+        >
           Sign in
         </a>
       </p>

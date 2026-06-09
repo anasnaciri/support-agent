@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { LEGAL_CONSENT_COOKIE } from "@/lib/legal-consent";
+import { sanitizeReturnTo } from "@/lib/return-to";
 
 // Self-hosted sign-up gate. WorkOS's hosted UI can't enforce a custom legal
 // checkbox, so we collect consent here, record it in a short-lived cookie, and
@@ -31,8 +32,17 @@ export const startGoogleSignUp = async (
     maxAge: 600,
   });
 
+  // Carry the page the user was on (the gate stamped it into the form's hidden
+  // returnTo) through to the GET route, which hands it to WorkOS so /callback
+  // returns the user there after auth. Sanitised: only same-origin paths pass.
+  const returnTo = sanitizeReturnTo(formData.get("returnTo")?.toString(), "");
+
   // OpenNext/Cloudflare does not propagate the AuthKit PKCE Set-Cookie header
   // when a server action redirects directly off-origin. Hand off to a
   // same-origin GET route so the browser receives the verifier cookie first.
-  redirect("/sign-up/start");
+  redirect(
+    returnTo
+      ? `/sign-up/start?returnTo=${encodeURIComponent(returnTo)}`
+      : "/sign-up/start",
+  );
 };

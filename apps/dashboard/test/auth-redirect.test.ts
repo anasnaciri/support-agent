@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ONBOARDING_PATH,
   SIGN_UP_PATH,
+  buildSignUpRedirect,
   resolveDashboardRedirect,
 } from "../lib/auth-redirect";
 
@@ -48,5 +49,36 @@ describe("resolveDashboardRedirect", () => {
         hasTenant: true,
       }),
     ).toBeNull();
+  });
+});
+
+// The logged-out redirect carries the page the user was on as a `returnTo`
+// query param so re-auth can land them back there. The destination stays the
+// legal-gated /sign-up; only the query is added.
+describe("buildSignUpRedirect", () => {
+  it("appends an encoded returnTo for a real page", () => {
+    expect(buildSignUpRedirect("/cases/abc")).toBe(
+      `${SIGN_UP_PATH}?returnTo=%2Fcases%2Fabc`,
+    );
+  });
+
+  it("encodes a path that carries its own query string", () => {
+    expect(buildSignUpRedirect("/cases?status=open")).toBe(
+      `${SIGN_UP_PATH}?returnTo=%2Fcases%3Fstatus%3Dopen`,
+    );
+  });
+
+  it("omits the query for the home page (nothing to preserve)", () => {
+    expect(buildSignUpRedirect("/")).toBe(SIGN_UP_PATH);
+  });
+
+  it("omits the query for a missing path", () => {
+    expect(buildSignUpRedirect(null)).toBe(SIGN_UP_PATH);
+    expect(buildSignUpRedirect(undefined)).toBe(SIGN_UP_PATH);
+  });
+
+  it("drops an unsafe returnTo rather than preserving it", () => {
+    expect(buildSignUpRedirect("//evil.com")).toBe(SIGN_UP_PATH);
+    expect(buildSignUpRedirect("https://evil.com")).toBe(SIGN_UP_PATH);
   });
 });

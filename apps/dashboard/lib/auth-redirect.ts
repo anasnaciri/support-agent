@@ -4,6 +4,8 @@
 // "logged-out users go to the legal-gated /sign-up, not WorkOS-hosted
 // /sign-in" rule (audit B2 / re-audit #4) has a regression test.
 
+import { sanitizeReturnTo } from "./return-to";
+
 /** The self-hosted, legal-gated sign-up page (the logged-out front door). */
 export const SIGN_UP_PATH = "/sign-up";
 /** Onboarding provisions the org + tenant for a signed-in user without one. */
@@ -31,4 +33,18 @@ export const resolveDashboardRedirect = (
   if (!state.hasOrganization) return ONBOARDING_PATH;
   if (!state.hasTenant) return ONBOARDING_PATH;
   return null;
+};
+
+/**
+ * The logged-out redirect target, carrying the page the user was on as a
+ * sanitised `returnTo` query param so re-auth lands them back there. The
+ * destination is always {@link SIGN_UP_PATH}; the home page and any unsafe
+ * value yield the bare path (nothing worth preserving / open-redirect guard).
+ */
+export const buildSignUpRedirect = (
+  returnTo: string | null | undefined,
+): string => {
+  const safe = sanitizeReturnTo(returnTo, "/");
+  if (safe === "/") return SIGN_UP_PATH;
+  return `${SIGN_UP_PATH}?returnTo=${encodeURIComponent(safe)}`;
 };
