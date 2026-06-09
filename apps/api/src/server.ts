@@ -147,6 +147,15 @@ import {
   fetchGoogleUserEmail,
 } from "./google-callback.js";
 import {
+  buildMicrosoftAuthorizeUrl,
+  signMicrosoftInstallState,
+  verifyMicrosoftInstallState,
+} from "./microsoft-install.js";
+import {
+  exchangeCodeForMicrosoftToken,
+  fetchMicrosoftUserEmail,
+} from "./microsoft-callback.js";
+import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
 } from "./shopify-webhook-registration.js";
@@ -2200,7 +2209,12 @@ const handleDashboardConnect = async (
     Date.now() + INSTALL_GRANT_TTL_MS,
   );
   const apiOrigin = new URL(cfg.shopify.callbackUrl).origin;
-  const path = provider === "shopify" ? "/shopify/install" : "/google/install";
+  const path =
+    provider === "shopify"
+      ? "/shopify/install"
+      : provider === "outlook"
+        ? "/microsoft/install"
+        : "/google/install";
   const url = `${apiOrigin}${path}?grant=${encodeURIComponent(grant)}`;
   return sendJson(res, 200, { url });
 };
@@ -3546,6 +3560,186 @@ const handleGoogleCallback = async (
   sendRedirect(res, `/installed?${installedQs.toString()}`);
 };
 
+/**
+ * GET /microsoft/install?grant=<signed-grant>
+ *
+ * Mirror of `/google/install` for the Outlook / O365 connector. Requires a
+ * signed install grant (minted by the authenticated /dashboard/connect
+ * endpoint) scoped to `outlook`; never a raw `?tenant=`.
+ */
+const handleMicrosoftInstall = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!cfg.microsoft) {
+    sendJson(res, 503, { error: "microsoft_oauth_not_configured" });
+    return;
+  }
+  const { params } = readQuery(req);
+  const grantParam = params["grant"];
+  if (!grantParam) {
+    sendJson(res, 400, { error: "missing_install_grant" });
+    return;
+  }
+  const grant = verifyInstallGrant(cfg.stateSigningKey, grantParam);
+  if (!grant || grant.provider !== "outlook") {
+    sendJson(res, 401, { error: "invalid_install_grant" });
+    return;
+  }
+  const tenant = grant.tenantId;
+  if (!(await tenantHasCurrentLegalAcceptance(tenant, layer))) {
+    sendLegalAcceptanceRequired(res);
+    return;
+  }
+  const state = signMicrosoftInstallState(cfg.stateSigningKey, {
+    tenantId: tenant,
+  });
+  const loginHint = params["login_hint"] ?? params["loginHint"];
+  const authorizeUrl = buildMicrosoftAuthorizeUrl({
+    clientId: cfg.microsoft.clientId,
+    redirectUri: cfg.microsoft.callbackUrl,
+    state,
+    tenant: cfg.microsoft.tenant,
+    ...(loginHint ? { loginHint } : {}),
+  });
+  sendRedirect(res, authorizeUrl);
+};
+
+/**
+ * GET /microsoft/auth/callback?code=&state=
+ *
+ * Verify state → exchange code → resolve the mailbox address via Graph `/me`
+ * → persist the connection under provider `outlook`. The inbound Graph
+ * subscription is created in the webhook slice (Graph validates the
+ * notification URL at subscription time, so it can't be created until that
+ * endpoint exists). Outbound + thread reads work as soon as this completes.
+ */
+const handleMicrosoftCallback = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!cfg.microsoft) {
+    sendJson(res, 503, { error: "microsoft_oauth_not_configured" });
+    return;
+  }
+  const { params } = readQuery(req);
+  if (params["error"]) {
+    sendJson(res, 400, {
+      error: "microsoft_oauth_error",
+      microsoftError: params["error"],
+      microsoftErrorDescription: params["error_description"] ?? null,
+    });
+    return;
+  }
+  const code = params["code"];
+  const state = params["state"];
+  if (!code || !state) {
+    sendJson(res, 400, { error: "missing_required_param" });
+    return;
+  }
+  const decoded = verifyMicrosoftInstallState(cfg.stateSigningKey, state);
+  if (!decoded) {
+    sendJson(res, 401, { error: "state_verification_failed" });
+    return;
+  }
+  const tenantId = decoded.tenantId;
+  if (!(await tenantHasCurrentLegalAcceptance(tenantId, layer))) {
+    sendLegalAcceptanceRequired(res);
+    return;
+  }
+
+  let token;
+  try {
+    token = await exchangeCodeForMicrosoftToken({
+      clientId: cfg.microsoft.clientId,
+      clientSecret: cfg.microsoft.clientSecret,
+      redirectUri: cfg.microsoft.callbackUrl,
+      tenant: cfg.microsoft.tenant,
+      code,
+    });
+  } catch (cause) {
+    sendJson(res, 502, {
+      error: "token_exchange_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  if (!token.refreshToken) {
+    sendJson(res, 400, {
+      error: "missing_refresh_token",
+      hint: "Re-run the install and grant offline access; if it persists, remove the app at https://myaccount.microsoft.com/permissions",
+    });
+    return;
+  }
+
+  let email: string;
+  try {
+    email = await fetchMicrosoftUserEmail({ accessToken: token.accessToken });
+  } catch (cause) {
+    sendJson(res, 502, {
+      error: "userinfo_fetch_failed",
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+    return;
+  }
+
+  const expiresAt = new Date(Date.now() + token.expiresInSeconds * 1000);
+  const putExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.put({
+          tenantId: TenantId(tenantId),
+          provider: "outlook",
+          shopDomain: email,
+          accessToken: token.accessToken,
+          refreshToken: token.refreshToken,
+          tokenExpiresAt: expiresAt,
+          scopes: token.scope,
+        });
+      }),
+      layer,
+    ),
+  );
+  if (putExit._tag !== "Success") {
+    sendJson(res, 500, {
+      error: "persist_failed",
+      detail: String(putExit.cause),
+    });
+    return;
+  }
+
+  const acceptsJson = (req.headers["accept"] ?? "")
+    .toString()
+    .toLowerCase()
+    .includes("application/json");
+  if (acceptsJson) {
+    sendJson(res, 200, {
+      ok: true,
+      tenantId,
+      provider: "outlook",
+      email,
+      scopes: token.scope,
+    });
+    return;
+  }
+  const dashboardRedirect = dashboardConnectRedirect(
+    cfg.dashboardBaseUrl,
+    "outlook",
+  );
+  if (dashboardRedirect) {
+    sendRedirect(res, dashboardRedirect);
+    return;
+  }
+  const installedQs = new URLSearchParams({ email, provider: "outlook" });
+  sendRedirect(res, `/installed?${installedQs.toString()}`);
+};
+
 // ============================================================
 // Gmail Pub/Sub push webhook
 // ============================================================
@@ -3927,6 +4121,39 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleGoogleCallback(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Microsoft / Outlook OAuth ----
+  app.get(
+    "/microsoft/install",
+    {
+      schema: {
+        tags: ["microsoft"],
+        summary: "Start the Microsoft / Outlook OAuth install flow",
+        querystring: googleInstallQuerySchema,
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      await handleMicrosoftInstall(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  app.get(
+    "/microsoft/auth/callback",
+    {
+      schema: {
+        tags: ["microsoft"],
+        summary: "Microsoft OAuth authorization-code callback",
+        querystring: googleCallbackQuerySchema,
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      await handleMicrosoftCallback(cfg, layer, req, res);
       return res;
     },
   );

@@ -108,6 +108,25 @@ export interface GoogleAppConfig {
   readonly pushToken: string | null;
 }
 
+export interface MicrosoftAppConfig {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly callbackUrl: string;
+  /** Azure AD tenant segment for authorize/token endpoints. Defaults to "common". */
+  readonly tenant: string;
+  /**
+   * Public URL Microsoft Graph posts mailbox change notifications to (the
+   * api's `/webhooks/conversations/outlook/:tenantId`). `null` disables
+   * subscription creation on install — used by the inbound webhook slice.
+   */
+  readonly notificationUrl: string | null;
+  /**
+   * Secret echoed back in every Graph change notification's `clientState`,
+   * verified on receipt so only our own subscriptions can drive the webhook.
+   */
+  readonly webhookClientState: string | null;
+}
+
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
@@ -120,6 +139,12 @@ export interface ApiConfig {
    * webhooks additionally require `GMAIL_PUSH_TOKEN`.
    */
   readonly google: GoogleAppConfig | null;
+  /**
+   * `null` when Microsoft OAuth env vars are unset. When set, the API exposes
+   * `/microsoft/install` + `/microsoft/auth/callback` for the Outlook / O365
+   * conversation connector; `null` makes those routes respond 503.
+   */
+  readonly microsoft: MicrosoftAppConfig | null;
   /**
    * Shared HMAC secret for approval-link tokens. Verifies the signed
    * `?token=...` on `/approvals/:id/approve|reject` URLs. MUST be the
@@ -197,6 +222,21 @@ export const loadApiConfig = (): ApiConfig => {
       `GOOGLE_OAUTH_CALLBACK_URL must use https:// (got ${googleCallbackUrl}). Google rejects http callbacks except for http://localhost loopback installs.`,
     );
   }
+  const msClientId = process.env["MICROSOFT_OAUTH_CLIENT_ID"];
+  const msClientSecret = process.env["MICROSOFT_OAUTH_CLIENT_SECRET"];
+  const msCallbackUrl = process.env["MICROSOFT_OAUTH_CALLBACK_URL"];
+  const msTenant = process.env["MICROSOFT_OAUTH_TENANT"]?.trim() || "common";
+  const msNotificationUrl =
+    process.env["MICROSOFT_GRAPH_NOTIFICATION_URL"]?.trim() || null;
+  const msWebhookClientState =
+    process.env["MICROSOFT_GRAPH_WEBHOOK_SECRET"]?.trim() || null;
+  const microsoftConfigured =
+    !!msClientId && !!msClientSecret && !!msCallbackUrl;
+  if (microsoftConfigured && !msCallbackUrl.startsWith("https://") && !allowHttp) {
+    throw new Error(
+      `MICROSOFT_OAUTH_CALLBACK_URL must use https:// (got ${msCallbackUrl}). Microsoft rejects non-https redirect URIs except http://localhost.`,
+    );
+  }
   // Pilot mode (SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true) is PURE per-tenant
   // provisioning — every tenant uses its own operator-provisioned custom app.
   // A deployment-wide ("global") Shopify app is NOT allowed: keeping one around
@@ -246,6 +286,16 @@ export const loadApiConfig = (): ApiConfig => {
           callbackUrl: googleCallbackUrl,
           pubsubTopic: googlePubsubTopic ?? null,
           pushToken: googlePushToken ?? null,
+        }
+      : null,
+    microsoft: microsoftConfigured
+      ? {
+          clientId: msClientId,
+          clientSecret: msClientSecret,
+          callbackUrl: msCallbackUrl,
+          tenant: msTenant,
+          notificationUrl: msNotificationUrl,
+          webhookClientState: msWebhookClientState,
         }
       : null,
   };

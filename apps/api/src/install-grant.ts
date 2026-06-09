@@ -15,12 +15,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // A grant is `base64url(`${tenantId}.${provider}.${expiresAtMs}`).base64url(sig)`
 // signed with HMAC-SHA256. It is provider-scoped and expires quickly.
 
-export type InstallGrantProvider = "shopify" | "gmail" | "google_sheets";
+export type InstallGrantProvider =
+  | "shopify"
+  | "gmail"
+  | "google_sheets"
+  | "outlook";
 
 const GRANT_PROVIDERS: ReadonlyArray<InstallGrantProvider> = [
   "shopify",
   "gmail",
   "google_sheets",
+  "outlook",
 ];
 
 export const isInstallGrantProvider = (
