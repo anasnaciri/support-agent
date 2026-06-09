@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GraphHttpError,
+  graphCreateSubscription,
   graphGetConversation,
+  graphGetMessage,
+  graphRenewSubscription,
   graphSendDraft,
   type GraphHttpFailure,
 } from "../src/graph-http.js";
@@ -130,5 +133,90 @@ describe("graphSendDraft", () => {
     await expect(
       graphSendDraft({ token: "t", draftId: "d", fetchImpl }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("graphGetMessage", () => {
+  it("normalises a single message by id (inbound from the customer)", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(url).toContain("/me/messages/m-1");
+      return okJson({
+        id: "m-1",
+        conversationId: "conv-1",
+        subject: "hi",
+        from: { emailAddress: { address: "jane@example.com" } },
+        toRecipients: [{ emailAddress: { address: mailbox } }],
+        body: { contentType: "text", content: "hello" },
+        sentDateTime: "2026-06-01T00:00:00Z",
+      });
+    }) as unknown as typeof fetch;
+    const msg = await graphGetMessage({
+      token: "t",
+      messageId: "m-1",
+      mailbox,
+      fetchImpl,
+    });
+    expect(msg.id).toBe("m-1");
+    expect(msg.threadId).toBe("conv-1");
+    expect(msg.direction).toBe("inbound");
+    expect(msg.bodyText).toBe("hello");
+  });
+
+  it("marks a message sent by the mailbox itself as outbound", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        id: "m-2",
+        conversationId: "conv-1",
+        from: { emailAddress: { address: mailbox } },
+        body: { contentType: "text", content: "our reply" },
+        sentDateTime: "2026-06-01T01:00:00Z",
+      }),
+    ) as unknown as typeof fetch;
+    const msg = await graphGetMessage({
+      token: "t",
+      messageId: "m-2",
+      mailbox,
+      fetchImpl,
+    });
+    expect(msg.direction).toBe("outbound");
+  });
+});
+
+describe("graph subscriptions", () => {
+  it("creates a subscription with the inbox resource + clientState", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://graph.microsoft.com/v1.0/subscriptions");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body["changeType"]).toBe("created");
+      expect(body["notificationUrl"]).toBe(
+        "https://api.example.com/webhooks/conversations/outlook/t1",
+      );
+      expect(body["clientState"]).toBe("secret");
+      expect(String(body["resource"]).toLowerCase()).toContain("inbox");
+      return okJson({ id: "sub-1", expirationDateTime: "2026-06-05T00:00:00Z" });
+    }) as unknown as typeof fetch;
+    const sub = await graphCreateSubscription({
+      token: "t",
+      notificationUrl: "https://api.example.com/webhooks/conversations/outlook/t1",
+      clientState: "secret",
+      expirationDateTime: "2026-06-05T00:00:00Z",
+      fetchImpl,
+    });
+    expect(sub).toEqual({ id: "sub-1", expirationDateTime: "2026-06-05T00:00:00Z" });
+  });
+
+  it("renews an existing subscription via PATCH", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.method).toBe("PATCH");
+      expect(url).toBe("https://graph.microsoft.com/v1.0/subscriptions/sub-1");
+      return okJson({ id: "sub-1", expirationDateTime: "2026-06-09T00:00:00Z" });
+    }) as unknown as typeof fetch;
+    const sub = await graphRenewSubscription({
+      token: "t",
+      subscriptionId: "sub-1",
+      expirationDateTime: "2026-06-09T00:00:00Z",
+      fetchImpl,
+    });
+    expect(sub.expirationDateTime).toBe("2026-06-09T00:00:00Z");
   });
 });

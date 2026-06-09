@@ -12,6 +12,10 @@ import {
   registerGmailWatchRenewal,
 } from "./gmail-watch-renewal-schedule.js";
 import {
+  GRAPH_SUBSCRIPTION_RENEWAL_QUEUE,
+  registerGraphSubscriptionRenewal,
+} from "./graph-subscription-renewal-schedule.js";
+import {
   RETENTION_SWEEP_QUEUE,
   registerRetentionSweep,
 } from "./retention-sweep-schedule.js";
@@ -102,6 +106,18 @@ const main = async (): Promise<void> => {
   if (renewalRegistered) {
     console.log(
       `[worker] scheduled gmail-watch-renewal cron on queue=${GMAIL_WATCH_RENEWAL_QUEUE}`,
+    );
+  }
+
+  // Schedule the Graph subscription-renewal cron. No-ops when Microsoft
+  // OAuth + webhook env vars are missing.
+  const graphRenewalRegistered = await registerGraphSubscriptionRenewal({
+    boss,
+    runtimeLayer,
+  });
+  if (graphRenewalRegistered) {
+    console.log(
+      `[worker] scheduled graph-subscription-renewal cron on queue=${GRAPH_SUBSCRIPTION_RENEWAL_QUEUE}`,
     );
   }
 

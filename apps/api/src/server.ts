@@ -156,10 +156,20 @@ import {
   fetchMicrosoftUserEmail,
 } from "./microsoft-callback.js";
 import {
+  handleGraphNotification,
+  parseGraphNotifications,
+  parseGraphValidationToken,
+} from "./graph-webhook.js";
+import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
 } from "./shopify-webhook-registration.js";
-import { startGmailWatch, revokeConnectorGrant } from "@support-agent/providers";
+import {
+  startGmailWatch,
+  revokeConnectorGrant,
+  graphCreateSubscription,
+  GRAPH_SUBSCRIPTION_TTL_MS,
+} from "@support-agent/providers";
 import {
   backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
@@ -3714,6 +3724,53 @@ const handleMicrosoftCallback = async (
     return;
   }
 
+  // Register the inbound Graph subscription. Soft-fails by design (like the
+  // Gmail watch): the credentials are saved and the renewal cron / a
+  // re-install can recover. Needs a configured public notification URL +
+  // client-state secret; Graph validates the URL during creation.
+  let subscription: { id: string; expirationDateTime: string } | null = null;
+  if (cfg.microsoft.notificationUrl && cfg.microsoft.webhookClientState) {
+    try {
+      const notificationUrl = `${cfg.microsoft.notificationUrl.replace(/\/+$/, "")}/${encodeURIComponent(tenantId)}`;
+      subscription = await graphCreateSubscription({
+        token: token.accessToken,
+        notificationUrl,
+        clientState: cfg.microsoft.webhookClientState,
+        expirationDateTime: new Date(
+          Date.now() + GRAPH_SUBSCRIPTION_TTL_MS,
+        ).toISOString(),
+      });
+      const patchExit = await Effect.runPromiseExit(
+        Effect.provide(
+          Effect.gen(function* () {
+            const store = yield* ConnectorCredentialStore;
+            return yield* store.patchMetadata({
+              tenantId: TenantId(tenantId),
+              provider: "outlook",
+              shopDomain: email,
+              metadata: {
+                subscriptionId: subscription!.id,
+                subscriptionExpiresAt: subscription!.expirationDateTime,
+              },
+            });
+          }),
+          layer,
+        ),
+      );
+      if (patchExit._tag !== "Success") {
+        req.log.error(
+          { err: patchExit.cause },
+          "[microsoft callback] subscription metadata patch failed",
+        );
+      }
+    } catch (cause) {
+      req.log.error(
+        { err: cause },
+        "[microsoft callback] subscription registration failed",
+      );
+    }
+  }
+
   const acceptsJson = (req.headers["accept"] ?? "")
     .toString()
     .toLowerCase()
@@ -3725,6 +3782,7 @@ const handleMicrosoftCallback = async (
       provider: "outlook",
       email,
       scopes: token.scope,
+      subscriptionRegistered: !!subscription,
     });
     return;
   }
@@ -3843,6 +3901,59 @@ const handleGmailWebhook = async (
   }
   // Always 200 once token verified — Pub/Sub retries on 5xx.
   sendJson(res, 200, { ok: true });
+};
+
+// ============================================================
+// Microsoft Graph change-notification webhook
+// ============================================================
+
+/**
+ * POST /webhooks/conversations/outlook/:tenantId
+ *
+ * Two shapes hit this route:
+ *   1. Subscription validation — Graph POSTs `?validationToken=…` when a
+ *      subscription is created; we echo the raw token back as text/plain 200.
+ *   2. Change notifications — a JSON body of `{ value: [...] }`; we verify
+ *      each `clientState`, fetch the message, and publish `message.received`.
+ */
+const handleGraphWebhook = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  // Validation handshake first — it has no body to authenticate and must be
+  // answered for the subscription to be created at all.
+  const query = (req.query ?? {}) as Record<string, string | undefined>;
+  const validationToken = parseGraphValidationToken(query);
+  if (validationToken) {
+    return res.code(200).type("text/plain").send(validationToken);
+  }
+
+  if (!cfg.microsoft) {
+    return sendJson(res, 503, { error: "microsoft_oauth_not_configured" });
+  }
+  const { tenantId } = req.params as { tenantId: string };
+  if (!tenantId) {
+    return sendJson(res, 400, { error: "missing_tenant" });
+  }
+
+  const rawBody = req.body as Buffer;
+  const notifications = parseGraphNotifications(rawBody);
+  if (notifications.length > 0) {
+    try {
+      await handleGraphNotification({
+        tenantId,
+        notifications,
+        layer,
+        microsoft: cfg.microsoft,
+      });
+    } catch (cause) {
+      req.log.error({ err: cause }, "[outlook webhook] notification handling failed");
+    }
+  }
+  // Graph retries on non-2xx; ack with 202 once we've accepted the batch.
+  return res.code(202).send();
 };
 
 // ============================================================
@@ -4181,6 +4292,23 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleGmailWebhook(cfg, layer, req, res);
+      return res;
+    },
+  );
+
+  // ---- Microsoft Graph change-notification webhook ----
+  app.post(
+    "/webhooks/conversations/outlook/:tenantId",
+    {
+      schema: {
+        tags: ["webhooks", "microsoft"],
+        summary: "Microsoft Graph mailbox change notification",
+        params: gmailParamsSchema,
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      await handleGraphWebhook(cfg, layer, req, res);
       return res;
     },
   );

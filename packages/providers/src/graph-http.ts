@@ -14,6 +14,7 @@
 // for the sent message (a bare `/reply` returns 202 with no body).
 
 import type {
+  ConversationMessage,
   ConversationThread,
   MessageParticipant,
   ThreadId,
@@ -273,4 +274,97 @@ export const graphSendDraft = async (
     body: {},
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
+};
+
+/**
+ * Fetch a single message (used by the inbound webhook, which receives only a
+ * message id in the change notification). `mailbox` decides direction.
+ */
+export const graphGetMessage = async (
+  opts: GraphHttpCallOptions & {
+    readonly messageId: string;
+    readonly mailbox: string;
+  },
+): Promise<ConversationMessage> => {
+  const path = `/me/messages/${encodeURIComponent(opts.messageId)}?$select=${encodeURIComponent(
+    MESSAGE_SELECT,
+  )}`;
+  const raw = (await graphFetch({
+    path,
+    token: opts.token,
+    prefer: 'outlook.body-content-type="text"',
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  })) as RawGraphMessage;
+  const conversationId = raw.conversationId ?? opts.messageId;
+  return normaliseMessage(raw, makeThreadId(conversationId), opts.mailbox);
+};
+
+// ============================================================
+// Change-notification subscriptions
+// ============================================================
+//
+// Graph mail subscriptions expire fast (max 4230 minutes ≈ 3 days), so a cron
+// renews them well before the lease lapses. We stay a margin under the max.
+
+export const GRAPH_SUBSCRIPTION_TTL_MS = 4000 * 60 * 1000;
+
+/** Default resource: new mail landing in the Inbox. */
+export const GRAPH_INBOX_RESOURCE = "/me/mailfolders('inbox')/messages";
+
+export interface GraphSubscription {
+  readonly id: string;
+  readonly expirationDateTime: string;
+}
+
+/**
+ * Create a change-notification subscription. NOTE: Graph validates
+ * `notificationUrl` synchronously during this call by POSTing a
+ * `validationToken` that our webhook must echo — so the webhook must be live
+ * and publicly reachable before this succeeds.
+ */
+export const graphCreateSubscription = async (
+  opts: GraphHttpCallOptions & {
+    readonly notificationUrl: string;
+    readonly clientState: string;
+    readonly expirationDateTime: string;
+    readonly resource?: string;
+  },
+): Promise<GraphSubscription> => {
+  const raw = (await graphFetch({
+    method: "POST",
+    path: "/subscriptions",
+    token: opts.token,
+    body: {
+      changeType: "created",
+      notificationUrl: opts.notificationUrl,
+      resource: opts.resource ?? GRAPH_INBOX_RESOURCE,
+      expirationDateTime: opts.expirationDateTime,
+      clientState: opts.clientState,
+    },
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  })) as { id?: string; expirationDateTime?: string };
+  return {
+    id: raw.id ?? "",
+    expirationDateTime: raw.expirationDateTime ?? opts.expirationDateTime,
+  };
+};
+
+/** Extend an existing subscription's lease. */
+export const graphRenewSubscription = async (
+  opts: GraphHttpCallOptions & {
+    readonly subscriptionId: string;
+    readonly expirationDateTime: string;
+  },
+): Promise<GraphSubscription> => {
+  const raw = (await graphFetch({
+    method: "PATCH",
+    path: `/subscriptions/${encodeURIComponent(opts.subscriptionId)}`,
+    token: opts.token,
+    body: { expirationDateTime: opts.expirationDateTime },
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  })) as { id?: string; expirationDateTime?: string };
+  return {
+    id: raw.id ?? opts.subscriptionId,
+    expirationDateTime: raw.expirationDateTime ?? opts.expirationDateTime,
+  };
 };
