@@ -114,6 +114,24 @@ export type ShopifyProduct = {
   readonly images: ReadonlyArray<ShopifyProductImage>;
 };
 
+/**
+ * A product as it appears in a catalog *search* result. Lighter than
+ * `ShopifyProduct`: no images (search answers "do you sell X?" and basic
+ * attribute questions from text), and it carries a plain-text
+ * `description` so an agent can ground its answer in the merchant's own
+ * product copy rather than inventing specs. `description` is the
+ * storefront body text, truncated by the provider to keep token cost
+ * bounded; `null` when the product has no description. Used by
+ * `shopify.search_products`.
+ */
+export type ShopifyProductSearchResult = {
+  readonly id: string; // gid://shopify/Product/...
+  readonly title: string;
+  readonly productType: string | null;
+  readonly vendor: string | null;
+  readonly description: string | null;
+};
+
 export type ShopifyCustomer = {
   readonly id: CustomerId;
   readonly email: string | null;

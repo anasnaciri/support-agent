@@ -13,6 +13,7 @@ import {
   type ShopifyError,
   type ShopifyOrder,
   type ShopifyProduct,
+  type ShopifyProductSearchResult,
   type ToolContext,
 } from "@support-agent/agent-core";
 import { ShopifyServiceTest } from "@support-agent/services";
@@ -20,6 +21,7 @@ import {
   shopifyGetCustomer,
   shopifyGetOrder,
   shopifyGetProduct,
+  shopifySearchProducts,
   shopifyRefundCreate,
   shopifyRefundRecommend,
   computeRefundRecommendation,
@@ -456,6 +458,111 @@ describe("shopify.get_product tool", () => {
       provider: "shopify",
       scopes: ["read_products"],
     });
+  });
+});
+
+describe("shopify.search_products tool", () => {
+  const hit = (
+    id: string,
+    title: string,
+    description: string | null,
+  ): ShopifyProductSearchResult => ({
+    id,
+    title,
+    productType: "Drinkware",
+    vendor: "Acme",
+    description,
+  });
+
+  it("returns matching products on success", async () => {
+    const env = ShopifyServiceTest({
+      searchProducts: (q) =>
+        q.includes("mug")
+          ? [hit("gid://shopify/Product/1", "Ceramic Mug", "Holds 12oz")]
+          : [],
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifySearchProducts.execute(
+          { query: "mug" } as never,
+          baseCtx("c-sp-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const products = (exit.value as Record<string, unknown>)[
+      "products"
+    ] as ReadonlyArray<Record<string, unknown>>;
+    expect(products).toHaveLength(1);
+    expect(products[0]!["title"]).toBe("Ceramic Mug");
+    expect(products[0]!["description"]).toBe("Holds 12oz");
+    expect(products[0]!["vendor"]).toBe("Acme");
+  });
+
+  it("returns an empty list when nothing matches (a miss is not an error)", async () => {
+    const env = ShopifyServiceTest({ searchProducts: () => [] });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifySearchProducts.execute(
+          { query: "spaceship" } as never,
+          baseCtx("c-sp-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect((exit.value as Record<string, unknown>)["products"]).toEqual([]);
+  });
+
+  it("maps a ShopifyError to ToolOutputInvalid", async () => {
+    const env = Layer.succeed(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (await import("@support-agent/services")).ShopifyService as any,
+      {
+        searchProducts: () =>
+          Effect.fail(new ShopifyAuthMissing({ tenantId })),
+      },
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifySearchProducts.execute(
+          { query: "mug" } as never,
+          baseCtx("c-sp-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.search_products");
+        expect(err.issues).toEqual(["ShopifyAuthMissing"]);
+      }
+    }
+  });
+
+  it("declares read risk, allow permission, read_products scope, and no tenant-control surface", () => {
+    expect(shopifySearchProducts.name).toBe("shopify.search_products");
+    expect(shopifySearchProducts.risk).toBe("read");
+    expect(shopifySearchProducts.defaultPermission).toBe("allow");
+    expect(shopifySearchProducts.sideEffectClass).toBe("none");
+    expect(shopifySearchProducts.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["read_products"],
+    });
+    // Internal plumbing, not a tenant-configurable action — must stay out
+    // of the per-agent Actions UI (mirrors knowledge.search).
+    expect(
+      (shopifySearchProducts as { tenantControl?: unknown }).tenantControl,
+    ).toBeUndefined();
+    expect(
+      (shopifySearchProducts as { displayName?: unknown }).displayName,
+    ).toBeUndefined();
   });
 });
 

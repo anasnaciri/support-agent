@@ -13,6 +13,7 @@ import {
   type ShopifyOrder,
   type ShopifyProduct,
   type ShopifyProductImage,
+  type ShopifyProductSearchResult,
   type ShopifyRefund,
   type TenantId,
   CustomerId as makeCustomerId,
@@ -388,6 +389,40 @@ const mapProduct = (p: GqlProduct): ShopifyProduct => ({
   ),
 });
 
+type GqlProductSearchNode = {
+  readonly id: string;
+  readonly title: string;
+  readonly productType: string | null;
+  readonly vendor: string | null;
+  readonly description: string | null;
+};
+
+// Keep product descriptions from blowing up the token budget when an
+// agent searches the catalog: a few hundred chars is plenty to answer
+// "do you sell X?" / "is it waterproof?", and we never want a multi-KB
+// body landing in the prompt. Truncate on a char boundary with an
+// ellipsis; collapse blank/whitespace-only descriptions to null so the
+// agent treats "no description" uniformly.
+const PRODUCT_DESCRIPTION_CAP = 600;
+const truncateDescription = (d: string | null): string | null => {
+  if (d === null) return null;
+  const trimmed = d.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > PRODUCT_DESCRIPTION_CAP
+    ? `${trimmed.slice(0, PRODUCT_DESCRIPTION_CAP)}…`
+    : trimmed;
+};
+
+const mapProductSearchNode = (
+  p: GqlProductSearchNode,
+): ShopifyProductSearchResult => ({
+  id: p.id,
+  title: p.title,
+  productType: p.productType,
+  vendor: p.vendor,
+  description: truncateDescription(p.description),
+});
+
 // ============================================================
 // Queries
 // ============================================================
@@ -456,6 +491,14 @@ const GET_PRODUCT_QUERY = `
       images(first: 10) {
         nodes { url altText }
       }
+    }
+  }
+`;
+
+const SEARCH_PRODUCTS_QUERY = `
+  query SearchProducts($q: String!, $n: Int!) {
+    products(first: $n, query: $q) {
+      nodes { id title productType vendor description }
     }
   }
 `;
@@ -685,6 +728,22 @@ export const ShopifyServiceLive = Layer.effect(
                 ? Effect.succeed(mapProduct(data.product))
                 : Effect.fail(new ProductNotFound({ productId })),
             ),
+          ),
+        ),
+
+      searchProducts: (tenantId, query, limit) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{ products: { nodes: ReadonlyArray<GqlProductSearchNode> } }>(
+            http,
+            creds,
+            tenantId,
+            SEARCH_PRODUCTS_QUERY,
+            // Clamp to a sane window: Shopify's `first` must be 1..250, and
+            // we never want a giant page. The tool passes a small limit;
+            // this is defence-in-depth against a bad caller.
+            { q: query, n: Math.min(Math.max(limit, 1), 50) },
+          ).pipe(
+            Effect.map((data) => data.products.nodes.map(mapProductSearchNode)),
           ),
         ),
 

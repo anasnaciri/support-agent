@@ -8,6 +8,7 @@ import {
   type ShopifyMoney,
   type ShopifyOrder,
   type ShopifyProduct,
+  type ShopifyProductSearchResult,
   type ShopifyRefund,
   type TenantId,
   CustomerNotFound,
@@ -66,6 +67,22 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       productId: string,
     ) => Effect.Effect<ShopifyProduct, ShopifyError>;
+
+    /**
+     * Keyword search over the store's product catalog. Backs
+     * `shopify.search_products` so the general-inquiry agent can answer
+     * "do you sell X?" / basic product-attribute questions grounded in
+     * the real catalog. `query` is free text (Shopify's product `query:`
+     * syntax — matches title/type/vendor/tag); `limit` caps the result
+     * count. Returns an empty array on no match — a search miss isn't an
+     * error, unlike `getProduct`'s `ProductNotFound`. Needs the
+     * `read_products` Shopify scope.
+     */
+    readonly searchProducts: (
+      tenantId: TenantId,
+      query: string,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<ShopifyProductSearchResult>, ShopifyError>;
 
     readonly searchByEmail: (
       tenantId: TenantId,
@@ -193,6 +210,14 @@ export interface ShopifyTestFixtures {
    */
   readonly productsById?: ReadonlyMap<string, ShopifyProduct>;
   /**
+   * Catalog-search fixture for `searchProducts`. A function of the query
+   * (like `refundOrder`) so a test can return different matches per query
+   * or assert the query was passed through. Defaults to "no matches".
+   */
+  readonly searchProducts?: (
+    query: string,
+  ) => ReadonlyArray<ShopifyProductSearchResult>;
+  /**
    * Map from order *name* (with or without leading `#`) to ShopifyOrder.
    * Keys are normalized to `#XXXX` on lookup so tests can write either
    * `"#1001"` or `"1001"` in the fixture.
@@ -257,6 +282,13 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           ? Effect.succeed(p)
           : Effect.fail(new ProductNotFound({ productId }));
       },
+      searchProducts: (_tenantId, query, limit) =>
+        Effect.succeed(
+          (fixtures.searchProducts?.(query) ?? []).slice(
+            0,
+            Math.max(0, limit),
+          ),
+        ),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
       findOrderByName: (_tenantId, name) => {

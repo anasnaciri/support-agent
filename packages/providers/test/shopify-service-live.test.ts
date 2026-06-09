@@ -526,6 +526,130 @@ describe("ShopifyServiceLive — getProduct", () => {
   });
 });
 
+describe("ShopifyServiceLive — searchProducts", () => {
+  it("queries products(query:) and maps title, type, vendor, trimmed description", async () => {
+    reset();
+    const SEARCH_PAYLOAD = {
+      data: {
+        products: {
+          nodes: [
+            {
+              id: "gid://shopify/Product/1",
+              title: "Ceramic Mug",
+              productType: "Drinkware",
+              vendor: "Acme",
+              description: "  Holds 12oz of coffee.  ",
+            },
+            {
+              id: "gid://shopify/Product/2",
+              title: "Travel Mug",
+              productType: "Drinkware",
+              vendor: "Acme",
+              description: null,
+            },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, SEARCH_PAYLOAD)]),
+    );
+    const products = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "mug", 5),
+        ),
+        layer,
+      ),
+    );
+    expect(products).toHaveLength(2);
+    expect(products[0]!.title).toBe("Ceramic Mug");
+    expect(products[0]!.description).toBe("Holds 12oz of coffee.");
+    // A null description passes through as null (no invented copy).
+    expect(products[1]!.description).toBeNull();
+
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: { q: string; n: number };
+    };
+    expect(body.query).toContain("query SearchProducts");
+    expect(body.variables.q).toBe("mug");
+    expect(body.variables.n).toBe(5);
+  });
+
+  it("returns an empty array when there are no matches", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { products: { nodes: [] } } }),
+      ]),
+    );
+    const products = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "nothing", 5),
+        ),
+        layer,
+      ),
+    );
+    expect(products).toEqual([]);
+  });
+
+  it("truncates a very long description to a bounded length with an ellipsis", async () => {
+    reset();
+    const longDesc = "x".repeat(2000);
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              products: {
+                nodes: [
+                  {
+                    id: "gid://shopify/Product/3",
+                    title: "Wordy",
+                    productType: null,
+                    vendor: null,
+                    description: longDesc,
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const products = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "wordy", 5),
+        ),
+        layer,
+      ),
+    );
+    expect(products[0]!.description!.length).toBeLessThan(longDesc.length);
+    expect(products[0]!.description!.endsWith("…")).toBe(true);
+  });
+
+  it("clamps a non-positive limit up into Shopify's first window", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { products: { nodes: [] } } }),
+      ]),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "x", 0),
+        ),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as { variables: { n: number } };
+    expect(body.variables.n).toBe(1);
+  });
+});
+
 describe("ShopifyServiceLive — listRecentOrderPiiPresence (PCD probe)", () => {
   const recentOrders = (
     nodes: ReadonlyArray<unknown>,
