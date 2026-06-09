@@ -96,6 +96,19 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
     ) => Effect.Effect<ShopInfo, ShopifyError>;
 
+    /**
+     * Read the store's configured shop policies (refund, shipping, privacy,
+     * …) as authored in the Shopify admin. Backs the post-connect knowledge
+     * import that seeds the tenant knowledge base with the merchant's own
+     * shipping + refund policy text, so specialists can ground answers in it.
+     * Returns an empty array when the store has no policies configured — a
+     * store with nothing set is the norm, not an error. Needs no extra scope
+     * beyond the base read access the connect flow already grants.
+     */
+    readonly getShopPolicies: (
+      tenantId: TenantId,
+    ) => Effect.Effect<ReadonlyArray<ShopPolicy>, ShopifyError>;
+
     readonly searchByEmail: (
       tenantId: TenantId,
       email: string,
@@ -202,6 +215,21 @@ export interface ShopInfo {
 }
 
 /**
+ * One merchant-authored shop policy. `type` is the Shopify `ShopPolicyType`
+ * enum value (e.g. `"REFUND_POLICY"`, `"SHIPPING_POLICY"`) — kept as a raw
+ * string so a new policy type Shopify adds doesn't break this boundary;
+ * callers match on the values they care about. `body` is the policy text as
+ * HTML; `url` is the public storefront URL of the policy. Note Shopify has no
+ * separate "return policy" — returns are covered by `REFUND_POLICY`.
+ */
+export interface ShopPolicy {
+  readonly type: string;
+  readonly title: string;
+  readonly body: string;
+  readonly url: string;
+}
+
+/**
  * Aggregated refund history for a single customer.
  *
  * `totalRefundedAmount` is `null` when the customer has no refunds —
@@ -280,6 +308,16 @@ export interface ShopifyTestFixtures {
    * effort callers treat as "store currency unknown".
    */
   readonly shopInfo?: ShopInfo;
+  /**
+   * Fixture for `getShopPolicies`. A thunk (like `refundOrder`) so a test can
+   * return policies on the happy path OR simulate a fetch failure — the policy
+   * import's "fail silently" boundary needs both. When unset the default Test
+   * impl returns an empty list (the "no policies configured" case).
+   */
+  readonly shopPolicies?: () => Effect.Effect<
+    ReadonlyArray<ShopPolicy>,
+    ShopifyError
+  >;
 }
 
 /**
@@ -321,6 +359,8 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         fixtures.shopInfo
           ? Effect.succeed(fixtures.shopInfo)
           : Effect.fail(new ShopifyAuthMissing({ tenantId })),
+      getShopPolicies: (_tenantId) =>
+        fixtures.shopPolicies ? fixtures.shopPolicies() : Effect.succeed([]),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
       findOrderByName: (_tenantId, name) => {

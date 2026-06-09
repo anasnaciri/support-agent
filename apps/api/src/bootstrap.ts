@@ -71,6 +71,10 @@ export interface ShopifyAppConfig {
  *      - `read_products`    → shopify.get_product (damaged-product photo
  *                             cross-check)
  *      - `write_orders`     → refund.create (and future order-edit tools)
+ *      - `read_legal_policies` → post-connect shop-policy import (seeds the
+ *                             knowledge base with the store's shipping +
+ *                             refund policy text). Not tied to a tool — the
+ *                             import is a best-effort worker job.
  *
  * Keep aligned with the Partner Dashboard config AND `shopify.app.toml`.
  * The `shopify-tool-scopes` test asserts every Shopify tool's
@@ -82,6 +86,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_customers",
   "read_products",
   "write_orders",
+  "read_legal_policies",
 ];
 
 export interface GoogleAppConfig {

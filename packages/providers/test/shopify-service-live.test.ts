@@ -290,6 +290,76 @@ describe("ShopifyServiceLive — getShopInfo", () => {
   });
 });
 
+describe("ShopifyServiceLive — getShopPolicies", () => {
+  it("queries shop policies and maps the response", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              shop: {
+                shopPolicies: [
+                  {
+                    type: "REFUND_POLICY",
+                    title: "Refund Policy",
+                    body: "<p>Returns within 30 days.</p>",
+                    url: "https://test-shop.myshopify.com/policies/refund-policy",
+                  },
+                  {
+                    type: "SHIPPING_POLICY",
+                    title: "Shipping Policy",
+                    body: "<p>Ships in 3 days.</p>",
+                    url: "https://test-shop.myshopify.com/policies/shipping-policy",
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const policies = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) => s.getShopPolicies(tenantId)),
+        layer,
+      ),
+    );
+    expect(policies).toEqual([
+      {
+        type: "REFUND_POLICY",
+        title: "Refund Policy",
+        body: "<p>Returns within 30 days.</p>",
+        url: "https://test-shop.myshopify.com/policies/refund-policy",
+      },
+      {
+        type: "SHIPPING_POLICY",
+        title: "Shipping Policy",
+        body: "<p>Ships in 3 days.</p>",
+        url: "https://test-shop.myshopify.com/policies/shipping-policy",
+      },
+    ]);
+    expect(captures).toHaveLength(1);
+    const body = JSON.parse(captures[0]!.body) as { query: string };
+    expect(body.query).toContain("query ShopPolicies");
+  });
+
+  it("returns an empty array when the store has no policies configured", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { shop: { shopPolicies: [] } } }),
+      ]),
+    );
+    const policies = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) => s.getShopPolicies(tenantId)),
+        layer,
+      ),
+    );
+    expect(policies).toEqual([]);
+  });
+});
+
 describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", () => {
   it("getCustomer maps the GraphQL response", async () => {
     reset();

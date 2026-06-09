@@ -23,6 +23,10 @@ import {
   ACCOUNT_CLEANUP_QUEUE,
   registerAccountCleanup,
 } from "./account-cleanup-schedule.js";
+import {
+  SHOPIFY_POLICY_IMPORT_QUEUE,
+  registerShopifyPolicyImport,
+} from "./shopify-policy-import-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -68,7 +72,9 @@ const main = async (): Promise<void> => {
                   ? ` (reason: ${exit.value.reason})`
                   : exit.value.type === "PausedWaitingForApproval"
                     ? ` (approvalId: ${exit.value.approvalId})`
-                    : ""),
+                    : exit.value.type === "PausedForHumanTakeover"
+                      ? ` (held — case under human takeover)`
+                      : ""),
           );
         } else {
           // E=never on handleEvent, so this can only be defects. Log + rethrow
@@ -122,6 +128,13 @@ const main = async (): Promise<void> => {
   });
   console.log(
     `[worker] consuming account-cleanup on queue=${ACCOUNT_CLEANUP_QUEUE}`,
+  );
+
+  // Post-connect shop-policy import: seeds the tenant knowledge base with the
+  // store's shipping + refund policies. Best-effort (logs + swallows).
+  await registerShopifyPolicyImport({ boss, runtimeLayer });
+  console.log(
+    `[worker] consuming shopify-policy-import on queue=${SHOPIFY_POLICY_IMPORT_QUEUE}`,
   );
 
   const onShutdown = async (signal: NodeJS.Signals) => {

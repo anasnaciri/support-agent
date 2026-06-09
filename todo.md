@@ -14,6 +14,35 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-09 — Auto-import shop policies into the knowledge base:** After a tenant connects Shopify, the OAuth
+  callback enqueues a best-effort `shopify.policies.import` pg-boss job; the worker reads `shop.shopPolicies`
+  (new `ShopifyService.getShopPolicies` Tag + Live impl, GraphQL validated, needs the `read_legal_policies`
+  scope — added to `DEFAULT_SHOPIFY_SCOPES` + `shopify.app.toml`), keeps SHIPPING_POLICY + REFUND_POLICY
+  (Shopify has **no** RETURN_POLICY — returns live under refund), converts the HTML body to text via `htmlToText`,
+  and upserts each as a `url` knowledge doc keyed by the policy URL (dedup via `contentHash`: create / update on
+  change / skip if unchanged; never touches merchant-authored docs). Fully silent: a missing scope, no policies,
+  or any Shopify/KB error logs + swallows (`runShopifyPolicyImport`), so a successful connect is never broken.
+  TDD: 2 provider tests (getShopPolicies) + 8 worker tests (create/filter/no-op/empty/dedup/update/no-overwrite/
+  silent). `pnpm build` green. Operator follow-up: add `read_legal_policies` to the app's Dev Dashboard scopes
+  (the binding config) or the import silently no-ops. Known tradeoff: stored as `url` docs, so a dashboard
+  Resync re-scrapes the storefront (noisier than the API body).
+- **2026-06-09 — Custom-distribution install link clarified:** Confirmed the Dev-Dashboard "Generate link" for a
+  custom-distribution app is a Shopify-signed, expiring `admin.shopify.com/oauth/install_custom_app?...signature=`
+  link (NOT reconstructable by us), while token acquisition stays authorization-code-grant (client-credentials is
+  org-owned-stores only). The operator confirmed the dashboard Connect → `/admin/oauth/authorize` route reaches
+  the locked store's install screen ("this app is exclusive to your store"), so A4's "build the authorize URL"
+  resolution holds for the locked store; the signed link remains an alternative entry. No code change this session.
+- **2026-06-09 — Human-takeover guard + resume:** The runtime had no guard for `human_takeover` (the symmetric
+  gap to the `waiting_for_approval` park guard): an inbound customer reply on a taken-over case reused the case
+  via `findByThreadId` and ran the agent loop, answering over the human. Added runtime section 2.95 — any event on
+  a `human_takeover` case records `event.held_human_takeover` and returns the new `PausedForHumanTakeover` result
+  without running the agent. Added the resume path so takeover is no longer a one-way door: `resumeCase` (db)
+  flips `human_takeover → in_progress` (transition + `case.resumed` audit, no-op if not in takeover), `POST
+  /dashboard/cases/:id/resume`, api-client `resume`, `resumeAction`, and a "Hand back to agent" button on the case
+  page (shown only when `human_takeover`). Resume is a pure status flip — the agent re-engages on the next inbound
+  message (the runtime has no message-history replay, so it deliberately doesn't replay the already-seen reply).
+  TDD: runtime e2e (held reply, status unchanged, LLM never called) + 3 resume integration tests. `pnpm build`
+  green; full suite 1065 passing / 5 skipped.
 - **2026-06-09 — Checklist maintenance:** Collapsed 78 verbose session entries into date-grouped summaries;
   detailed implementation and audit records remain in the phase checklist and audit section below.
 - **2026-06-09 — Dashboard controls:** Added branded Auto-confirmation, per-agent outward-action controls,

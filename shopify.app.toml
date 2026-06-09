@@ -55,7 +55,13 @@ embedded = false
 # justify is name + email + address — NOT phone. If a connected store returns
 # orders with those fields blanked, the PCD declaration is missing. See
 # docs/shopify-pcd.md for the per-field justifications and the per-app checklist.
-scopes = "read_orders,read_customers,read_products,write_orders"
+#
+# read_legal_policies → post-connect shop-policy import: reads the store's
+# configured shipping + refund policies (shop.shopPolicies) and seeds the
+# tenant knowledge base with them. Not protected customer data. Without this
+# scope the import silently no-ops (best-effort), so the connect flow still
+# succeeds — but the policies won't be imported until the scope is granted.
+scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies"
 
 [auth]
 redirect_urls = [

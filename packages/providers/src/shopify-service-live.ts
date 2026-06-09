@@ -32,6 +32,7 @@ import {
   type CustomerRefundHistory,
   type OrderPiiPresence,
   type ShopifyCredentials,
+  type ShopPolicy,
   type RefundOrderInput,
 } from "@support-agent/services";
 
@@ -509,6 +510,21 @@ const SHOP_INFO_QUERY = `
   }
 `;
 
+// `Shop.shopPolicies` is a plain list ([ShopPolicy!]!), not a connection —
+// no `first`/`nodes` paging. `body` is HTML; `url` is the public policy page.
+const SHOP_POLICIES_QUERY = `
+  query ShopPolicies {
+    shop {
+      shopPolicies {
+        type
+        title
+        body
+        url
+      }
+    }
+  }
+`;
+
 const SEARCH_CUSTOMER_QUERY = `
   query SearchCustomer($q: String!) {
     customers(first: 1, query: $q) {
@@ -763,6 +779,24 @@ export const ShopifyServiceLive = Layer.effect(
             {},
           ).pipe(
             Effect.map((data) => ({ currencyCode: data.shop.currencyCode })),
+          ),
+        ),
+
+      getShopPolicies: (tenantId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{
+            shop: { shopPolicies: ReadonlyArray<ShopPolicy> };
+          }>(http, creds, tenantId, SHOP_POLICIES_QUERY, {}).pipe(
+            Effect.map((data) =>
+              data.shop.shopPolicies.map(
+                (p): ShopPolicy => ({
+                  type: p.type,
+                  title: p.title,
+                  body: p.body,
+                  url: p.url,
+                }),
+              ),
+            ),
           ),
         ),
 
