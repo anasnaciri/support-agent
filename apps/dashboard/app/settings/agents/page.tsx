@@ -43,7 +43,6 @@ export default async function AgentsListPage() {
               <TableHead>Mode</TableHead>
               <TableHead>Model</TableHead>
               <TableHead>Tools</TableHead>
-              <TableHead>Handoffs</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -78,9 +77,6 @@ export default async function AgentsListPage() {
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {a.tools.length}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {a.handoffs.length === 0 ? "—" : a.handoffs.length}
                   </TableCell>
                 </TableRow>
               );

@@ -174,10 +174,6 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
                 </code>
               </Row>
             ) : null}
-            <Row label="Max turns / tick">{agent.maxTurnsPerTick}</Row>
-            {agent.temperature !== undefined ? (
-              <Row label="Temperature">{agent.temperature}</Row>
-            ) : null}
           </dl>
 
           {!credential ? (
@@ -321,30 +317,6 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
         </CardContent>
       </Card>
 
-      {agent.handoffs.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Handoffs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-1">
-              {agent.handoffs.map((target) => (
-                <li key={target}>
-                  <Link
-                    href={`/settings/agents/${target}`}
-                    className="text-primary hover:underline"
-                  >
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                      {target}
-                    </code>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">System prompt</CardTitle>
@@ -392,13 +364,6 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
               </Button>
             </form>
           ) : null}
-
-          <div className="space-y-1.5">
-            <Label>Built-in prompt (read-only)</Label>
-            <pre className="max-h-[400px] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
-              {agent.promptTemplate}
-            </pre>
-          </div>
         </CardContent>
       </Card>
     </div>
