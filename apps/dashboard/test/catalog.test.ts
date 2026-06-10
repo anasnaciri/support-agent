@@ -6,6 +6,7 @@ import type {
   ToolDto,
 } from "@support-agent/dashboard-contracts";
 import {
+  capabilitiesForProvider,
   currentToolPermission,
   tenantConfigurableActions,
 } from "../lib/catalog.js";
@@ -103,6 +104,77 @@ describe("tenantConfigurableActions", () => {
     expect(
       actions.find((a) => a.tool.name === "supplier.add_sheet_row")?.agentDefault,
     ).toBe("allow");
+  });
+});
+
+describe("capabilitiesForProvider", () => {
+  const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+  const scopedCatalog: CatalogResponse = {
+    agents: [],
+    tools: [
+      tool({
+        name: "supplier.read_sheet_columns",
+        defaultPermission: "allow",
+        requiredConnectorScopes: {
+          provider: "google_sheets",
+          scopes: [SHEETS_SCOPE],
+        },
+      }),
+      tool({
+        name: "supplier.add_sheet_row",
+        displayName: "Escalate to supplier",
+        requiredConnectorScopes: {
+          provider: "google_sheets",
+          scopes: [SHEETS_SCOPE],
+        },
+      }),
+      tool({
+        name: "refund.create",
+        displayName: "Issue a refund",
+        requiredConnectorScopes: {
+          provider: "shopify",
+          scopes: ["write_orders"],
+        },
+      }),
+      tool({
+        name: "shopify.get_order",
+        requiredConnectorScopes: {
+          provider: "shopify",
+          scopes: ["read_orders"],
+        },
+      }),
+      tool({ name: "conversation.reply" }), // no connector scopes — excluded
+    ],
+  };
+
+  it("lists one friendly capability per tool, sorted by label", () => {
+    expect(capabilitiesForProvider(scopedCatalog, "google_sheets")).toEqual([
+      {
+        tool: "supplier.add_sheet_row",
+        label: "Add row",
+        scope: SHEETS_SCOPE,
+      },
+      {
+        tool: "supplier.read_sheet_columns",
+        label: "Read sheet",
+        scope: SHEETS_SCOPE,
+      },
+    ]);
+  });
+
+  it("prefers explicit override, then displayName, then a humanized name", () => {
+    // refund.create -> displayName; shopify.get_order -> humanized name.
+    expect(
+      capabilitiesForProvider(scopedCatalog, "shopify").map((c) => c.label),
+    ).toEqual(["Get order", "Issue a refund"]);
+  });
+
+  it("excludes tools with no scopes or a different provider", () => {
+    const tools = capabilitiesForProvider(scopedCatalog, "shopify").map(
+      (c) => c.tool,
+    );
+    expect(tools).not.toContain("conversation.reply");
+    expect(tools).not.toContain("supplier.add_sheet_row");
   });
 });
 

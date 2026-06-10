@@ -185,16 +185,20 @@ export default async function ConnectorManagePage({
                   </code>
                 </div>
               ) : null}
-              <div className="text-xs text-muted-foreground">
-                {row.scopes.length} scope
-                {row.scopes.length === 1 ? "" : "s"}
-                {row.installedAt
-                  ? ` · installed ${formatRelativeTime(row.installedAt)}`
-                  : ""}
-                {row.revokedAt
-                  ? ` · revoked ${formatRelativeTime(row.revokedAt)}`
-                  : ""}
-              </div>
+              {row.installedAt || row.revokedAt ? (
+                <div className="text-xs text-muted-foreground">
+                  {[
+                    row.installedAt
+                      ? `installed ${formatRelativeTime(row.installedAt)}`
+                      : null,
+                    row.revokedAt
+                      ? `revoked ${formatRelativeTime(row.revokedAt)}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm italic text-muted-foreground">
@@ -262,7 +266,7 @@ export default async function ConnectorManagePage({
             <CardTitle className="text-base">Granted capabilities</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 pt-0">
-            <ul className="space-y-1 text-xs">
+            <ul className="space-y-1.5 text-sm">
               {capabilities.map((cap) => {
                 const granted = isConnectorScopeGranted(
                   provider,
@@ -270,24 +274,19 @@ export default async function ConnectorManagePage({
                   row.scopes,
                 );
                 return (
-                  <li
-                    key={cap.scope}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        aria-hidden
-                        className={
-                          granted
-                            ? "inline-block size-1.5 rounded-full bg-primary"
-                            : "inline-block size-1.5 rounded-full bg-destructive"
-                        }
-                      />
-                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                        {cap.scope}
-                      </code>
+                  <li key={cap.tool} className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className={
+                        granted
+                          ? "inline-block size-2 rounded-full bg-primary"
+                          : "inline-block size-2 rounded-full bg-destructive"
+                      }
+                    />
+                    <span>{cap.label}</span>
+                    <span className="sr-only">
+                      {granted ? " (granted)" : " (not granted)"}
                     </span>
-                    <span className="text-muted-foreground">{cap.tools}</span>
                   </li>
                 );
               })}

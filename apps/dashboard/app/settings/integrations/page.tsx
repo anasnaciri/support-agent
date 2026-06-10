@@ -2,21 +2,12 @@ import Link from "next/link";
 import { AlertTriangle, Settings2 } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 import {
   SUPPORTED_PROVIDERS,
@@ -243,58 +234,6 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
           );
         })}
       </div>
-
-      {rows.length > 0 ? (
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">All connections</h2>
-          <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Account / shop</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Scopes</TableHead>
-                  <TableHead>Installed</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>
-                      {PROVIDER_LABELS[r.provider] ?? r.provider}
-                    </TableCell>
-                    <TableCell>
-                      {r.shopDomain ? (
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                          {r.shopDomain}
-                        </code>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={integrationStatusVariant(r.status)}>
-                        {r.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {r.scopes.length === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        <code className="text-xs">{r.scopes.join(", ")}</code>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {r.installedAt ? formatRelativeTime(r.installedAt) : "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-        </div>
-      ) : null}
     </div>
   );
 }

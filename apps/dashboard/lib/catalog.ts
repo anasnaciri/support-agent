@@ -78,32 +78,51 @@ export const currentToolPermission = (
   return overrideRow?.toolPermissions?.[toolName] ?? agentDefault;
 };
 
-/** One row of the per-provider capability grid on `/settings/integrations`. */
+/** One capability shown on a connector's Manage page. */
 export interface ConnectorCapability {
+  /** Tool name — stable key. */
+  readonly tool: string;
+  /** Merchant-facing label for what the connection lets the agent do. */
+  readonly label: string;
+  /** The connector scope this capability needs (for the granted dot). */
   readonly scope: string;
-  readonly tools: string;
 }
 
 /**
- * Distinct `requiredConnectorScopes` entries across the catalog tools for the
- * named provider, grouped by scope and tagged with the tools that need each.
- * Alphabetical by scope so the grid is stable between renders.
+ * Connector-capability labels, intentionally separate from a tool's agent-facing
+ * `displayName`: the agent page calls `supplier.add_sheet_row` "Escalate to
+ * supplier", but on the *connection* the plainer "Add row" describes what the
+ * grant actually does. Only tools that need a friendlier-than-default name go
+ * here; everything else falls back to `displayName`, then a humanized name.
+ */
+const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  "supplier.read_sheet_columns": "Read sheet",
+  "supplier.add_sheet_row": "Add row",
+};
+
+/** "shopify.get_order" -> "Get order". Drops the namespace, de-snakes, caps. */
+const humanizeToolName = (name: string): string => {
+  const dot = name.lastIndexOf(".");
+  const base = (dot === -1 ? name : name.slice(dot + 1)).replace(/_/g, " ");
+  return base.charAt(0).toUpperCase() + base.slice(1);
+};
+
+/**
+ * One friendly capability per catalog tool that declares
+ * `requiredConnectorScopes` for the named provider. Sorted by label so the list
+ * is stable between renders. The raw scope is carried (not shown) so the page
+ * can render a granted/missing dot against the connection's scopes.
  */
 export const capabilitiesForProvider = (
   catalog: CatalogResponse,
   provider: string,
-): ReadonlyArray<ConnectorCapability> => {
-  const byScope = new Map<string, string[]>();
-  for (const t of catalog.tools) {
-    const req = t.requiredConnectorScopes;
-    if (!req || req.provider !== provider) continue;
-    for (const s of req.scopes) {
-      const bucket = byScope.get(s) ?? [];
-      bucket.push(t.name);
-      byScope.set(s, bucket);
-    }
-  }
-  return [...byScope.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([scope, toolNames]) => ({ scope, tools: toolNames.join(", ") }));
-};
+): ReadonlyArray<ConnectorCapability> =>
+  catalog.tools
+    .filter((t) => t.requiredConnectorScopes?.provider === provider)
+    .map((t) => ({
+      tool: t.name,
+      label:
+        CAPABILITY_LABELS[t.name] ?? t.displayName ?? humanizeToolName(t.name),
+      scope: t.requiredConnectorScopes?.scopes[0] ?? "",
+    }))
+    .sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
