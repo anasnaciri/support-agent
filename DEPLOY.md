@@ -234,6 +234,13 @@ The box is now reachable; finish the provider side (also tracked in
   `https://api.<domain>/google/auth/callback`; create the Pub/Sub topic +
   push subscription to
   `https://api.<domain>/webhooks/conversations/gmail/<tenantId>?token=<GMAIL_PUSH_TOKEN>`.
+- **Microsoft/Outlook:** create an Entra app registration ([steps below](#microsoft--outlook-azure-app-registration)) and set its redirect to
+  `https://api.<domain>/microsoft/auth/callback`. Unlike Gmail there's **no
+  manual subscription setup** — the Graph change-notification subscription is
+  created automatically on connect and renewed by the worker cron; you only
+  need `https://api.<domain>/webhooks/conversations/outlook` to be publicly
+  reachable and `MICROSOFT_GRAPH_WEBHOOK_SECRET` set identically on api +
+  worker.
 
 > **Known behavior — compliance webhooks after a tenant is deleted.** In pilot
 > mode each shop's webhooks are HMAC-verified with that tenant's own provisioned
@@ -243,6 +250,63 @@ The box is now reachable; finish the provider side (also tracked in
 > was already wiped at deletion, so there's nothing left to redact — but Shopify
 > may log the delivery as failed. Nothing to action; don't mistake it for a
 > live-tenant webhook failure.
+
+### Microsoft / Outlook (Azure app registration)
+
+The Outlook connector authenticates merchant mailboxes via a Microsoft Entra
+(Azure AD) **app registration** — the only Azure resource needed (no App
+Service, no Key Vault). Graph API usage is free; the only cost is the mailbox's
+existing M365 license, which the merchant already pays.
+
+1. **portal.azure.com → Microsoft Entra ID → App registrations → New registration.**
+2. **Supported account types:** for SaaS (any merchant's Outlook/O365) pick
+   *"Accounts in any organizational directory (multitenant)"* → use
+   `MICROSOFT_OAUTH_TENANT=common`. For a single-org pilot pick *"this
+   organizational directory only"* → use that **Directory (tenant) ID** as the
+   tenant. (Personal `outlook.com` accounts need *"…and personal Microsoft
+   accounts"*; Graph mail on them is flakier, so add only if required.)
+3. **Redirect URI:** platform **Web** (not SPA — we use a client secret), value
+   `https://api.<domain>/microsoft/auth/callback`.
+4. **Certificates & secrets → New client secret →** copy the **Value** (not the
+   Secret ID) → `MICROSOFT_OAUTH_CLIENT_SECRET`. Copy **Application (client) ID**
+   → `MICROSOFT_OAUTH_CLIENT_ID`.
+5. **API permissions → Microsoft Graph → Delegated** — add all of:
+   `Mail.ReadWrite`, `Mail.Send`, **`User.Read`**, `offline_access`, `openid`,
+   `email`, `profile`. ⚠️ `User.Read` is **required** — the OAuth callback reads
+   the mailbox address via Graph `/me`; without it the callback 403s and the
+   install fails with a 502 (`userinfo_fetch_failed`). Click **Grant admin
+   consent** if you're an admin.
+
+**One app per environment.** Don't share a single registration between the dev
+Cloudflare-tunnel host and prod Railway — separate apps keep secrets isolated
+and stop a churning dev redirect URL from touching prod. Each env's
+`.env`/Railway vars point at its own app; use a *named* (stable) tunnel host for
+dev so its redirect URI doesn't change every run.
+
+**Env vars** (`MICROSOFT_*` on **both** api + worker; `CALLBACK_URL` is api-only):
+
+```
+MICROSOFT_OAUTH_CLIENT_ID=          # this env's app
+MICROSOFT_OAUTH_CLIENT_SECRET=      # the secret Value
+MICROSOFT_OAUTH_TENANT=common       # or a Directory ID for single-org
+MICROSOFT_OAUTH_CALLBACK_URL=https://api.<domain>/microsoft/auth/callback   # api only
+MICROSOFT_GRAPH_NOTIFICATION_URL=https://api.<domain>/webhooks/conversations/outlook
+MICROSOFT_GRAPH_WEBHOOK_SECRET=     # openssl rand -hex 32
+```
+
+Three of these **must be byte-identical on api + worker**, or the connector
+fails silently: `CREDENTIAL_ENCRYPTION_KEY` (api encrypts tokens, worker
+decrypts them), `MICROSOFT_GRAPH_WEBHOOK_SECRET` (api webhook rejects
+notifications whose `clientState` doesn't match), and the Microsoft app itself
+(the worker refreshes tokens that app issued). The worker's renewal cron is
+skipped unless `MICROSOFT_GRAPH_NOTIFICATION_URL` + `MICROSOFT_GRAPH_WEBHOOK_SECRET`
+are both set — look for `scheduled graph-subscription-renewal cron` in its logs.
+
+> **Before real merchants:** a multitenant app shows an "unverified" warning on
+> the consent screen (and some orgs block unverified apps) until you complete
+> **Publisher verification** (free, via a Microsoft Partner account). Also, each
+> merchant org's admin may need to grant consent the first time, since
+> `Mail.ReadWrite`/`Mail.Send` often aren't user-consentable by org policy.
 
 ## 7. Updating
 
