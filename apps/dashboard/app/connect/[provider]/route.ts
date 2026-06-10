@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/session";
 import { api, getDashboardContext } from "@/lib/api-client";
+import { connectRedirectUrl } from "@/lib/connect-redirect";
 
 // GET /connect/:provider — the Connect/Reconnect button target. Authenticates
 // the merchant via their WorkOS session (getDashboardContext redirects to
@@ -23,14 +23,11 @@ export const GET = async (
   if (!SUPPORTED.has(provider)) redirect("/settings/integrations");
 
   const ctx = await getDashboardContext();
-  const { user } = await getSession();
   const { url } = await api.connectUrl(ctx, provider);
 
-  // Prefill the Google account on the consent screen (UX only; Shopify uses
-  // the shop, not a login hint).
-  const hint =
-    provider !== "shopify" && user?.email
-      ? `&login_hint=${encodeURIComponent(user.email)}`
-      : "";
-  redirect(`${url}${hint}`);
+  // No `login_hint`: the dashboard login email is the merchant's account, not
+  // the mailbox they're connecting. Prefilling it pre-selected (and on
+  // Microsoft, locked) the wrong account. The user picks the account on the
+  // provider's own screen. See lib/connect-redirect.ts.
+  redirect(connectRedirectUrl(url, provider, null));
 };
