@@ -147,4 +147,36 @@ describe("revokeConnectorGrant — dispatch", () => {
       "https://oauth2.googleapis.com/revoke",
     );
   });
+
+  it("no-ops for an outlook grant (no client-callable revoke; sub self-expires)", async () => {
+    const fetchImpl = vi.fn(async () => ok());
+    const outcome = await revokeConnectorGrant(
+      {
+        provider: "outlook",
+        shopDomain: "ops@store.com",
+        accessToken: "graph_access",
+        refreshToken: "graph_refresh",
+        apiVersion: null,
+      },
+      fetchImpl,
+    );
+    expect(outcome.kind).toBe("already_gone");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("no-ops for an imap grant (no provider-side grant to revoke)", async () => {
+    const fetchImpl = vi.fn(async () => ok());
+    const outcome = await revokeConnectorGrant(
+      {
+        provider: "imap",
+        shopDomain: "support@store.com",
+        accessToken: "app-password",
+        refreshToken: null,
+        apiVersion: null,
+      },
+      fetchImpl,
+    );
+    expect(outcome.kind).toBe("already_gone");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });

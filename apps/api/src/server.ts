@@ -1411,7 +1411,13 @@ const LLM_PROVIDER_SET: ReadonlySet<string> = new Set([
 const isLlmProviderName = (p: string): p is LLMProvider =>
   LLM_PROVIDER_SET.has(p);
 
-const CONNECTOR_PROVIDERS = ["shopify", "gmail", "google_sheets"] as const;
+const CONNECTOR_PROVIDERS = [
+  "shopify",
+  "gmail",
+  "google_sheets",
+  "outlook",
+  "imap",
+] as const;
 type DisconnectProvider = (typeof CONNECTOR_PROVIDERS)[number];
 const isDisconnectProvider = (p: string): p is DisconnectProvider =>
   (CONNECTOR_PROVIDERS as ReadonlyArray<string>).includes(p);

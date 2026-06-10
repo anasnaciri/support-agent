@@ -15,13 +15,18 @@
 
 import { stopGmailWatch } from "./gmail-watch.js";
 
-export type RevocableProvider = "shopify" | "gmail" | "google_sheets";
+export type RevocableProvider =
+  | "shopify"
+  | "gmail"
+  | "google_sheets"
+  | "outlook"
+  | "imap";
 
 /** A connector grant to revoke provider-side. Tokens are plaintext here —
  * the worker decrypts them from the job payload just before calling. */
 export interface ConnectorGrant {
   readonly provider: RevocableProvider;
-  /** Shop domain (Shopify) or mailbox/account label (Google). */
+  /** Shop domain (Shopify), mailbox/account label (Google/Outlook/IMAP). */
   readonly shopDomain: string;
   readonly accessToken: string;
   readonly refreshToken: string | null;
@@ -106,6 +111,8 @@ export const uninstallShopifyApp = async (
  *   - shopify       → uninstall (revoke the access token)
  *   - gmail         → stop the Pub/Sub watch, then revoke the OAuth grant
  *   - google_sheets → revoke the OAuth grant
+ *   - outlook       → no-op (see below)
+ *   - imap          → no-op (no provider-side grant exists)
  *
  * Best-effort and never throws. Google revocation prefers the refresh token
  * so the entire grant dies, falling back to the access token.
@@ -139,5 +146,19 @@ export const revokeConnectorGrant = async (
         grant.refreshToken ?? grant.accessToken,
         fetchImpl,
       );
+    case "outlook":
+      // Microsoft identity has no client-callable token-revocation endpoint
+      // analogous to Google's /revoke (revokeSignInSessions is a heavyweight
+      // admin op that kills ALL of the user's sessions — wrong scope here). The
+      // Graph change-notification subscription is what keeps inbound mail
+      // flowing; once the connection is locally revoked the renewal cron stops
+      // touching it (it filters status === "active"), so the subscription lease
+      // self-expires within ~3 days. Local revoke is authoritative.
+      return { kind: "already_gone" };
+    case "imap":
+      // A generic IMAP/SMTP connection is just stored credentials (an app
+      // password) — there is no provider-side grant or subscription to revoke.
+      // Wiping the local row is the whole disconnect.
+      return { kind: "already_gone" };
   }
 };

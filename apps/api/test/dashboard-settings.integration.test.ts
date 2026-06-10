@@ -95,7 +95,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
 
   const seedConnection = (
     tid: string,
-    provider: "gmail" | "google_sheets" | "shopify",
+    provider: "gmail" | "google_sheets" | "shopify" | "outlook" | "imap",
     shopDomain: string,
   ): Promise<void> =>
     Effect.runPromise(
@@ -802,6 +802,61 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         and(
           eq(connectorConnections.tenantId, tenantId),
           eq(connectorConnections.provider, "gmail"),
+          eq(connectorConnections.status, "active"),
+        ),
+      );
+    expect(active.length).toBe(0);
+  });
+
+  it("POST /dashboard/connections/outlook/disconnect revokes the row locally", async () => {
+    if (!raw) return;
+    await seedConnection(tenantId, "outlook", "ops@acme.test");
+    // Outlook has no client-callable provider-side revoke, so this must NOT
+    // reach any external host — fail loudly if it tries.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("microsoft") || u.includes("graph") || u.includes("login")) {
+        throw new Error(`unexpected provider call during outlook disconnect: ${u}`);
+      }
+      return originalFetch(url, init);
+    }) as typeof fetch;
+    let body: { revoked: number; providerRevoked: number };
+    try {
+      const res = await post("/dashboard/connections/outlook/disconnect");
+      expect(res.status).toBe(200);
+      body = (await res.json()) as typeof body;
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(body.revoked).toBe(1);
+    const active = await raw.db
+      .select({ id: connectorConnections.id })
+      .from(connectorConnections)
+      .where(
+        and(
+          eq(connectorConnections.tenantId, tenantId),
+          eq(connectorConnections.provider, "outlook"),
+          eq(connectorConnections.status, "active"),
+        ),
+      );
+    expect(active.length).toBe(0);
+  });
+
+  it("POST /dashboard/connections/imap/disconnect revokes the row locally", async () => {
+    if (!raw) return;
+    await seedConnection(tenantId, "imap", "support@acme.test");
+    const res = await post("/dashboard/connections/imap/disconnect");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { revoked: number };
+    expect(body.revoked).toBe(1);
+    const active = await raw.db
+      .select({ id: connectorConnections.id })
+      .from(connectorConnections)
+      .where(
+        and(
+          eq(connectorConnections.tenantId, tenantId),
+          eq(connectorConnections.provider, "imap"),
           eq(connectorConnections.status, "active"),
         ),
       );
