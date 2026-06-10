@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ConnectorCredentialStore,
@@ -171,7 +171,11 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
                     ),
                   )
                   .limit(1)
-              : db
+              : // No shopDomain: a tenant can hold several rows for one
+                // provider (e.g. a revoked mailbox plus its reconnected
+                // replacement), so prefer the active row — newest first —
+                // before falling back to a revoked one.
+                db
                   .select()
                   .from(connectorConnections)
                   .where(
@@ -179,6 +183,10 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
                       eq(connectorConnections.tenantId, tenantId),
                       eq(connectorConnections.provider, provider),
                     ),
+                  )
+                  .orderBy(
+                    desc(sql`(${connectorConnections.status} = 'active')`),
+                    desc(connectorConnections.updatedAt),
                   )
                   .limit(1),
           );

@@ -186,6 +186,67 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
     }
   });
 
+  it("get without shopDomain prefers the active row over a revoked sibling", async () => {
+    // Regression: a tenant reconnects a provider under a different account
+    // (e.g. wrong Outlook mailbox first, then the right one). The old row is
+    // revoked, the new one active. A bare `get(tenant, provider)` — the shape
+    // every webhook handler uses — must resolve the ACTIVE row, not whichever
+    // one the database returns first.
+    const fetched = await run(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        yield* store.put({
+          tenantId: TenantId(tenantId),
+          provider: "outlook",
+          shopDomain: "wrong-mailbox@example.com",
+          accessToken: "tok_wrong",
+          scopes: ["Mail.ReadWrite"],
+        });
+        yield* store.revoke(
+          TenantId(tenantId),
+          "outlook",
+          "wrong-mailbox@example.com",
+        );
+        yield* store.put({
+          tenantId: TenantId(tenantId),
+          provider: "outlook",
+          shopDomain: "right-mailbox@example.com",
+          accessToken: "tok_right",
+          scopes: ["Mail.ReadWrite"],
+        });
+        return yield* store.get(TenantId(tenantId), "outlook");
+      }),
+    );
+    expect(fetched.shopDomain).toBe("right-mailbox@example.com");
+    expect(fetched.status).toBe("active");
+  });
+
+  it("get without shopDomain when only revoked rows exist → ConnectorRevoked", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        yield* store.put({
+          tenantId: TenantId(otherTenantId),
+          provider: "outlook",
+          shopDomain: "gone-mailbox@example.com",
+          accessToken: "tok_gone",
+          scopes: ["Mail.ReadWrite"],
+        });
+        yield* store.revoke(
+          TenantId(otherTenantId),
+          "outlook",
+          "gone-mailbox@example.com",
+        );
+        return yield* store.get(TenantId(otherTenantId), "outlook");
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ConnectorRevoked);
+    }
+  });
+
   it("listForTenant returns only that tenant's rows", async () => {
     const list = await run(
       Effect.gen(function* () {
