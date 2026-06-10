@@ -38,7 +38,7 @@ interface RawTokenJson {
 
 /** Default delegated scopes — kept in lockstep with `microsoft-install.ts`. */
 export const GRAPH_MAIL_SCOPES =
-  "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send offline_access openid email profile";
+  "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read offline_access openid email profile";
 
 export const refreshGraphToken = async (
   opts: RefreshGraphTokenOptions,

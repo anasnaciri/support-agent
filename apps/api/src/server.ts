@@ -3737,6 +3737,7 @@ const handleMicrosoftCallback = async (
       code,
     });
   } catch (cause) {
+    req.log.error({ err: cause }, "[microsoft callback] token exchange failed");
     sendJson(res, 502, {
       error: "token_exchange_failed",
       detail: cause instanceof Error ? cause.message : String(cause),
@@ -3756,6 +3757,7 @@ const handleMicrosoftCallback = async (
   try {
     email = await fetchMicrosoftUserEmail({ accessToken: token.accessToken });
   } catch (cause) {
+    req.log.error({ err: cause }, "[microsoft callback] userinfo (/me) failed");
     sendJson(res, 502, {
       error: "userinfo_fetch_failed",
       detail: cause instanceof Error ? cause.message : String(cause),

@@ -23,9 +23,12 @@ export const MICROSOFT_OUTLOOK_SCOPES: ReadonlyArray<string> = [
   "https://graph.microsoft.com/Mail.ReadWrite",
   // Send replies / askCustomer messages on the merchant's behalf.
   "https://graph.microsoft.com/Mail.Send",
+  // Required to read the connected mailbox address via Graph `/me` in the
+  // OAuth callback — without it `/me` returns 403 and the install fails.
+  "https://graph.microsoft.com/User.Read",
   // Refresh token issuance.
   "offline_access",
-  // Surface the connected mailbox address on the connection record.
+  // OIDC sign-in scopes.
   "openid",
   "email",
   "profile",
