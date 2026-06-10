@@ -71,6 +71,24 @@ export default async function ConnectImapPage({ searchParams }: PageProps) {
           </AlertDescription>
         </Alert>
       ) : null}
+      {error === "imap_already_connected" ? (
+        <Alert variant="warning">
+          <AlertTitle>A mailbox is already connected</AlertTitle>
+          <AlertDescription>
+            This store is already connected to{" "}
+            <strong>{first(params["mailbox"]) ?? "another mailbox"}</strong>.
+            One IMAP mailbox per store — disconnect it in{" "}
+            <Link
+              href="/settings/integrations"
+              className="font-medium text-primary hover:underline"
+            >
+              Settings → Integrations
+            </Link>{" "}
+            before connecting a different one. Re-submitting the same address
+            updates its password and server settings.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {error === "legal_acceptance_required" ? (
         <Alert variant="warning">
           <AlertDescription>

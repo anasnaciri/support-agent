@@ -2262,6 +2262,38 @@ const handleDashboardConnectImap = async (
   if (!parsed.ok) return sendJson(res, 400, { error: parsed.error });
   const { config, mailbox } = parsed.value;
 
+  // One IMAP mailbox per store: replies resolve credentials per (tenant,
+  // provider), so a second active mailbox could send from the wrong account.
+  // Re-connecting the SAME mailbox stays allowed (upsert — password rotation,
+  // host changes). The merchant must disconnect before switching mailboxes.
+  const listExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.listForTenant(TenantId(auth.tenantId));
+      }),
+      layer,
+    ),
+  );
+  if (listExit._tag !== "Success") {
+    return sendJson(res, 500, {
+      error: "persist_failed",
+      detail: String(listExit.cause),
+    });
+  }
+  const conflicting = listExit.value.find(
+    (c) =>
+      c.provider === "imap" &&
+      c.status === "active" &&
+      c.shopDomain.toLowerCase() !== mailbox.toLowerCase(),
+  );
+  if (conflicting) {
+    return sendJson(res, 409, {
+      error: "imap_already_connected",
+      mailbox: conflicting.shopDomain,
+    });
+  }
+
   // Fail closed if we can't actually log in — better a 400 now than a
   // silently-dead connector that only errors when the agent tries to reply.
   try {

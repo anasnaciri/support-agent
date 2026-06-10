@@ -42,6 +42,13 @@ export const connectImapAction = async (formData: FormData): Promise<void> => {
   if (res.status === 403) {
     redirect("/connect/imap?error=legal_acceptance_required");
   }
+  if (res.status === 409) {
+    const body = res.body as { mailbox?: string } | null;
+    const mb = body?.mailbox
+      ? `&mailbox=${encodeURIComponent(body.mailbox)}`
+      : "";
+    redirect(`/connect/imap?error=imap_already_connected${mb}`);
+  }
   if (res.status === 400) {
     const body = res.body as { error?: string; detail?: string } | null;
     const err = body?.error ?? "imap_connect_failed";

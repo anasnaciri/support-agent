@@ -868,6 +868,41 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST /dashboard/connections/imap 409s when another active IMAP mailbox exists", async () => {
+    if (!raw) return;
+    await seedConnection(tenantId, "imap", "first@acme.test");
+    const res = await post("/dashboard/connections/imap", {
+      mailbox: "second@acme.test",
+      password: "pw",
+      imapHost: "127.0.0.1",
+      imapPort: 1,
+      smtpHost: "127.0.0.1",
+      smtpPort: 1,
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; mailbox?: string };
+    expect(body.error).toBe("imap_already_connected");
+    expect(body.mailbox).toBe("first@acme.test");
+  });
+
+  it("POST /dashboard/connections/imap lets the SAME mailbox through the guard (re-connect/rotate)", async () => {
+    if (!raw) return;
+    // Same mailbox as the active row seeded above: the guard must not 409 —
+    // the request proceeds to the connectivity check, which fails here
+    // because nothing listens on port 1.
+    const res = await post("/dashboard/connections/imap", {
+      mailbox: "first@acme.test",
+      password: "rotated",
+      imapHost: "127.0.0.1",
+      imapPort: 1,
+      smtpHost: "127.0.0.1",
+      smtpPort: 1,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("imap_connect_failed");
+  });
+
   // ---- Auth edges ----
 
   it("503 when the dashboard token is not configured", async () => {

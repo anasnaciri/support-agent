@@ -223,6 +223,8 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 - [ ] **U12. Approval receipt pages dead-end** (`approval-endpoints.ts:157-204`) — good states (approved/rejected/already-decided/expired) but no link into the dashboard case (the code comment says these become redirects — the dashboard exists now), and "ask to re-send" has no re-send mechanism.
 - [ ] **U13. MultiSelect keyboard support** (`components/ui/multi-select.tsx`): no Escape-to-close, no arrow nav, mousedown-outside-only close.
 - [ ] **U14. "Couldn't load cases" has no Retry button** (`CasesSidebar.tsx`); watch `text-[10px]` badge legibility (`CasesSidebar.tsx:224`).
+- [ ] **U15. Next.js deprecation: the `middleware` file convention is deprecated — rename to `proxy`.**
+  Build warns `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` Affects `apps/dashboard/middleware.ts` (the pathname-passthrough that stamps `x-pathname` for `returnTo` — not auth). Rename the file to `proxy.ts` and the export from `middleware` to `proxy` per the Next.js 16 convention; verify the OpenNext/Cloudflare build still picks it up.
 
 ---
 
