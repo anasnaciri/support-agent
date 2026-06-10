@@ -63,6 +63,23 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const connectedLabel = connectedValue
     ? (PROVIDER_LABELS[connectedValue] ?? null)
     : null;
+  // Set when a connect was refused because a mailbox is already connected
+  // for that provider (one mailbox per provider per store).
+  const errorParam = params["error"];
+  const alreadyConnected =
+    (Array.isArray(errorParam) ? errorParam[0] : errorParam) ===
+    "already_connected";
+  const conflictProviderParam = params["provider"];
+  const conflictProvider = Array.isArray(conflictProviderParam)
+    ? conflictProviderParam[0]
+    : conflictProviderParam;
+  const conflictLabel = conflictProvider
+    ? (PROVIDER_LABELS[conflictProvider] ?? conflictProvider)
+    : "this provider";
+  const conflictMailboxParam = params["mailbox"];
+  const conflictMailbox = Array.isArray(conflictMailboxParam)
+    ? conflictMailboxParam[0]
+    : conflictMailboxParam;
   const apiBaseUrl = getApiBaseUrl();
 
   const [rows, settings, shopifyGate] = await Promise.all([
@@ -129,6 +146,23 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
       {connectedLabel ? (
         <Alert variant="success">
           <AlertDescription>{connectedLabel} connected.</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {alreadyConnected ? (
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>A mailbox is already connected</AlertTitle>
+          <AlertDescription>
+            Only one {conflictLabel} mailbox can be connected at a time
+            {conflictMailbox ? (
+              <>
+                {" "}
+                (currently <strong>{conflictMailbox}</strong>)
+              </>
+            ) : null}
+            . Disconnect it below before connecting a different one.
+          </AlertDescription>
         </Alert>
       ) : null}
 

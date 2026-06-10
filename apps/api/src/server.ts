@@ -108,6 +108,11 @@ import {
 } from "./admin-tenants.js";
 import { dashboardConnectRedirect } from "./post-connect-redirect.js";
 import {
+  activeMailboxConflict,
+  alreadyConnectedRedirect,
+  type OAuthMailboxProvider,
+} from "./connect-guard.js";
+import {
   assertShopifyShopConnectable,
   claimShopifyShopForTenant,
   findTenantByShop,
@@ -2226,6 +2231,35 @@ const handleDashboardConnect = async (
   if (!isInstallGrantProvider(provider)) {
     return sendJson(res, 400, { error: "bad_provider" });
   }
+  // One mailbox per provider per store (same invariant as the IMAP connect
+  // endpoint): refuse to start the OAuth flow while a mailbox is connected,
+  // BEFORE the merchant sits through the consent screen. The callbacks
+  // re-check for manual installs.
+  if (provider === "gmail" || provider === "outlook") {
+    const listExit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.listForTenant(TenantId(auth.tenantId));
+        }),
+        layer,
+      ),
+    );
+    if (listExit._tag !== "Success") {
+      return sendJson(res, 500, {
+        error: "persist_failed",
+        detail: String(listExit.cause),
+      });
+    }
+    const conflict = activeMailboxConflict(listExit.value, provider);
+    if (conflict) {
+      return sendJson(res, 409, {
+        error: "already_connected",
+        provider,
+        mailbox: conflict.shopDomain,
+      });
+    }
+  }
   const grant = signInstallGrant(
     cfg.stateSigningKey,
     { tenantId: auth.tenantId, provider },
@@ -3475,6 +3509,67 @@ const handleGoogleInstall = async (
  * saved and a re-install (or a scheduled watch-refresh) can recover.
  * Failing the install over a flaky watch call would orphan the OAuth grant.
  */
+/**
+ * Shared by the OAuth callbacks: when the tenant already has an ACTIVE
+ * connection for `provider` under a DIFFERENT mailbox, answer the request
+ * (browser → redirect to the integrations page with the conflict spelled
+ * out; otherwise JSON 409) and return `true` so the caller stops. Same-
+ * mailbox re-auth returns `false` — the upsert repairs tokens in place.
+ */
+const rejectWhenMailboxConnected = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+  opts: {
+    readonly tenantId: string;
+    readonly provider: OAuthMailboxProvider;
+    readonly mailbox: string;
+  },
+): Promise<boolean> => {
+  const listExit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ConnectorCredentialStore;
+        return yield* store.listForTenant(TenantId(opts.tenantId));
+      }),
+      layer,
+    ),
+  );
+  if (listExit._tag !== "Success") {
+    sendJson(res, 500, {
+      error: "persist_failed",
+      detail: String(listExit.cause),
+    });
+    return true;
+  }
+  const conflict = activeMailboxConflict(
+    listExit.value,
+    opts.provider,
+    opts.mailbox,
+  );
+  if (!conflict) return false;
+  const acceptsJson = (req.headers["accept"] ?? "")
+    .toString()
+    .toLowerCase()
+    .includes("application/json");
+  const redirectUrl = alreadyConnectedRedirect(
+    cfg.dashboardBaseUrl,
+    opts.provider,
+    conflict.shopDomain,
+  );
+  if (!acceptsJson && redirectUrl) {
+    sendRedirect(res, redirectUrl);
+  } else {
+    sendJson(res, 409, {
+      error: "already_connected",
+      provider: opts.provider,
+      mailbox: conflict.shopDomain,
+    });
+  }
+  return true;
+};
+
 const handleGoogleCallback = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -3562,6 +3657,18 @@ const handleGoogleCallback = async (
       error: "userinfo_fetch_failed",
       detail: cause instanceof Error ? cause.message : String(cause),
     });
+    return;
+  }
+
+  // One Gmail mailbox per store (google_sheets is not a mailbox — exempt).
+  if (
+    provider === "gmail" &&
+    (await rejectWhenMailboxConnected(cfg, layer, req, res, {
+      tenantId,
+      provider: "gmail",
+      mailbox: email,
+    }))
+  ) {
     return;
   }
 
@@ -3800,6 +3907,19 @@ const handleMicrosoftCallback = async (
       error: "userinfo_fetch_failed",
       detail: cause instanceof Error ? cause.message : String(cause),
     });
+    return;
+  }
+
+  // One Outlook mailbox per store: a different account than the connected
+  // one is rejected even here (manual installs bypass the dashboard mint
+  // guard). Re-authorizing the SAME mailbox proceeds — it repairs tokens.
+  if (
+    await rejectWhenMailboxConnected(cfg, layer, req, res, {
+      tenantId,
+      provider: "outlook",
+      mailbox: email,
+    })
+  ) {
     return;
   }
 

@@ -601,11 +601,27 @@ export const api = {
   connectUrl: async (
     ctx: CallCtx,
     provider: string,
-  ): Promise<{ readonly url: string }> => {
+  ): Promise<
+    | { readonly url: string }
+    | { readonly alreadyConnected: { readonly mailbox: string | null } }
+  > => {
     const { status, body } = await call(
       `/connect/${encodeURIComponent(provider)}`,
       { method: "POST", ctx },
     );
+    // One mailbox per provider per store — the api refuses to mint an
+    // install grant while one is connected.
+    if (
+      status === 409 &&
+      (body as { error?: unknown })?.error === "already_connected"
+    ) {
+      const mailbox = (body as { mailbox?: unknown }).mailbox;
+      return {
+        alreadyConnected: {
+          mailbox: typeof mailbox === "string" ? mailbox : null,
+        },
+      };
+    }
     if (status !== 200 || typeof (body as { url?: unknown })?.url !== "string") {
       throw new Error(`dashboard api ${status} on /connect/${provider}`);
     }

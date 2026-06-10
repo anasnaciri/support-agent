@@ -23,11 +23,25 @@ export const GET = async (
   if (!SUPPORTED.has(provider)) redirect("/settings/integrations");
 
   const ctx = await getDashboardContext();
-  const { url } = await api.connectUrl(ctx, provider);
+  const result = await api.connectUrl(ctx, provider);
+
+  // One mailbox per provider per store: the api refuses to start the OAuth
+  // flow while one is connected. Land back on integrations with the
+  // conflict spelled out instead of the provider's consent screen.
+  if ("alreadyConnected" in result) {
+    const qs = new URLSearchParams({
+      error: "already_connected",
+      provider,
+    });
+    if (result.alreadyConnected.mailbox) {
+      qs.set("mailbox", result.alreadyConnected.mailbox);
+    }
+    redirect(`/settings/integrations?${qs.toString()}`);
+  }
 
   // No `login_hint`: the dashboard login email is the merchant's account, not
   // the mailbox they're connecting. Prefilling it pre-selected (and on
   // Microsoft, locked) the wrong account. The user picks the account on the
   // provider's own screen. See lib/connect-redirect.ts.
-  redirect(connectRedirectUrl(url, provider, null));
+  redirect(connectRedirectUrl(result.url, provider, null));
 };

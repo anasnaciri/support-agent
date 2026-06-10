@@ -868,6 +868,37 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST /dashboard/connect/outlook 409s while an Outlook mailbox is already connected", async () => {
+    if (!raw) return;
+    await seedConnection(tenantId, "outlook", "inbox@acme.test");
+    const res = await post("/dashboard/connect/outlook");
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; mailbox?: string };
+    expect(body.error).toBe("already_connected");
+    expect(body.mailbox).toBe("inbox@acme.test");
+    // Disconnect clears the block: the merchant can then connect another one.
+    await post("/dashboard/connections/outlook/disconnect");
+    const after = await post("/dashboard/connect/outlook");
+    expect(after.status).toBe(200);
+  });
+
+  it("POST /dashboard/connect/gmail 409s while a Gmail mailbox is already connected", async () => {
+    if (!raw) return;
+    await seedConnection(tenantId, "gmail", "help@acme.test");
+    const res = await post("/dashboard/connect/gmail");
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("already_connected");
+    await post("/dashboard/connections/gmail/disconnect");
+  });
+
+  it("POST /dashboard/connect/:provider stays open for non-mailbox providers (shopify)", async () => {
+    // Shopify reconnects/repairs are routine; the mailbox guard must not
+    // apply to it.
+    const res = await post("/dashboard/connect/shopify");
+    expect(res.status).toBe(200);
+  });
+
   it("POST /dashboard/connections/imap 409s when another active IMAP mailbox exists", async () => {
     if (!raw) return;
     await seedConnection(tenantId, "imap", "first@acme.test");
