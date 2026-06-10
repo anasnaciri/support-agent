@@ -106,7 +106,10 @@ describe("imap-poll pollOne", () => {
     expect(ops.listSince).toHaveBeenCalledWith(5);
     expect(published).toHaveLength(1);
     expect(published[0]!.type).toBe("message.received");
-    expect(published[0]!.threadId).toBe("m6@host");
+    expect(published[0]!.threadId).toBe("imap:m6@host");
+    expect(
+      (published[0]!.payload as { threadId?: string }).threadId,
+    ).toBe("imap:m6@host");
     expect(calls[0]!.metadata["lastUid"]).toBe(7);
   });
 

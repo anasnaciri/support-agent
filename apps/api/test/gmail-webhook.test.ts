@@ -183,8 +183,9 @@ describe("backfillUnreadGmailInbox", () => {
     expect(published[0]).toMatchObject({
       type: "message.received",
       tenantId,
-      threadId: "t-1",
+      threadId: "gmail:t-1",
       payload: {
+        threadId: "gmail:t-1",
         messageId: "m-unread",
         subject: "Still waiting on order #1001",
         bodyText: "Can someone help with this?",

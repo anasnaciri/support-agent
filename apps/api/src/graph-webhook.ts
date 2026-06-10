@@ -4,6 +4,7 @@ import { PgBoss } from "pg-boss";
 import {
   ConnectorCredentialStore,
   makeEnqueuedWorkflowEvent,
+  namespaceThreadId,
   type ConnectorConnection,
 } from "@support-agent/services";
 import {
@@ -240,7 +241,12 @@ export const handleGraphNotification = async (
         skippedOutbound += 1;
         continue;
       }
-      const inbound: InboundMessage = toInboundMessage(msg);
+      // Namespace the thread id so the conversation router replies through
+      // this same connector (a tenant can hold several mailboxes at once).
+      const inbound: InboundMessage = {
+        ...toInboundMessage(msg),
+        threadId: namespaceThreadId(PROVIDER, msg.threadId),
+      };
       const event: DomainEvent = {
         type: "message.received",
         tenantId: TenantId(opts.tenantId),

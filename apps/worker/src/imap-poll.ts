@@ -15,6 +15,7 @@ import { Effect } from "effect";
 import { and, eq } from "drizzle-orm";
 import {
   ConnectorCredentialStore,
+  namespaceThreadId,
   type ConnectorConnection,
 } from "@support-agent/services";
 import { TenantId, type DomainEvent } from "@support-agent/agent-core";
@@ -92,7 +93,12 @@ export const pollOne = async (
     for (const raw of messages) {
       const msg = toConversationMessage(raw, conn.shopDomain);
       if (msg.direction === "outbound") continue; // mail we sent
-      const inbound = toInboundMessage(msg);
+      // Namespace the thread id so the conversation router replies through
+      // this same connector (a tenant can hold several mailboxes at once).
+      const inbound = {
+        ...toInboundMessage(msg),
+        threadId: namespaceThreadId("imap", msg.threadId),
+      };
       await deps.publish({
         type: "message.received",
         tenantId: TenantId(conn.tenantId),

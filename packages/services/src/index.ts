@@ -26,6 +26,7 @@ export * from "./tracking-config.js";
 export * from "./tracking-service.js";
 export * from "./tracking-no-provider.js";
 export * from "./conversation-service.js";
+export * from "./conversation-thread-id.js";
 export * from "./platform-mail.js";
 export * from "./org-directory.js";
 export * from "./approval-link-config.js";

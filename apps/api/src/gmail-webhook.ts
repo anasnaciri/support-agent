@@ -6,6 +6,7 @@ import {
   BlobStorage,
   ConnectorCredentialStore,
   makeEnqueuedWorkflowEvent,
+  namespaceThreadId,
   type ConnectorConnection,
 } from "@support-agent/services";
 import {
@@ -248,7 +249,12 @@ const publishGmailMessageIds = async (opts: {
           ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
         });
       }
-      const inbound: InboundMessage = toInboundMessage(msg, attachments);
+      // Namespace the thread id so the conversation router replies through
+      // this same connector (a tenant can hold several mailboxes at once).
+      const inbound: InboundMessage = {
+        ...toInboundMessage(msg, attachments),
+        threadId: namespaceThreadId("gmail", msg.threadId),
+      };
       const event: DomainEvent = {
         type: "message.received",
         tenantId: TenantId(opts.tenantId),
