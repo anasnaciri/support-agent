@@ -20,6 +20,8 @@ import {
   disconnectShopifyAction,
   disconnectGmailAction,
   disconnectGoogleSheetsAction,
+  disconnectOutlookAction,
+  disconnectImapAction,
 } from "./actions";
 
 const DISCONNECT_ACTIONS: Readonly<
@@ -28,6 +30,8 @@ const DISCONNECT_ACTIONS: Readonly<
   shopify: disconnectShopifyAction,
   gmail: disconnectGmailAction,
   google_sheets: disconnectGoogleSheetsAction,
+  outlook: disconnectOutlookAction,
+  imap: disconnectImapAction,
 };
 
 interface PageProps {

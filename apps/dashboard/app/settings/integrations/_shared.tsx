@@ -9,6 +9,7 @@ export const SUPPORTED_PROVIDERS = [
   "gmail",
   "google_sheets",
   "outlook",
+  "imap",
 ] as const;
 
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
@@ -23,6 +24,7 @@ export const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   gmail: "Gmail",
   google_sheets: "Google Sheets",
   outlook: "Outlook",
+  imap: "IMAP / SMTP",
 };
 
 export const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
@@ -34,6 +36,8 @@ export const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Spreadsheet read/write access for Sheets-backed workflows. Installed via Google OAuth.",
   outlook:
     "Inbound customer threads + outbound replies on this connection (Outlook / Microsoft 365). Installed via Microsoft OAuth.",
+  imap:
+    "Any other mailbox — PrivateEmail, Zoho, Fastmail, cPanel, custom domains. Connect with host/port + an app password (no OAuth).",
 };
 
 const ShopifyIcon = () => (
@@ -152,11 +156,31 @@ const OutlookIcon = () => (
   </svg>
 );
 
+// Generic mail glyph — IMAP/SMTP is a protocol, not a brand.
+const ImapIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    className="size-5 shrink-0"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+    <path d="m3.5 6.5 8.5 6 8.5-6" />
+  </svg>
+);
+
 export const PROVIDER_ICONS = {
   shopify: ShopifyIcon,
   gmail: GmailIcon,
   google_sheets: GoogleSheetsIcon,
   outlook: OutlookIcon,
+  imap: ImapIcon,
 } satisfies Readonly<Record<SupportedProvider, typeof ShopifyIcon>>;
 
 const originFromEnvUrl = (raw: string | undefined): string | null => {

@@ -575,6 +575,26 @@ export const api = {
       ctx,
     }),
 
+  // Connect a generic IMAP/SMTP mailbox. Unlike the OAuth connectors there's
+  // no redirect: the credentials are POSTed to the api, which connectivity-
+  // checks both servers before storing. Plaintext app-password transits
+  // dashboard → api over TLS; the api encrypts it at rest.
+  connectImap: (
+    ctx: CallCtx,
+    input: {
+      readonly mailbox: string;
+      readonly password: string;
+      readonly imapHost: string;
+      readonly imapPort?: number;
+      readonly imapSecure?: boolean;
+      readonly smtpHost: string;
+      readonly smtpPort?: number;
+      readonly smtpSecure?: boolean;
+      readonly user?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/connections/imap", { method: "POST", body: input, ctx }),
+
   // Mint a signed install grant for the authenticated tenant and get the
   // provider OAuth install URL (5th-audit #2). The tenant is derived
   // server-side from the session, never client-supplied.

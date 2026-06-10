@@ -11,7 +11,9 @@ import { api, getDashboardContext } from "@/lib/api-client";
 // one merchant can't start an install that binds a provider account to another
 // tenant (5th-audit #2).
 
-const SUPPORTED = new Set(["shopify", "gmail", "google_sheets"]);
+// OAuth-redirect connectors only. `imap` is intentionally absent — it has no
+// OAuth flow and is connected through the /connect/imap credential form.
+const SUPPORTED = new Set(["shopify", "gmail", "google_sheets", "outlook"]);
 
 export const GET = async (
   _request: Request,
