@@ -39,6 +39,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
   const readyTenantId = randomUUID();
   const shopBoundTenantId = randomUUID();
   const boundShop = "bound-store.myshopify.com";
+  const blockedShop = `install-gate-blocked-${randomUUID()}.myshopify.com`;
 
   const acceptedSettings = {
     legalAcceptance: {
@@ -138,7 +139,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("refuses an unprovisioned tenant with 403 (no global fallback)", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&grant=${grant(unprovisionedTenantId)}`,
+      `${pilotUrl}/shopify/install?shop=${blockedShop}&grant=${grant(unprovisionedTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
@@ -150,7 +151,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
 
   it("refuses a revoked tenant with 403 (reason revoked)", async () => {
     const res = await fetch(
-      `${pilotUrl}/shopify/install?shop=acme.myshopify.com&grant=${grant(revokedTenantId)}`,
+      `${pilotUrl}/shopify/install?shop=${blockedShop}&grant=${grant(revokedTenantId)}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(403);
