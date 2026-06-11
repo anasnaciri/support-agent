@@ -39,3 +39,30 @@ export const dashboardConnectRedirect = (
     return null;
   }
 };
+
+/**
+ * Failure-path counterpart of {@link dashboardConnectRedirect} (audit U6).
+ * A merchant who cancels the provider's consent screen (or whose callback
+ * fails) lands back on the integrations page with `?error=<provider>:<code>`
+ * rendered as a warning Alert — previously they got a raw JSON error in the
+ * browser and a dead end. Codes the dashboard knows: `access_denied`,
+ * `exchange_failed`, `state_mismatch` (anything else renders generically).
+ * Returns null when no dashboard origin is configured so callers keep their
+ * JSON response as the fallback.
+ */
+export const dashboardConnectErrorRedirect = (
+  dashboardBaseUrl: string | null,
+  provider: string,
+  code: string,
+): string | null => {
+  if (!dashboardBaseUrl) return null;
+  const trimmed = dashboardBaseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  try {
+    const url = new URL(`${trimmed}/settings/integrations`);
+    url.searchParams.set("error", `${provider}:${code}`);
+    return url.toString();
+  } catch {
+    return null;
+  }
+};

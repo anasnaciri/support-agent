@@ -237,6 +237,15 @@ export const loadApiConfig = (): ApiConfig => {
       `MICROSOFT_OAUTH_CALLBACK_URL must use https:// (got ${msCallbackUrl}). Microsoft rejects non-https redirect URIs except http://localhost.`,
     );
   }
+  // The Graph webhook's ONLY authentication is the clientState shared
+  // secret; the handler fails closed without it (audit S4). Surface the
+  // misconfiguration at boot rather than as silently-rejected inbound
+  // notifications once subscriptions start delivering.
+  if (microsoftConfigured && msNotificationUrl && !msWebhookClientState) {
+    throw new Error(
+      "MICROSOFT_GRAPH_WEBHOOK_SECRET must be set when MICROSOFT_GRAPH_NOTIFICATION_URL is configured — Graph notifications are authenticated solely by clientState and are rejected without it.",
+    );
+  }
   // Pilot mode (SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true) is PURE per-tenant
   // provisioning — every tenant uses its own operator-provisioned custom app.
   // A deployment-wide ("global") Shopify app is NOT allowed: keeping one around

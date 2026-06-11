@@ -146,6 +146,47 @@ describe("handleGraphNotification", () => {
     expect(published).toHaveLength(0);
   });
 
+  it("rejects ALL notifications when no webhookClientState is configured — fail closed (audit S4)", async () => {
+    const fetchImpl = vi.fn(async () => inboundMessageResponse) as unknown as typeof fetch;
+    const published: DomainEvent[] = [];
+    const result = await handleGraphNotification({
+      tenantId,
+      notifications: [notification],
+      layer: storeLayer(),
+      microsoft: { ...microsoft, webhookClientState: null },
+      fetchImpl,
+      publish: async (e) => {
+        published.push(e);
+      },
+    });
+    expect(result.rejectedClientState).toBe(1);
+    expect(result.published).toBe(0);
+    expect(published).toHaveLength(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does no token work for a batch that fails clientState validation (audit S4)", async () => {
+    // The connection's token is expired, so any token resolution would
+    // trigger a refresh — which goes through fetchImpl. A forged batch
+    // (wrong clientState) must be rejected BEFORE any token work, or an
+    // unauthenticated POST can churn the tenant's refresh token.
+    const expiredConn: ConnectorConnection = {
+      ...outlookConn,
+      tokenExpiresAt: new Date(Date.now() - 60_000),
+    };
+    const fetchImpl = vi.fn(async () => inboundMessageResponse) as unknown as typeof fetch;
+    const result = await handleGraphNotification({
+      tenantId,
+      notifications: [{ ...notification, clientState: "wrong" }],
+      layer: ConnectorCredentialStoreTest([expiredConn]) as unknown as ApiLayer,
+      microsoft,
+      fetchImpl,
+      publish: async () => {},
+    });
+    expect(result.rejectedClientState).toBe(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("skips a message the mailbox itself sent (outbound)", async () => {
     const outboundResponse = okJson({
       id: "m-2",

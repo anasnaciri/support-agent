@@ -150,6 +150,40 @@ export const handleGraphNotification = async (
   let rejectedClientState = 0;
   let failed = 0;
 
+  // Authenticate the batch BEFORE any token work (audit S4). clientState
+  // is the only authentication this endpoint has, so:
+  //   - with no configured secret we fail CLOSED (previously the check
+  //     was skipped entirely, letting anyone who guessed a tenant id
+  //     drive message fetches), and
+  //   - notifications that fail the check are dropped here, before the
+  //     token resolve/refresh below — otherwise a forged unauthenticated
+  //     POST forces a refresh-token rotation on every request (a
+  //     refresh-churn DoS against the tenant's mailbox connection).
+  const secret = opts.microsoft.webhookClientState;
+  if (!secret) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[outlook webhook] MICROSOFT_GRAPH_WEBHOOK_SECRET is not configured — rejecting all notifications (fail closed)",
+    );
+    return {
+      published: 0,
+      skippedOutbound: 0,
+      rejectedClientState: opts.notifications.length,
+      failed: 0,
+    };
+  }
+  const authenticated: GraphChangeNotification[] = [];
+  for (const n of opts.notifications) {
+    if (n.clientState !== secret) {
+      rejectedClientState += 1;
+    } else {
+      authenticated.push(n);
+    }
+  }
+  if (authenticated.length === 0) {
+    return { published, skippedOutbound, rejectedClientState, failed };
+  }
+
   // Resolve + refresh the tenant's Outlook token once for the batch.
   const connExit = await Effect.runPromiseExit(
     Effect.provide(
@@ -165,7 +199,7 @@ export const handleGraphNotification = async (
     console.warn(
       `[outlook webhook] no active connection for tenant=${opts.tenantId}`,
     );
-    return { published: 0, skippedOutbound: 0, rejectedClientState: 0, failed: opts.notifications.length };
+    return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
   }
   let conn: ConnectorConnection = connExit.value;
 
@@ -176,7 +210,7 @@ export const handleGraphNotification = async (
     if (!conn.refreshToken) {
       // eslint-disable-next-line no-console
       console.warn(`[outlook webhook] no refresh token for tenant=${opts.tenantId}`);
-      return { published: 0, skippedOutbound: 0, rejectedClientState: 0, failed: opts.notifications.length };
+      return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
     }
     try {
       const refreshed = await refreshGraphToken({
@@ -207,25 +241,17 @@ export const handleGraphNotification = async (
       if (patchExit._tag !== "Success") {
         // eslint-disable-next-line no-console
         console.error("[outlook webhook] token rotate failed:", patchExit.cause);
-        return { published: 0, skippedOutbound: 0, rejectedClientState: 0, failed: opts.notifications.length };
+        return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
       }
       conn = patchExit.value;
     } catch (cause) {
       // eslint-disable-next-line no-console
       console.error("[outlook webhook] refresh failed:", cause);
-      return { published: 0, skippedOutbound: 0, rejectedClientState: 0, failed: opts.notifications.length };
+      return { published: 0, skippedOutbound: 0, rejectedClientState, failed: authenticated.length };
     }
   }
 
-  for (const n of opts.notifications) {
-    // Verify the subscription is ours before acting on it.
-    if (
-      opts.microsoft.webhookClientState &&
-      n.clientState !== opts.microsoft.webhookClientState
-    ) {
-      rejectedClientState += 1;
-      continue;
-    }
+  for (const n of authenticated) {
     if (!n.resourceId) {
       failed += 1;
       continue;

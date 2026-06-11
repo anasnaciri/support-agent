@@ -1,11 +1,13 @@
 import { Cause, Effect } from "effect";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
+import fastifyHelmet from "@fastify/helmet";
+import fastifyRateLimit from "@fastify/rate-limit";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import {
@@ -106,7 +108,10 @@ import {
   getTenantDetailForAdmin,
   listTenantsForAdmin,
 } from "./admin-tenants.js";
-import { dashboardConnectRedirect } from "./post-connect-redirect.js";
+import {
+  dashboardConnectErrorRedirect,
+  dashboardConnectRedirect,
+} from "./post-connect-redirect.js";
 import {
   activeMailboxConflict,
   alreadyConnectedRedirect,
@@ -193,7 +198,9 @@ import {
   extractToken,
   makePgBossApprovalPublisher,
   matchApprovalRoute,
+  renderApprovalConfirmPage,
   renderApprovalPage,
+  verifyApprovalLink,
 } from "./approval-endpoints.js";
 import { PgBoss } from "pg-boss";
 import {
@@ -232,6 +239,20 @@ const sendJson = (
   status: number,
   body: unknown,
 ): FastifyReply => res.code(status).send(body);
+
+/**
+ * Log an internal failure cause server-side and return an opaque
+ * correlation id for the response body (audit S12). Effect `Cause`
+ * stringification can surface stack traces, SQL fragments, and table
+ * names — none of which belong in an HTTP response. Ops greps the
+ * error id to find the full cause in the logs.
+ */
+const opaqueCause = (cause: unknown): string => {
+  const errorId = randomUUID().slice(0, 8);
+  // eslint-disable-next-line no-console
+  console.error(`[api][error_id=${errorId}]`, cause);
+  return `error_id=${errorId}`;
+};
 
 const sendRedirect = (res: FastifyReply, target: string): FastifyReply =>
   res.code(302).header("location", target).send();
@@ -672,7 +693,7 @@ const handleDashboardShopifyApp = async (
   if (exit._tag !== "Success") {
     return sendJson(res, 500, {
       error: "lookup_failed",
-      detail: String(exit.cause),
+      detail: opaqueCause(exit.cause),
     });
   }
   const row = exit.value;
@@ -751,7 +772,13 @@ const handleDashboardApprovalAction =
         );
       }
     }
-    return sendJson(res, result.kind === "approval_not_found" ? 404 : 200, result);
+    const status =
+      result.kind === "approval_not_found"
+        ? 404
+        : result.kind === "expired"
+          ? 410
+          : 200;
+    return sendJson(res, status, result);
   };
 
 // POST /dashboard/cases/:id/takeover — manager takes over a case.
@@ -1128,7 +1155,7 @@ const handleAdminShopifyAppPut = async (
   if (exit._tag !== "Success") {
     sendJson(res, 500, {
       error: "provisioning_failed",
-      detail: String(exit.cause),
+      detail: opaqueCause(exit.cause),
     });
     return;
   }
@@ -1159,7 +1186,7 @@ const handleAdminShopifyAppGet = async (
     Effect.provide(getAdminShopifyApp(tenantId), layer),
   );
   if (exit._tag !== "Success") {
-    sendJson(res, 500, { error: "lookup_failed", detail: String(exit.cause) });
+    sendJson(res, 500, { error: "lookup_failed", detail: opaqueCause(exit.cause) });
     return;
   }
   if (exit.value.kind === "tenant_not_found") {
@@ -1190,7 +1217,7 @@ const handleAdminShopifyAppDelete = async (
     Effect.provide(revokeAdminShopifyApp(tenantId), layer),
   );
   if (exit._tag !== "Success") {
-    sendJson(res, 500, { error: "revoke_failed", detail: String(exit.cause) });
+    sendJson(res, 500, { error: "revoke_failed", detail: opaqueCause(exit.cause) });
     return;
   }
   if (exit.value.kind === "tenant_not_found") {
@@ -1234,7 +1261,7 @@ const handleAdminShopifyAppPcdCheck = async (
     Effect.provide(checkAdminShopifyAppPcd(tenantId), layer),
   );
   if (exit._tag !== "Success") {
-    sendJson(res, 502, { error: "pcd_check_failed", detail: String(exit.cause) });
+    sendJson(res, 502, { error: "pcd_check_failed", detail: opaqueCause(exit.cause) });
     return;
   }
   if (exit.value.kind === "tenant_not_found") {
@@ -1267,7 +1294,7 @@ const handleAdminTenantsList = async (
     Effect.provide(listTenantsForAdmin(), layer),
   );
   if (exit._tag !== "Success") {
-    sendJson(res, 500, { error: "list_failed", detail: String(exit.cause) });
+    sendJson(res, 500, { error: "list_failed", detail: opaqueCause(exit.cause) });
     return;
   }
   sendJson(res, 200, { tenants: exit.value });
@@ -1286,7 +1313,7 @@ const handleAdminTenantDetail = async (
     Effect.provide(getTenantDetailForAdmin(tenantId), layer),
   );
   if (exit._tag !== "Success") {
-    sendJson(res, 500, { error: "detail_failed", detail: String(exit.cause) });
+    sendJson(res, 500, { error: "detail_failed", detail: opaqueCause(exit.cause) });
     return;
   }
   if (!exit.value) {
@@ -2248,7 +2275,7 @@ const handleDashboardConnect = async (
     if (listExit._tag !== "Success") {
       return sendJson(res, 500, {
         error: "persist_failed",
-        detail: String(listExit.cause),
+        detail: opaqueCause(listExit.cause),
       });
     }
     const conflict = activeMailboxConflict(listExit.value, provider);
@@ -2312,7 +2339,7 @@ const handleDashboardConnectImap = async (
   if (listExit._tag !== "Success") {
     return sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(listExit.cause),
+      detail: opaqueCause(listExit.cause),
     });
   }
   const conflicting = listExit.value.find(
@@ -2360,7 +2387,7 @@ const handleDashboardConnectImap = async (
   if (putExit._tag !== "Success") {
     return sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(putExit.cause),
+      detail: opaqueCause(putExit.cause),
     });
   }
   return sendJson(res, 200, { ok: true, provider: "imap", mailbox });
@@ -2707,7 +2734,7 @@ const handleShopifyInstall = async (
       if (resolveExit._tag !== "Success") {
         sendJson(res, 500, {
           error: "tenant_resolve_failed",
-          detail: String(resolveExit.cause),
+          detail: opaqueCause(resolveExit.cause),
         });
         return;
       }
@@ -2856,7 +2883,7 @@ const handleShopifyCallback = async (
     if (resolveExit._tag !== "Success") {
       sendJson(res, 500, {
         error: "tenant_resolve_failed",
-        detail: String(resolveExit.cause),
+        detail: opaqueCause(resolveExit.cause),
       });
       return;
     }
@@ -3069,6 +3096,20 @@ const handleShopifyCallback = async (
  * callback after persisting the token, so there's no token-bearing
  * Shopify request to verify here.
  */
+/** HTML-entity escape for values interpolated into HTML pages (audit S5). */
+const escapeHtml = (s: string): string =>
+  s
+    .replace(/&/gu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;")
+    .replace(/"/gu, "&quot;")
+    .replace(/'/gu, "&#39;");
+
+// The decoded `host` param must be a plain admin.shopify.com path —
+// charset-restricted so it can't break out of the href attribute even
+// before escaping (audit S5).
+const ADMIN_HOST_RE = /^admin\.shopify\.com\/[A-Za-z0-9./_-]*$/u;
+
 const handleInstalledPage = (req: FastifyRequest, res: FastifyReply): void => {
   const { params } = readQuery(req);
   const shop = params["shop"] ?? null;
@@ -3077,16 +3118,18 @@ const handleInstalledPage = (req: FastifyRequest, res: FastifyReply): void => {
   if (host) {
     try {
       const decoded = Buffer.from(host, "base64").toString("utf8");
-      adminUrl = decoded.startsWith("admin.shopify.com/")
-        ? `https://${decoded}`
-        : null;
+      adminUrl = ADMIN_HOST_RE.test(decoded) ? `https://${decoded}` : null;
     } catch {
       adminUrl = null;
     }
   }
-  const safeShop = shop && shop.length < 200 ? shop : null;
+  // Only a syntactically valid *.myshopify.com domain renders; anything
+  // else (script payloads, attribute breakouts) is dropped, and the value
+  // is entity-escaped on interpolation regardless (audit S5 — this was an
+  // unauthenticated reflected XSS).
+  const safeShop = shop && isValidShopDomain(shop) ? escapeHtml(shop) : null;
   const adminAnchor = adminUrl
-    ? `<a href="${adminUrl}">return to your Shopify admin</a>`
+    ? `<a href="${escapeHtml(adminUrl)}">return to your Shopify admin</a>`
     : "return to your Shopify admin";
   // No-op pages should be HTML so the browser renders them; the user
   // typed the URL or got bounced here from the callback.
@@ -3184,7 +3227,7 @@ const handleAppUninstalled = async (
   if (tenantExit._tag !== "Success") {
     sendJson(res, 500, {
       error: "tenant_lookup_failed",
-      detail: String(tenantExit.cause),
+      detail: opaqueCause(tenantExit.cause),
     });
     return;
   }
@@ -3539,7 +3582,7 @@ const rejectWhenMailboxConnected = async (
   if (listExit._tag !== "Success") {
     sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(listExit.cause),
+      detail: opaqueCause(listExit.cause),
     });
     return true;
   }
@@ -3581,7 +3624,30 @@ const handleGoogleCallback = async (
     return;
   }
   const { params } = readQuery(req);
+  // Best-effort provider for failure redirects: the state (when present
+  // and valid) says whether this was a gmail or sheets install.
+  const providerHint = (() => {
+    const s = params["state"];
+    if (!s) return "gmail";
+    return (
+      verifyGoogleInstallState(cfg.stateSigningKey, s)?.provider ?? "gmail"
+    );
+  })();
+  // Send the merchant back to the integrations page with a renderable
+  // error instead of a raw JSON dead end (audit U6); JSON remains the
+  // fallback when no dashboard origin is configured.
+  const failRedirect = (errCode: string): boolean => {
+    const target = dashboardConnectErrorRedirect(
+      cfg.dashboardBaseUrl,
+      providerHint,
+      errCode,
+    );
+    if (!target) return false;
+    sendRedirect(res, target);
+    return true;
+  };
   if (params["error"]) {
+    if (failRedirect("access_denied")) return;
     sendJson(res, 400, {
       error: "google_oauth_error",
       googleError: params["error"],
@@ -3610,6 +3676,7 @@ const handleGoogleCallback = async (
         : null;
     })();
   if (!decoded) {
+    if (failRedirect("state_mismatch")) return;
     sendJson(res, 401, { error: "state_verification_failed" });
     return;
   }
@@ -3630,6 +3697,9 @@ const handleGoogleCallback = async (
       code,
     });
   } catch (cause) {
+    // eslint-disable-next-line no-console
+    console.error("[google callback] token exchange failed:", cause);
+    if (failRedirect("exchange_failed")) return;
     sendJson(res, 502, {
       error: "token_exchange_failed",
       detail: cause instanceof Error ? cause.message : String(cause),
@@ -3693,7 +3763,7 @@ const handleGoogleCallback = async (
   if (putExit._tag !== "Success") {
     sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(putExit.cause),
+      detail: opaqueCause(putExit.cause),
     });
     return;
   }
@@ -3847,7 +3917,20 @@ const handleMicrosoftCallback = async (
     return;
   }
   const { params } = readQuery(req);
+  // Renderable failure redirect to the integrations page (audit U6);
+  // JSON stays the fallback without a configured dashboard origin.
+  const failRedirect = (errCode: string): boolean => {
+    const target = dashboardConnectErrorRedirect(
+      cfg.dashboardBaseUrl,
+      "outlook",
+      errCode,
+    );
+    if (!target) return false;
+    sendRedirect(res, target);
+    return true;
+  };
   if (params["error"]) {
+    if (failRedirect("access_denied")) return;
     sendJson(res, 400, {
       error: "microsoft_oauth_error",
       microsoftError: params["error"],
@@ -3863,6 +3946,7 @@ const handleMicrosoftCallback = async (
   }
   const decoded = verifyMicrosoftInstallState(cfg.stateSigningKey, state);
   if (!decoded) {
+    if (failRedirect("state_mismatch")) return;
     sendJson(res, 401, { error: "state_verification_failed" });
     return;
   }
@@ -3883,6 +3967,7 @@ const handleMicrosoftCallback = async (
     });
   } catch (cause) {
     req.log.error({ err: cause }, "[microsoft callback] token exchange failed");
+    if (failRedirect("exchange_failed")) return;
     sendJson(res, 502, {
       error: "token_exchange_failed",
       detail: cause instanceof Error ? cause.message : String(cause),
@@ -3944,7 +4029,7 @@ const handleMicrosoftCallback = async (
   if (putExit._tag !== "Success") {
     sendJson(res, 500, {
       error: "persist_failed",
-      detail: String(putExit.cause),
+      detail: opaqueCause(putExit.cause),
     });
     return;
   }
@@ -4212,6 +4297,72 @@ const acquireApprovalBoss = async (
   return boss;
 };
 
+/**
+ * GET /approvals/:id/:action — verification + confirmation page ONLY.
+ * Email-security scanners (Outlook SafeLinks, Mimecast, Gmail prefetch)
+ * follow GET links in inbound mail; a GET that decided the approval let
+ * a scanner silently approve refunds before the manager ever opened the
+ * email (audit S2). The actual decision happens in the POST below.
+ */
+const handleApprovalConfirmPage = (
+  cfg: ApiConfig,
+  req: FastifyRequest,
+  res: FastifyReply,
+): void => {
+  const url = req.url ?? "/";
+  const pathOnly = url.split("?")[0] ?? "";
+  const match = matchApprovalRoute(pathOnly);
+  if (!match) {
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const token = extractToken(url);
+  if (!token) {
+    sendHtml(
+      res,
+      400,
+      renderApprovalPage(
+        { kind: "bad_token", reason: { ok: false, reason: "malformed" } },
+        match.action,
+      ).body,
+    );
+    return;
+  }
+  const linkCheck = verifyApprovalLink({
+    approvalId: match.approvalId,
+    action: match.action,
+    token,
+    signingKey: cfg.approvalSigningKey,
+  });
+  if (linkCheck.kind !== "ok") {
+    const page = renderApprovalPage(linkCheck, match.action);
+    sendHtml(res, page.status, page.body);
+    return;
+  }
+  const page = renderApprovalConfirmPage({
+    approvalId: match.approvalId,
+    action: match.action,
+    token,
+  });
+  sendHtml(res, page.status, page.body);
+};
+
+/**
+ * Extract the token from a POST body. The server buffers every body as
+ * raw bytes (webhook HMAC requirement), so the urlencoded confirm-form
+ * body is parsed here. Keeping the token in the POST body (not the URL)
+ * also keeps it out of request logs (audit S6).
+ */
+const extractTokenFromPostBody = (body: unknown): string | null => {
+  if (!Buffer.isBuffer(body)) return null;
+  try {
+    const params = new URLSearchParams(body.toString("utf8"));
+    return params.get("token");
+  } catch {
+    return null;
+  }
+};
+
 const handleApprovalDecision = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -4226,7 +4377,9 @@ const handleApprovalDecision = async (
     sendJson(res, 404, { error: "not_found" });
     return;
   }
-  const token = extractToken(url);
+  // Token comes from the confirm-form's POST body; the query-string
+  // fallback keeps curl/scripted flows working.
+  const token = extractTokenFromPostBody(req.body) ?? extractToken(url);
   if (!token) {
     sendHtml(
       res,
@@ -4250,7 +4403,9 @@ const handleApprovalDecision = async (
     ),
   });
 
-  const page = renderApprovalPage(outcome, match.action);
+  const page = renderApprovalPage(outcome, match.action, {
+    dashboardBaseUrl: cfg.dashboardBaseUrl,
+  });
   sendHtml(res, page.status, page.body);
 };
 
@@ -4264,14 +4419,60 @@ export interface ServerHandle {
 }
 
 /**
+ * Strip secret-bearing query params from a URL before it reaches the
+ * request log (audit S6). Several capability secrets travel in `?…`:
+ * the Gmail push token, signed approval tokens, and install grants —
+ * anyone with log access could previously harvest them.
+ */
+const SECRET_QUERY_PARAMS = ["token", "grant", "code", "id_token", "hmac"];
+
+export const redactUrlSecrets = (url: string): string => {
+  const q = url.indexOf("?");
+  if (q === -1) return url;
+  try {
+    const params = new URLSearchParams(url.slice(q + 1));
+    let touched = false;
+    for (const name of SECRET_QUERY_PARAMS) {
+      if (params.has(name)) {
+        params.set(name, "[redacted]");
+        touched = true;
+      }
+    }
+    if (!touched) return url;
+    return `${url.slice(0, q)}?${params.toString()}`;
+  } catch {
+    // Unparseable query string — drop it entirely rather than log it.
+    return url.slice(0, q);
+  }
+};
+
+/**
  * Pino logger config. Enabled by default (structured JSON); quieted to
  * `warn` under tests so the DB-gated integration suite isn't drowned in
  * per-request lines. `LOG_LEVEL` overrides the level outside tests.
+ * The request serializer redacts secret query params (audit S6) and the
+ * `redact` paths cover headers that may carry bearer tokens.
  */
-const loggerConfig = () =>
-  process.env["NODE_ENV"] === "test"
-    ? { level: "warn" }
-    : { level: process.env["LOG_LEVEL"] ?? "info" };
+const loggerConfig = () => ({
+  level:
+    process.env["NODE_ENV"] === "test"
+      ? "warn"
+      : (process.env["LOG_LEVEL"] ?? "info"),
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "req.headers['x-goog-channel-token']",
+    ],
+    censor: "[redacted]",
+  },
+  serializers: {
+    req: (req: { method: string; url: string }) => ({
+      method: req.method,
+      url: redactUrlSecrets(req.url ?? ""),
+    }),
+  },
+});
 
 export const startServer = async (
   cfg: ApiConfig,
@@ -4298,6 +4499,35 @@ export const startServer = async (
     { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
+
+  // Security headers (audit S11). The CSP is strict because the only HTML
+  // this server emits is self-contained receipt/landing pages with inline
+  // styles — no scripts, no external assets. CORS stays closed on purpose:
+  // the dashboard talks to this api server-to-server with a bearer token,
+  // never from the browser with cookies.
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        styleSrc: ["'unsafe-inline'"],
+        formAction: ["'self'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+  });
+
+  // Rate limiting (audit S11). One generous global bucket — the goal is
+  // blunting token brute-force and webhook floods, not traffic shaping.
+  // Keyed by IP; the worker/dashboard talk to Postgres or use one bearer
+  // token from a handful of IPs, so legitimate traffic never approaches
+  // this. Disabled under tests to keep suites deterministic.
+  if (process.env["NODE_ENV"] !== "test") {
+    await app.register(fastifyRateLimit, {
+      max: Number(process.env["RATE_LIMIT_MAX"] ?? 600),
+      timeWindow: "1 minute",
+    });
+  }
 
   // OpenAPI generation. Registered before the routes so its onRoute hook
   // captures every schema below; the browsable UI lands at /docs.
@@ -4539,14 +4769,32 @@ export const startServer = async (
   );
 
   // ---- Approval links ----
+  // GET verifies the signed link and renders a confirmation page; only
+  // the POST (submitted by the page's form) decides. Email-security
+  // scanners follow GETs — they must not be able to decide (audit S2).
   app.get(
     "/approvals/:approvalId/:action",
     {
       schema: {
         tags: ["approvals"],
-        summary: "Approve or reject a gated tool call from an emailed link",
+        summary:
+          "Confirmation page for an emailed approval link (no state change)",
         params: approvalParamsSchema,
         querystring: tokenQuerySchema,
+      },
+    },
+    async (req, res) => {
+      handleApprovalConfirmPage(cfg, req, res);
+      return res;
+    },
+  );
+  app.post(
+    "/approvals/:approvalId/:action",
+    {
+      schema: {
+        tags: ["approvals"],
+        summary: "Approve or reject a gated tool call (confirm-page POST)",
+        params: approvalParamsSchema,
       },
     },
     async (req, res) => {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { dashboardConnectRedirect } from "../src/post-connect-redirect.js";
+import {
+  dashboardConnectErrorRedirect,
+  dashboardConnectRedirect,
+} from "../src/post-connect-redirect.js";
 
 describe("dashboardConnectRedirect", () => {
   it("returns null when no dashboard origin is configured (fall back to /installed)", () => {
@@ -36,5 +39,27 @@ describe("dashboardConnectRedirect", () => {
 
   it("returns null on an unparseable base URL instead of throwing", () => {
     expect(dashboardConnectRedirect("not a url", "shopify")).toBeNull();
+  });
+});
+
+// Audit U6 — a merchant who cancels the provider consent screen (or whose
+// callback fails) previously got a raw JSON error in the browser. The
+// dashboard renders ?error=<provider>:<code> as a warning Alert.
+describe("dashboardConnectErrorRedirect", () => {
+  it("builds the ?error=<provider>:<code> contract", () => {
+    const url = dashboardConnectErrorRedirect(
+      "https://dash.example.com",
+      "gmail",
+      "access_denied",
+    );
+    const parsed = new URL(url!);
+    expect(parsed.pathname).toBe("/settings/integrations");
+    expect(parsed.searchParams.get("error")).toBe("gmail:access_denied");
+  });
+
+  it("returns null without a dashboard base URL (caller keeps the JSON fallback)", () => {
+    expect(
+      dashboardConnectErrorRedirect(null, "outlook", "exchange_failed"),
+    ).toBeNull();
   });
 });

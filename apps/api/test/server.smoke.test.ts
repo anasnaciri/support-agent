@@ -75,4 +75,78 @@ describe("apps/api — server smoke (no DB)", () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
   });
+
+  // Audit S5 — /installed reflected the raw ?shop= and decoded ?host=
+  // params into HTML. The page is unauthenticated, so this was a clean
+  // reflected XSS on the api origin.
+  describe("GET /installed — reflected XSS hardening (audit S5)", () => {
+    it("drops a script payload in ?shop=", async () => {
+      const payload = "<img src=x onerror=alert(document.domain)>";
+      const res = await fetch(
+        `${baseUrl}/installed?shop=${encodeURIComponent(payload)}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).not.toContain("<img");
+      expect(body).not.toContain("onerror");
+    });
+
+    it("renders a valid myshopify domain", async () => {
+      const res = await fetch(
+        `${baseUrl}/installed?shop=test-store.myshopify.com`,
+      );
+      const body = await res.text();
+      expect(body).toContain("test-store.myshopify.com");
+    });
+
+    it("rejects a crafted ?host= that passes the prefix check but breaks out of the href", async () => {
+      const evil = Buffer.from(
+        'admin.shopify.com/"><script>alert(1)</script>',
+        "utf8",
+      ).toString("base64");
+      const res = await fetch(`${baseUrl}/installed?host=${evil}`);
+      const body = await res.text();
+      expect(body).not.toContain("<script>alert(1)</script>");
+      expect(body).not.toContain('"><');
+    });
+
+    it("still links a legitimate admin host", async () => {
+      const good = Buffer.from(
+        "admin.shopify.com/store/test-store",
+        "utf8",
+      ).toString("base64");
+      const res = await fetch(`${baseUrl}/installed?host=${good}`);
+      const body = await res.text();
+      expect(body).toContain(
+        'href="https://admin.shopify.com/store/test-store"',
+      );
+    });
+  });
+
+  // Audit S2 — the emailed approval link is a GET; scanners follow GETs.
+  // The GET must verify-and-render only; the page's form POSTs to decide.
+  describe("approval links — GET never mutates (audit S2)", () => {
+    it("GET with a garbage token renders the invalid-link page without touching state", async () => {
+      const res = await fetch(
+        `${baseUrl}/approvals/00000000-0000-0000-0000-000000000001/approve?token=garbage`,
+      );
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).toContain("can't be used");
+    });
+  });
+
+  // Audit S11 — security headers on every response.
+  describe("security headers (audit S11)", () => {
+    it("sets X-Content-Type-Options and frame protections", async () => {
+      const res = await fetch(`${baseUrl}/healthz`);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("x-frame-options")).toBeTruthy();
+    });
+
+    it("ships a Content-Security-Policy on HTML pages", async () => {
+      const res = await fetch(`${baseUrl}/installed`);
+      expect(res.headers.get("content-security-policy")).toBeTruthy();
+    });
+  });
 });

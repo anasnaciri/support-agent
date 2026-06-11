@@ -5,7 +5,9 @@ import {
   extractToken,
   makePgBossApprovalPublisher,
   matchApprovalRoute,
+  renderApprovalConfirmPage,
   renderApprovalPage,
+  verifyApprovalLink,
   type BossLike,
 } from "../src/approval-endpoints.js";
 import { randomUUID } from "node:crypto";
@@ -243,7 +245,11 @@ describe("approval endpoints — pure helpers", () => {
 });
 
 describe("decideApproval — orchestration", () => {
-  const seedAndSign = (env: ReturnType<typeof makeLayer>) => {
+  const seedAndSign = (
+    env: ReturnType<typeof makeLayer>,
+    action: "approve" | "reject" = "approve",
+    overrides: Partial<Approval> = {},
+  ) => {
     const row = env.seed({
       tenantId: TenantId("tenant-1"),
       caseId: CaseId("case-1"),
@@ -253,9 +259,11 @@ describe("decideApproval — orchestration", () => {
       reasoning: "test",
       riskLevel: "medium",
       expiresAt: new Date(Date.now() + 60_000),
+      ...overrides,
     } as never);
     const token = signApprovalToken({
       approvalId: row.id,
+      action,
       secret: SIGNING_KEY,
       ttlMs: 60_000,
     });
@@ -290,7 +298,7 @@ describe("decideApproval — orchestration", () => {
 
   it("rejects + publishes approval.rejected", async () => {
     const env = makeLayer();
-    const { row, token } = seedAndSign(env);
+    const { row, token } = seedAndSign(env, "reject");
     const published: DomainEvent[] = [];
     const outcome = await decideApproval({
       approvalId: row.id,
@@ -306,11 +314,53 @@ describe("decideApproval — orchestration", () => {
     expect(published[0]?.type).toBe("approval.rejected");
   });
 
+  it("refuses a reject token replayed against the approve path (audit S3)", async () => {
+    const env = makeLayer();
+    const { row, token } = seedAndSign(env, "reject");
+    const published: DomainEvent[] = [];
+    const outcome = await decideApproval({
+      approvalId: row.id,
+      action: "approve",
+      token,
+      signingKey: SIGNING_KEY,
+      layer: env.layer as never,
+      publish: async (e) => {
+        published.push(e);
+      },
+    });
+    expect(outcome.kind).toBe("token_action_mismatch");
+    expect(published).toHaveLength(0);
+  });
+
+  it("refuses to decide an expired pending approval (audit L7)", async () => {
+    const env = makeLayer();
+    const { row, token } = seedAndSign(env, "approve", {
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const published: DomainEvent[] = [];
+    const outcome = await decideApproval({
+      approvalId: row.id,
+      action: "approve",
+      token,
+      signingKey: SIGNING_KEY,
+      layer: env.layer as never,
+      publish: async (e) => {
+        published.push(e);
+      },
+    });
+    expect(outcome.kind).toBe("expired");
+    expect(published).toHaveLength(0);
+    const page = renderApprovalPage(outcome, "approve");
+    expect(page.status).toBe(410);
+    expect(page.body.toLowerCase()).toContain("expired");
+  });
+
   it("rejects a token signed with the wrong key", async () => {
     const env = makeLayer();
     const { row } = seedAndSign(env);
     const wrongToken = signApprovalToken({
       approvalId: row.id,
+      action: "approve",
       secret: "different-key",
       ttlMs: 60_000,
     });
@@ -334,6 +384,7 @@ describe("decideApproval — orchestration", () => {
     const { row } = seedAndSign(env);
     const otherToken = signApprovalToken({
       approvalId: "11111111-1111-1111-1111-111111111111",
+      action: "approve",
       secret: SIGNING_KEY,
       ttlMs: 60_000,
     });
@@ -382,6 +433,7 @@ describe("decideApproval — orchestration", () => {
     const id = "11111111-1111-1111-1111-111111111111";
     const token = signApprovalToken({
       approvalId: id,
+      action: "approve",
       secret: SIGNING_KEY,
       ttlMs: 60_000,
     });
@@ -394,6 +446,93 @@ describe("decideApproval — orchestration", () => {
       publish: async () => {},
     });
     expect(outcome.kind).toBe("approval_not_found");
+  });
+});
+
+describe("GET confirm page — no state change (audit S2)", () => {
+  const APPROVAL_ID = "00000000-0000-0000-0000-000000000001";
+
+  it("verifies a valid link without touching the approval", () => {
+    const token = signApprovalToken({
+      approvalId: APPROVAL_ID,
+      action: "approve",
+      secret: SIGNING_KEY,
+      ttlMs: 60_000,
+    });
+    const verified = verifyApprovalLink({
+      approvalId: APPROVAL_ID,
+      action: "approve",
+      token,
+      signingKey: SIGNING_KEY,
+    });
+    expect(verified.kind).toBe("ok");
+  });
+
+  it("refuses an action mismatch on the GET as well", () => {
+    const token = signApprovalToken({
+      approvalId: APPROVAL_ID,
+      action: "reject",
+      secret: SIGNING_KEY,
+      ttlMs: 60_000,
+    });
+    const verified = verifyApprovalLink({
+      approvalId: APPROVAL_ID,
+      action: "approve",
+      token,
+      signingKey: SIGNING_KEY,
+    });
+    expect(verified.kind).toBe("token_action_mismatch");
+  });
+
+  it("renders a confirmation form that POSTs the token — GET must not mutate", () => {
+    const token = signApprovalToken({
+      approvalId: APPROVAL_ID,
+      action: "approve",
+      secret: SIGNING_KEY,
+      ttlMs: 60_000,
+    });
+    const page = renderApprovalConfirmPage({
+      approvalId: APPROVAL_ID,
+      action: "approve",
+      token,
+    });
+    expect(page.status).toBe(200);
+    // The page must contain a POST form back to the same path with the
+    // token in a hidden field — email-security scanners follow GETs, so
+    // only the POST may decide (audit S2).
+    expect(page.body).toContain('method="post"');
+    expect(page.body).toContain(
+      `action="/approvals/${APPROVAL_ID}/approve"`,
+    );
+    expect(page.body).toContain('name="token"');
+    // The token value is HTML-escaped into the hidden field.
+    expect(page.body).toContain(token);
+  });
+});
+
+describe("receipt page dashboard link (audit U12)", () => {
+  it("links into the dashboard approval when a dashboard URL is configured", () => {
+    const approval = {
+      id: ApprovalId("00000000-0000-0000-0000-00000000000a"),
+      status: "approved",
+      decidedAt: new Date(),
+    } as never;
+    const page = renderApprovalPage({ kind: "decided", approval }, "approve", {
+      dashboardBaseUrl: "https://dash.example.com",
+    });
+    expect(page.body).toContain(
+      "https://dash.example.com/approvals/00000000-0000-0000-0000-00000000000a",
+    );
+  });
+
+  it("omits the link when no dashboard URL is configured", () => {
+    const approval = {
+      id: ApprovalId("b"),
+      status: "approved",
+      decidedAt: new Date(),
+    } as never;
+    const page = renderApprovalPage({ kind: "decided", approval }, "approve");
+    expect(page.body).not.toContain("href=");
   });
 });
 

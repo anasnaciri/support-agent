@@ -59,8 +59,55 @@ export type ApprovalEndpointOutcome =
   | { readonly kind: "decided"; readonly approval: Approval }
   | { readonly kind: "already_decided"; readonly approval: Approval }
   | { readonly kind: "approval_not_found" }
+  | { readonly kind: "expired"; readonly approval: Approval }
   | { readonly kind: "bad_token"; readonly reason: VerifyApprovalTokenResult & { readonly ok: false } }
-  | { readonly kind: "token_mismatch"; readonly tokenApprovalId: string };
+  | { readonly kind: "token_mismatch"; readonly tokenApprovalId: string }
+  /**
+   * The token is valid but was signed for the OTHER action — e.g. a
+   * reject link's token replayed against the approve path (audit S3).
+   */
+  | { readonly kind: "token_action_mismatch"; readonly tokenAction: string };
+
+// ============================================================
+// Link verification (no state change)
+// ============================================================
+//
+// Shared by the GET confirm page and the POST decision: token signature,
+// approval-id binding, and action binding. The GET calls ONLY this —
+// email-security scanners (Outlook SafeLinks, Gmail prefetch) follow GET
+// links, so the GET must never decide anything (audit S2).
+
+export interface VerifyApprovalLinkInput {
+  readonly approvalId: string;
+  readonly action: "approve" | "reject";
+  readonly token: string;
+  readonly signingKey: string;
+}
+
+export type VerifyApprovalLinkResult =
+  | { readonly kind: "ok" }
+  | { readonly kind: "bad_token"; readonly reason: VerifyApprovalTokenResult & { readonly ok: false } }
+  | { readonly kind: "token_mismatch"; readonly tokenApprovalId: string }
+  | { readonly kind: "token_action_mismatch"; readonly tokenAction: string };
+
+export const verifyApprovalLink = (
+  input: VerifyApprovalLinkInput,
+): VerifyApprovalLinkResult => {
+  const verified = verifyApprovalToken({
+    token: input.token,
+    secret: input.signingKey,
+  });
+  if (!verified.ok) {
+    return { kind: "bad_token", reason: verified };
+  }
+  if (verified.approvalId !== input.approvalId) {
+    return { kind: "token_mismatch", tokenApprovalId: verified.approvalId };
+  }
+  if (verified.action !== input.action) {
+    return { kind: "token_action_mismatch", tokenAction: verified.action };
+  }
+  return { kind: "ok" };
+};
 
 export interface DecideApprovalOptions {
   readonly approvalId: string;
@@ -87,24 +134,18 @@ const SYSTEM_MANAGER_ID = UserId("00000000-0000-0000-0000-000000000000");
 export const decideApproval = async (
   opts: DecideApprovalOptions,
 ): Promise<ApprovalEndpointOutcome> => {
-  // 1. Verify the token. Signature first, then expiry — the verifier
-  //    short-circuits on bad sig so a probe can't distinguish "bad sig"
-  //    from "expired" via timing.
-  const verified = verifyApprovalToken({
+  // 1.–2. Verify the token: signature first (constant-time, expiry after
+  //    so a probe can't distinguish "bad sig" from "expired"), then the
+  //    approval-id binding, then the action binding (audit S3 — a reject
+  //    link's token must not approve by editing the path).
+  const linkCheck = verifyApprovalLink({
+    approvalId: opts.approvalId,
+    action: opts.action,
     token: opts.token,
-    secret: opts.signingKey,
+    signingKey: opts.signingKey,
   });
-  if (!verified.ok) {
-    return { kind: "bad_token", reason: verified };
-  }
-  // 2. The token binds approvalId — if the URL id and the token id
-  //    differ, refuse. Prevents someone swapping the URL path with a
-  //    valid token meant for a different approval.
-  if (verified.approvalId !== opts.approvalId) {
-    return {
-      kind: "token_mismatch",
-      tokenApprovalId: verified.approvalId,
-    };
+  if (linkCheck.kind !== "ok") {
+    return linkCheck;
   }
 
   const managerId = opts.managerId ?? SYSTEM_MANAGER_ID;
@@ -166,39 +207,104 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f6f6;
 </style></head><body><div class="card">`;
 const SHELL_FOOT = `</div></body></html>`;
 
+const BUTTON_CSS = `.btn{display:inline-block;border:0;border-radius:8px;padding:10px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn.ok{background:#065f46;color:#fff}
+.btn.bad{background:#991b1b;color:#fff}
+a.dash{display:inline-block;margin-top:16px;font-size:14px;color:#1e40af}`;
+
+const SHELL_HEAD_WITH_BUTTONS = SHELL_HEAD.replace(
+  "</style>",
+  `\n${BUTTON_CSS}</style>`,
+);
+
+/** Minimal HTML-entity escape for values interpolated into pages. */
+const escapeHtml = (s: string): string =>
+  s
+    .replace(/&/gu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;")
+    .replace(/"/gu, "&quot;")
+    .replace(/'/gu, "&#39;");
+
+export interface RenderApprovalPageOptions {
+  /**
+   * Dashboard origin for the "View in dashboard" link on receipt pages
+   * (audit U12). Omitted → no link (single-binary pilot without a
+   * dashboard deploy).
+   */
+  readonly dashboardBaseUrl?: string | null;
+}
+
+const dashboardLink = (
+  approvalId: string,
+  opts?: RenderApprovalPageOptions,
+): string =>
+  opts?.dashboardBaseUrl
+    ? `<a class="dash" href="${escapeHtml(`${opts.dashboardBaseUrl}/approvals/${approvalId}`)}">View this approval in the dashboard →</a>`
+    : "";
+
+/**
+ * GET confirm page (audit S2). Renders a form whose POST carries the
+ * token in the body — the GET itself never mutates, so email-security
+ * scanners that prefetch links can't decide approvals. The token was
+ * already verified (signature + id + action) before this renders.
+ */
+export const renderApprovalConfirmPage = (input: {
+  readonly approvalId: string;
+  readonly action: "approve" | "reject";
+  readonly token: string;
+}): { readonly status: number; readonly body: string } => {
+  const ok = input.action === "approve";
+  return {
+    status: 200,
+    body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approve" : "Reject"}</span><h1 class="title">Confirm: ${ok ? "approve this reply?" : "reject this reply?"}</h1><p class="muted">${ok ? "Your support agent will send the proposed reply to the customer." : "The case will be escalated to your team for human handling."}</p><form method="post" action="/approvals/${escapeHtml(input.approvalId)}/${input.action}"><input type="hidden" name="token" value="${escapeHtml(input.token)}"><button class="btn ${ok ? "ok" : "bad"}" type="submit">${ok ? "Approve and send" : "Reject"}</button></form>${SHELL_FOOT}`,
+  };
+};
+
 export const renderApprovalPage = (
   outcome: ApprovalEndpointOutcome,
   action: "approve" | "reject",
+  opts?: RenderApprovalPageOptions,
 ): { readonly status: number; readonly body: string } => {
   switch (outcome.kind) {
     case "decided": {
       const ok = action === "approve";
       return {
         status: 200,
-        body: `${SHELL_HEAD}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${ok ? "Reply approved" : "Reply rejected"}</h1><p class="muted">${ok ? "Your support agent will send the reply to the customer in a moment." : "The case has been escalated to human takeover."}</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${ok ? "Reply approved" : "Reply rejected"}</h1><p class="muted">${ok ? "Your support agent will send the reply to the customer in a moment." : "The case has been escalated to human takeover."}</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
       };
     }
     case "already_decided": {
       const ok = outcome.approval.status === "approved";
       return {
         status: 200,
-        body: `${SHELL_HEAD}<span class="badge info">Already decided</span><h1 class="title">This approval has already been ${ok ? "approved" : outcome.approval.status}</h1><p class="muted">No further action is needed. Decision recorded ${outcome.approval.decidedAt?.toISOString() ?? ""}.</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge info">Already decided</span><h1 class="title">This approval has already been ${ok ? "approved" : escapeHtml(outcome.approval.status)}</h1><p class="muted">No further action is needed. Decision recorded ${outcome.approval.decidedAt?.toISOString() ?? ""}.</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
       };
     }
+    case "expired":
+      return {
+        status: 410,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Expired</span><h1 class="title">This approval has expired</h1><p class="muted">The proposed action is too old to act on safely — the order or conversation may have changed since it was drafted. The case needs a human decision from the dashboard.</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
+      };
     case "approval_not_found":
       return {
         status: 404,
-        body: `${SHELL_HEAD}<span class="badge bad">Not found</span><h1 class="title">Approval not found</h1><p class="muted">This link doesn't match any approval. It may have been deleted, or the URL is malformed.</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Not found</span><h1 class="title">Approval not found</h1><p class="muted">This link doesn't match any approval. It may have been deleted, or the URL is malformed.</p>${SHELL_FOOT}`,
       };
     case "bad_token":
       return {
         status: 400,
-        body: `${SHELL_HEAD}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${outcome.reason.reason}. Approval links expire after a few days for safety; ask your support team to re-send if you still need to act.</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${escapeHtml(outcome.reason.reason)}. Approval links expire after a day for safety; decide from the dashboard if you still need to act.</p>${SHELL_FOOT}`,
       };
     case "token_mismatch":
       return {
         status: 400,
-        body: `${SHELL_HEAD}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">The token doesn't match this approval id.</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">The token doesn't match this approval id.</p>${SHELL_FOOT}`,
+      };
+    case "token_action_mismatch":
+      return {
+        status: 400,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">The token was issued for a different action. Use the original button link from the email.</p>${SHELL_FOOT}`,
       };
   }
 };
