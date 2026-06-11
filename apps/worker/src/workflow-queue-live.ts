@@ -17,6 +17,16 @@ import {
 import type { PgBoss } from "./queue.js";
 
 export const DEFAULT_WORKFLOW_QUEUE_NAME = "workflow.events";
+export const DEFAULT_WORKFLOW_DEAD_LETTER_QUEUE = "workflow.events.dead";
+
+// With `key_strict_fifo`, a job in `failed` state holds the partial unique
+// index slot (pg-boss job_i8 covers active|retry|failed), blocking every
+// subsequent event for that case/thread key until the row is deleted.
+// The pg-boss default retention is 7 days — far too long for a poison
+// message to block a customer conversation (audit L11). One hour keeps the
+// blockage bounded; the dead-letter consumer escalates the case to a human
+// immediately on exhaustion regardless.
+const DEFAULT_DELETE_AFTER_SECONDS = 3600;
 
 export interface PgBossWorkflowQueueOptions {
   readonly queueName?: string;
@@ -27,6 +37,7 @@ export interface PgBossWorkflowQueueOptions {
   readonly expireInSeconds?: number;
   readonly retentionSeconds?: number;
   readonly deleteAfterSeconds?: number;
+  readonly deadLetter?: string | null;
   readonly pollingIntervalSeconds?: number;
   readonly batchSize?: number;
 }
@@ -48,14 +59,19 @@ const createQueueOptions = (
     policy: opts.queuePolicy ?? "key_strict_fifo",
     retryLimit: opts.retryLimit ?? 5,
     retryBackoff: opts.retryBackoff ?? true,
+    deleteAfterSeconds: opts.deleteAfterSeconds ?? DEFAULT_DELETE_AFTER_SECONDS,
   };
   if (opts.retryDelay !== undefined) out.retryDelay = opts.retryDelay;
   if (opts.expireInSeconds !== undefined)
     out.expireInSeconds = opts.expireInSeconds;
   if (opts.retentionSeconds !== undefined)
     out.retentionSeconds = opts.retentionSeconds;
-  if (opts.deleteAfterSeconds !== undefined)
-    out.deleteAfterSeconds = opts.deleteAfterSeconds;
+  // `null` opts out of dead-lettering (tests); undefined gets the default.
+  const deadLetter =
+    opts.deadLetter === undefined
+      ? DEFAULT_WORKFLOW_DEAD_LETTER_QUEUE
+      : opts.deadLetter;
+  if (deadLetter) out.deadLetter = deadLetter;
   return out;
 };
 
@@ -136,7 +152,24 @@ export const ensureWorkflowQueue = (
   boss: PgBoss,
   opts: PgBossWorkflowQueueOptions = {},
 ): Effect.Effect<void, WorkflowQueueBackendError> =>
-  wrap("ensure_queue", boss.createQueue(queueName(opts), createQueueOptions(opts)));
+  Effect.gen(function* () {
+    const queueOpts = createQueueOptions(opts);
+    // The dead-letter target must exist before a queue can reference it.
+    if (queueOpts.deadLetter) {
+      yield* wrap(
+        "ensure_queue",
+        boss.createQueue(queueOpts.deadLetter, {
+          policy: "standard",
+          retryLimit: 3,
+          retryBackoff: true,
+        }),
+      );
+    }
+    yield* wrap(
+      "ensure_queue",
+      boss.createQueue(queueName(opts), queueOpts),
+    );
+  });
 
 export const enqueueWorkflowEvent = (
   boss: PgBoss,

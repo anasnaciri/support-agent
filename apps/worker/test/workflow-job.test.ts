@@ -1,0 +1,218 @@
+import { Effect, Layer } from "effect";
+import { describe, expect, it } from "vitest";
+import {
+  AgentId,
+  TenantId,
+  type DomainEvent,
+  type WorkflowResult,
+} from "@support-agent/agent-core";
+import {
+  AuditLogService,
+  AuditLogServiceTest,
+  CaseRepository,
+  CaseRepositoryTest,
+  TransactionRunnerPassthrough,
+} from "@support-agent/services";
+import { settleWorkflowResult } from "../src/workflow-job.js";
+import { escalateDeadLetteredEvent } from "../src/workflow-dead-letter.js";
+
+// ------------------------------------------------------------
+// Audit C1/L11 — worker-side settlement of a tick's WorkflowResult.
+// `Failed retryable:true` must surface as a retry (throw → pg-boss
+// backoff); everything else completes the job. Dead-lettered events
+// must park their case in human_takeover so retry exhaustion is
+// visible instead of silently dropping the event.
+// ------------------------------------------------------------
+
+describe("settleWorkflowResult", () => {
+  it("retries a retryable Failed", () => {
+    const result: WorkflowResult = {
+      type: "Failed",
+      reason: "llm transient error: ProviderUnavailable",
+      retryable: true,
+    };
+    expect(settleWorkflowResult(result)).toEqual({
+      kind: "retry",
+      reason: "llm transient error: ProviderUnavailable",
+    });
+  });
+
+  it("completes a non-retryable Failed", () => {
+    const result: WorkflowResult = {
+      type: "Failed",
+      reason: "approval x not found",
+      retryable: false,
+    };
+    expect(settleWorkflowResult(result)).toEqual({ kind: "complete" });
+  });
+
+  it("completes terminal and paused results", () => {
+    const results: ReadonlyArray<WorkflowResult> = [
+      { type: "Completed" },
+      { type: "PausedWaitingForCustomer" },
+      { type: "PausedForHumanTakeover" },
+      { type: "HumanTakeoverRequired", reason: "max_turns_exceeded" },
+    ];
+    for (const r of results) {
+      expect(settleWorkflowResult(r)).toEqual({ kind: "complete" });
+    }
+  });
+});
+
+describe("escalateDeadLetteredEvent", () => {
+  const layer = Layer.mergeAll(
+    CaseRepositoryTest,
+    AuditLogServiceTest,
+    TransactionRunnerPassthrough,
+  );
+
+  it("parks the dead-lettered event's case in human_takeover with an audit row", async () => {
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            subject: "Dead letter test",
+          });
+          const event: DomainEvent = {
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-dl" as never,
+              messageId: "msg-dl",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Help",
+              bodyText: "Hello",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          };
+          yield* escalateDeadLetteredEvent(event);
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.entries.map((e) => e.action)).toContain(
+      "case.escalated_to_human",
+    );
+  });
+
+  it("resolves the case for a dead-lettered message.received via the thread id", async () => {
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            subject: "Dead letter thread test",
+            threadId: "thread-dl-2" as never,
+          });
+          const event: DomainEvent = {
+            type: "message.received",
+            tenantId: TenantId("tenant-acme"),
+            threadId: "thread-dl-2" as never,
+            payload: {
+              threadId: "thread-dl-2" as never,
+              messageId: "msg-dl-2",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Help",
+              bodyText: "Hello",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          };
+          yield* escalateDeadLetteredEvent(event);
+          const fetched = yield* repo.getById(created.id);
+          return { fetched };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.fetched.status).toBe("human_takeover");
+  });
+
+  it("leaves an already human_takeover case untouched (idempotent)", async () => {
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            subject: "Already parked",
+          });
+          yield* repo.transitionStatus(created.id, "human_takeover", {
+            reason: "test setup",
+          });
+          const event: DomainEvent = {
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-dl-3" as never,
+              messageId: "msg-dl-3",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Help",
+              bodyText: "Hello",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          };
+          yield* escalateDeadLetteredEvent(event);
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.fetched.status).toBe("human_takeover");
+    // No second escalation audit row.
+    expect(
+      out.entries.filter((e) => e.action === "case.escalated_to_human"),
+    ).toHaveLength(0);
+  });
+
+  it("never fails on an unknown case (logs and moves on)", async () => {
+    await Effect.runPromise(
+      Effect.provide(
+        escalateDeadLetteredEvent({
+          type: "customer.replied",
+          caseId: "case-does-not-exist" as never,
+          payload: {
+            threadId: "thread-x" as never,
+            messageId: "msg-x",
+            from: { name: null, email: "x@example.com" },
+            to: [],
+            subject: "x",
+            bodyText: "x",
+            bodyHtml: null,
+            receivedAt: new Date(),
+            attachments: [],
+          },
+        }),
+        layer,
+      ),
+    );
+  });
+});

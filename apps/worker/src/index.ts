@@ -7,6 +7,11 @@ import {
   ensureWorkflowQueue,
   reviveDomainEvent,
 } from "./workflow-queue-live.js";
+import { settleWorkflowResult } from "./workflow-job.js";
+import {
+  WORKFLOW_DEAD_LETTER_QUEUE,
+  registerWorkflowDeadLetterConsumer,
+} from "./workflow-dead-letter.js";
 import {
   GMAIL_WATCH_RENEWAL_QUEUE,
   registerGmailWatchRenewal,
@@ -81,6 +86,16 @@ const main = async (): Promise<void> => {
                       ? ` (held — case under human takeover)`
                       : ""),
           );
+          // Retryable failures must surface as a thrown error so pg-boss
+          // applies its retry policy; completing the job here would drop
+          // the event forever (audit C1). Exhausted retries land on the
+          // dead-letter queue, whose consumer parks the case for a human.
+          const settlement = settleWorkflowResult(exit.value);
+          if (settlement.kind === "retry") {
+            throw new Error(
+              `retryable workflow failure: ${settlement.reason}`,
+            );
+          }
         } else {
           // E=never on handleEvent, so this can only be defects. Log + rethrow
           // so pg-boss applies its retry policy.
@@ -95,6 +110,17 @@ const main = async (): Promise<void> => {
 
   console.log(
     `[worker] running. workerId=${workerId} queue=${DEFAULT_WORKFLOW_QUEUE_NAME}`,
+  );
+
+  // Dead-letter consumer: parks the case behind any workflow event that
+  // exhausted its retries in human_takeover so the failure is visible on
+  // the dashboard instead of silently dropped (audit C1/L11).
+  const deadLetterWorkerId = await registerWorkflowDeadLetterConsumer({
+    boss,
+    runtimeLayer,
+  });
+  console.log(
+    `[worker] dead-letter consumer running. workerId=${deadLetterWorkerId} queue=${WORKFLOW_DEAD_LETTER_QUEUE}`,
   );
 
   // Schedule the Gmail watch-renewal cron. No-ops when Google OAuth env

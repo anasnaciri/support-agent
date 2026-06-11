@@ -44,6 +44,8 @@ import {
   DbClient,
   DbClientLive,
   ImageHashStoreLive,
+  ProcessedMessageStoreLive,
+  ToolExecutionStoreLive,
   KnowledgeBaseServiceLive,
   LLMCredentialResolverLive,
   TenantAgentOverridesServiceLive,
@@ -255,6 +257,11 @@ export const buildWorker = async (
     // `knowledge.search` tool the specialists call.
     KnowledgeBaseServiceLive,
     TimerServiceLive,
+    // At-least-once idempotency (audit C2/C3): processed-message dedup
+    // and tool-execution markers. The runtime treats both as optional —
+    // wiring them here is what turns the dedup on in production.
+    ProcessedMessageStoreLive,
+    ToolExecutionStoreLive,
     // Exposed so workers like the retention-sweep cron can read
     // per-tenant settings (`retentionDays`). Other services that need
     // TenantRepository (PlatformMailService, PermissionServiceLive)
@@ -346,7 +353,9 @@ export const buildWorker = async (
   const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
     baseUrl: approvalBaseUrl,
     signingKey: approvalSigningKey,
-    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    // 24h — matches the approval row's expiresAt so an emailed link can
+    // never outlive the approval it points at (audit S3; was 7 days).
+    ttlMs: 24 * 60 * 60 * 1000,
   });
 
   // Conversation connector. The worker boots ONE `ConversationService`, but
@@ -394,16 +403,24 @@ export const buildWorker = async (
       ? ([["imap", makeImapSmtpConversation()]] as const)
       : []),
   ];
+  // In production the in-memory fallback is forbidden outright (audit
+  // L16): ConversationServiceTest "sends" replies into memory, the agent
+  // resolves the case, and the customer receives nothing — a silent
+  // outage. (Unreachable today because CREDENTIAL_ENCRYPTION_KEY is
+  // already required in prod and the IMAP builder needs only that key,
+  // but the hard fail keeps a future builder-gating change from quietly
+  // reintroducing the no-op path.)
+  if (isProd && !(credKeyB64 && connectorBuilders.length > 0)) {
+    throw new Error(
+      "[worker] no conversation connector configured in production — replies would silently no-op. Set CREDENTIAL_ENCRYPTION_KEY (and provider OAuth env for Gmail/Outlook).",
+    );
+  }
   const conversation =
     credKeyB64 && connectorBuilders.length > 0
       ? ConversationRouterLive(connectorBuilders).pipe(
           Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
         )
-      : (warnProdFallback(
-          "conversation connector",
-          "CREDENTIAL_ENCRYPTION_KEY + GOOGLE_OAUTH_CLIENT_ID/SECRET or MICROSOFT_OAUTH_CLIENT_ID/SECRET",
-        ),
-        ConversationServiceTest({}));
+      : ConversationServiceTest({});
 
   // Sheets connector. Same gating as Gmail: when CREDENTIAL_ENCRYPTION_KEY
   // + Google OAuth env are set, swap in the Live layer that resolves
