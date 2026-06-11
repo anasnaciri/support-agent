@@ -192,6 +192,41 @@ describe("conversation.reply tool", () => {
     expect(handle.sent).toHaveLength(0);
   });
 
+  it("refuses to send a customer reply to the connected mailbox itself", async () => {
+    const { layer, handle } = makeConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: "Support", email: "support@example.com" }],
+            subject: null,
+            bodyText: "This must not be sent to ourselves.",
+            bodyHtml: null,
+            inReplyToMessageId: "msg-1",
+            draftId: "draft-self",
+          } as never,
+          baseCtx("c-self-reply"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual([
+          "recipient_is_connected_mailbox:support@example.com",
+        ]);
+      }
+    }
+    expect(handle.sent).toHaveLength(0);
+  });
+
   it("declares an idempotencyKey derived from draftId", () => {
     // Master-plan §9: state-changing tools MUST surface an idempotency
     // key so the runtime can dedupe retries before re-invoking the body.

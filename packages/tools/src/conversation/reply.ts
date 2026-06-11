@@ -33,6 +33,23 @@ export const assertRecipientsInThread = (
   mailbox?: string,
 ): Effect.Effect<void, ToolOutputInvalid, ConversationService> =>
   Effect.gen(function* () {
+    if (mailbox) {
+      const ownAddress = mailbox.trim().toLowerCase();
+      const selfRecipients = recipients.filter(
+        (recipient) => recipient.email.trim().toLowerCase() === ownAddress,
+      );
+      if (selfRecipients.length > 0) {
+        return yield* Effect.fail(
+          new ToolOutputInvalid({
+            tool: toolName,
+            issues: selfRecipients.map(
+              (recipient) =>
+                `recipient_is_connected_mailbox:${recipient.email}`,
+            ),
+          }),
+        );
+      }
+    }
     const convo = yield* ConversationService;
     const threadEither = yield* convo
       .fetchThread(tenantId, ThreadId(threadId), mailbox)

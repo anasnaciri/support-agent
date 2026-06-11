@@ -103,6 +103,17 @@ const oneInboundMessage = {
   sentDateTime: "2026-06-01T10:00:00Z",
 };
 
+const laterOutboundMessage = {
+  id: "m-2",
+  conversationId: "conv-1",
+  subject: "Re: Where is my order?",
+  from: { emailAddress: { name: "Support", address: mailbox } },
+  toRecipients: [{ emailAddress: { address: "jane@example.com" } }],
+  body: { contentType: "text", content: "We shipped it yesterday." },
+  receivedDateTime: "2026-06-01T11:00:00Z",
+  sentDateTime: "2026-06-01T11:00:00Z",
+};
+
 const runFetchThread = (
   fetchImpl: typeof fetch,
   store: Layer.Layer<ConnectorCredentialStore>,
@@ -179,20 +190,33 @@ describe("GraphConversationLive — fetchThread", () => {
 });
 
 describe("GraphConversationLive — reply", () => {
-  it("createReply → patch body → send, returning the draft id as the SentMessage", async () => {
+  it("replies to the latest inbound message and explicitly sets customer recipients", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       if (url.includes("/me/messages?$filter")) {
-        return conversationList([oneInboundMessage]);
+        return conversationList([oneInboundMessage, laterOutboundMessage]);
       }
       if (url.endsWith("/createReply")) {
+        expect(url).toContain("/me/messages/m-1/createReply");
+        expect(url).not.toContain("/me/messages/m-2/createReply");
         return okJson({ id: "draft-9", conversationId: "conv-1" });
       }
       if (method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as {
           body: { contentType: string; content: string };
+          toRecipients: ReadonlyArray<{
+            emailAddress: { name?: string; address: string };
+          }>;
         };
         expect(body.body.content).toContain("We shipped it yesterday.");
+        expect(body.toRecipients).toEqual([
+          {
+            emailAddress: {
+              name: "Jane",
+              address: "jane@example.com",
+            },
+          },
+        ]);
         expect(url).toContain("/me/messages/draft-9");
         return okJson({ id: "draft-9" });
       }

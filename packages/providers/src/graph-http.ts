@@ -244,12 +244,13 @@ export const graphCreateReplyDraft = async (
   return { id: raw.id };
 };
 
-/** Replace a draft's body with our content. */
+/** Replace a reply draft's body and recipients with the approved values. */
 export const graphUpdateDraftBody = async (
   opts: GraphHttpCallOptions & {
     readonly draftId: string;
     readonly bodyText: string;
     readonly bodyHtml: string | null;
+    readonly to: ReadonlyArray<MessageParticipant>;
   },
 ): Promise<void> => {
   const content = opts.bodyHtml ?? opts.bodyText;
@@ -258,7 +259,15 @@ export const graphUpdateDraftBody = async (
     method: "PATCH",
     path: `/me/messages/${encodeURIComponent(opts.draftId)}`,
     token: opts.token,
-    body: { body: { contentType, content } },
+    body: {
+      body: { contentType, content },
+      toRecipients: opts.to.map((recipient) => ({
+        emailAddress: {
+          ...(recipient.name ? { name: recipient.name } : {}),
+          address: recipient.email,
+        },
+      })),
+    },
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
 };

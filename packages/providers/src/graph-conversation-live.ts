@@ -176,8 +176,9 @@ export const makeGraphConversation = (
       });
 
     // Both reply and askCustomer are outbound on an existing conversation —
-    // Graph keeps threading via `createReply`, so we reply to the most recent
-    // message in the thread.
+    // Graph keeps threading via `createReply`. It replies to the selected
+    // message's sender, so the target must be the most recent inbound message:
+    // selecting our own latest outbound message creates a self-addressed draft.
     const send = (
       tenantId: TenantId,
       draft: ConversationReply | AskCustomerDraft,
@@ -199,12 +200,14 @@ export const makeGraphConversation = (
               draftId: draft.draftId,
             }),
         });
-        const latest = thread.messages.at(-1);
-        if (!latest) {
+        const latestInbound = thread.messages.slice().reverse().find(
+          (message) => message.direction === "inbound",
+        );
+        if (!latestInbound) {
           return yield* Effect.fail(
             new ConversationSendFailed({
               draftId: draft.draftId,
-              reason: "no message to reply to in conversation",
+              reason: "no inbound message to reply to in conversation",
             }),
           );
         }
@@ -212,7 +215,7 @@ export const makeGraphConversation = (
           try: () =>
             graphCreateReplyDraft({
               token: conn.accessToken,
-              messageId: latest.id,
+              messageId: latestInbound.id,
               ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
             }),
           catch: (cause) =>
@@ -225,6 +228,7 @@ export const makeGraphConversation = (
               draftId: created.id,
               bodyText: draft.bodyText,
               bodyHtml: draft.bodyHtml,
+              to: draft.to,
               ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
             }),
           catch: (cause) =>
