@@ -14,6 +14,31 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-11 — Workspaces (multi-store per account):** A WorkOS org now owns MANY tenant rows — each row is
+  one **workspace** with its own Shopify store, mailboxes, LLM key, cases, knowledge, policies. Architecture:
+  workspace = tenant row (no new scoping column anywhere; services/runtime/worker/webhook routing untouched).
+  (1) db: `tenants_workos_org_unique` relaxed to a plain index (migration 0020); default workspace = oldest
+  `(created_at, id)` — `findTenantIdByWorkosOrg`/`tenantByWorkosOrg` now ORDER BY it; new
+  `listWorkspacesByWorkosOrg`/`findWorkspaceForOrg`/`createWorkspaceForOrg` (non-idempotent)/
+  `renameWorkspaceForOrg`. (2) api: `x-workspace-id` header pins a dashboard request to a workspace via the
+  single `authenticateDashboard` change point (400 malformed / 404 foreign — never 403, which the dashboard
+  reserves for onboarding; no header → default). New endpoints: GET+POST `/dashboard/workspaces`,
+  `:id/rename`, `:id/delete`. Deletion: `deleteTenantAccount` gained `{allowOrgDelete, sendEmail}` +
+  `resolveCleanupTargets` — the WorkOS org goes on the cleanup job ONLY when allowed AND it's the org's last
+  workspace (fixed a real bug: admin delete of one of two workspaces would have nuked the shared org);
+  workspace delete refuses the last workspace (409); account delete sweeps all workspaces newest-first, only
+  the final (default) job carries org+email. Create-workspace copies the org's current legal acceptance
+  (connector gates keep holding); zero workspaces → 409 use_onboarding. (3) dashboard: `workspace:id` cookie
+  (server actions only) validated per-request via pure `pickActiveWorkspace` (stale → default, self-healing);
+  `getDashboardContext` returns `{workspaceId, workspaces}` and every api call stamps the header (incl. the
+  /api/cases proxies); WorkspaceSwitcher popover in the icon rail; `/workspaces/new`; settings/account split
+  into per-workspace delete (>1 workspaces, typed-name confirm) + whole-account delete (copy enumerates all
+  workspaces). Also: `call()` gained `on403:"return"` — fixed the dead legal-403 branch in the IMAP connect
+  action. (4) admin: tenant list grouped by org (`groupTenantsByOrg`). (5) chore: removed dead
+  `resolveTenantByShop` (the no-state auto-create path; both install/callback no-state branches are
+  lookup-only). No pg-boss/worker changes needed — `runAccountCleanup` already skips null org/email.
+  TDD throughout; verified `pnpm build`, both Next builds, full ci-local suite green at each commit.
+  **Follow-ups recorded under "Workspaces follow-ups" below.**
 - **2026-06-11 — Email thread isolation + Outlook reply hardening:** Fixed the mailbox/thread routing gap that let the dashboard and runtime guess among multiple connected mailboxes. Cases now carry the exact connected mailbox, `findByThreadId` scopes by `(tenant, provider, mailbox, thread)`, inbox events stamp `mailbox`, and conversation tools fail closed when a case is not mailbox-bound. The dashboard email-thread view now resolves legacy cases conservatively and shows a safe ambiguity state. Separate Outlook-specific fixes landed for the pre-existing self-reply bug: Graph replies now anchor to the latest inbound customer message, the approved `to` list is written back onto the draft, replies to the connected mailbox itself are rejected, and Graph reply drafts are filtered out of thread views so the same draft/sent pair does not render twice. Verified with `pnpm build`, the targeted conversation/provider tests, the DB integration suite for mailbox scoping, and the full local CI run (`1388 passed / 5 skipped`).
 - **2026-06-11 — Dashboard "Retry now" (resume + immediate agent tick):** A `human_takeover` case can now be
   re-run by the agent on demand, closing the recovery loop for `max_turns_exceeded` / retries-exhausted
@@ -144,6 +169,9 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
 - [ ] **S14 — forwarded-WorkOS-JWT auth for apps/api:** replace the shared `DASHBOARD_API_TOKEN` +
       self-asserted `x-org-id` trust with the user's WorkOS access token forwarded per request and
       verified api-side via JWKS. Until then a leaked service token = full cross-tenant compromise.
+      The migration must also cover the self-asserted `x-workspace-id` header (2026-06-11 workspaces) —
+      it shares the same trust model (the api does verify org-owns-workspace, but the org itself is
+      asserted).
 - [ ] **Dashboard: render `connectorHealth`** on /settings/integrations — the renewal/poll crons now stamp
       `connectorHealth`/`connectorHealthReason` into connector metadata; the UI should badge broken
       connectors (the operator alert email already fires).
@@ -157,6 +185,27 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
 - [ ] **Enrich `timer.expired` ticks like `case.resumed`:** the retry work (2026-06-11) gave `case.resumed`
       a real re-orientation message (thread id + prior context); follow-up timer ticks still wake the agent
       with a bare `(system event: timer.expired)` and the same blindness — same fix applies.
+
+## Workspaces follow-ups (2026-06-11)
+
+Deliberately deferred when workspaces (multi-store per account) landed:
+
+- [ ] **Per-workspace membership / roles** — decided 2026-06-11: every org member sees every workspace for
+      now. A later iteration adds a `workspace_members` table + access checks in `authenticateDashboard` and
+      a member-management UI. Until then workspace isolation is a navigation concept, not a permission one.
+- [ ] **"Workspace deleted" email template** — workspace-scoped deletes currently send NO email (only the
+      account delete's final workspace does). Add a distinct, lighter Resend template for single-workspace
+      deletion if merchants ask for a receipt.
+- [ ] **Concurrent delete of the last two workspaces** — two simultaneous workspace deletes can each pass
+      the `count > 1` check and leave a live zero-workspace org (the user recovers via /onboarding under the
+      same org; no data loss). Hardening if it ever matters: take the org-scoped pg advisory lock
+      (`TransactionRunner.withLock`) around the count+delete.
+- [ ] **`createTenantForOrg` race is no longer index-backed** — onboarding's org-idempotency now rests only
+      on its pre-SELECT (the unique index is gone). A two-tab onboarding race can mint two first workspaces;
+      harmless (it's just an extra workspace the user can delete), recorded for completeness.
+- [ ] **Workspace rename UI** — the api endpoint (`POST /dashboard/workspaces/:id/rename`) exists and is
+      tested; the dashboard doesn't surface it yet (names are set at create time). Small settings form when
+      needed.
 
 ## ⚠️ Pilot pre-onboarding audit (2026-06-06)
 
