@@ -18,8 +18,25 @@ export type DashboardAuthParse =
        * requests, which don't need it.
        */
       readonly userId: string | undefined;
+      /**
+       * Workspace (tenant row) the request is pinned to, from
+       * `x-workspace-id`. Undefined → the org's default workspace. Shape and
+       * ownership are checked after parsing, against the DB.
+       */
+      readonly workspaceId: string | undefined;
     }
   | { readonly ok: false; readonly status: 401 | 400; readonly message: string };
+
+/**
+ * `tenants.id` is a Postgres `uuid` — comparing it against a non-UUID string
+ * throws a cast error (a 500). Gate the self-asserted `x-workspace-id` on
+ * shape so garbage becomes a clean 400 before any query runs.
+ */
+const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isWorkspaceIdShape = (value: string): boolean =>
+  UUID_SHAPE.test(value);
 
 const BEARER = "Bearer ";
 
@@ -54,10 +71,13 @@ export const parseDashboardAuth = (
     return { ok: false, status: 400, message: "missing x-org-id" };
   }
   const userId = headers["x-user-id"];
+  const workspaceId = headers["x-workspace-id"];
   return {
     ok: true,
     organizationId: org,
     userId: userId && userId.length > 0 ? userId : undefined,
+    workspaceId:
+      workspaceId && workspaceId.length > 0 ? workspaceId : undefined,
   };
 };
 

@@ -59,6 +59,7 @@ import {
   createTenantForOrg,
   DbClient,
   findTenantIdByWorkosOrg,
+  findWorkspaceForOrg,
   knowledgeDocuments,
   parsePageNumber,
   parsePageSize,
@@ -71,7 +72,11 @@ import {
   type DrizzleDb,
 } from "@support-agent/db";
 import { fetchModelCatalog } from "@support-agent/providers";
-import { parseAdminAuth, parseDashboardAuth } from "./dashboard-auth.js";
+import {
+  isWorkspaceIdShape,
+  parseAdminAuth,
+  parseDashboardAuth,
+} from "./dashboard-auth.js";
 import { retryCaseNow } from "./case-retry.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
@@ -320,8 +325,13 @@ type DashboardAuthResult =
 
 /**
  * Shared auth for `/dashboard/*`: verify the service token, read the asserted
- * WorkOS org, resolve it to a tenant. 503 unconfigured, 401/400 bad auth,
- * 403 when the org isn't linked to a tenant.
+ * WorkOS org, resolve it to a WORKSPACE (tenant row). `x-workspace-id` pins
+ * the request to one of the org's workspaces; without it the org's default
+ * (oldest) workspace is used. 503 unconfigured, 401/400 bad auth, 400 on a
+ * malformed workspace id, 404 when the org doesn't own the named workspace
+ * (NOT 403 — the dashboard treats 403 as "needs onboarding", and a stale
+ * workspace cookie must never bounce a real tenant there), 403 when the org
+ * has no workspaces at all.
  */
 const authenticateDashboard = async (
   cfg: ApiConfig,
@@ -337,6 +347,18 @@ const authenticateDashboard = async (
   );
   if (!parsed.ok) {
     return { ok: false, status: parsed.status, error: parsed.message };
+  }
+  if (parsed.workspaceId !== undefined) {
+    if (!isWorkspaceIdShape(parsed.workspaceId)) {
+      return { ok: false, status: 400, error: "invalid_workspace_id" };
+    }
+    const workspace = await runWithDb(layer, (db) =>
+      findWorkspaceForOrg(db, parsed.organizationId, parsed.workspaceId!),
+    );
+    if (!workspace) {
+      return { ok: false, status: 404, error: "workspace_not_found" };
+    }
+    return { ok: true, tenantId: workspace.id, userId: parsed.userId };
   }
   const tenantId = await runWithDb(layer, (db) =>
     findTenantIdByWorkosOrg(db, parsed.organizationId),
