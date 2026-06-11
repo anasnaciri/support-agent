@@ -236,6 +236,34 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect((await get(`/dashboard/cases/${caseX}`)).status).toBe(404);
   });
 
+  it("GET /dashboard/cases/:id/conversation-thread — reports a case without a thread", async () => {
+    if (!raw) return;
+    const res = await get(`/dashboard/cases/${caseA}/conversation-thread`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: "unavailable",
+      reason: "no_thread",
+    });
+  });
+
+  it("GET /dashboard/cases/:id/conversation-thread — 404 for another tenant's case", async () => {
+    if (!raw) return;
+    expect(
+      (await get(`/dashboard/cases/${caseX}/conversation-thread`)).status,
+    ).toBe(404);
+  });
+
+  it("GET /dashboard/cases/:id/conversation-thread — requires dashboard auth", async () => {
+    if (!raw) return;
+    expect(
+      (
+        await get(`/dashboard/cases/${caseA}/conversation-thread`, {
+          "x-org-id": orgId,
+        })
+      ).status,
+    ).toBe(401);
+  });
+
   it("GET /dashboard/cases/:id/events — audit rows since cursor", async () => {
     if (!raw) return;
     const body = (await (await get(`/dashboard/cases/${caseA}/events?since=0`)).json()) as {

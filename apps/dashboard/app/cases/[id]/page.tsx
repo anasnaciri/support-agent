@@ -3,6 +3,8 @@ import Link from "next/link";
 import type {
   ApprovalDetail,
   AuditEntry,
+  CaseConversationThreadResult,
+  DashboardConversationParticipant,
 } from "@support-agent/dashboard-contracts";
 
 import { api, getDashboardContext } from "@/lib/api-client";
@@ -19,6 +21,12 @@ import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { resumeAction, retryAction, takeOverAction } from "./actions";
+import {
+  buildCaseTimelineHref,
+  conversationThreadUnavailableView,
+  formatAttachmentSize,
+  parseCaseTimelineMode,
+} from "./case-timeline";
 import {
   RECOMMENDATION_LABEL,
   extractRefundRecommendation,
@@ -339,18 +347,138 @@ const RefundRecommendationBlock = ({
   </div>
 );
 
+const participantLabel = (
+  participant: DashboardConversationParticipant,
+): string =>
+  participant.name
+    ? `${participant.name} <${participant.email}>`
+    : participant.email;
+
+const EmailThreadTimeline = ({
+  result,
+}: {
+  readonly result: CaseConversationThreadResult;
+}) => {
+  if (result.status === "unavailable") {
+    const view = conversationThreadUnavailableView(result.reason);
+    return (
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          <div className="font-medium text-sm">{view.title}</div>
+          <p className="text-sm text-muted-foreground">{view.description}</p>
+          {view.showIntegrationsLink ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/settings/integrations">Open integrations</Link>
+            </Button>
+          ) : null}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (result.thread.messages.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          The provider returned an empty email thread.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Card>
+        <CardContent className="space-y-1.5 p-4">
+          <div className="font-medium text-sm">{result.thread.subject}</div>
+          <div className="text-xs text-muted-foreground">
+            {result.thread.participants.map(participantLabel).join(" · ")}
+          </div>
+        </CardContent>
+      </Card>
+      <ol className="relative space-y-3">
+        {result.thread.messages.map((message) => (
+          <li
+            key={message.id}
+            className="relative ml-2 border-l-2 border-border pl-5"
+          >
+            <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
+            <Card>
+              <CardContent className="space-y-3 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">
+                        {message.direction === "inbound" ? "Received" : "Sent"}
+                      </Badge>
+                      {message.subject ? (
+                        <span className="font-medium text-sm">
+                          {message.subject}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      From {participantLabel(message.from)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      To {message.to.map(participantLabel).join(", ") || "(none)"}
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatDateTime(message.sentAt)}
+                  </div>
+                </div>
+                {message.sanitizedBodyHtml ? (
+                  <div
+                    className="break-words rounded-md bg-muted/30 p-3 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:p-1 [&_th]:border [&_th]:border-border [&_th]:p-1 [&_ul]:list-disc [&_ul]:pl-5"
+                    dangerouslySetInnerHTML={{
+                      __html: message.sanitizedBodyHtml,
+                    }}
+                  />
+                ) : (
+                  <p className="whitespace-pre-wrap break-words rounded-md bg-muted/30 p-3 text-sm">
+                    {message.bodyText || "(empty message)"}
+                  </p>
+                )}
+                {message.attachments.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {message.attachments.map((attachment, index) => (
+                      <Badge
+                        key={`${message.id}-attachment-${index}`}
+                        variant="outline"
+                        className="font-normal"
+                      >
+                        {attachment.filename} · {attachment.contentType} ·{" "}
+                        {formatAttachmentSize(attachment.sizeBytes)}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+};
+
 export default async function CaseDetailPage({ params, searchParams }: Params) {
   const { id } = await params;
   const sp = await searchParams;
+  const timelineMode = parseCaseTimelineMode(sp.timeline);
   const banner =
     takeOverBanner(sp.takenOver) ??
     resumeBanner(sp.resumed) ??
     retryBanner(sp.retried) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
-  const [detail, shopify] = await Promise.all([
+  const [detail, shopify, conversationThread] = await Promise.all([
     api.caseDetail(ctx, id),
     api.caseShopify(ctx, id),
+    timelineMode === "email"
+      ? api.caseConversationThread(ctx, id)
+      : Promise.resolve(null),
   ]);
   if (!detail) notFound();
   const caseRow = detail.case;
@@ -389,23 +517,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     .slice()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const tokenRollup = sumCaseTokens(entries);
-  const timelineMode = sp.timeline === "simplified" ? "simplified" : "full";
   const summaryText =
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
-  const timelineHref = (mode: "full" | "simplified") => {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(sp)) {
-      if (value) query.set(key, value);
-    }
-    if (mode === "simplified") {
-      query.set("timeline", "simplified");
-    } else {
-      query.delete("timeline");
-    }
-    const search = query.toString();
-    return search ? `/cases/${caseRow.id}?${search}` : `/cases/${caseRow.id}`;
-  };
+  const timelineHref = (mode: "full" | "simplified" | "email") =>
+    buildCaseTimelineHref(caseRow.id, sp, mode);
   const recommendationTimelineItems: SimplifiedTimelineItem[] = entries.flatMap(
     (entry) => {
       const recommendation = refundRecommendationFromEntry(entry);
@@ -566,9 +682,25 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             >
               <Link href={timelineHref("simplified")}>Simplified</Link>
             </Button>
+            <Button
+              asChild
+              size="sm"
+              variant={timelineMode === "email" ? "default" : "outline"}
+            >
+              <Link href={timelineHref("email")}>Email thread</Link>
+            </Button>
           </div>
         </div>
-        {timelineMode === "simplified" ? (
+        {timelineMode === "email" ? (
+          <EmailThreadTimeline
+            result={
+              conversationThread ?? {
+                status: "unavailable",
+                reason: "no_thread",
+              }
+            }
+          />
+        ) : timelineMode === "simplified" ? (
           summaryText || simplifiedTimelineItems.length > 0 ? (
             <div className="space-y-3">
               {summaryText ? (

@@ -12,7 +12,9 @@ import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import {
   applyApprovalDecision,
+  CaseRepository,
   ConnectorCredentialStore,
+  ConversationService,
   DATA_PROCESSING_NOTICE_VERSION,
   DPA_VERSION,
   decisionToEvent,
@@ -33,6 +35,7 @@ import {
 } from "@support-agent/services";
 import {
   AgentId,
+  CaseId,
   ConnectorNotFound,
   ConnectorStoreDbError,
   TenantId,
@@ -69,6 +72,10 @@ import { fetchModelCatalog } from "@support-agent/providers";
 import { parseAdminAuth, parseDashboardAuth } from "./dashboard-auth.js";
 import { retryCaseNow } from "./case-retry.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
+import {
+  conversationUnavailableReason,
+  projectConversationThread,
+} from "./dashboard-conversation-thread.js";
 import {
   buildModelsResponse,
   resolveActiveLlmCredential,
@@ -497,6 +504,61 @@ const handleDashboardCaseDetail = async (
   );
   if (!result) return sendJson(res, 404, { error: "not_found" });
   return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id/conversation-thread — live provider thread for the
+// third case-timeline view. The case lookup is tenant-scoped before any
+// provider call, and connector failures degrade to a stable UI result.
+const handleDashboardCaseConversationThread = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const conversation = yield* ConversationService;
+        const caseRow = yield* cases
+          .getById(CaseId(id), TenantId(auth.tenantId))
+          .pipe(Effect.catchTag("CaseNotFound", () => Effect.succeed(null)));
+        if (!caseRow) return { kind: "not_found" as const };
+        if (!caseRow.threadId) {
+          return {
+            kind: "result" as const,
+            result: {
+              status: "unavailable" as const,
+              reason: "no_thread" as const,
+            },
+          };
+        }
+        const threadResult = yield* conversation
+          .fetchThread(TenantId(auth.tenantId), caseRow.threadId)
+          .pipe(
+            Effect.match({
+              onFailure: (error) => ({
+                status: "unavailable" as const,
+                reason: conversationUnavailableReason(error),
+              }),
+              onSuccess: (thread) => ({
+                status: "available" as const,
+                thread: projectConversationThread(thread),
+              }),
+            }),
+          );
+        return { kind: "result" as const, result: threadResult };
+      }),
+      layer,
+    ),
+  );
+  if (result.kind === "not_found") {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  return sendJson(res, 200, result.result);
 };
 
 // GET /dashboard/cases/:id/events?since= — audit rows after `since` (poll).
@@ -4874,6 +4936,11 @@ export const startServer = async (
     "/dashboard/cases/:id",
     "Case detail with timeline + approvals",
     handleDashboardCaseDetail,
+  );
+  dashboardGet(
+    "/dashboard/cases/:id/conversation-thread",
+    "Live customer email thread for a case",
+    handleDashboardCaseConversationThread,
   );
   dashboardGet(
     "/dashboard/cases/:id/events",

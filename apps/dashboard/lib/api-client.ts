@@ -12,6 +12,7 @@ import type {
   ApprovalsListResult,
   AuditEntry,
   AuditFilter,
+  CaseConversationThreadResult,
   CaseDetail,
   CaseEventsResult,
   CaseListRow,
@@ -275,6 +276,23 @@ export const api = {
     if (status === 404) return null;
     if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id`);
     return body as CaseDetail;
+  },
+
+  caseConversationThread: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CaseConversationThreadResult | null> => {
+    const { status, body } = await call(
+      `/cases/${encodeURIComponent(id)}/conversation-thread`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) {
+      throw new Error(
+        `dashboard api ${status} on /cases/:id/conversation-thread`,
+      );
+    }
+    return body as CaseConversationThreadResult;
   },
 
   caseShopify: async (

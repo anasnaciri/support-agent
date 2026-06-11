@@ -3,7 +3,9 @@ import {
   ApprovalService,
   BlobStorage,
   BlobStorageTest,
+  CaseRepository,
   ConnectorCredentialStore,
+  ConversationService,
   KnowledgeBaseService,
   parseKey,
   ShopifyAppProvisioningStore,
@@ -15,6 +17,7 @@ import {
 } from "@support-agent/services";
 import {
   ApprovalServiceLive,
+  CaseRepositoryLive,
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
@@ -27,6 +30,11 @@ import {
 import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
+  ConversationRouterLive,
+  makeCaseProviderResolver,
+  makeGmailConversation,
+  makeGraphConversation,
+  makeImapSmtpConversation,
   ShopifyCredentialStoreFromConnector,
   ShopifyHttpLive,
   ShopifyServiceLive,
@@ -324,6 +332,37 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const appProvisioning = ShopifyAppProvisioningStoreLive(
     cfg.encryptionKey,
   ).pipe(Layer.provide(dbLayer));
+  const caseRepo = CaseRepositoryLive.pipe(Layer.provide(dbLayer));
+  const connectorBuilders = [
+    ...(cfg.google
+      ? ([
+          [
+            "gmail",
+            makeGmailConversation({
+              clientId: cfg.google.clientId,
+              clientSecret: cfg.google.clientSecret,
+            }),
+          ],
+        ] as const)
+      : []),
+    ...(cfg.microsoft
+      ? ([
+          [
+            "outlook",
+            makeGraphConversation({
+              clientId: cfg.microsoft.clientId,
+              clientSecret: cfg.microsoft.clientSecret,
+              tenant: cfg.microsoft.tenant,
+            }),
+          ],
+        ] as const)
+      : []),
+    ...([["imap", makeImapSmtpConversation()]] as const),
+  ];
+  const conversation = ConversationRouterLive(
+    connectorBuilders,
+    makeCaseProviderResolver,
+  ).pipe(Layer.provide(Layer.mergeAll(store, caseRepo)));
   // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
@@ -361,6 +400,8 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   return Layer.mergeAll(
     store,
     appProvisioning,
+    caseRepo,
+    conversation,
     approvals,
     tx,
     dbLayer,
@@ -375,6 +416,8 @@ export const buildApiLayers = (cfg: ApiConfig) => {
 
 export type ApiLayer = Layer.Layer<
   | ConnectorCredentialStore
+  | ConversationService
+  | CaseRepository
   | ShopifyAppProvisioningStore
   | ApprovalService
   | TransactionRunner

@@ -154,6 +154,51 @@ export interface CaseDetail {
   readonly approvals: ReadonlyArray<ApprovalDetail>;
 }
 
+export interface DashboardConversationParticipant {
+  readonly name: string | null;
+  readonly email: string;
+}
+
+export interface DashboardConversationAttachment {
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+}
+
+export interface DashboardConversationMessage {
+  readonly id: string;
+  readonly direction: "inbound" | "outbound";
+  readonly from: DashboardConversationParticipant;
+  readonly to: ReadonlyArray<DashboardConversationParticipant>;
+  readonly subject: string | null;
+  readonly bodyText: string;
+  readonly sanitizedBodyHtml: string | null;
+  readonly sentAt: string;
+  readonly attachments: ReadonlyArray<DashboardConversationAttachment>;
+}
+
+export interface DashboardConversationThread {
+  readonly subject: string;
+  readonly participants: ReadonlyArray<DashboardConversationParticipant>;
+  readonly messages: ReadonlyArray<DashboardConversationMessage>;
+}
+
+export type CaseConversationThreadUnavailableReason =
+  | "no_thread"
+  | "thread_not_found"
+  | "auth_required"
+  | "provider_unavailable";
+
+export type CaseConversationThreadResult =
+  | {
+      readonly status: "available";
+      readonly thread: DashboardConversationThread;
+    }
+  | {
+      readonly status: "unavailable";
+      readonly reason: CaseConversationThreadUnavailableReason;
+    };
+
 export interface CaseEventsResult {
   readonly events: ReadonlyArray<{
     readonly id: string;

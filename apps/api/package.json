@@ -26,10 +26,12 @@
     "@support-agent/tools": "workspace:*",
     "effect": "^3.10.0",
     "fastify": "^5.8.5",
-    "pg-boss": "^12.18.2"
+    "pg-boss": "^12.18.2",
+    "sanitize-html": "^2.17.5"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/sanitize-html": "^2.16.1",
     "drizzle-orm": "^0.45.2",
     "tsx": "^4.7.0"
   }
