@@ -4,18 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { api, getDashboardContext } from "@/lib/api-client";
 
-/**
- * Parse a major-units decimal string ("25.00", "200") into minor units
- * (2500, 20000). Returns null on malformed input. Rejects negatives, multiple
- * dots, and more than 2 fractional digits (no sub-cent thresholds).
- */
-const parseMajorUnits = (raw: string): number | null => {
-  const trimmed = raw.trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
-  const num = Number.parseFloat(trimmed);
-  if (!Number.isFinite(num) || num < 0) return null;
-  return Math.round(num * 100);
-};
+import { resolveRefundThresholds } from "./parse-thresholds";
 
 export const saveRefundPolicyAction = async (
   formData: FormData,
@@ -39,25 +28,30 @@ export const saveRefundPolicyAction = async (
   if (!/^[A-Z]{3}$/.test(currency)) {
     redirect("/settings/refund-policy?error=bad_currency");
   }
-  const askMinor = parseMajorUnits(ask);
-  const denyMinor = parseMajorUnits(deny);
-  // The thresholds only govern behaviour in `thresholds` mode. In the
-  // always-ask / always-deny modes they're ignored, so don't block the save
-  // on them — but we still persist whatever was entered so switching back to
-  // `thresholds` restores the merchant's numbers.
-  if (mode === "thresholds") {
-    if (askMinor === null || denyMinor === null) {
-      redirect("/settings/refund-policy?error=bad_amount");
-    }
-    if (askMinor > denyMinor) {
-      redirect("/settings/refund-policy?error=bad_order");
-    }
+
+  // In `thresholds` mode both amounts govern behaviour and must validate. In
+  // always-ask / always-deny they're dormant: a parseable value is persisted
+  // (so switching back restores it), but an unparseable one falls back to the
+  // STORED value — never coalesced to 0, so a stale tab can't silently zero
+  // the merchant's saved thresholds (U10).
+  const { refundPolicy: stored } = await api.settings(ctx);
+  const resolved = resolveRefundThresholds({
+    mode,
+    askRaw: ask,
+    denyRaw: deny,
+    stored: {
+      askMinor: stored.askAboveMinorUnits,
+      denyMinor: stored.denyAboveMinorUnits,
+    },
+  });
+  if (!resolved.ok) {
+    redirect(`/settings/refund-policy?error=${resolved.error}`);
   }
 
   await api.setRefundPolicy(ctx, {
     currencyCode: currency,
-    askAboveMinorUnits: askMinor ?? 0,
-    denyAboveMinorUnits: denyMinor ?? 0,
+    askAboveMinorUnits: resolved.askMinor,
+    denyAboveMinorUnits: resolved.denyMinor,
     mode,
   });
 

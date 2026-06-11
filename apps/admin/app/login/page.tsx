@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { isAuthenticated } from "@/lib/session";
+import { SubmitButton } from "@/app/_components/submit-button";
 import { loginAction } from "./actions";
 
 interface PageProps {
@@ -12,7 +13,10 @@ interface PageProps {
 export default async function LoginPage({ searchParams }: PageProps) {
   if (await isAuthenticated()) redirect("/");
   const params = (await searchParams) ?? {};
-  const hasError = params["error"] != null;
+  const errorParam = params["error"];
+  const error = Array.isArray(errorParam) ? errorParam[0] : errorParam;
+  const retryParam = params["retry"];
+  const retry = Array.isArray(retryParam) ? retryParam[0] : retryParam;
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
@@ -38,15 +42,19 @@ export default async function LoginPage({ searchParams }: PageProps) {
               className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-zinc-500"
             />
           </div>
-          {hasError ? (
+          {error === "locked" ? (
+            <p className="text-sm text-red-400">
+              Too many failed attempts. Try again in {retry ?? "a few"} seconds.
+            </p>
+          ) : error ? (
             <p className="text-sm text-red-400">Incorrect password.</p>
           ) : null}
-          <button
-            type="submit"
+          <SubmitButton
+            pendingLabel="Signing in…"
             className="w-full rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
           >
             Sign in
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </main>

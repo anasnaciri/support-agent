@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
+import { buildSignInRedirect } from "@/lib/auth-redirect";
+import { isPaused, nextFailureCount } from "./live-status";
 
 interface Props {
   readonly caseId: string;
@@ -18,11 +20,18 @@ export default function CaseLiveBoundary({ caseId, initialSince }: Props) {
   const [state, setState] = useState<"connecting" | "open" | "error">(
     "connecting",
   );
+  const [failures, setFailures] = useState(0);
   const sinceRef = useRef(initialSince);
+  const failuresRef = useRef(0);
 
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const recordResult = (ok: boolean) => {
+      failuresRef.current = nextFailureCount(failuresRef.current, ok);
+      setFailures(failuresRef.current);
+    };
 
     const tick = async () => {
       try {
@@ -31,10 +40,23 @@ export default function CaseLiveBoundary({ caseId, initialSince }: Props) {
           { cache: "no-store" },
         );
         if (!active) return;
+        if (res.status === 401) {
+          // Session gone and unrefreshable (U1): stop polling silently and
+          // hard-navigate to re-auth, returning to this case afterwards.
+          active = false;
+          window.location.assign(
+            buildSignInRedirect(
+              `${window.location.pathname}${window.location.search}`,
+            ),
+          );
+          return;
+        }
         if (!res.ok) {
           setState("error");
+          recordResult(false);
         } else {
           setState("open");
+          recordResult(true);
           const data = (await res.json()) as {
             events: ReadonlyArray<{ id: string }>;
           };
@@ -45,7 +67,10 @@ export default function CaseLiveBoundary({ caseId, initialSince }: Props) {
           }
         }
       } catch {
-        if (active) setState("error");
+        if (active) {
+          setState("error");
+          recordResult(false);
+        }
       } finally {
         if (active) timer = setTimeout(tick, POLL_MS);
       }
@@ -72,20 +97,38 @@ export default function CaseLiveBoundary({ caseId, initialSince }: Props) {
         ? "text-warning-foreground"
         : "text-muted-foreground";
 
+  const paused = isPaused(failures);
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-        textClass,
-      )}
-      aria-live="polite"
-      aria-label={`Live updates ${state}`}
-    >
+    <span className="inline-flex items-center gap-2">
       <span
-        className={cn("inline-block size-2 rounded-full", dotClass)}
-        aria-hidden
-      />
-      LIVE
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+          textClass,
+        )}
+        aria-live="polite"
+        aria-label={`Live updates ${state}`}
+      >
+        <span
+          className={cn("inline-block size-2 rounded-full", dotClass)}
+          aria-hidden
+        />
+        LIVE
+      </span>
+      {paused ? (
+        // Several consecutive poll failures (U11): say so visibly instead of
+        // leaving only the amber dot.
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground">
+          Updates paused —{" "}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="underline underline-offset-2 hover:no-underline"
+          >
+            reload
+          </button>
+        </span>
+      ) : null}
     </span>
   );
 }

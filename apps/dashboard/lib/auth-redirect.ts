@@ -8,6 +8,8 @@ import { sanitizeReturnTo } from "./return-to";
 
 /** The self-hosted, legal-gated sign-up page (the logged-out front door). */
 export const SIGN_UP_PATH = "/sign-up";
+/** The WorkOS-hosted sign-in bounce (returning users — re-auth, not sign-up). */
+export const SIGN_IN_PATH = "/sign-in";
 /** Onboarding provisions the org + tenant for a signed-in user without one. */
 export const ONBOARDING_PATH = "/onboarding";
 
@@ -47,4 +49,17 @@ export const buildSignUpRedirect = (
   const safe = sanitizeReturnTo(returnTo, "/");
   if (safe === "/") return SIGN_UP_PATH;
   return `${SIGN_UP_PATH}?returnTo=${encodeURIComponent(safe)}`;
+};
+
+/**
+ * Same shape as {@link buildSignUpRedirect} but targeting the hosted sign-in
+ * bounce — used by client pollers whose fetch came back 401 (U1): the user
+ * already has an account, they just need to re-authenticate.
+ */
+export const buildSignInRedirect = (
+  returnTo: string | null | undefined,
+): string => {
+  const safe = sanitizeReturnTo(returnTo, "/");
+  if (safe === "/") return SIGN_IN_PATH;
+  return `${SIGN_IN_PATH}?returnTo=${encodeURIComponent(safe)}`;
 };

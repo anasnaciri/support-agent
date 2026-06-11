@@ -1,7 +1,8 @@
 import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSession } from "./session";
+import { getSessionState } from "./session";
+import { buildRefreshRedirect } from "./session-refresh";
 import type { ShopifyCustomer, ShopifyOrder } from "@support-agent/agent-core";
 import type {
   AgentOverrideRow,
@@ -68,23 +69,6 @@ const apiToken = (): string => {
   }
   return v.trim();
 };
-
-// Mirrors the old lib/tenant.ts error so app/error.tsx keeps redirecting to
-// /no-access. The boundary checks `error.name` + whether the message mentions
-// "organization", so preserve both.
-export class NoTenantAccess extends Error {
-  constructor(
-    public readonly reason: "no_organization" | "no_tenant_mapping",
-    organizationId: string | null,
-  ) {
-    super(
-      reason === "no_organization"
-        ? "user has no WorkOS organization"
-        : `no tenant linked to organization ${organizationId}`,
-    );
-    this.name = "NoTenantAccess";
-  }
-}
 
 export interface DashboardContext {
   readonly organizationId: string;
@@ -179,7 +163,14 @@ const fetchTenant = async (
  * airtight net for anyone who still reaches the hosted sign-up.
  */
 export const getDashboardContext = async (): Promise<DashboardContext> => {
-  const { user, organizationId } = await getSession();
+  const { disposition, session } = await getSessionState();
+  // Expired access token with a sealed refreshToken (U1): bounce through the
+  // refresh route handler (RSCs can't Set-Cookie) and land back here, instead
+  // of destroying the user's context with a /sign-up round-trip.
+  if (disposition === "refreshable") {
+    redirect(buildRefreshRedirect(await currentPathname()));
+  }
+  const { user, organizationId } = session;
   if (!user) redirect(buildSignUpRedirect(await currentPathname()));
   if (!organizationId) redirect(ONBOARDING_PATH);
   const tenant = await fetchTenant(organizationId);
@@ -217,7 +208,11 @@ export interface OrgContext {
  * both. Only the session (a signed-in user) is required.
  */
 export const requireOrganization = async (): Promise<OrgContext> => {
-  const { user, organizationId } = await getSession();
+  const { disposition, session } = await getSessionState();
+  if (disposition === "refreshable") {
+    redirect(buildRefreshRedirect(await currentPathname()));
+  }
+  const { user, organizationId } = session;
   // Legal-gated front door (audit B2) — see getDashboardContext.
   if (!user) redirect(buildSignUpRedirect(await currentPathname()));
   const tenant = organizationId ? await fetchTenant(organizationId) : null;

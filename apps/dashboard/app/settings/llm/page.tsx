@@ -5,12 +5,12 @@ import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { connectLlmAction, revokeLlmAction } from "./actions";
@@ -196,9 +196,9 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
                 </div>
               </div>
               <form action={revokeLlmAction}>
-                <Button type="submit" variant="outline">
+                <SubmitButton variant="outline" pendingLabel="Revoking…">
                   Revoke
-                </Button>
+                </SubmitButton>
               </form>
             </>
           ) : (
@@ -248,7 +248,7 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
                   Only needed for self-hosted gateways or proxy endpoints.
                 </p>
               </div>
-              <Button type="submit">Connect</Button>
+              <SubmitButton pendingLabel="Connecting…">Connect</SubmitButton>
             </form>
           )}
         </CardContent>

@@ -6,7 +6,9 @@ import { formatRelativeTime } from "@/lib/format";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Label } from "@/components/ui/label";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { riskVariant } from "@/lib/status-variants";
@@ -226,9 +228,9 @@ export const ApprovalCard = ({
               />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" variant="success">
+              <SubmitButton variant="success" pendingLabel="Approving…">
                 Approve &amp; send
-              </Button>
+              </SubmitButton>
               <Button asChild variant="outline">
                 <Link href={`/approvals/${approval.id}`}>Open full view</Link>
               </Button>
@@ -248,9 +250,9 @@ export const ApprovalCard = ({
               <input type="hidden" name="approvalId" value={approval.id} />
               <input type="hidden" name="returnTo" value={returnTo} />
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="submit" variant="success">
+                <SubmitButton variant="success" pendingLabel="Approving…">
                   Approve
-                </Button>
+                </SubmitButton>
                 <Button asChild variant="outline">
                   <Link href={`/approvals/${approval.id}`}>Open full view</Link>
                 </Button>
@@ -264,9 +266,13 @@ export const ApprovalCard = ({
         <form action={rejectAction}>
           <input type="hidden" name="approvalId" value={approval.id} />
           <input type="hidden" name="returnTo" value={returnTo} />
-          <Button type="submit" variant="destructive">
+          <ConfirmSubmitButton
+            title="Reject this approval?"
+            description="No customer reply goes out, and the case escalates to human takeover — you'll handle it manually from there."
+            confirmLabel="Reject & take over"
+          >
             Reject (escalate to human takeover)
-          </Button>
+          </ConfirmSubmitButton>
         </form>
       </CardContent>
     </Card>

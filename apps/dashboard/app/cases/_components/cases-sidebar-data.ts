@@ -89,3 +89,19 @@ export const mergeDedupeById = <T extends { readonly id: string }>(
   }
   return merged;
 };
+
+/**
+ * Fold a freshly fetched page 1 into the already-loaded rows, updating
+ * matching rows IN PLACE (same position) and ignoring rows that aren't
+ * loaded. Used when the pathname changes (U8): the case the merchant just
+ * took over / resumed gets its status badge updated without reordering the
+ * list, resetting pagination, or jumping the scroll position.
+ */
+export const applyFreshPage = <T extends { readonly id: string }>(
+  existing: ReadonlyArray<T>,
+  fresh: ReadonlyArray<T>,
+): ReadonlyArray<T> => {
+  if (fresh.length === 0) return existing;
+  const byId = new Map(fresh.map((r) => [r.id, r]));
+  return existing.map((row) => byId.get(row.id) ?? row);
+};

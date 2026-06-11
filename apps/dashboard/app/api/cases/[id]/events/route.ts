@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/session";
+import { getSessionOrRefresh } from "@/lib/session";
 import { api } from "@/lib/api-client";
 
 // ============================================================
@@ -17,7 +17,9 @@ interface RouteParams {
 
 export async function GET(req: Request, { params }: RouteParams) {
   const { id } = await params;
-  const { user, organizationId } = await getSession();
+  // Refresh an expired-mid-session token while we can still Set-Cookie (U1)
+  // — keeps an open case tab's live-updates poll authenticated.
+  const { user, organizationId } = await getSessionOrRefresh();
   if (!user || !organizationId) {
     return new Response("unauthorized", { status: 401 });
   }

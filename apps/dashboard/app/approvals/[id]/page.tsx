@@ -7,9 +7,10 @@ import {
   riskVariant,
 } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Label } from "@/components/ui/label";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
@@ -120,9 +121,9 @@ export default async function ApprovalDetailPage({ params }: Params) {
                     rows={8}
                   />
                 </div>
-                <Button type="submit" variant="success">
+                <SubmitButton variant="success" pendingLabel="Approving…">
                   Approve
-                </Button>
+                </SubmitButton>
                 <p className="text-xs text-muted-foreground">
                   Your edits land in{" "}
                   <code className="rounded bg-muted px-1.5 py-0.5">
@@ -134,17 +135,21 @@ export default async function ApprovalDetailPage({ params }: Params) {
             ) : (
               <form action={approveAction}>
                 <input type="hidden" name="approvalId" value={row.id} />
-                <Button type="submit" variant="success">
+                <SubmitButton variant="success" pendingLabel="Approving…">
                   Approve
-                </Button>
+                </SubmitButton>
               </form>
             )}
 
             <form action={rejectAction}>
               <input type="hidden" name="approvalId" value={row.id} />
-              <Button type="submit" variant="destructive">
+              <ConfirmSubmitButton
+                title="Reject this approval?"
+                description="No customer reply goes out, and the case escalates to human takeover — you'll handle it manually from there."
+                confirmLabel="Reject & take over"
+              >
                 Reject
-              </Button>
+              </ConfirmSubmitButton>
             </form>
 
             <p className="text-sm text-muted-foreground">

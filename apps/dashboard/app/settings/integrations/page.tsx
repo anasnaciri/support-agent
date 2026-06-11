@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
+
 import {
   SUPPORTED_PROVIDERS,
   PROVIDER_LABELS,
@@ -16,6 +18,7 @@ import {
   getApiBaseUrl,
   connectHref,
 } from "./_shared";
+import { connectErrorMessage, parseConnectError } from "./connect-error";
 import {
   disconnectShopifyAction,
   disconnectGmailAction,
@@ -43,17 +46,14 @@ interface PageProps {
 export default async function IntegrationsPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
   const params = (await searchParams) ?? {};
-  const shopifyParam = params["shopify"];
-  const shopifyBanner =
-    (Array.isArray(shopifyParam) ? shopifyParam[0] : shopifyParam) ===
-    "disconnected";
-  const gmailParam = params["gmail"];
-  const gmailBanner =
-    (Array.isArray(gmailParam) ? gmailParam[0] : gmailParam) === "disconnected";
-  const sheetsParam = params["sheets"];
-  const sheetsBanner =
-    (Array.isArray(sheetsParam) ? sheetsParam[0] : sheetsParam) ===
-    "disconnected";
+  // Set by every disconnect action (`?disconnected=<provider>`, U5).
+  const disconnectedParam = params["disconnected"];
+  const disconnectedValue = Array.isArray(disconnectedParam)
+    ? disconnectedParam[0]
+    : disconnectedParam;
+  const disconnectedLabel = disconnectedValue
+    ? (PROVIDER_LABELS[disconnectedValue] ?? null)
+    : null;
   // Set by the apps/api OAuth callback when it redirects the merchant back
   // here after a successful connect (`?connected=shopify`, `=gmail`, …).
   const connectedParam = params["connected"];
@@ -66,9 +66,11 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   // Set when a connect was refused because a mailbox is already connected
   // for that provider (one mailbox per provider per store).
   const errorParam = params["error"];
-  const alreadyConnected =
-    (Array.isArray(errorParam) ? errorParam[0] : errorParam) ===
-    "already_connected";
+  const errorValue = Array.isArray(errorParam) ? errorParam[0] : errorParam;
+  const alreadyConnected = errorValue === "already_connected";
+  // OAuth denial/failure from the api callback: `?error=<provider>:<code>`
+  // (U6) — e.g. the merchant clicked Cancel on Google's consent screen.
+  const connectError = parseConnectError(errorValue);
   const conflictProviderParam = params["provider"];
   const conflictProvider = Array.isArray(conflictProviderParam)
     ? conflictProviderParam[0]
@@ -125,27 +127,28 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {shopifyBanner ? (
+      {disconnectedLabel ? (
         <Alert variant="success">
-          <AlertDescription>Shopify disconnected.</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {gmailBanner ? (
-        <Alert variant="success">
-          <AlertDescription>Gmail disconnected.</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {sheetsBanner ? (
-        <Alert variant="success">
-          <AlertDescription>Google Sheets disconnected.</AlertDescription>
+          <AlertDescription>{disconnectedLabel} disconnected.</AlertDescription>
         </Alert>
       ) : null}
 
       {connectedLabel ? (
         <Alert variant="success">
           <AlertDescription>{connectedLabel} connected.</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {connectError ? (
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>
+            {PROVIDER_LABELS[connectError.provider] ?? connectError.provider}{" "}
+            wasn&apos;t connected
+          </AlertTitle>
+          <AlertDescription>
+            {connectErrorMessage(connectError.code)}
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -237,9 +240,19 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                       </Button>
                       {disconnectAction ? (
                         <form action={disconnectAction}>
-                          <Button type="submit" variant="destructive">
+                          <ConfirmSubmitButton
+                            title={`Disconnect ${label}?`}
+                            description={
+                              p === "shopify"
+                                ? "The agent loses order, customer, and refund access for this store until you reconnect."
+                                : p === "google_sheets"
+                                  ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
+                                  : "The agent stops reading and replying to this mailbox immediately. Open cases can't send replies until you reconnect."
+                            }
+                            confirmLabel="Disconnect"
+                          >
                             Disconnect
-                          </Button>
+                          </ConfirmSubmitButton>
                         </form>
                       ) : null}
                     </>

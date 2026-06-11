@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { adminApi } from "@/lib/admin-api";
 import { requireSession } from "@/lib/session";
 import { Header, StatusBadge } from "@/app/_components/header";
+import { SubmitButton } from "@/app/_components/submit-button";
 import {
   provisionShopifyAppAction,
   revokeShopifyAppAction,
@@ -210,12 +211,12 @@ export default async function TenantDetailPage({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="submit"
+              <SubmitButton
+                pendingLabel="Saving…"
                 className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
               >
                 {shopifyApp ? "Rotate credentials" : "Provision app"}
-              </button>
+              </SubmitButton>
             </div>
           </form>
 
@@ -249,12 +250,12 @@ export default async function TenantDetailPage({
               action={runPcd}
               className="flex items-center gap-3 border-t border-zinc-800 pt-3"
             >
-              <button
-                type="submit"
+              <SubmitButton
+                pendingLabel="Checking…"
                 className="rounded-md border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
               >
                 Run PCD check
-              </button>
+              </SubmitButton>
               <span className="text-xs text-zinc-500">
                 Reads a few recent orders and reports whether customer PII comes
                 back populated or redacted.
@@ -264,12 +265,12 @@ export default async function TenantDetailPage({
 
           {shopifyApp && shopifyApp.status !== "revoked" ? (
             <form action={revoke} className="border-t border-zinc-800 pt-3">
-              <button
-                type="submit"
+              <SubmitButton
+                pendingLabel="Revoking…"
                 className="text-sm text-red-400 hover:text-red-300"
               >
                 Revoke provisioning
-              </button>
+              </SubmitButton>
             </form>
           ) : null}
         </section>
@@ -330,12 +331,12 @@ export default async function TenantDetailPage({
               placeholder="Tenant name"
               className="grow rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-red-500/60"
             />
-            <button
-              type="submit"
+            <SubmitButton
+              pendingLabel="Deleting…"
               className="rounded-md border border-red-500/40 px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-500/10"
             >
               Delete tenant
-            </button>
+            </SubmitButton>
           </form>
         </section>
       </main>

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ONBOARDING_PATH,
+  SIGN_IN_PATH,
   SIGN_UP_PATH,
+  buildSignInRedirect,
   buildSignUpRedirect,
   resolveDashboardRedirect,
 } from "../lib/auth-redirect";
@@ -80,5 +82,26 @@ describe("buildSignUpRedirect", () => {
   it("drops an unsafe returnTo rather than preserving it", () => {
     expect(buildSignUpRedirect("//evil.com")).toBe(SIGN_UP_PATH);
     expect(buildSignUpRedirect("https://evil.com")).toBe(SIGN_UP_PATH);
+  });
+});
+
+// U1: client pollers that hit a 401 hard-navigate to the hosted sign-in (the
+// user already has a WorkOS account — re-auth, not sign-up) carrying the page
+// they were on so they land back there.
+describe("buildSignInRedirect", () => {
+  it("appends an encoded returnTo for a real page", () => {
+    expect(buildSignInRedirect("/cases/abc")).toBe(
+      `${SIGN_IN_PATH}?returnTo=%2Fcases%2Fabc`,
+    );
+  });
+
+  it("omits the query for the home page and missing paths", () => {
+    expect(buildSignInRedirect("/")).toBe(SIGN_IN_PATH);
+    expect(buildSignInRedirect(null)).toBe(SIGN_IN_PATH);
+  });
+
+  it("drops an unsafe returnTo rather than preserving it", () => {
+    expect(buildSignInRedirect("//evil.com")).toBe(SIGN_IN_PATH);
+    expect(buildSignInRedirect("https://evil.com")).toBe(SIGN_IN_PATH);
   });
 });

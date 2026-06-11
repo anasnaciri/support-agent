@@ -14,7 +14,28 @@ const port = (formData: FormData, key: string, fallback: number): number => {
   return Number.isInteger(n) && n > 0 && n <= 65535 ? n : fallback;
 };
 
-export const connectImapAction = async (formData: FormData): Promise<void> => {
+/** useActionState shape for the IMAP connect form (U4). */
+export interface ImapConnectState {
+  readonly error:
+    | "missing_fields"
+    | "imap_connect_failed"
+    | "imap_already_connected"
+    | "legal_acceptance_required"
+    | "unexpected";
+  /** Connectivity-check detail from the api (host/auth error text). */
+  readonly detail?: string;
+  /** The already-connected mailbox, for the conflict message. */
+  readonly mailbox?: string;
+}
+
+// useActionState (the onboarding/sign-up pattern, U4): a failed connectivity
+// check returns state and React re-renders in place, so all eight fields —
+// including the app password — survive instead of being wiped by a PRG
+// redirect. Success still redirects to the integrations banner.
+export const connectImapAction = async (
+  _prev: ImapConnectState | null,
+  formData: FormData,
+): Promise<ImapConnectState | null> => {
   const ctx = await getDashboardContext();
 
   const mailbox = str(formData, "mailbox");
@@ -24,7 +45,7 @@ export const connectImapAction = async (formData: FormData): Promise<void> => {
   const user = str(formData, "user");
 
   if (!mailbox || !password || !imapHost || !smtpHost) {
-    redirect("/connect/imap?error=missing_fields");
+    return { error: "missing_fields" };
   }
 
   const res = await api.connectImap(ctx, {
@@ -40,23 +61,24 @@ export const connectImapAction = async (formData: FormData): Promise<void> => {
   });
 
   if (res.status === 403) {
-    redirect("/connect/imap?error=legal_acceptance_required");
+    return { error: "legal_acceptance_required" };
   }
   if (res.status === 409) {
     const body = res.body as { mailbox?: string } | null;
-    const mb = body?.mailbox
-      ? `&mailbox=${encodeURIComponent(body.mailbox)}`
-      : "";
-    redirect(`/connect/imap?error=imap_already_connected${mb}`);
+    return {
+      error: "imap_already_connected",
+      ...(body?.mailbox ? { mailbox: body.mailbox } : {}),
+    };
   }
   if (res.status === 400) {
-    const body = res.body as { error?: string; detail?: string } | null;
-    const err = body?.error ?? "imap_connect_failed";
-    const detail = body?.detail ? `&detail=${encodeURIComponent(body.detail)}` : "";
-    redirect(`/connect/imap?error=${encodeURIComponent(err)}${detail}`);
+    const body = res.body as { detail?: string } | null;
+    return {
+      error: "imap_connect_failed",
+      ...(body?.detail ? { detail: body.detail } : {}),
+    };
   }
   if (res.status !== 200) {
-    redirect("/connect/imap?error=unexpected");
+    return { error: "unexpected" };
   }
 
   revalidatePath("/settings/integrations");

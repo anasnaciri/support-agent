@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/session";
+import { getSessionOrRefresh } from "@/lib/session";
 import { api } from "@/lib/api-client";
 import { parsePageNumber, parsePageSize } from "@/lib/pagination";
 
@@ -13,7 +13,10 @@ import { parsePageNumber, parsePageSize } from "@/lib/pagination";
 // GET /dashboard/cases?q=&page=&limit=, returning Page<CaseListRow> as JSON.
 
 export async function GET(req: Request) {
-  const { user, organizationId } = await getSession();
+  // Route handlers CAN Set-Cookie, so an expired-mid-session access token is
+  // refreshed here (U1) — an open tab's polling keeps the session alive
+  // instead of decaying into permanent 401s.
+  const { user, organizationId } = await getSessionOrRefresh();
   if (!user || !organizationId) {
     return new Response("unauthorized", { status: 401 });
   }

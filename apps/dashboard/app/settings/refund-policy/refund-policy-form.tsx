@@ -9,9 +9,9 @@ import type {
 } from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SubmitButton } from "@/components/ui/submit-button";
 
 import { saveRefundPolicyAction } from "./actions";
 
@@ -191,7 +191,7 @@ export const RefundPolicyForm = ({ policy }: { policy: RefundPolicyView }) => {
         </>
       ) : null}
 
-      <Button type="submit">Save</Button>
+      <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
     </form>
   );
 };

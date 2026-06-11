@@ -4,10 +4,11 @@ import { FileText, Link2, RefreshCw } from "lucide-react";
 import { api, getDashboardContext } from "@/lib/api-client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
@@ -111,7 +112,7 @@ export default async function KnowledgeEditPage({
                 />
               </div>
             ) : null}
-            <Button type="submit">Save</Button>
+            <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
           </form>
         </CardContent>
       </Card>
@@ -140,10 +141,10 @@ export default async function KnowledgeEditPage({
             </p>
             <form action={resyncKnowledgeAction}>
               <input type="hidden" name="id" value={doc.id} />
-              <Button type="submit" variant="outline" size="sm">
+              <SubmitButton variant="outline" size="sm" pendingLabel="Re-syncing…">
                 <RefreshCw className="size-3.5" aria-hidden />
                 Re-sync
-              </Button>
+              </SubmitButton>
             </form>
             <Textarea
               readOnly
@@ -165,9 +166,14 @@ export default async function KnowledgeEditPage({
           </p>
           <form action={deleteKnowledgeAction}>
             <input type="hidden" name="id" value={doc.id} />
-            <Button type="submit" variant="destructive" size="sm">
+            <ConfirmSubmitButton
+              size="sm"
+              title={`Delete “${doc.title}”?`}
+              description="Your agents stop referencing this document immediately. This can't be undone."
+              confirmLabel="Delete document"
+            >
               Delete document
-            </Button>
+            </ConfirmSubmitButton>
           </form>
         </CardContent>
       </Card>

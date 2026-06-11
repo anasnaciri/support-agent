@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { logoutAction } from "@/app/logout/actions";
+
 export function Header({ crumb }: { readonly crumb?: string }) {
   return (
     <header className="border-b border-zinc-800">
@@ -15,9 +17,15 @@ export function Header({ crumb }: { readonly crumb?: string }) {
             </>
           ) : null}
         </div>
-        <a href="/logout" className="text-sm text-zinc-400 hover:text-zinc-100">
-          Sign out
-        </a>
+        {/* POST via server action, never a GET link (S13). */}
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="text-sm text-zinc-400 hover:text-zinc-100"
+          >
+            Sign out
+          </button>
+        </form>
       </div>
     </header>
   );

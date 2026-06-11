@@ -14,6 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { signOutAction } from "./sign-out-action";
 
 interface NavItem {
   readonly href: string;
@@ -92,15 +93,18 @@ export function IconRail({ email }: Props) {
           item={{ href: "/settings", label: "Settings", icon: Settings }}
           active={isActive(pathname, "/settings")}
         />
-        <Link
-          href="/sign-out"
-          prefetch={false}
-          title={email ? `Sign out — ${email}` : "Sign out"}
-          aria-label="Sign out"
-          className="flex size-10 items-center justify-center rounded-lg text-sidebar-foreground/55 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
-        >
-          <LogOut className="size-5" aria-hidden />
-        </Link>
+        {/* POST via server action, never a GET link (S13) — sign-out mutates
+            state and must not fire from a prefetch or drive-by navigation. */}
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            title={email ? `Sign out — ${email}` : "Sign out"}
+            aria-label="Sign out"
+            className="flex size-10 items-center justify-center rounded-lg text-sidebar-foreground/55 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
+          >
+            <LogOut className="size-5" aria-hidden />
+          </button>
+        </form>
       </div>
     </aside>
   );

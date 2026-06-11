@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyFreshPage,
   caseIdFromPathname,
   mergeDedupeById,
   shouldLoadMore,
@@ -126,5 +127,32 @@ describe("mergeDedupeById", () => {
 
   it("returns the existing rows unchanged for an empty page", () => {
     expect(mergeDedupeById([row("a")], [])).toEqual([row("a")]);
+  });
+});
+
+// U8: after a takeover/resume the case-detail page revalidates but the
+// client-state sidebar kept stale status badges. On pathname change the
+// sidebar refetches page 1 and folds the fresh rows into what's loaded —
+// updating in place (no reordering, no scroll jump, no pagination reset).
+describe("applyFreshPage", () => {
+  const row = (id: string, status = "in_progress") => ({ id, status });
+
+  it("updates loaded rows in place from the fresh page", () => {
+    expect(
+      applyFreshPage(
+        [row("a"), row("b"), row("c")],
+        [row("b", "human_takeover")],
+      ),
+    ).toEqual([row("a"), row("b", "human_takeover"), row("c")]);
+  });
+
+  it("ignores fresh rows that are not currently loaded (no scroll jump)", () => {
+    expect(applyFreshPage([row("a")], [row("z"), row("a", "resolved")])).toEqual(
+      [row("a", "resolved")],
+    );
+  });
+
+  it("returns the existing rows unchanged for an empty fresh page", () => {
+    expect(applyFreshPage([row("a")], [])).toEqual([row("a")]);
   });
 });

@@ -10,6 +10,7 @@ import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
@@ -435,25 +436,25 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           {canTakeOver ? (
             <form action={takeOverAction} className="ml-auto">
               <input type="hidden" name="caseId" value={caseRow.id} />
-              <Button
-                type="submit"
+              <SubmitButton
                 variant="outline"
+                pendingLabel="Taking over…"
                 title="Stop the agent on this case and handle it manually"
               >
                 Take over
-              </Button>
+              </SubmitButton>
             </form>
           ) : null}
           {canResume ? (
             <form action={resumeAction} className="ml-auto">
               <input type="hidden" name="caseId" value={caseRow.id} />
-              <Button
-                type="submit"
+              <SubmitButton
                 variant="outline"
+                pendingLabel="Handing back…"
                 title="Let the agent handle this case again — it resumes on the customer's next reply"
               >
                 Hand back to agent
-              </Button>
+              </SubmitButton>
             </form>
           ) : null}
         </div>

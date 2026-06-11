@@ -21,18 +21,28 @@ const str = (formData: FormData, key: string): string => {
   return typeof v === "string" ? v : "";
 };
 
+/** useActionState shape for the create forms (U4). */
+export interface KnowledgeCreateState {
+  readonly error: string;
+}
+
+// Create is a useActionState action (not PRG): a failed URL fetch or
+// validation error returns state and the form KEEPS the merchant's input —
+// a large pasted document must never be discarded by a redirect (U4).
+// Success still redirects to the saved banner.
 export const createKnowledgeAction = async (
+  _prev: KnowledgeCreateState | null,
   formData: FormData,
-): Promise<void> => {
+): Promise<KnowledgeCreateState | null> => {
   const ctx = await getDashboardContext();
   const title = str(formData, "title").trim();
-  if (!title) redirect("/settings/knowledge?error=invalid_title");
+  if (!title) return { error: "invalid_title" };
 
   const res =
     formData.get("sourceType") === "url"
       ? await (async () => {
           const sourceUrl = str(formData, "sourceUrl").trim();
-          if (!sourceUrl) redirect("/settings/knowledge?error=invalid_url");
+          if (!sourceUrl) return { error: "invalid_url" } as const;
           return api.createKnowledge(ctx, {
             title,
             sourceType: "url",
@@ -41,8 +51,7 @@ export const createKnowledgeAction = async (
         })()
       : await (async () => {
           const content = str(formData, "content");
-          if (!content.trim())
-            redirect("/settings/knowledge?error=missing_content");
+          if (!content.trim()) return { error: "missing_content" } as const;
           return api.createKnowledge(ctx, {
             title,
             sourceType: "text",
@@ -50,8 +59,9 @@ export const createKnowledgeAction = async (
           });
         })();
 
+  if ("error" in res) return res;
   if (res.status !== 200) {
-    redirect(`/settings/knowledge?error=${encodeURIComponent(failCode(res.body))}`);
+    return { error: failCode(res.body) };
   }
   revalidatePath("/settings/knowledge");
   redirect("/settings/knowledge?saved=1");

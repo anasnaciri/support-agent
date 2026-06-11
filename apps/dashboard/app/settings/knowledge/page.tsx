@@ -5,12 +5,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
-import { createKnowledgeAction, deleteKnowledgeAction } from "./actions";
+import { deleteKnowledgeAction } from "./actions";
+import { KnowledgeCreateForm } from "./_create-form";
 import { knowledgeErrorMessage } from "./_messages";
 
 interface PageProps {
@@ -108,9 +107,15 @@ export default async function KnowledgePage({ searchParams }: PageProps) {
                     </Button>
                     <form action={deleteKnowledgeAction}>
                       <input type="hidden" name="id" value={doc.id} />
-                      <Button type="submit" variant="ghost" size="sm">
+                      <ConfirmSubmitButton
+                        variant="ghost"
+                        size="sm"
+                        title={`Delete “${doc.title}”?`}
+                        description="Your agents stop referencing this document immediately. This can't be undone."
+                        confirmLabel="Delete document"
+                      >
                         Delete
-                      </Button>
+                      </ConfirmSubmitButton>
                     </form>
                   </div>
                 </li>
@@ -129,29 +134,7 @@ export default async function KnowledgePage({ searchParams }: PageProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            <form action={createKnowledgeAction} className="space-y-4">
-              <input type="hidden" name="sourceType" value="text" />
-              <div className="grid gap-2">
-                <Label htmlFor="paste-title">Title</Label>
-                <Input
-                  id="paste-title"
-                  name="title"
-                  placeholder="Returns policy"
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="paste-content">Text</Label>
-                <Textarea
-                  id="paste-content"
-                  name="content"
-                  rows={8}
-                  placeholder="Paste your shipping policy, returns policy, FAQ, …"
-                  required
-                />
-              </div>
-              <Button type="submit">Save document</Button>
-            </form>
+            <KnowledgeCreateForm sourceType="text" />
           </CardContent>
         </Card>
 
@@ -163,35 +146,7 @@ export default async function KnowledgePage({ searchParams }: PageProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            <form action={createKnowledgeAction} className="space-y-4">
-              <input type="hidden" name="sourceType" value="url" />
-              <div className="grid gap-2">
-                <Label htmlFor="url-title">Title</Label>
-                <Input
-                  id="url-title"
-                  name="title"
-                  placeholder="Shipping policy"
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="url-source">Page URL</Label>
-                <Input
-                  id="url-source"
-                  name="sourceUrl"
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://yourstore.com/policies/shipping"
-                  required
-                  aria-describedby="url-hint"
-                />
-                <p id="url-hint" className="text-xs text-muted-foreground">
-                  We fetch the page once and store a snapshot of its text. You can
-                  re-sync it later from the document&apos;s page.
-                </p>
-              </div>
-              <Button type="submit">Fetch &amp; save</Button>
-            </form>
+            <KnowledgeCreateForm sourceType="url" />
           </CardContent>
         </Card>
       </div>

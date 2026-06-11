@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // Pure session-token + password helpers — no Next imports, so they're unit
 // testable. The Next cookie/redirect glue lives in `session.ts`.
@@ -19,19 +19,33 @@ const b64url = (b: Buffer): string => b.toString("base64url");
 const sign = (payload: string): string =>
   b64url(createHmac("sha256", sessionSecret()).update(payload).digest());
 
+// Constant-time string compare with no early return on length mismatch
+// (S10): hash both sides to a fixed 32 bytes first, so neither the timing
+// nor the comparison itself leaks the expected value's length.
 const constantTimeEqual = (a: string, b: string): boolean => {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ab.length === bb.length && timingSafeEqual(ab, bb);
+  const ah = createHash("sha256").update(a, "utf8").digest();
+  const bh = createHash("sha256").update(b, "utf8").digest();
+  return timingSafeEqual(ah, bh);
 };
 
-/** Issue a signed session value: `base64url({iat}).hmac`. */
+// Key-version of the current ADMIN_SESSION_SECRET, embedded in every session
+// payload. Rotating ADMIN_SESSION_SECRET is the documented "log every
+// operator out NOW" lever: the HMAC stops verifying AND the kid stops
+// matching, so no token issued under the old secret survives (S10). Rotate
+// the secret after rotating ADMIN_DASHBOARD_PASSWORD — password rotation
+// alone does not invalidate live sessions.
+const keyVersion = (): string =>
+  createHash("sha256").update(sessionSecret(), "utf8").digest("hex").slice(0, 8);
+
+/** Issue a signed session value: `base64url({iat, kid}).hmac`. */
 export const signSessionValue = (issuedAtMs: number): string => {
-  const payload = b64url(Buffer.from(JSON.stringify({ iat: issuedAtMs })));
+  const payload = b64url(
+    Buffer.from(JSON.stringify({ iat: issuedAtMs, kid: keyVersion() })),
+  );
   return `${payload}.${sign(payload)}`;
 };
 
-/** Verify signature + freshness. `nowMs` is injected so tests are deterministic. */
+/** Verify signature + key-version + freshness. `nowMs` is injected so tests are deterministic. */
 export const verifySessionValue = (
   value: string | undefined,
   nowMs: number,
@@ -45,8 +59,12 @@ export const verifySessionValue = (
   try {
     const decoded = JSON.parse(
       Buffer.from(payload, "base64url").toString("utf8"),
-    ) as { iat?: unknown };
+    ) as { iat?: unknown; kid?: unknown };
     if (typeof decoded.iat !== "number") return false;
+    // Belt-and-braces with the HMAC above: a payload stamped under a
+    // different (or no) key-version never verifies, even if a signature
+    // somehow checked out. Also retires pre-kid legacy tokens outright.
+    if (decoded.kid !== keyVersion()) return false;
     return nowMs - decoded.iat >= 0 && nowMs - decoded.iat < SESSION_MAX_AGE_S * 1000;
   } catch {
     return false;

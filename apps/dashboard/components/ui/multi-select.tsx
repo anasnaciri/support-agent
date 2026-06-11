@@ -4,6 +4,7 @@ import { Check, ChevronDown } from "lucide-react";
 import * as React from "react";
 
 import { multiSelectLabel } from "@/lib/approvals-filters";
+import { nextOptionIndex } from "@/lib/multi-select-nav";
 import { cn } from "@/lib/utils";
 
 export interface MultiSelectOption {
@@ -40,6 +41,8 @@ export const MultiSelect = ({
   const [open, setOpen] = React.useState(false);
   const [selected, setSelected] = React.useState<ReadonlyArray<string>>(values);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -50,6 +53,53 @@ export const MultiSelect = ({
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
+
+  // Escape closes and hands focus back to the trigger (U13).
+  const close = (refocusTrigger: boolean) => {
+    setOpen(false);
+    if (refocusTrigger) triggerRef.current?.focus();
+  };
+
+  // Roving focus across the rendered [role="option"] buttons. The math is
+  // pure (lib/multi-select-nav.ts); this just reads/writes the DOM focus.
+  const moveFocus = (delta: 1 | -1) => {
+    const list = listRef.current;
+    if (!list) return;
+    const options = Array.from(
+      list.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    );
+    const current = options.findIndex((el) => el === document.activeElement);
+    const next = nextOptionIndex(current, delta, options.length);
+    if (next >= 0) options[next]?.focus();
+  };
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    if (e.key === "Escape" && open) {
+      e.preventDefault();
+      close(true);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        // Focus the first/last option once the list has rendered.
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        requestAnimationFrame(() => moveFocus(delta));
+      } else {
+        moveFocus(e.key === "ArrowDown" ? 1 : -1);
+      }
+    }
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close(true);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      moveFocus(e.key === "ArrowDown" ? 1 : -1);
+    }
+  };
 
   const toggle = (value: string) => {
     setSelected((prev) =>
@@ -80,7 +130,9 @@ export const MultiSelect = ({
       <button
         type="button"
         id={id}
+        ref={triggerRef}
         onClick={() => !disabled && setOpen((o) => !o)}
+        onKeyDown={onTriggerKeyDown}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -104,6 +156,8 @@ export const MultiSelect = ({
 
       {open ? (
         <div
+          ref={listRef}
+          onKeyDown={onListKeyDown}
           className="absolute left-0 right-0 z-50 mt-1 max-h-[300px] overflow-y-auto rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
           role="listbox"
           aria-multiselectable

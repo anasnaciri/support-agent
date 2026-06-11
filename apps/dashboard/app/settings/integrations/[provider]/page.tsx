@@ -9,6 +9,7 @@ import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -245,9 +246,19 @@ export default async function ConnectorManagePage({
 
             {showDisconnect && disconnectAction ? (
               <form action={disconnectAction}>
-                <Button type="submit" variant="destructive">
+                <ConfirmSubmitButton
+                  title={`Disconnect ${label}?`}
+                  description={
+                    provider === "shopify"
+                      ? "The agent loses order, customer, and refund access for this store until you reconnect."
+                      : provider === "google_sheets"
+                        ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
+                        : "The agent stops reading and replying to this mailbox immediately. Open cases can't send replies until you reconnect."
+                  }
+                  confirmLabel="Disconnect"
+                >
                   Disconnect {label}
-                </Button>
+                </ConfirmSubmitButton>
               </form>
             ) : null}
           </div>

@@ -7,13 +7,16 @@ import { Search } from "lucide-react";
 
 import type { CaseListRow, Page } from "@support-agent/dashboard-contracts";
 import { cn } from "@/lib/utils";
+import { buildSignInRedirect } from "@/lib/auth-redirect";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   LOAD_MORE_THRESHOLD_PX,
   OVERSCAN,
   ROW_HEIGHT,
   SIDEBAR_PAGE_SIZE,
+  applyFreshPage,
   caseIdFromPathname,
   mergeDedupeById,
   shouldLoadMore,
@@ -27,7 +30,8 @@ import {
 // unit-tested in cases-sidebar-data.ts.
 
 export function CasesSidebar() {
-  const activeId = caseIdFromPathname(usePathname() ?? "");
+  const pathname = usePathname() ?? "";
+  const activeId = caseIdFromPathname(pathname);
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -59,6 +63,15 @@ export function CasesSidebar() {
         const res = await fetch(`/api/cases?${params.toString()}`, {
           cache: "no-store",
         });
+        if (res.status === 401) {
+          // Session gone and unrefreshable (U1): re-auth and come back here.
+          window.location.assign(
+            buildSignInRedirect(
+              `${window.location.pathname}${window.location.search}`,
+            ),
+          );
+          return;
+        }
         if (!res.ok) throw new Error(`cases ${res.status}`);
         const data = (await res.json()) as Page<CaseListRow>;
         if (q !== latestQueryRef.current) return; // a newer query superseded us
@@ -97,6 +110,40 @@ export function CasesSidebar() {
     setScrollTop(0);
     void fetchPage(debounced, 1, true);
   }, [debounced, fetchPage]);
+
+  // Pathname change ⇒ a server action probably just ran (take over, hand
+  // back, approve) and revalidated the page — but this list is client state,
+  // so its status badges would stay stale (U8). Refetch page 1 and fold the
+  // fresh rows into what's loaded, in place: no reorder, no scroll jump.
+  const mountedPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (mountedPathRef.current === null) {
+      // Initial mount — the debounced-query effect already loads page 1.
+      mountedPathRef.current = pathname;
+      return;
+    }
+    if (mountedPathRef.current === pathname) return;
+    mountedPathRef.current = pathname;
+    const q = latestQueryRef.current;
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          page: "1",
+          limit: String(SIDEBAR_PAGE_SIZE),
+        });
+        if (q) params.set("q", q);
+        const res = await fetch(`/api/cases?${params.toString()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return; // best-effort freshness; the poller/Retry handle errors
+        const data = (await res.json()) as Page<CaseListRow>;
+        if (q !== latestQueryRef.current) return;
+        setRows((prev) => applyFreshPage(prev, data.rows));
+      } catch {
+        // Ignore — purely a freshness top-up.
+      }
+    })();
+  }, [pathname]);
 
   // Measure the scroll viewport so the window math knows how many rows fit.
   useEffect(() => {
@@ -181,13 +228,25 @@ export function CasesSidebar() {
             ))}
           </ul>
         ) : rows.length === 0 ? (
-          <p className="px-3 py-8 text-center text-sm italic text-muted-foreground">
-            {error
-              ? "Couldn’t load cases."
-              : debounced
-                ? `No cases match “${debounced}”.`
-                : "No cases yet."}
-          </p>
+          error ? (
+            <div className="space-y-3 px-3 py-8 text-center">
+              <p className="text-sm italic text-muted-foreground">
+                Couldn’t load cases.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchPage(latestQueryRef.current, 1, true)}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <p className="px-3 py-8 text-center text-sm italic text-muted-foreground">
+              {debounced ? `No cases match “${debounced}”.` : "No cases yet."}
+            </p>
+          )
         ) : (
           <div style={{ height: totalHeight }} className="relative">
             <ul
