@@ -174,10 +174,12 @@ export const resumeCase = async (
   });
 
 /**
- * Self-service tenant creation for a signed-in WorkOS org (ported from the
- * dashboard's onboarding action). Idempotent by org: the partial unique index
- * on `workos_organization_id` rejects a second row, so a re-submit / two-tab
- * race resolves to the existing tenant with `alreadyExisted: true`.
+ * Self-service FIRST-workspace creation for a signed-in WorkOS org (the
+ * onboarding flow). Idempotent by org via the pre-SELECT only — since
+ * migration 0020 an org may own many tenant rows (workspaces), so the old
+ * unique-index backstop is gone. A two-tab onboarding race can therefore
+ * mint two workspaces instead of one; that's harmless (it's just an extra
+ * workspace), and deliberate creation goes through `createWorkspaceForOrg`.
  */
 export const createTenantForOrg = async (
   db: DrizzleDb,
@@ -196,25 +198,67 @@ export const createTenantForOrg = async (
   if (existing[0]) return { tenantId: existing[0].id, alreadyExisted: true };
 
   const id = randomUUID();
-  try {
-    await db.insert(tenants).values({
-      id,
-      name: input.name,
-      workosOrganizationId: input.organizationId,
-      settings: {
-        notificationEmail: input.notificationEmail,
-        legalAcceptance: input.legalAcceptance,
-      },
-    });
-    return { tenantId: id, alreadyExisted: false };
-  } catch (cause) {
-    // Most likely the unique index — another tab won the race. Re-read.
-    const [row] = await db
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(eq(tenants.workosOrganizationId, input.organizationId))
-      .limit(1);
-    if (row) return { tenantId: row.id, alreadyExisted: true };
-    throw cause;
-  }
+  await db.insert(tenants).values({
+    id,
+    name: input.name,
+    workosOrganizationId: input.organizationId,
+    settings: {
+      notificationEmail: input.notificationEmail,
+      legalAcceptance: input.legalAcceptance,
+    },
+  });
+  return { tenantId: id, alreadyExisted: false };
+};
+
+/**
+ * Mint an ADDITIONAL workspace (tenant row) under an existing org.
+ * Deliberately NOT idempotent — every call creates a workspace. Legal
+ * acceptance is supplied by the caller (the api copies the org's current
+ * acceptance; a workspace without one can never pass the connector gates).
+ */
+export const createWorkspaceForOrg = async (
+  db: DrizzleDb,
+  input: {
+    readonly organizationId: string;
+    readonly name: string;
+    readonly notificationEmail: string;
+    readonly legalAcceptance: LegalAcceptance;
+  },
+): Promise<{ readonly workspaceId: string }> => {
+  const id = randomUUID();
+  await db.insert(tenants).values({
+    id,
+    name: input.name,
+    workosOrganizationId: input.organizationId,
+    settings: {
+      notificationEmail: input.notificationEmail,
+      legalAcceptance: input.legalAcceptance,
+    },
+  });
+  return { workspaceId: id };
+};
+
+/**
+ * Rename a workspace, only when the org owns it. Returns false on a
+ * foreign/unknown workspace (the api maps that to 404).
+ */
+export const renameWorkspaceForOrg = async (
+  db: DrizzleDb,
+  input: {
+    readonly organizationId: string;
+    readonly workspaceId: string;
+    readonly name: string;
+  },
+): Promise<boolean> => {
+  const rows = await db
+    .update(tenants)
+    .set({ name: input.name })
+    .where(
+      and(
+        eq(tenants.workosOrganizationId, input.organizationId),
+        eq(tenants.id, input.workspaceId),
+      ),
+    )
+    .returning({ id: tenants.id });
+  return rows.length > 0;
 };

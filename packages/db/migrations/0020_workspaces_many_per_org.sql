@@ -1,0 +1,2 @@
+DROP INDEX "tenants_workos_org_unique";--> statement-breakpoint
+CREATE INDEX "tenants_workos_org_idx" ON "tenants" USING btree ("workos_organization_id") WHERE "tenants"."workos_organization_id" IS NOT NULL;

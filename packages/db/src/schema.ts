@@ -45,13 +45,16 @@ export const tenants = pgTable(
   (t) => [
     // One tenant per Shopify shop. Partial index — NULL is allowed for
     // tenants that don't have a Shopify connection yet (or use a non-
-    // Shopify connector). The callback's `resolveTenantByShop` relies on
-    // this constraint to make the upsert race-safe.
+    // Shopify connector).
     uniqueIndex("tenants_shopify_domain_unique")
       .on(t.shopifyDomain)
       .where(sql`${t.shopifyDomain} IS NOT NULL`),
-    // One tenant per WorkOS organization. Same partial-index pattern.
-    uniqueIndex("tenants_workos_org_unique")
+    // A WorkOS organization owns MANY tenant rows — each row is one
+    // "workspace" (its own store, mailboxes, LLM key, cases). Plain index
+    // for the org→workspaces lookup; the "default" workspace is resolved
+    // by ordering (created_at ASC, id ASC), not by a constraint.
+    // Migration 0019 relaxed the previous 1:1 unique index.
+    index("tenants_workos_org_idx")
       .on(t.workosOrganizationId)
       .where(sql`${t.workosOrganizationId} IS NOT NULL`),
   ],

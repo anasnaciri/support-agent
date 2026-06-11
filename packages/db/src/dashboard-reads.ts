@@ -85,7 +85,16 @@ export type {
 
 const TOP_N = 5;
 
-/** Resolve the tenant a WorkOS organization is linked to, or null. */
+// An org owns many workspaces (tenant rows). The "default" workspace — what
+// a request without an explicit workspace resolves to — is the OLDEST row,
+// id ASC tiebreak. The ordering is load-bearing: without it, two rows per
+// org would make these lookups plan-dependent.
+const defaultWorkspaceOrder = [asc(tenants.createdAt), asc(tenants.id)];
+
+/**
+ * Resolve the org's DEFAULT workspace (oldest tenant row), or null when the
+ * org has none yet.
+ */
 export const findTenantIdByWorkosOrg = async (
   db: DrizzleDb,
   organizationId: string,
@@ -94,13 +103,15 @@ export const findTenantIdByWorkosOrg = async (
     .select({ id: tenants.id })
     .from(tenants)
     .where(eq(tenants.workosOrganizationId, organizationId))
+    .orderBy(...defaultWorkspaceOrder)
     .limit(1);
   return rows[0]?.id ?? null;
 };
 
 /**
- * Tenant id + name for a WorkOS org, or null when the org has no tenant yet.
- * Backs `GET /dashboard/tenant` (the dashboard maps null → /onboarding).
+ * Default-workspace id + name for a WorkOS org, or null when the org has no
+ * tenant yet. Backs `GET /dashboard/tenant` (the dashboard maps null →
+ * /onboarding).
  */
 export const tenantByWorkosOrg = async (
   db: DrizzleDb,
@@ -110,6 +121,56 @@ export const tenantByWorkosOrg = async (
     .select({ id: tenants.id, name: tenants.name })
     .from(tenants)
     .where(eq(tenants.workosOrganizationId, organizationId))
+    .orderBy(...defaultWorkspaceOrder)
+    .limit(1);
+  const row = rows[0];
+  return row ? { id: row.id, name: row.name } : null;
+};
+
+export interface WorkspaceRow {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: Date;
+  readonly shopifyDomain: string | null;
+}
+
+/**
+ * All workspaces (tenant rows) of a WorkOS org, default first. Backs
+ * `GET /dashboard/workspaces` and the dashboard's workspace switcher.
+ */
+export const listWorkspacesByWorkosOrg = async (
+  db: DrizzleDb,
+  organizationId: string,
+): Promise<ReadonlyArray<WorkspaceRow>> =>
+  db
+    .select({
+      id: tenants.id,
+      name: tenants.name,
+      createdAt: tenants.createdAt,
+      shopifyDomain: tenants.shopifyDomain,
+    })
+    .from(tenants)
+    .where(eq(tenants.workosOrganizationId, organizationId))
+    .orderBy(...defaultWorkspaceOrder);
+
+/**
+ * A single workspace IF the org owns it, else null — the ownership check
+ * behind the `x-workspace-id` header and the rename/delete endpoints.
+ */
+export const findWorkspaceForOrg = async (
+  db: DrizzleDb,
+  organizationId: string,
+  workspaceId: string,
+): Promise<{ readonly id: string; readonly name: string } | null> => {
+  const rows = await db
+    .select({ id: tenants.id, name: tenants.name })
+    .from(tenants)
+    .where(
+      and(
+        eq(tenants.workosOrganizationId, organizationId),
+        eq(tenants.id, workspaceId),
+      ),
+    )
     .limit(1);
   const row = rows[0];
   return row ? { id: row.id, name: row.name } : null;
