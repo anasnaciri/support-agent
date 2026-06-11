@@ -14,6 +14,33 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-11 — Full audit remediation (audit.md):** Fixed 61 of 63 findings from the 2026-06-10 five-area
+  audit; see `audit.md` (all boxes ticked except U15/S14) for the per-item list with file references. The
+  headline structural changes, since several master-plan claims were previously **unimplemented**:
+  (1) C1–C3 at-least-once safety — retryable runtime failures now rethrow so pg-boss actually retries
+  (retryLimit was dead code), a dead-letter consumer parks exhausted cases in `human_takeover`, and two new
+  tables (`processed_messages`, `tool_executions`) dedupe duplicate webhook ticks and tool re-executions
+  (the `(caseId,callId)` / draftId dedup the tool descriptions CLAIMED existed did not — descriptions fixed).
+  (2) §10 state machine now real: `isStatusTransitionAllowed` matrix in agent-core, enforced by both repo
+  impls; the final_message-over-takeover race holds the case. (3) §4-adjacent: timers are enqueue-then-mark,
+  approvals get an expiry + republish maintenance cron (`approval-maintenance-schedule.ts`), and the ask path
+  writes approval+park+audit in one tx. (4) Per-case tick serialization via `TransactionRunner.withLock`
+  (pg advisory lock) — closes the thread-key vs case-key queue race. (5) Approval links: GET renders a
+  confirm page, only POST decides (email-scanner auto-approval), tokens are per-action signed with 24h TTL.
+  (6) Graph webhook fails closed + validates clientState before token work; SSRF fetch pins DNS answers;
+  IMAP/SMTP require STARTTLS; Gmail MIME rejects header injection; reply recipients constrained to thread
+  participants; refund thresholds compare case-cumulative amounts. (7) Connector health: renewal/poll crons
+  stamp `connectorHealth` metadata + one-time Resend operator alert on ok→broken (dashboard can render the
+  flag — **follow-up: integrations page doesn't read it yet**). (8) Worker builds its layer graph once
+  (ManagedRuntime), tool HTTP runs outside the audit tx, `tool.timeout` honored, ciphertext now version-
+  prefixed with multi-key decrypt (`decryptWithKeys`) for key rotation.
+  **Deferred:** S14 (forwarded-WorkOS-JWT to replace the shared DASHBOARD_API_TOKEN + x-org-id trust) — top
+  security follow-up, needs a deliberate migration; U15 (middleware→proxy rename) pending the Next 15/16
+  decision. **Deviations recorded:** commits land directly on `main` (matching the operator's current
+  workflow — the feature branch had already been merged); CREDENTIAL_ENCRYPTION_KEY_PREVIOUS env plumbing
+  for the new multi-key decrypt is not yet wired into bootstrap (mechanism + tests exist in crypto.ts).
+  Verified: full suite 1120 passed (DB-gated integration suites included via ci-local), `pnpm build` green,
+  both Next apps build. New worker crons registered in index.ts: approval-maintenance, workflow dead-letter.
 - **2026-06-09 — Auto-import shop policies into the knowledge base:** After a tenant connects Shopify, the OAuth
   callback enqueues a best-effort `shopify.policies.import` pg-boss job; the worker reads `shop.shopPolicies`
   (new `ShopifyService.getShopPolicies` Tag + Live impl, GraphQL validated, needs the `read_legal_policies`
@@ -95,6 +122,24 @@ No master-plan deviation was introduced by the summarized sessions beyond deviat
 checklist, audit section, `master-plan.md`, or project memories.
 
 ---
+
+## Audit follow-ups (2026-06-11)
+
+Remaining work surfaced by the audit remediation (everything else in `audit.md` is done):
+
+- [ ] **S14 — forwarded-WorkOS-JWT auth for apps/api:** replace the shared `DASHBOARD_API_TOKEN` +
+      self-asserted `x-org-id` trust with the user's WorkOS access token forwarded per request and
+      verified api-side via JWKS. Until then a leaked service token = full cross-tenant compromise.
+- [ ] **Dashboard: render `connectorHealth`** on /settings/integrations — the renewal/poll crons now stamp
+      `connectorHealth`/`connectorHealthReason` into connector metadata; the UI should badge broken
+      connectors (the operator alert email already fires).
+- [ ] **Wire `CREDENTIAL_ENCRYPTION_KEY_PREVIOUS`** through api/worker bootstrap to `decryptWithKeys`
+      so key rotation is operational end-to-end (crypto mechanism + tests landed).
+- [ ] **U15 — middleware→proxy rename** once the Next 15-vs-16 decision settles (see audit.md U15).
+- [ ] **D1 deploy note:** migration 0018's active-mailbox unique index fails if prod already has two
+      ACTIVE rows for one mailbox — check before deploying.
+- [ ] Consider draftId-based send-dedup inside the Gmail/Graph/IMAP connectors as a second layer under
+      the runtime's `tool_executions` markers (C2 is covered; this would also catch cross-case repeats).
 
 ## ⚠️ Pilot pre-onboarding audit (2026-06-06)
 
