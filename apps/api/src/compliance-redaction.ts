@@ -163,6 +163,77 @@ export const recordDataRequest = (
     });
   });
 
+// ============================================================
+// pg-boss payload redaction (audit D7)
+// ============================================================
+//
+// `message.received` jobs carry full customer email bodies into
+// `pgboss.job` (and, on older pg-boss versions, `pgboss.archive`) under
+// `data->'event'->>'tenantId'` — see apps/worker's WorkflowJobData
+// envelope `{ eventId, event, key, enqueuedAt }`. The tenant wipe must
+// remove those rows too or the PII outlives the tenant. The predicate is
+// deliberately the NESTED event tenantId: the `account.cleanup` job keeps
+// its (encrypted) payload tenantId at TOP level and must SURVIVE the wipe
+// — it is what finishes the deletion.
+
+export interface QueueRedactionResult {
+  readonly deletedJobRows: number;
+  readonly deletedArchiveRows: number;
+}
+
+const SAFE_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
+
+/** Postgres "relation/schema doesn't exist" — the dev case to tolerate. */
+const isMissingRelation = (cause: unknown): boolean => {
+  let current: unknown = cause;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (code === "42P01" || code === "3F000") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
+/**
+ * Delete every queue row whose event payload belongs to `tenantId` from
+ * `<schema>.job` and `<schema>.archive`. Tolerant of the pgboss schema /
+ * tables not existing (dev runs the api without the worker ever having
+ * booted pg-boss); any other failure propagates so the caller retries.
+ */
+export const redactTenantQueueJobs = (
+  tenantId: string,
+  schema = "pgboss",
+): Effect.Effect<QueueRedactionResult, Error, DbClient> =>
+  Effect.gen(function* () {
+    if (!SAFE_SCHEMA_NAME.test(schema)) {
+      return yield* Effect.fail(
+        new Error(`redactTenantQueueJobs: unsafe schema name ${JSON.stringify(schema)}`),
+      );
+    }
+    const db = yield* DbClient;
+    const deleteFrom = (table: "job" | "archive"): Effect.Effect<number, Error> =>
+      Effect.tryPromise({
+        try: async () => {
+          const rows = await db.execute(
+            sql`DELETE FROM ${sql.raw(`"${schema}"."${table}"`)} WHERE data->'event'->>'tenantId' = ${tenantId} RETURNING 1`,
+          );
+          return Array.isArray(rows) ? rows.length : 0;
+        },
+        catch: (cause) =>
+          new Error(`redactTenantQueueJobs(${table}) failed: ${String(cause)}`, {
+            cause,
+          }),
+      }).pipe(
+        Effect.catchAll((error) =>
+          isMissingRelation(error.cause) ? Effect.succeed(0) : Effect.fail(error),
+        ),
+      );
+
+    const deletedJobRows = yield* deleteFrom("job");
+    const deletedArchiveRows = yield* deleteFrom("archive");
+    return { deletedJobRows, deletedArchiveRows };
+  });
+
 export interface RedactShopResult {
   readonly tenantId: string;
   readonly deletedCases: number;
@@ -170,6 +241,9 @@ export interface RedactShopResult {
   readonly deletedConnectorRows: number;
   /** `true` if the tenant row itself was deleted. */
   readonly tenantDeleted: boolean;
+  /** pg-boss rows carrying the tenant's event payloads (audit D7). */
+  readonly deletedQueueJobRows: number;
+  readonly deletedQueueArchiveRows: number;
 }
 
 /**
@@ -205,7 +279,7 @@ export const redactShop = (
 ): Effect.Effect<RedactShopResult, Error, DbClient> =>
   Effect.gen(function* () {
     const db = yield* DbClient;
-    return yield* Effect.tryPromise({
+    const wiped = yield* Effect.tryPromise({
       try: () =>
         db.transaction(async (tx) => {
           // 1. approvals (FK to cases AND tenants; nuke by tenant)
@@ -259,4 +333,15 @@ export const redactShop = (
         }),
       catch: (cause) => new Error(`redactShop failed: ${String(cause)}`),
     });
+    // pg-boss payloads (audit D7) — AFTER the wipe tx commits: a failed wipe
+    // must not have already destroyed the events of a still-live tenant. A
+    // genuine failure here fails redactShop so the (idempotent) caller
+    // retries the queue sweep; the row deletes above are already no-ops on
+    // the retry.
+    const queue = yield* redactTenantQueueJobs(tenantId);
+    return {
+      ...wiped,
+      deletedQueueJobRows: queue.deletedJobRows,
+      deletedQueueArchiveRows: queue.deletedArchiveRows,
+    };
   });

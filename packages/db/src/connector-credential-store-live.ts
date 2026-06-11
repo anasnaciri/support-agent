@@ -33,6 +33,64 @@ const wrap = <A>(
     catch: (cause) => new ConnectorStoreDbError({ cause }),
   });
 
+// ============================================================
+// BYOK active-LLM conflict (audit D11)
+// ============================================================
+
+const ACTIVE_LLM_UNIQUE_CONSTRAINT =
+  "connector_connections_active_llm_per_tenant_unique";
+
+/**
+ * Typed cause for "this tenant already has a different ACTIVE LLM provider"
+ * (the `connector_connections_active_llm_per_tenant_unique` partial index).
+ * The store's error channel stays `ConnectorStoreDbError` (the Tag lives in
+ * agent-core), so this rides in its `cause`; discriminate with
+ * {@link isActiveLlmProviderConflict} instead of parsing raw pg errors.
+ */
+export class ActiveLlmProviderConflict extends Error {
+  readonly _tag = "ActiveLlmProviderConflict";
+  constructor(
+    readonly tenantId: string,
+    readonly provider: string,
+  ) {
+    super(
+      `tenant ${tenantId} already has an active LLM provider; disconnect it before connecting ${provider}`,
+    );
+  }
+}
+
+/** True when `error` is (or wraps, via `cause`) an active-LLM conflict. */
+export const isActiveLlmProviderConflict = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (current instanceof ActiveLlmProviderConflict) return true;
+    if (
+      typeof current === "object" &&
+      (current as { _tag?: unknown })._tag === "ActiveLlmProviderConflict"
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
+/** Walk a (possibly wrapped) driver error for the pg unique-violation shape. */
+const isLlmUniqueViolation = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    const e = current as { code?: unknown; constraint_name?: unknown };
+    if (
+      e.code === "23505" &&
+      e.constraint_name === ACTIVE_LLM_UNIQUE_CONSTRAINT
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
 const rowToConnection = (
   r: ConnectorConnectionRow,
   key: Buffer,
@@ -136,6 +194,20 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
                 set: setClause,
               })
               .returning(),
+          ).pipe(
+            // D11: a second ACTIVE LLM provider violates the partial unique
+            // index — surface it as a typed conflict callers can branch on
+            // instead of a raw driver error.
+            Effect.mapError((e) =>
+              isLlmUniqueViolation(e.cause)
+                ? new ConnectorStoreDbError({
+                    cause: new ActiveLlmProviderConflict(
+                      input.tenantId,
+                      input.provider,
+                    ),
+                  })
+                : e,
+            ),
           );
           const row = rows[0];
           if (!row) {
@@ -307,25 +379,44 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
       > =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
-          // Read-modify-write inside a SELECT FOR UPDATE so two concurrent
-          // webhook pushes don't lose each other's keys. The shopDomain
-          // index makes this single-row lookup cheap.
-          const rows = yield* wrap(
-            db
-              .select()
-              .from(connectorConnections)
-              .where(
-                and(
-                  eq(connectorConnections.tenantId, input.tenantId),
-                  eq(connectorConnections.provider, input.provider),
-                  eq(connectorConnections.shopDomain, input.shopDomain),
-                ),
-              )
-              .for("update")
-              .limit(1),
+          // Read-modify-write inside ONE transaction so the SELECT FOR
+          // UPDATE actually holds its lock until the merged write commits
+          // (audit D3) — in autocommit each statement is its own tx and the
+          // lock is gone before the UPDATE, letting two concurrent webhook
+          // pushes lose each other's keys. If an outer withTransaction(...)
+          // is active, `db` is already a tx and this opens a SAVEPOINT —
+          // same guarantee, nested (mirrors `transitionStatus`).
+          const result = yield* wrap(
+            db.transaction(async (tx) => {
+              const rows = await tx
+                .select()
+                .from(connectorConnections)
+                .where(
+                  and(
+                    eq(connectorConnections.tenantId, input.tenantId),
+                    eq(connectorConnections.provider, input.provider),
+                    eq(connectorConnections.shopDomain, input.shopDomain),
+                  ),
+                )
+                .for("update")
+                .limit(1);
+              const prior = rows[0];
+              if (!prior) return { kind: "not_found" as const };
+              const merged = {
+                ...((prior.metadata as Record<string, unknown> | null) ?? {}),
+                ...input.metadata,
+              };
+              const updated = await tx
+                .update(connectorConnections)
+                .set({ metadata: merged, updatedAt: new Date() })
+                .where(eq(connectorConnections.id, prior.id))
+                .returning();
+              const row = updated[0];
+              if (!row) return { kind: "not_found" as const };
+              return { kind: "ok" as const, row };
+            }),
           );
-          const prior = rows[0];
-          if (!prior) {
+          if (result.kind === "not_found") {
             return yield* Effect.fail(
               new ConnectorNotFound({
                 tenantId: input.tenantId,
@@ -334,34 +425,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          const merged = {
-            ...((prior.metadata as Record<string, unknown> | null) ?? {}),
-            ...input.metadata,
-          };
-          const updated = yield* wrap(
-            db
-              .update(connectorConnections)
-              .set({ metadata: merged, updatedAt: new Date() })
-              .where(
-                and(
-                  eq(connectorConnections.tenantId, input.tenantId),
-                  eq(connectorConnections.provider, input.provider),
-                  eq(connectorConnections.shopDomain, input.shopDomain),
-                ),
-              )
-              .returning(),
-          );
-          const row = updated[0];
-          if (!row) {
-            return yield* Effect.fail(
-              new ConnectorNotFound({
-                tenantId: input.tenantId,
-                provider: input.provider,
-                shopDomain: input.shopDomain,
-              }),
-            );
-          }
-          return rowToConnection(row, encryptionKey);
+          return rowToConnection(result.row, encryptionKey);
         });
 
       return ConnectorCredentialStore.of({

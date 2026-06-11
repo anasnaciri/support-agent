@@ -65,6 +65,27 @@ describe("buildConnectorGrants", () => {
   it("returns an empty list when there are no revocable rows", () => {
     expect(buildConnectorGrants([row({ provider: "openai" })], enc)).toEqual([]);
   });
+
+  it("captures outlook grants so the cleanup worker sees them (audit D8)", () => {
+    const grants = buildConnectorGrants(
+      [
+        row({
+          provider: "outlook",
+          shopDomain: "support@contoso.com",
+          accessToken: "ms-at",
+          refreshToken: "ms-rt",
+        }),
+      ],
+      enc,
+    );
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({
+      provider: "outlook",
+      shopDomain: "support@contoso.com",
+      accessTokenEncrypted: "ENC(ms-at)",
+      refreshTokenEncrypted: "ENC(ms-rt)",
+    });
+  });
 });
 
 describe("makePgBossAccountCleanupPublisher", () => {

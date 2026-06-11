@@ -107,10 +107,17 @@ export const AuditLogServiceLiveBuilder = (
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
           const limit = opts.limit ?? 100;
-          const whereClause =
-            opts.afterId !== undefined
-              ? and(eq(auditLog.caseId, caseId), gt(auditLog.id, opts.afterId))
-              : eq(auditLog.caseId, caseId);
+          // D9: enforce the tenant scope when given — a cross-tenant caseId
+          // reads as an empty history.
+          const whereClause = and(
+            eq(auditLog.caseId, caseId),
+            ...(opts.tenantId !== undefined
+              ? [eq(auditLog.tenantId, opts.tenantId)]
+              : []),
+            ...(opts.afterId !== undefined
+              ? [gt(auditLog.id, opts.afterId)]
+              : []),
+          );
           const rows = yield* wrap(
             "forCase",
             db

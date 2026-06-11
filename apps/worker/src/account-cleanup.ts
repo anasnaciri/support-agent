@@ -27,9 +27,18 @@ import { revokeConnectorGrant } from "@support-agent/providers";
  * ciphertext (base64) under the shared CREDENTIAL_ENCRYPTION_KEY — the api
  * encrypted them before the wipe so they never sit in the pg-boss table in
  * plaintext. Mirrors apps/api's EncryptedConnectorGrant.
+ *
+ * `outlook` (audit D8): Microsoft identity offers NO client-callable
+ * token-revocation endpoint for the stored refresh token (Google's /revoke
+ * has no analogue; `revokeSignInSessions` would nuke ALL of the user's
+ * sessions across every app — wrong blast radius). The grant still flows
+ * through `revokeConnectorGrant`, which encodes that limitation: it treats
+ * the local wipe as authoritative and the Graph subscription lease
+ * self-expires (~3 days), while the refresh token ages out on Microsoft's
+ * side (~90 days of inactivity). See packages/providers oauth-revocation.ts.
  */
 export interface EncryptedConnectorGrant {
-  readonly provider: "shopify" | "gmail" | "google_sheets";
+  readonly provider: "shopify" | "gmail" | "google_sheets" | "outlook";
   readonly shopDomain: string;
   readonly accessTokenEncrypted: string;
   readonly refreshTokenEncrypted: string | null;

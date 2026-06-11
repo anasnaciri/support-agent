@@ -68,6 +68,12 @@ export const cases = pgTable(
     shopifyOrderId: text("shopify_order_id"),
     channel: text("channel").notNull(),
     threadId: text("thread_id"),
+    // Conversation-connector discriminator stamped at case create (audit D2):
+    // which provider owns `thread_id` (gmail/outlook/imap). NULL for cases
+    // created before the stamp existed and for non-conversation channels.
+    // The conversation router uses it to route legacy (un-namespaced) thread
+    // ids instead of guessing the tenant's "most recent active connector".
+    provider: text("provider"),
     category: text("category"),
     status: text("status").notNull(),
     currentAgentId: text("current_agent_id").notNull(),
@@ -96,12 +102,24 @@ export const cases = pgTable(
       "cases_status_check",
       sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_supplier','waiting_for_approval','approved_action_running','resolved','failed','human_takeover')`,
     ),
+    // Mirrors CONVERSATION_PROVIDERS in @support-agent/services. NULL passes
+    // the CHECK (unstamped legacy cases / non-conversation channels).
+    check(
+      "cases_provider_check",
+      sql`${t.provider} IN ('gmail','outlook','imap')`,
+    ),
     index("cases_tenant_status_idx").on(
       t.tenantId,
       t.status,
       sql`${t.updatedAt} DESC`,
     ),
     index("cases_customer_idx").on(t.customerId),
+    // One case per (tenant, thread): `findByThreadId` runs on every inbound
+    // email — this both indexes the hottest lookup and makes case-per-thread
+    // uniqueness a DB invariant instead of a queue-FIFO accident (audit D4).
+    uniqueIndex("cases_tenant_thread_unique")
+      .on(t.tenantId, t.threadId)
+      .where(sql`${t.threadId} IS NOT NULL`),
   ],
 );
 
@@ -143,6 +161,15 @@ export const auditLog = pgTable(
       sql`${t.actorType} IN ('agent','user','system','customer')`,
     ),
     index("audit_log_case_idx").on(t.caseId, t.id),
+    // Tenant-wide scans (dashboard auditList pagination keyed on id DESC and
+    // the usage rollup filtering on action + occurred_at) on the fastest-
+    // growing table — audit D5.
+    index("audit_log_tenant_id_idx").on(t.tenantId, sql`${t.id} DESC`),
+    index("audit_log_tenant_action_occurred_idx").on(
+      t.tenantId,
+      t.action,
+      t.occurredAt,
+    ),
   ],
 );
 
@@ -183,6 +210,9 @@ export const approvals = pgTable(
     index("approvals_pending_idx")
       .on(t.tenantId, t.status, t.expiresAt)
       .where(sql`${t.status} = 'pending'`),
+    // Per-case approval lookups (caseDetail, takeover's pending-cancel scan)
+    // — audit D5.
+    index("approvals_case_idx").on(t.caseId),
   ],
 );
 
@@ -247,6 +277,16 @@ export const connectorConnections = pgTable(
     uniqueIndex("connector_connections_active_shopify_shop_unique")
       .on(t.provider, t.shopDomain)
       .where(sql`${t.provider} = 'shopify' AND ${t.status} = 'active'`),
+    // One ACTIVE owner per mailbox across ALL tenants for the conversation
+    // connectors (audit D1) — otherwise inbound-webhook tenant resolution
+    // (e.g. findTenantByGmailMailbox) is plan-dependent and a customer's
+    // email could be routed to the wrong tenant. Mirrors the shopify index
+    // above; revoked rows are excluded so reconnect history survives.
+    uniqueIndex("connector_connections_active_mailbox_unique")
+      .on(t.provider, t.shopDomain)
+      .where(
+        sql`${t.provider} IN ('gmail','outlook','imap') AND ${t.status} = 'active'`,
+      ),
     // BYOK: at most one active LLM provider per tenant. The provider field
     // names the chosen one (openrouter/anthropic/openai); only one of those
     // three rows may carry status='active' at a time, so a tenant can't
@@ -463,6 +503,77 @@ export const timers = pgTable(
 
 export type TimerRow = typeof timers.$inferSelect;
 export type TimerInsert = typeof timers.$inferInsert;
+
+/**
+ * Processed-message dedup ledger (audit C3). Pub/Sub and Graph are
+ * at-least-once; the runtime consults the UNIQUE (tenant, provider,
+ * message_id) key at the top of a tick so a duplicate webhook delivery —
+ * or the Gmail cursor-expiry reseed replaying history — can't run a second
+ * full agent tick (and send a second customer reply) for the same inbound
+ * message. `case_id` is informational (which case the message landed on);
+ * SET NULL on case deletion so redaction isn't blocked while the dedup
+ * record survives.
+ */
+export const processedMessages = pgTable(
+  "processed_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    messageId: text("message_id").notNull(),
+    threadId: text("thread_id"),
+    caseId: uuid("case_id").references(() => cases.id, {
+      onDelete: "set null",
+    }),
+    processedAt: timestamp("processed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("processed_messages_tenant_provider_message_unique").on(
+      t.tenantId,
+      t.provider,
+      t.messageId,
+    ),
+  ],
+);
+
+export type ProcessedMessageRow = typeof processedMessages.$inferSelect;
+export type ProcessedMessageInsert = typeof processedMessages.$inferInsert;
+
+/**
+ * Tool-execution markers (audit C2). A side-effecting tool records a row
+ * keyed by (case_id, call_id) in the same transaction as its audit write;
+ * an at-least-once redelivery (approval resume re-run, job retry) consults
+ * the marker and short-circuits instead of double-executing a refund or
+ * customer email. Cascades with the case (redaction).
+ */
+export const toolExecutions = pgTable(
+  "tool_executions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    callId: text("call_id").notNull(),
+    tool: text("tool").notNull(),
+    executedAt: timestamp("executed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resultOk: boolean("result_ok"),
+  },
+  (t) => [
+    uniqueIndex("tool_executions_case_call_unique").on(t.caseId, t.callId),
+  ],
+);
+
+export type ToolExecutionRow = typeof toolExecutions.$inferSelect;
+export type ToolExecutionInsert = typeof toolExecutions.$inferInsert;
 
 /**
  * Perceptual hashes of customer photo attachments — backs the damaged-

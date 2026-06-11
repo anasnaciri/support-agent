@@ -6,13 +6,18 @@ import {
   CaseRepository,
   CaseRepositoryDbError,
   CaseStateConflict,
+  InvalidStatusTransition,
+  isConversationProvider,
+  resolveCaseProvider,
   type CaseRepositoryError,
+  type ConversationProviderId,
   type CreateCaseInput,
   type TransitionStatusOptions,
   type UpdatableCaseFields,
 } from "@support-agent/services";
 import {
   CaseId,
+  isStatusTransitionAllowed,
   type Case,
   type CaseChannel,
   type CaseContext,
@@ -90,6 +95,9 @@ export const CaseRepositoryLive = Layer.effect(
               shopifyOrderId: input.orderId ?? null,
               channel: input.channel,
               threadId: input.threadId ?? null,
+              // D2: stamp the owning conversation connector — explicit input
+              // first, else derived from a namespaced threadId.
+              provider: resolveCaseProvider(input),
               category: input.category ?? null,
               status: input.status ?? "new",
               currentAgentId: input.currentAgentId,
@@ -112,12 +120,22 @@ export const CaseRepositoryLive = Layer.effect(
         return rowToCase(row);
       });
 
-    const getById = (id: CaseId): Effect.Effect<Case, CaseRepositoryError> =>
+    // D9: a tenant-scoped `WHERE` — when no tenantId is given this stays the
+    // bare-id lookup, when given a cross-tenant id behaves like a miss.
+    const idScope = (id: CaseId, tenantId?: TenantId) =>
+      tenantId === undefined
+        ? eq(cases.id, id)
+        : and(eq(cases.id, id), eq(cases.tenantId, tenantId));
+
+    const getById = (
+      id: CaseId,
+      tenantId?: TenantId,
+    ): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "getById",
-          db.select().from(cases).where(eq(cases.id, id)).limit(1),
+          db.select().from(cases).where(idScope(id, tenantId)).limit(1),
         );
         const row = rows[0];
         if (!row) return yield* Effect.fail(new CaseNotFound({ caseId: id }));
@@ -127,6 +145,7 @@ export const CaseRepositoryLive = Layer.effect(
     const findByThreadId = (
       tenantId: TenantId,
       threadId: ThreadId,
+      provider?: ConversationProviderId,
     ): Effect.Effect<Case | null, CaseRepositoryError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
@@ -135,16 +154,48 @@ export const CaseRepositoryLive = Layer.effect(
           db
             .select()
             .from(cases)
-            .where(and(eq(cases.tenantId, tenantId), eq(cases.threadId, threadId)))
+            .where(
+              and(
+                eq(cases.tenantId, tenantId),
+                eq(cases.threadId, threadId),
+                // D2: include the provider in the lookup key when known, so
+                // a (theoretical) cross-provider threadId collision can't
+                // resolve to the wrong case.
+                ...(provider !== undefined
+                  ? [eq(cases.provider, provider)]
+                  : []),
+              ),
+            )
             .limit(1),
         );
         const row = rows[0];
         return row ? rowToCase(row) : null;
       });
 
+    const findThreadProvider = (
+      tenantId: TenantId,
+      threadId: ThreadId,
+    ): Effect.Effect<ConversationProviderId | null, CaseRepositoryError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "findThreadProvider",
+          db
+            .select({ provider: cases.provider })
+            .from(cases)
+            .where(
+              and(eq(cases.tenantId, tenantId), eq(cases.threadId, threadId)),
+            )
+            .limit(1),
+        );
+        const provider = rows[0]?.provider;
+        return provider && isConversationProvider(provider) ? provider : null;
+      });
+
     const update = (
       id: CaseId,
       patch: UpdatableCaseFields,
+      tenantId?: TenantId,
     ): Effect.Effect<Case, CaseRepositoryError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
@@ -162,7 +213,11 @@ export const CaseRepositoryLive = Layer.effect(
 
         const updated = yield* wrap(
           "update",
-          db.update(cases).set(dbPatch).where(eq(cases.id, id)).returning(),
+          db
+            .update(cases)
+            .set(dbPatch)
+            .where(idScope(id, tenantId))
+            .returning(),
         );
         const row = updated[0];
         if (!row) return yield* Effect.fail(new CaseNotFound({ caseId: id }));
@@ -186,7 +241,7 @@ export const CaseRepositoryLive = Layer.effect(
             const currentRows = await tx
               .select()
               .from(cases)
-              .where(eq(cases.id, id))
+              .where(idScope(id, opts.tenantId))
               .for("update")
               .limit(1);
             const current = currentRows[0];
@@ -201,6 +256,21 @@ export const CaseRepositoryLive = Layer.effect(
                 caseId: id,
                 expected: opts.expectedFromStatus,
                 actual: current.status as CaseStatus,
+              };
+            }
+            // Master-plan §10 (audit L1): the transition matrix guards
+            // every status write, under the same row lock as the write.
+            if (
+              !isStatusTransitionAllowed(
+                current.status as CaseStatus,
+                toStatus,
+              )
+            ) {
+              return {
+                kind: "invalid_transition" as const,
+                caseId: id,
+                from: current.status as CaseStatus,
+                to: toStatus,
               };
             }
             const now = new Date();
@@ -236,6 +306,14 @@ export const CaseRepositoryLive = Layer.effect(
                 actual: result.actual,
               }),
             );
+          case "invalid_transition":
+            return yield* Effect.fail(
+              new InvalidStatusTransition({
+                caseId: result.caseId,
+                from: result.from,
+                to: result.to,
+              }),
+            );
           case "ok":
             return rowToCase(result.row);
         }
@@ -245,6 +323,7 @@ export const CaseRepositoryLive = Layer.effect(
       create,
       getById,
       findByThreadId,
+      findThreadProvider,
       update,
       transitionStatus,
     });

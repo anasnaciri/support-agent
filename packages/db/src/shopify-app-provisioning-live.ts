@@ -155,26 +155,28 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
           // this shop (a transfer) BEFORE stamping the new owner, so the
           // active-shop unique index holds and getByShop stays deterministic
           // (A3). The old row keeps its credentials but is no longer routed.
+          // Both steps share ONE transaction (audit D11): a crash between
+          // them must not leave the shop detached from BOTH tenants.
           yield* wrap(
-            db
-              .update(shopifyAppProvisioning)
-              .set({ shopDomain: null, updatedAt: now })
-              .where(
-                and(
-                  eq(shopifyAppProvisioning.shopDomain, shopDomain),
-                  ne(shopifyAppProvisioning.tenantId, tenantId),
-                ),
-              ),
-          );
-          yield* wrap(
-            db
-              .update(shopifyAppProvisioning)
-              .set({
-                shopDomain,
-                status: "connected",
-                updatedAt: now,
-              })
-              .where(eq(shopifyAppProvisioning.tenantId, tenantId)),
+            db.transaction(async (tx) => {
+              await tx
+                .update(shopifyAppProvisioning)
+                .set({ shopDomain: null, updatedAt: now })
+                .where(
+                  and(
+                    eq(shopifyAppProvisioning.shopDomain, shopDomain),
+                    ne(shopifyAppProvisioning.tenantId, tenantId),
+                  ),
+                );
+              await tx
+                .update(shopifyAppProvisioning)
+                .set({
+                  shopDomain,
+                  status: "connected",
+                  updatedAt: now,
+                })
+                .where(eq(shopifyAppProvisioning.tenantId, tenantId));
+            }),
           );
         });
 

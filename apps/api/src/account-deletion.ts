@@ -40,18 +40,21 @@ export interface AccountCleanupJobData {
 }
 
 export interface EncryptedConnectorGrant {
-  readonly provider: "shopify" | "gmail" | "google_sheets";
+  readonly provider: "shopify" | "gmail" | "google_sheets" | "outlook";
   readonly shopDomain: string;
   readonly accessTokenEncrypted: string;
   readonly refreshTokenEncrypted: string | null;
   readonly apiVersion: string | null;
 }
 
-/** Providers whose connection IS a revocable OAuth grant. LLM BYOK keys
- * (openrouter/anthropic/openai) and outlook (not yet wired) are excluded. */
+/** Providers whose connection IS a provider-side OAuth grant the cleanup
+ * worker must handle (audit D8). LLM BYOK keys (openrouter/anthropic/openai)
+ * are excluded — nothing to revoke. IMAP is excluded on purpose: the stored
+ * app password has no provider-side grant; wiping the local row is the whole
+ * disconnect (the deletion runbook should tell the merchant to rotate it). */
 export const REVOCABLE_GRANT_PROVIDERS: ReadonlyArray<
   EncryptedConnectorGrant["provider"]
-> = ["shopify", "gmail", "google_sheets"];
+> = ["shopify", "gmail", "google_sheets", "outlook"];
 
 /** A connector row, narrowed to the fields grant-capture needs. */
 export interface ConnectorGrantSource {

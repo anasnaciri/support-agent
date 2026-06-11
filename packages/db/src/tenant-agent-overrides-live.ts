@@ -85,7 +85,11 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
 
       // Field-aware clear: null the model but KEEP a sibling system prompt,
       // then remove the row only when both overridable fields are null (so
-      // "Reset model" never wipes a tenant's custom prompt).
+      // "Reset model" never wipes a tenant's custom prompt). UPDATE and
+      // DELETE share ONE transaction and the DELETE re-checks the just-
+      // cleared column (audit D10): as two autocommit statements, a
+      // concurrent setModel landing between them would have its fresh row
+      // deleted.
       clearModel: (tenantId: TenantId, agentId: AgentId) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
@@ -94,21 +98,22 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
             eq(tenantAgentOverrides.agentId, agentId),
           );
           yield* wrap(
-            db
-              .update(tenantAgentOverrides)
-              .set({ model: null, updatedAt: new Date() })
-              .where(where),
-          );
-          yield* wrap(
-            db
-              .delete(tenantAgentOverrides)
-              .where(
-                and(
-                  where,
-                  isNull(tenantAgentOverrides.systemPrompt),
-                  isNull(tenantAgentOverrides.toolPermissions),
-                ),
-              ),
+            db.transaction(async (tx) => {
+              await tx
+                .update(tenantAgentOverrides)
+                .set({ model: null, updatedAt: new Date() })
+                .where(where);
+              await tx
+                .delete(tenantAgentOverrides)
+                .where(
+                  and(
+                    where,
+                    isNull(tenantAgentOverrides.model),
+                    isNull(tenantAgentOverrides.systemPrompt),
+                    isNull(tenantAgentOverrides.toolPermissions),
+                  ),
+                );
+            }),
           );
         }),
 
@@ -140,6 +145,7 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
         }),
 
       // Symmetric to clearModel — null the prompt, keep a sibling model.
+      // Same one-tx + re-check-cleared-column shape (audit D10).
       clearSystemPrompt: (tenantId: TenantId, agentId: AgentId) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
@@ -148,21 +154,22 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
             eq(tenantAgentOverrides.agentId, agentId),
           );
           yield* wrap(
-            db
-              .update(tenantAgentOverrides)
-              .set({ systemPrompt: null, updatedAt: new Date() })
-              .where(where),
-          );
-          yield* wrap(
-            db
-              .delete(tenantAgentOverrides)
-              .where(
-                and(
-                  where,
-                  isNull(tenantAgentOverrides.model),
-                  isNull(tenantAgentOverrides.toolPermissions),
-                ),
-              ),
+            db.transaction(async (tx) => {
+              await tx
+                .update(tenantAgentOverrides)
+                .set({ systemPrompt: null, updatedAt: new Date() })
+                .where(where);
+              await tx
+                .delete(tenantAgentOverrides)
+                .where(
+                  and(
+                    where,
+                    isNull(tenantAgentOverrides.model),
+                    isNull(tenantAgentOverrides.systemPrompt),
+                    isNull(tenantAgentOverrides.toolPermissions),
+                  ),
+                );
+            }),
           );
         }),
 
@@ -200,7 +207,8 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
 
       // Drop one key from the map. `nullif(… - key, '{}')` collapses an emptied
       // map back to NULL so the field-aware row delete (below) can fire when
-      // model + systemPrompt are also null.
+      // model + systemPrompt are also null. One tx like the clears above —
+      // the two-statement variant has the same D10 race window.
       clearToolPermission: (
         tenantId: TenantId,
         agentId: AgentId,
@@ -213,25 +221,25 @@ export const TenantAgentOverridesServiceLive = Layer.effect(
             eq(tenantAgentOverrides.agentId, agentId),
           );
           yield* wrap(
-            db
-              .update(tenantAgentOverrides)
-              .set({
-                toolPermissions: sql`nullif(coalesce(${tenantAgentOverrides.toolPermissions}, '{}'::jsonb) - ${toolName}, '{}'::jsonb)`,
-                updatedAt: new Date(),
-              })
-              .where(where),
-          );
-          yield* wrap(
-            db
-              .delete(tenantAgentOverrides)
-              .where(
-                and(
-                  where,
-                  isNull(tenantAgentOverrides.model),
-                  isNull(tenantAgentOverrides.systemPrompt),
-                  isNull(tenantAgentOverrides.toolPermissions),
-                ),
-              ),
+            db.transaction(async (tx) => {
+              await tx
+                .update(tenantAgentOverrides)
+                .set({
+                  toolPermissions: sql`nullif(coalesce(${tenantAgentOverrides.toolPermissions}, '{}'::jsonb) - ${toolName}, '{}'::jsonb)`,
+                  updatedAt: new Date(),
+                })
+                .where(where);
+              await tx
+                .delete(tenantAgentOverrides)
+                .where(
+                  and(
+                    where,
+                    isNull(tenantAgentOverrides.model),
+                    isNull(tenantAgentOverrides.systemPrompt),
+                    isNull(tenantAgentOverrides.toolPermissions),
+                  ),
+                );
+            }),
           );
         }),
     });

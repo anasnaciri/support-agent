@@ -1,7 +1,7 @@
 import { Effect, type Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { PgBoss } from "pg-boss";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   BlobStorage,
   ConnectorCredentialStore,
@@ -178,6 +178,14 @@ export const findTenantByGmailMailbox = (
               eq(connectorConnections.shopDomain, mailbox),
               eq(connectorConnections.status, "active"),
             ),
+          )
+          // The connector_connections_active_mailbox_unique partial index
+          // (audit D1) guarantees at most one active row per mailbox; this
+          // deterministic ordering is the backstop so tenant routing can
+          // never become plan-dependent even if that invariant regresses.
+          .orderBy(
+            desc(connectorConnections.installedAt),
+            asc(connectorConnections.id),
           )
           .limit(1),
       catch: (cause) =>

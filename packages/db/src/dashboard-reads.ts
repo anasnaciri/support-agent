@@ -164,8 +164,13 @@ export const todaySummary = async (
   tenantId: string,
   now: Date = new Date(),
 ): Promise<TodaySummary> => {
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
+  // "Today" starts at UTC midnight (audit D11): server-local midnight made
+  // the rollup depend on wherever the API process happens to run. UTC is a
+  // deliberate simplification until tenants carry a timezone setting — when
+  // they do, compute this boundary in the tenant's zone instead.
+  const dayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   const [byStatus, pending, takeover, resolvedToday] = await Promise.all([
     db
@@ -411,7 +416,15 @@ export const caseEvents = async (
       occurredAt: auditLog.occurredAt,
     })
     .from(auditLog)
-    .where(and(eq(auditLog.caseId, caseId), gt(auditLog.id, sinceId)))
+    .where(
+      and(
+        eq(auditLog.caseId, caseId),
+        // Redundant with the caseId pre-check above, but every sibling query
+        // double-scopes by tenant — keep the invariant uniform (audit D12).
+        eq(auditLog.tenantId, tenantId),
+        gt(auditLog.id, sinceId),
+      ),
+    )
     .orderBy(asc(auditLog.id))
     .limit(50);
 

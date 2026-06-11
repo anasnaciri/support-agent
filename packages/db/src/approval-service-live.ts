@@ -96,14 +96,25 @@ export const ApprovalServiceLive = Layer.effect(
         return rowToApproval(row);
       });
 
+    // D9: when a tenant scope is given, a cross-tenant approval behaves
+    // exactly like a missing one.
+    const idScope = (
+      id: ReturnType<typeof ApprovalId>,
+      tenantId?: TenantId,
+    ) =>
+      tenantId === undefined
+        ? eq(approvals.id, id)
+        : and(eq(approvals.id, id), eq(approvals.tenantId, tenantId));
+
     const getById = (
       id: ReturnType<typeof ApprovalId>,
+      tenantId?: TenantId,
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
           "getById",
-          db.select().from(approvals).where(eq(approvals.id, id)).limit(1),
+          db.select().from(approvals).where(idScope(id, tenantId)).limit(1),
         );
         const row = rows[0];
         if (!row)
@@ -120,6 +131,7 @@ export const ApprovalServiceLive = Layer.effect(
         readonly approvedInput?: unknown;
         readonly decisionReason?: string | null;
       },
+      tenantId?: TenantId,
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
@@ -129,7 +141,7 @@ export const ApprovalServiceLive = Layer.effect(
             const currentRows = await tx
               .select()
               .from(approvals)
-              .where(eq(approvals.id, id))
+              .where(idScope(id, tenantId))
               .for("update")
               .limit(1);
             const current = currentRows[0];
@@ -180,21 +192,31 @@ export const ApprovalServiceLive = Layer.effect(
       });
 
     const approve = (input: ApproveInput) =>
-      transition(input.id, "pending", {
-        status: "approved",
-        decidedBy: input.decidedBy,
-        decisionReason: input.decisionReason ?? null,
-        ...(input.approvedInput !== undefined
-          ? { approvedInput: input.approvedInput }
-          : {}),
-      });
+      transition(
+        input.id,
+        "pending",
+        {
+          status: "approved",
+          decidedBy: input.decidedBy,
+          decisionReason: input.decisionReason ?? null,
+          ...(input.approvedInput !== undefined
+            ? { approvedInput: input.approvedInput }
+            : {}),
+        },
+        input.tenantId,
+      );
 
     const reject = (input: RejectInput) =>
-      transition(input.id, "pending", {
-        status: "rejected",
-        decidedBy: input.decidedBy,
-        decisionReason: input.decisionReason ?? null,
-      });
+      transition(
+        input.id,
+        "pending",
+        {
+          status: "rejected",
+          decidedBy: input.decidedBy,
+          decisionReason: input.decisionReason ?? null,
+        },
+        input.tenantId,
+      );
 
     const listPending = (
       tenantId: TenantId,
