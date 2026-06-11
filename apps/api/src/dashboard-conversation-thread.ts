@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import sanitizeHtml from "sanitize-html";
 import type {
   ConversationError,
@@ -11,6 +12,7 @@ import type {
   ConnectorConnection,
   ConversationProviderId,
 } from "@support-agent/services";
+import { isConversationProvider } from "@support-agent/services";
 
 const SAFE_EMAIL_TAGS = [
   "a",
@@ -161,3 +163,91 @@ export const resolveCaseConversationMailbox = (
     reason: candidates.length === 0 ? "auth_required" : "mailbox_ambiguous",
   };
 };
+
+export const resolveCaseConversationThread = (
+  caseMailbox: string | null,
+  provider: ConversationProviderId | null,
+  connections: ReadonlyArray<ConnectorConnection>,
+  fetchThread: (
+    provider: ConversationProviderId,
+    mailbox: string,
+  ) => Effect.Effect<ConversationThread, ConversationError>,
+): Effect.Effect<
+  | {
+      readonly ok: true;
+      readonly mailbox: string;
+      readonly thread: ConversationThread;
+    }
+  | {
+      readonly ok: false;
+      readonly reason: "auth_required" | "mailbox_ambiguous";
+    }
+> =>
+  Effect.gen(function* () {
+    const activeConnections = connections.filter(
+      (connection) =>
+        connection.status === "active" &&
+        isConversationProvider(connection.provider) &&
+        (provider === null || connection.provider === provider),
+    );
+
+    const probe = (
+      candidateProvider: ConversationProviderId,
+      mailbox: string,
+    ) =>
+      fetchThread(candidateProvider, mailbox).pipe(
+        Effect.match({
+          onFailure: (error) =>
+            error._tag === "ConversationAuthMissing" ||
+            error._tag === "ConversationAuthFailed"
+              ? ({ ok: false as const, reason: "auth_required" as const })
+              : null,
+          onSuccess: (
+            thread,
+          ): {
+            readonly ok: true;
+            readonly mailbox: string;
+            readonly thread: ConversationThread;
+          } => ({
+            ok: true,
+            mailbox,
+            thread,
+          }),
+        }),
+      );
+
+    const candidateProviders =
+      provider === null
+        ? Array.from(
+            new Set(
+              activeConnections
+                .map((connection) => connection.provider)
+                .filter(isConversationProvider),
+            ),
+          )
+        : [provider];
+
+    if (caseMailbox && provider !== null) {
+      const result = yield* probe(provider, caseMailbox);
+      if (result?.ok) return result;
+      if (result?.reason === "auth_required") return result;
+    }
+
+    if (activeConnections.length === 0) {
+      return { ok: false as const, reason: "auth_required" as const };
+    }
+
+    let sawAuthRequired = false;
+    for (const candidateProvider of candidateProviders) {
+      for (const connection of activeConnections) {
+        const result = yield* probe(candidateProvider, connection.shopDomain);
+        if (result?.ok) return result;
+        if (result?.reason === "auth_required") sawAuthRequired = true;
+      }
+    }
+
+    return {
+      ok: false as const,
+      reason: sawAuthRequired ? ("auth_required" as const) : ("mailbox_ambiguous" as const),
+    };
+  });

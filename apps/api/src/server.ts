@@ -24,6 +24,7 @@ import {
   KnowledgeBaseService,
   legalAcceptanceIsCurrent,
   parseThreadId,
+  namespaceThreadId,
   ShopifyAppProvisioningStore,
   TenantAgentOverridesService,
   TenantRepository,
@@ -76,7 +77,7 @@ import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
-  resolveCaseConversationMailbox,
+  resolveCaseConversationThread,
 } from "./dashboard-conversation-thread.js";
 import {
   buildModelsResponse,
@@ -539,56 +540,42 @@ const handleDashboardCaseConversationThread = async (
             },
           };
         }
+        const threadId = caseRow.threadId;
+        const rawThreadId = parseThreadId(threadId)?.raw ?? threadId;
         const provider =
-          parseThreadId(caseRow.threadId)?.provider ??
-          (yield* cases.findThreadProvider(
-            TenantId(auth.tenantId),
-            caseRow.threadId,
-          ));
-        if (!provider) {
-          return {
-            kind: "result" as const,
-            result: {
-              status: "unavailable" as const,
-              reason: "mailbox_ambiguous" as const,
-            },
-          };
-        }
+          parseThreadId(threadId)?.provider ??
+          (yield* cases.findThreadProvider(TenantId(auth.tenantId), threadId));
         const connections = yield* connectorStore.listForTenant(
           TenantId(auth.tenantId),
         );
-        const mailbox = resolveCaseConversationMailbox(
+        const threadResult = yield* resolveCaseConversationThread(
           caseRow.mailbox,
           provider,
           connections,
-        );
-        if (!mailbox.ok) {
-          return {
-            kind: "result" as const,
-            result: {
+          (candidateProvider, mailbox) =>
+            conversation.fetchThread(
+              TenantId(auth.tenantId),
+              namespaceThreadId(candidateProvider, rawThreadId),
+              mailbox,
+            ),
+        ).pipe(
+          Effect.match({
+            onFailure: (error) => ({
               status: "unavailable" as const,
-              reason: mailbox.reason,
-            },
-          };
-        }
-        const threadResult = yield* conversation
-          .fetchThread(
-            TenantId(auth.tenantId),
-            caseRow.threadId,
-            mailbox.mailbox,
-          )
-          .pipe(
-            Effect.match({
-              onFailure: (error) => ({
-                status: "unavailable" as const,
-                reason: conversationUnavailableReason(error),
-              }),
-              onSuccess: (thread) => ({
-                status: "available" as const,
-                thread: projectConversationThread(thread),
-              }),
+              reason: conversationUnavailableReason(error),
             }),
-          );
+            onSuccess: (resolution) =>
+              resolution.ok
+                ? {
+                    status: "available" as const,
+                    thread: projectConversationThread(resolution.thread),
+                  }
+                : {
+                    status: "unavailable" as const,
+                    reason: resolution.reason,
+                  },
+          }),
+        );
         return { kind: "result" as const, result: threadResult };
       }),
       layer,

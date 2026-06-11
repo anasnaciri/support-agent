@@ -1,8 +1,10 @@
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   conversationUnavailableReason,
   projectConversationThread,
   resolveCaseConversationMailbox,
+  resolveCaseConversationThread,
   sanitizeEmailHtml,
   stripQuotedText,
 } from "../src/dashboard-conversation-thread.js";
@@ -210,5 +212,76 @@ describe("dashboard conversation thread", () => {
         connections,
       ),
     ).toEqual({ ok: true, mailbox: "first@merchant.com" });
+  });
+
+  it("loads a legacy case by probing connected mailboxes until one matches", async () => {
+    const connections = [
+      {
+        tenantId,
+        provider: "gmail" as const,
+        shopDomain: "first@merchant.com",
+        accessToken: "secret",
+        refreshToken: null,
+        tokenExpiresAt: null,
+        metadata: {},
+        scopes: [],
+        apiVersion: null,
+        installedAt: new Date(),
+        status: "active" as const,
+      },
+      {
+        tenantId,
+        provider: "gmail" as const,
+        shopDomain: "second@merchant.com",
+        accessToken: "secret",
+        refreshToken: null,
+        tokenExpiresAt: null,
+        metadata: {},
+        scopes: [],
+        apiVersion: null,
+        installedAt: new Date(),
+        status: "active" as const,
+      },
+    ];
+    const thread = await Effect.runPromise(
+      resolveCaseConversationThread(
+        null,
+        null,
+        connections,
+        (provider, mailbox) =>
+          provider === "gmail" && mailbox === "first@merchant.com"
+            ? Effect.fail(new ThreadNotFound({ tenantId, threadId }))
+            : Effect.succeed({
+                id: threadId,
+                subject: "Return request",
+                participants: [
+                  { name: "Customer", email: "customer@example.com" },
+                  { name: null, email: mailbox },
+                ],
+                messages: [
+                  {
+                    id: "message-1",
+                    threadId,
+                    direction: "inbound",
+                    from: { name: "Customer", email: "customer@example.com" },
+                    to: [{ name: null, email: mailbox }],
+                    subject: "Return request",
+                    bodyText: "Please help",
+                    bodyHtml: null,
+                    sentAt: new Date("2026-06-11T10:30:00.000Z"),
+                    attachments: [],
+                  },
+                ],
+              }),
+      ),
+    );
+
+    expect(thread).toEqual({
+      ok: true,
+      mailbox: "second@merchant.com",
+      thread: expect.objectContaining({
+        id: threadId,
+      }),
+    });
   });
 });
