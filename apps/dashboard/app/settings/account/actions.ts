@@ -1,9 +1,12 @@
 "use server";
 
+import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { signOut } from "@workos-inc/authkit-nextjs";
 
 import { api, getDashboardContext } from "@/lib/api-client";
+import { WORKSPACE_COOKIE } from "@/lib/workspace";
 
 /**
  * Irreversibly delete the signed-in manager's tenant account. The api wipes
@@ -30,4 +33,37 @@ export const deleteAccountAction = async (
   }
 
   await signOut({ returnTo: "/goodbye" });
+};
+
+/**
+ * Delete only the ACTIVE workspace. The org, the other workspaces, and the
+ * manager's session all survive — afterwards the dashboard lands on the
+ * default workspace. Same typed-name confirmation pattern as the account
+ * delete; the api refuses the last workspace (account delete is that door).
+ */
+export const deleteWorkspaceAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const ctx = await getDashboardContext();
+  const confirm = String(formData.get("confirm") ?? "").trim();
+  if (confirm !== ctx.tenantName) {
+    redirect("/settings/account?error=workspace_name_mismatch");
+  }
+  if (ctx.workspaces.length <= 1) {
+    redirect("/settings/account?error=last_workspace");
+  }
+
+  const res = await api.deleteWorkspace(ctx, ctx.workspaceId);
+  if (res.status === 409) {
+    redirect("/settings/account?error=last_workspace");
+  }
+  if (res.status !== 200) {
+    redirect("/settings/account?error=workspace_delete_failed");
+  }
+
+  // Back to the default workspace (stale cookie would self-heal anyway).
+  const store = await cookies();
+  store.delete(WORKSPACE_COOKIE);
+  revalidatePath("/", "layout");
+  redirect("/?workspace_deleted=1");
 };

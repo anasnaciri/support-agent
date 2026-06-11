@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 
 import { getSession } from "@/lib/session";
+import { getShellWorkspaces } from "@/lib/api-client";
 import { parseSidebarWidth } from "@/lib/sidebar-width";
 import { AppShell } from "./AppShell";
 import "./globals.css";
@@ -17,6 +18,9 @@ export default async function RootLayout({
   readonly children: ReactNode;
 }) {
   const { user } = await getSession();
+  // Tolerant fetch (null on signed-out / pre-onboarding / api hiccup) — the
+  // layout wraps auth routes too, so this must never redirect or throw.
+  const shellWorkspaces = await getShellWorkspaces();
   const cookieStore = await cookies();
   // Controls the secondary (contextual) sidebar; default open on first
   // visit. AppShell updates the cookie on every toggle so subsequent
@@ -33,6 +37,8 @@ export default async function RootLayout({
       >
         <AppShell
           email={user?.email ?? null}
+          workspaces={shellWorkspaces?.workspaces ?? null}
+          activeWorkspaceId={shellWorkspaces?.activeWorkspaceId ?? null}
           defaultOpen={defaultOpen}
           defaultWidth={defaultWidth}
         >

@@ -10,6 +10,8 @@ import {
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
+import type { WorkspaceSummary } from "@support-agent/dashboard-contracts";
+
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -33,6 +35,9 @@ interface SecondarySection {
 
 interface Props {
   readonly email: string | null;
+  /** Workspaces for the rail's switcher; null → signed out / pre-onboarding. */
+  readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
+  readonly activeWorkspaceId: string | null;
   readonly defaultOpen: boolean;
   readonly defaultWidth: number;
   readonly children: ReactNode;
@@ -40,6 +45,8 @@ interface Props {
 
 export function AppShell({
   email,
+  workspaces,
+  activeWorkspaceId,
   defaultOpen,
   defaultWidth,
   children,
@@ -119,7 +126,11 @@ export function AppShell({
 
   return (
     <div className="flex h-screen overflow-hidden bg-sidebar">
-      <IconRail email={email} />
+      <IconRail
+        email={email}
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+      />
 
       {/* pt-3 reveals a sliver of the dark frame so the off-white panel reads
           as floating, matching the rest of the app. */}

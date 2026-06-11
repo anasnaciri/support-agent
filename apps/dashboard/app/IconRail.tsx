@@ -13,8 +13,11 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import type { WorkspaceSummary } from "@support-agent/dashboard-contracts";
+
 import { cn } from "@/lib/utils";
 import { signOutAction } from "./sign-out-action";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface NavItem {
   readonly href: string;
@@ -62,9 +65,12 @@ const RailLink = ({
 
 interface Props {
   readonly email: string | null;
+  /** Workspaces for the switcher; null → signed out / pre-onboarding. */
+  readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
+  readonly activeWorkspaceId: string | null;
 }
 
-export function IconRail({ email }: Props) {
+export function IconRail({ email, workspaces, activeWorkspaceId }: Props) {
   const pathname = usePathname() ?? "/";
 
   return (
@@ -77,6 +83,15 @@ export function IconRail({ email }: Props) {
       >
         <Sprout className="size-5" aria-hidden />
       </Link>
+
+      {workspaces && workspaces.length > 0 && activeWorkspaceId ? (
+        <div className="mt-3">
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+          />
+        </div>
+      ) : null}
 
       <nav className="mt-6 flex flex-1 flex-col items-center gap-1">
         {PRIMARY_NAV.map((item) => (

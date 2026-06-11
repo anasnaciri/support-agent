@@ -1,5 +1,5 @@
 import "server-only";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionState } from "./session";
 import { buildRefreshRedirect } from "./session-refresh";
@@ -24,12 +24,16 @@ import type {
   OnboardingResult,
   Page,
   ShopifyAppGateView,
+  CreateWorkspaceResult,
   TenantInfo,
   TenantSettingsView,
   TodaySummary,
   UsageDecisionRow,
+  WorkspaceSummary,
+  WorkspacesResponse,
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
+import { WORKSPACE_COOKIE, pickActiveWorkspace } from "./workspace";
 import { LEGAL_ACCEPTED_AT_KEY, hasAcceptedAtSignup } from "./legal-consent";
 import { ONBOARDING_PATH, buildSignUpRedirect } from "./auth-redirect";
 
@@ -77,13 +81,19 @@ export interface DashboardContext {
   readonly userId: string;
   /** Stable manager UUID derived from the WorkOS user id (the api's x-user-id). */
   readonly userDecisionUuid: string;
+  /** The ACTIVE workspace (tenant row) — same value as workspaceId. */
   readonly tenantId: string;
   readonly tenantName: string;
+  readonly workspaceId: string;
+  /** Every workspace the org owns, default first (for the switcher). */
+  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
 }
 
 interface CallCtx {
   readonly organizationId: string;
   readonly userDecisionUuid?: string;
+  /** Pins the api call to one workspace; absent → the org's default. */
+  readonly workspaceId?: string;
 }
 
 interface CallResult {
@@ -104,6 +114,13 @@ const call = async (
     readonly method?: "GET" | "POST";
     readonly body?: unknown;
     readonly ctx: CallCtx;
+    /**
+     * What a 403 means depends on the endpoint: for tenant-scoped reads it's
+     * "org has no tenant" (→ /onboarding), but endpoints with their own 403
+     * semantics (legal_acceptance_required) need the body back instead of a
+     * drive-by redirect.
+     */
+    readonly on403?: "redirect" | "return";
   },
 ): Promise<CallResult> => {
   const headers: Record<string, string> = {
@@ -111,6 +128,7 @@ const call = async (
     "x-org-id": opts.ctx.organizationId,
   };
   if (opts.ctx.userDecisionUuid) headers["x-user-id"] = opts.ctx.userDecisionUuid;
+  if (opts.ctx.workspaceId) headers["x-workspace-id"] = opts.ctx.workspaceId;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
 
   const res = await fetch(`${apiBase()}/dashboard${path}`, {
@@ -123,7 +141,7 @@ const call = async (
   if (res.status === 401 || res.status === 503) {
     throw new Error(`dashboard api auth/config error ${res.status} on ${path}`);
   }
-  if (res.status === 403) {
+  if (res.status === 403 && (opts.on403 ?? "redirect") === "redirect") {
     redirect("/onboarding");
   }
   if (res.status >= 500) {
@@ -151,6 +169,20 @@ const fetchTenant = async (
   return (body as { tenant: TenantInfo | null }).tenant;
 };
 
+const fetchWorkspaces = async (
+  organizationId: string,
+): Promise<WorkspacesResponse> => {
+  const { status, body } = await call("/workspaces", { ctx: { organizationId } });
+  if (status !== 200) throw new Error(`dashboard api ${status} on /workspaces`);
+  return body as WorkspacesResponse;
+};
+
+/** The workspace:id cookie, or undefined. */
+const workspaceCookie = async (): Promise<string | undefined> => {
+  const store = await cookies();
+  return store.get(WORKSPACE_COOKIE)?.value;
+};
+
 /**
  * The gate every tenant-scoped page calls first. Redirects to /sign-up when
  * there's no session and /onboarding when the user has no org yet (a fresh
@@ -174,15 +206,46 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId } = session;
   if (!user) redirect(buildSignUpRedirect(await currentPathname()));
   if (!organizationId) redirect(ONBOARDING_PATH);
-  const tenant = await fetchTenant(organizationId);
-  if (!tenant) redirect(ONBOARDING_PATH);
+  const { workspaces } = await fetchWorkspaces(organizationId);
+  // The cookie is advisory — a stale value (deleted workspace) resolves to
+  // the default instead of erroring, so a delete/switch race can't strand
+  // the user. The cookie itself is rewritten on the next explicit switch.
+  const active = pickActiveWorkspace(workspaces, await workspaceCookie());
+  if (!active) redirect(ONBOARDING_PATH);
   return {
     organizationId,
     userId: user.id,
     userDecisionUuid: dashboardUserDecisionUuid(user.id),
-    tenantId: tenant.tenantId,
-    tenantName: tenant.name,
+    tenantId: active.id,
+    tenantName: active.name,
+    workspaceId: active.id,
+    workspaces,
   };
+};
+
+/**
+ * Workspace list + active id for the app shell's switcher. Tolerant on
+ * purpose: the root layout renders on auth/onboarding routes too, where
+ * there is no session or no org — any failure means "no switcher", never a
+ * redirect or a crash.
+ */
+export interface ShellWorkspaces {
+  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
+  readonly activeWorkspaceId: string;
+}
+
+export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
+  try {
+    const { session } = await getSessionState();
+    const { user, organizationId } = session;
+    if (!user || !organizationId) return null;
+    const { workspaces } = await fetchWorkspaces(organizationId);
+    const active = pickActiveWorkspace(workspaces, await workspaceCookie());
+    if (!active) return null;
+    return { workspaces, activeWorkspaceId: active.id };
+  } catch {
+    return null;
+  }
 };
 
 export interface OrgContext {
@@ -433,9 +496,58 @@ export const api = {
   acceptLegal: (ctx: CallCtx): Promise<CallResult> =>
     call("/legal-acceptance", { method: "POST", ctx }),
 
-  /** Irreversibly delete the tenant's own account (wipe + WorkOS + email). */
+  /**
+   * Irreversibly delete the whole account: EVERY workspace the org owns,
+   * then the WorkOS org + deletion email (worker).
+   */
   deleteAccount: (ctx: CallCtx): Promise<CallResult> =>
     call("/account/delete", { method: "POST", ctx }),
+
+  // ---- Workspaces ----
+  workspaces: (ctx: CallCtx): Promise<WorkspacesResponse> =>
+    okBody("/workspaces", ctx) as Promise<WorkspacesResponse>,
+
+  createWorkspace: async (
+    ctx: CallCtx,
+    input: { readonly name: string; readonly notificationEmail: string },
+  ): Promise<{
+    status: number;
+    result: CreateWorkspaceResult | null;
+    error: string | null;
+  }> => {
+    const { status, body } = await call("/workspaces", {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return", // legal_acceptance_required — caller routes to legal
+    });
+    return {
+      status,
+      result: status === 200 ? (body as CreateWorkspaceResult) : null,
+      error:
+        status === 200
+          ? null
+          : ((body as { error?: string } | null)?.error ?? "unknown"),
+    };
+  },
+
+  renameWorkspace: (
+    ctx: CallCtx,
+    workspaceId: string,
+    name: string,
+  ): Promise<CallResult> =>
+    call(`/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
+      method: "POST",
+      body: { name },
+      ctx,
+    }),
+
+  /** Delete ONE workspace; the org and sibling workspaces survive. */
+  deleteWorkspace: (ctx: CallCtx, workspaceId: string): Promise<CallResult> =>
+    call(`/workspaces/${encodeURIComponent(workspaceId)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
 
   setAgentModel: (ctx: CallCtx, agentId: string, model: string): Promise<CallResult> =>
     call(`/agents/${encodeURIComponent(agentId)}/model`, {
@@ -606,7 +718,14 @@ export const api = {
       readonly user?: string;
     },
   ): Promise<CallResult> =>
-    call("/connections/imap", { method: "POST", body: input, ctx }),
+    // on403 return: the action maps it to its legal_acceptance_required
+    // message (the blanket /onboarding redirect made that branch dead code).
+    call("/connections/imap", {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return",
+    }),
 
   // Mint a signed install grant for the authenticated tenant and get the
   // provider OAuth install URL (5th-audit #2). The tenant is derived

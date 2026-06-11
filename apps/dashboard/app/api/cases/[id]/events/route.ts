@@ -1,5 +1,8 @@
+import { cookies } from "next/headers";
+
 import { getSessionOrRefresh } from "@/lib/session";
 import { api } from "@/lib/api-client";
+import { WORKSPACE_COOKIE } from "@/lib/workspace";
 
 // ============================================================
 // Live case updates — same-origin poll proxy (Path B)
@@ -24,7 +27,13 @@ export async function GET(req: Request, { params }: RouteParams) {
     return new Response("unauthorized", { status: 401 });
   }
   const since = new URL(req.url).searchParams.get("since") ?? "0";
-  const result = await api.caseEvents({ organizationId }, id, since);
+  // Pin to the active workspace like the page that opened this poll.
+  const workspaceId = (await cookies()).get(WORKSPACE_COOKIE)?.value;
+  const result = await api.caseEvents(
+    { organizationId, ...(workspaceId ? { workspaceId } : {}) },
+    id,
+    since,
+  );
   if (!result) return new Response("not found", { status: 404 });
   return Response.json(result, {
     headers: { "Cache-Control": "no-store" },

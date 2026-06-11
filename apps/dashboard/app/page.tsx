@@ -22,12 +22,18 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 const TOP_N = 5;
 
 interface TodaySearchParams {
-  readonly searchParams?: Promise<{ readonly onboarded?: string }>;
+  readonly searchParams?: Promise<{
+    readonly onboarded?: string;
+    readonly workspace_created?: string;
+    readonly workspace_deleted?: string;
+  }>;
 }
 
 export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const sp = searchParams ? await searchParams : {};
   const justOnboarded = sp.onboarded === "1";
+  const workspaceCreated = sp.workspace_created === "1";
+  const workspaceDeleted = sp.workspace_deleted === "1";
   const ctx = await getDashboardContext();
   const summary = await api.today(ctx);
 
@@ -59,6 +65,32 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
               Settings → Integrations
             </Link>{" "}
             to start receiving cases.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {workspaceCreated ? (
+        <Alert variant="success">
+          <Sprout className="size-4" />
+          <AlertTitle>Workspace created — you&apos;re now in {ctx.tenantName}</AlertTitle>
+          <AlertDescription>
+            Connect this workspace&apos;s store and mailbox from{" "}
+            <Link
+              href="/settings/integrations"
+              className="font-medium underline underline-offset-2"
+            >
+              Settings → Integrations
+            </Link>{" "}
+            to start receiving cases.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {workspaceDeleted ? (
+        <Alert variant="success">
+          <Sprout className="size-4" />
+          <AlertTitle>Workspace deleted</AlertTitle>
+          <AlertDescription>
+            You&apos;re back in {ctx.tenantName}. The deleted workspace&apos;s
+            data and connections are being cleaned up.
           </AlertDescription>
         </Alert>
       ) : null}
