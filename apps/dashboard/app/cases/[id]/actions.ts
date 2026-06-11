@@ -34,3 +34,14 @@ export const resumeAction = async (formData: FormData): Promise<void> => {
   revalidatePath("/cases");
   redirect(`/cases/${caseId}?resumed=${result.kind}`);
 };
+
+export const retryAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  const result = await api.retry(ctx, caseId);
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?retried=${result.kind}`);
+};

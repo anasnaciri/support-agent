@@ -10,6 +10,7 @@ import {
   type ChatMessage,
   type DomainEvent,
   type LLMDecision,
+  type ThreadId,
   type ToolContext,
   type WorkflowResult,
   summarizePhotoSignals,
@@ -187,10 +188,15 @@ const buildUserMessageFromInbound = (
   };
 };
 
-const buildInitialMessages = (
+export const buildInitialMessages = (
   event: DomainEvent,
-  caseSubject: string | null,
+  caseRow: {
+    readonly subject: string | null;
+    readonly threadId: ThreadId | null;
+    readonly context: Record<string, unknown>;
+  },
 ): ChatMessage[] => {
+  const caseSubject = caseRow.subject;
   if (event.type === "ticket.created") {
     const subject = event.payload.subject ?? caseSubject ?? "(no subject)";
     return [
@@ -220,6 +226,37 @@ const buildInitialMessages = (
     const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
     const text = `${header}\n\nSubject: ${subject}\n\n${event.payload.bodyText}`;
     return [buildUserMessageFromInbound(text, event.payload.attachments)];
+  }
+  if (event.type === "case.resumed") {
+    // A manager explicitly re-ran the case from the dashboard (or an
+    // operator replayed it). Unlike inbound events, there is no message
+    // payload here — the agent starts blind. Hand it everything the case
+    // row knows so it can re-orient: the thread id (to wire
+    // `conversation.fetch_thread` / `conversation.reply` without
+    // guessing), the subject, and the context patches accumulated on
+    // previous attempts (`case.update_context`).
+    const parts: string[] = [];
+    if (caseRow.threadId) {
+      parts.push(`[Thread context: threadId=${caseRow.threadId}]`);
+    }
+    parts.push(
+      `(system event: case.resumed — trigger: ${event.trigger})`,
+      "A manager handed this case back to you and asked you to try again.",
+    );
+    if (caseSubject) {
+      parts.push(`Subject: ${caseSubject}`);
+    }
+    if (Object.keys(caseRow.context).length > 0) {
+      parts.push(
+        `Context gathered on previous attempts:\n${JSON.stringify(caseRow.context, null, 2)}`,
+      );
+    }
+    if (caseRow.threadId) {
+      parts.push(
+        "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then complete the customer's request.",
+      );
+    }
+    return [{ role: "user", content: parts.join("\n\n") }];
   }
   // Other events resume an in-flight case; for Phase 1 we don't have message
   // history, so we just signal what woke the case up.
@@ -1061,10 +1098,11 @@ export const AgentRuntimeDefault = Layer.effect(
           yield* registry.resolve(working.currentAgentId),
           overrideMap,
         );
-        const messages: ChatMessage[] = buildInitialMessages(
-          event,
-          working.subject,
-        );
+        const messages: ChatMessage[] = buildInitialMessages(event, {
+          subject: working.subject,
+          threadId: working.threadId,
+          context: working.context,
+        });
         let current = working;
 
         for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {

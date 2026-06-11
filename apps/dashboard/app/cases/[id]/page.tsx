@@ -18,7 +18,7 @@ import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
-import { resumeAction, takeOverAction } from "./actions";
+import { resumeAction, retryAction, takeOverAction } from "./actions";
 import {
   RECOMMENDATION_LABEL,
   extractRefundRecommendation,
@@ -34,6 +34,7 @@ interface Params {
   readonly searchParams: Promise<{
     readonly takenOver?: string;
     readonly resumed?: string;
+    readonly retried?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -69,6 +70,29 @@ const resumeBanner = (kind: string | undefined): Banner | null => {
     return {
       tone: "success",
       text: "Handed back to the agent. It will resume on the customer's next reply.",
+    };
+  }
+  if (kind === "not_in_takeover") {
+    return {
+      tone: "info",
+      text: "This case wasn't under human takeover — no change.",
+    };
+  }
+  return null;
+};
+
+const retryBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "retried") {
+    return {
+      tone: "success",
+      text: "Handed back to the agent — it's retrying now. New activity will appear in the timeline shortly.",
+    };
+  }
+  if (kind === "resumed_no_tick") {
+    return {
+      tone: "warn",
+      text: "Handed back to the agent, but the retry couldn't be queued. It will resume on the customer's next reply.",
     };
   }
   if (kind === "not_in_takeover") {
@@ -321,6 +345,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const banner =
     takeOverBanner(sp.takenOver) ??
     resumeBanner(sp.resumed) ??
+    retryBanner(sp.retried) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify] = await Promise.all([
@@ -446,16 +471,27 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             </form>
           ) : null}
           {canResume ? (
-            <form action={resumeAction} className="ml-auto">
-              <input type="hidden" name="caseId" value={caseRow.id} />
-              <SubmitButton
-                variant="outline"
-                pendingLabel="Handing back…"
-                title="Let the agent handle this case again — it resumes on the customer's next reply"
-              >
-                Hand back to agent
-              </SubmitButton>
-            </form>
+            <div className="ml-auto flex items-center gap-2">
+              <form action={resumeAction}>
+                <input type="hidden" name="caseId" value={caseRow.id} />
+                <SubmitButton
+                  variant="outline"
+                  pendingLabel="Handing back…"
+                  title="Let the agent handle this case again — it resumes on the customer's next reply"
+                >
+                  Hand back to agent
+                </SubmitButton>
+              </form>
+              <form action={retryAction}>
+                <input type="hidden" name="caseId" value={caseRow.id} />
+                <SubmitButton
+                  pendingLabel="Retrying…"
+                  title="Hand the case back and have the agent try again right now"
+                >
+                  Retry now
+                </SubmitButton>
+              </form>
+            </div>
           ) : null}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">

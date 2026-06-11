@@ -67,6 +67,7 @@ import {
 } from "@support-agent/db";
 import { fetchModelCatalog } from "@support-agent/providers";
 import { parseAdminAuth, parseDashboardAuth } from "./dashboard-auth.js";
+import { retryCaseNow } from "./case-retry.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   buildModelsResponse,
@@ -833,6 +834,39 @@ const handleDashboardResume = async (
       reason,
     }),
   );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/retry — manager hands a taken-over case back
+// AND has the agent try again immediately: the resume flip plus a
+// `case.resumed` workflow event, so the worker ticks now instead of
+// waiting for the customer's next message.
+const handleDashboardRetry = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const managerId = auth.userId;
+  const outcome = await retryCaseNow({
+    caseId: id,
+    resume: () =>
+      runWithDb(layer, (db) =>
+        resumeCase(db, {
+          caseId: id,
+          tenantId: auth.tenantId,
+          managerId,
+          reason: "manager asked the agent to retry from the dashboard",
+        }),
+      ),
+    publish: makePgBossApprovalPublisher(() =>
+      acquireApprovalBoss(cfg.databaseUrl),
+    ),
+  });
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
 };
 
@@ -4959,6 +4993,11 @@ export const startServer = async (
     "/dashboard/cases/:id/resume",
     "Hand a taken-over case back to the agent (manager)",
     handleDashboardResume,
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/retry",
+    "Hand a taken-over case back and have the agent retry now (manager)",
+    handleDashboardRetry,
   );
   dashboardPost(
     "/dashboard/onboarding",

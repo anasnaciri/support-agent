@@ -14,6 +14,19 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-11 — Dashboard "Retry now" (resume + immediate agent tick):** A `human_takeover` case can now be
+  re-run by the agent on demand, closing the recovery loop for `max_turns_exceeded` / retries-exhausted
+  escalations ("Hand back to agent" only waited for the customer's next message). Three pieces:
+  (1) `buildInitialMessages` (now exported) builds a real re-orientation message for `case.resumed` ticks —
+  thread id header, trigger, subject, prior `case.update_context` patches, and a fetch_thread instruction
+  (previously the agent woke to a bare `(system event: case.resumed)` with no thread id, so it couldn't act).
+  (2) `POST /dashboard/cases/:id/retry` (`apps/api/src/case-retry.ts`): `resumeCase` flip first (the §2.95
+  guard would hold an event published before the flip), then publish `case.resumed` trigger=`dashboard_retry`
+  onto `workflow.events`; publish failure degrades to `resumed_no_tick` (= plain hand-back, never a lost case).
+  (3) "Retry now" button + outcome banners on `/cases/:id` next to "Hand back to agent" (api-client `retry`,
+  `retryAction`). Tests: message-shape unit tests (services), retry orchestration unit tests (api),
+  integration test proving the event lands in `pgboss.job`, runtime e2e for the full `case.resumed` tick.
+  Note: cases stranded in `new` by the pre-audit-fix worker can be unstuck with Take over → Retry now.
 - **2026-06-11 — Full audit remediation (audit.md):** Fixed 61 of 63 findings from the 2026-06-10 five-area
   audit; see `audit.md` (all boxes ticked except U15/S14) for the per-item list with file references. The
   headline structural changes, since several master-plan claims were previously **unimplemented**:
@@ -140,6 +153,9 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
       ACTIVE rows for one mailbox — check before deploying.
 - [ ] Consider draftId-based send-dedup inside the Gmail/Graph/IMAP connectors as a second layer under
       the runtime's `tool_executions` markers (C2 is covered; this would also catch cross-case repeats).
+- [ ] **Enrich `timer.expired` ticks like `case.resumed`:** the retry work (2026-06-11) gave `case.resumed`
+      a real re-orientation message (thread id + prior context); follow-up timer ticks still wake the agent
+      with a bare `(system event: timer.expired)` and the same blindness — same fix applies.
 
 ## ⚠️ Pilot pre-onboarding audit (2026-06-06)
 

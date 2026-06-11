@@ -237,6 +237,67 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
   });
 });
 
+describe("AgentRuntime — dashboard retry (case.resumed)", () => {
+  it("runs a tick with the thread id and prior context so a retried agent can act", async () => {
+    const counter = { count: 0 };
+    const seen: Array<unknown> = [];
+    const layer = buildLayer(
+      LLMServiceFromFn((req) => {
+        seen.push(req.messages);
+        return Effect.succeed({
+          type: "final_message",
+          text: "Retried and answered the customer.",
+        } as const);
+      }) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const runtime = yield* AgentRuntime;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("recovery-test-agent"),
+            subject: "Where is my order?",
+            threadId: "outlook:thread-retry-1" as never,
+            context: { identifiedOrderId: "#1001" },
+          });
+          const result = yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_retry",
+          });
+          const fetched = yield* repo.getById(created.id);
+          return { result, fetched };
+        }),
+        layer as never,
+      ) as Effect.Effect<
+        { result: { type: string }; fetched: { status: string } },
+        never,
+        never
+      >,
+    );
+
+    // The tick ran to completion and resolved the case.
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
+    // The agent was handed everything it needs to re-orient: the thread
+    // id (to wire conversation.* tools), the retry trigger, and the
+    // context patches from the previous attempt.
+    const firstUser = (seen[0] as Array<{ role: string; content: unknown }>)
+      .find((m) => m.role === "user");
+    const text = String(firstUser?.content);
+    expect(text).toContain("threadId=outlook:thread-retry-1");
+    expect(text).toContain("dashboard_retry");
+    expect(text).toContain("#1001");
+    expect(text).toContain("Where is my order?");
+  });
+});
+
 describe("AgentRuntime — dangling HumanTakeoverRequired paths (L4)", () => {
   it("transitions the case to human_takeover when max turns are exhausted", async () => {
     const counter = { count: 0 };

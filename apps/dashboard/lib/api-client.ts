@@ -672,4 +672,14 @@ export const api = {
     });
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },
+
+  // Resume + an immediate `case.resumed` tick — the agent retries now
+  // instead of waiting for the customer's next reply.
+  retry: async (ctx: CallCtx, caseId: string): Promise<ResumeOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/retry`, {
+      method: "POST",
+      ctx,
+    });
+    return (body as ResumeOutcomeView | null) ?? { kind: "error" };
+  },
 };

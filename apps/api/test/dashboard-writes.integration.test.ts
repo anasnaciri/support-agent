@@ -22,6 +22,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const caseReject = randomUUID();
   const caseTakeover = randomUUID();
   const caseResume = randomUUID();
+  const caseRetry = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
@@ -110,6 +111,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseReject, tenantId, "waiting_for_approval"),
       mkCase(caseTakeover, tenantId, "waiting_for_approval"),
       mkCase(caseResume, tenantId, "human_takeover"),
+      mkCase(caseRetry, tenantId, "human_takeover"),
     ]);
     await raw.db.insert(approvals).values([
       mkApproval(pApprove, caseApprove, tenantId),
@@ -200,6 +202,41 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(body.kind).toBe("not_in_takeover");
     expect(body.status).toBe("in_progress");
     expect(await caseStatus(caseResume)).toBe("in_progress");
+  });
+
+  it("retry hands the case back AND enqueues a case.resumed tick", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseRetry}/retry`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; toStatus?: string };
+    expect(body.kind).toBe("retried");
+    expect(body.toStatus).toBe("in_progress");
+    expect(await caseStatus(caseRetry)).toBe("in_progress");
+    // The worker-facing event actually landed on workflow.events.
+    const jobs = await raw.db.execute(
+      sql`select count(*)::int as n from pgboss.job
+          where name = 'workflow.events'
+            and data->'event'->>'type' = 'case.resumed'
+            and data->'event'->>'caseId' = ${caseRetry}`,
+    );
+    expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(1);
+  });
+
+  it("retrying a case that isn't in human_takeover is a no-op (no event)", async () => {
+    if (!raw) return;
+    // caseRetry is now in_progress from the previous test.
+    const res = await post(`/dashboard/cases/${caseRetry}/retry`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; status?: string };
+    expect(body.kind).toBe("not_in_takeover");
+    expect(body.status).toBe("in_progress");
+    const jobs = await raw.db.execute(
+      sql`select count(*)::int as n from pgboss.job
+          where name = 'workflow.events'
+            and data->'event'->>'type' = 'case.resumed'
+            and data->'event'->>'caseId' = ${caseRetry}`,
+    );
+    expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(1);
   });
 
   it("resume 404s for a case in another tenant (no mutation)", async () => {
