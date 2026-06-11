@@ -5,6 +5,7 @@ import {
   ToolOutputInvalid,
 } from "@support-agent/agent-core";
 import { ConversationService, TimerService } from "@support-agent/services";
+import { assertRecipientsInThread } from "./reply.js";
 
 const Participant = Schema.Struct({
   name: Schema.NullOr(Schema.String),
@@ -61,6 +62,13 @@ export const conversationAskCustomer = defineTool({
     Effect.gen(function* () {
       const remindAfterHours = input.remindAfterHours;
       const convo = yield* ConversationService;
+      // Recipient constraint (audit S9) — same rule as conversation.reply.
+      yield* assertRecipientsInThread(
+        ctx.tenantId,
+        input.to,
+        input.threadId,
+        "conversation.ask_customer",
+      );
       const sent = yield* convo
         .askCustomer(ctx.tenantId, {
           threadId: ThreadId(input.threadId),

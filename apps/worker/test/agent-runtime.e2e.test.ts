@@ -474,9 +474,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(proposed.draftId).toBe("order-status-reply-test-1");
 
     const actions = out.entries.map((e) => e.action);
-    // event.received + (llm.decision, tool.invoked) x 3 + final llm.decision.
-    // No `tool.invoked` for conversation.reply because permission=ask
-    // short-circuits before execute. No `case.resolved` because we paused.
+    // event.received + (llm.decision, tool.invoked) x 3 + final llm.decision
+    // + the case.waiting_for_approval park row (written in the same tx as
+    // the approval + transition). No `tool.invoked` for conversation.reply
+    // because permission=ask short-circuits before execute. No
+    // `case.resolved` because we paused.
     expect(actions).toEqual([
       "event.received",
       "llm.decision",
@@ -486,6 +488,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
+      "case.waiting_for_approval",
     ]);
 
     // The handoff audit row carries the source agent id (support-triage) and
@@ -1939,7 +1942,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(proposed.draftId).toBe("refund-reply-test-1");
 
     // Audit trail: event.received + (llm.decision, tool.invoked) × 3 + a
-    // final llm.decision (the conversation.reply tool call that was gated).
+    // final llm.decision (the conversation.reply tool call that was gated)
+    // + the case.waiting_for_approval park row (same tx as the approval).
     // No `tool.invoked` for conversation.reply because permission=ask
     // short-circuits BEFORE execute. No `case.resolved` because we paused.
     const actions = out.entries.map((e) => e.action);
@@ -1952,6 +1956,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
+      "case.waiting_for_approval",
     ]);
   });
 

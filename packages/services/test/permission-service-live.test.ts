@@ -11,6 +11,8 @@ import {
 import { Schema } from "effect";
 import {
   applyRefundPolicy,
+  AuditLogService,
+  AuditLogServiceTest,
   checkRequiredScopes,
   isConnectorScopeGranted,
   ConnectorCredentialStoreTest,
@@ -344,6 +346,108 @@ describe("PermissionServiceLive", () => {
       policy,
     );
     expect(result).toBe("deny");
+  });
+
+  // Audit L9 — N small refunds must not bypass the cap: the policy
+  // compares the CASE-CUMULATIVE refunded amount, not each call alone.
+  describe("cumulative refund aggregation (audit L9)", () => {
+    const caseId = "cccccccc-cccc-cccc-cccc-cccccccccccc" as never;
+
+    const runCheckWithHistory = async (
+      payload: unknown,
+      priorAmountsMinor: ReadonlyArray<number>,
+    ): Promise<string> => {
+      const tenants = TenantRepositoryTest({
+        settingsByTenant: new Map([
+          [
+            tenantId,
+            new TenantSettings({
+              notificationEmail: null,
+              refundPolicy: policy,
+              retentionDays: 730,
+              supplierEscalationSheet: null,
+              legalAcceptance: null,
+            }),
+          ],
+        ]),
+      });
+      const connectors = ConnectorCredentialStoreTest([
+        shopifyConnectionWithRefunds,
+      ]);
+      const layer = PermissionServiceLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(tenants, connectors, AuditLogServiceTest),
+        ),
+      );
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const audit = yield* AuditLogService;
+            for (const minor of priorAmountsMinor) {
+              yield* audit.record({
+                tenantId,
+                caseId,
+                actor: { type: "agent", id: AgentId("refund-review-agent") },
+                action: "tool.invoked",
+                details: {
+                  tool: "refund.create",
+                  callId: `prior-${minor}`,
+                  ok: true,
+                  amountMinorUnits: minor,
+                  currencyCode: "USD",
+                },
+              });
+            }
+            const svc = yield* PermissionService;
+            return yield* svc.check({
+              tenantId,
+              agent,
+              tool: refundTool,
+              payload,
+              caseId,
+            });
+          }),
+          Layer.merge(layer, AuditLogServiceTest),
+        ) as Effect.Effect<string, never, never>,
+      );
+    };
+
+    it("denies when prior refunds plus the new one exceed the hard cap", async () => {
+      // $90 + $90 already refunded; a third $90 is individually mid-range
+      // ("ask") but cumulatively $270 > the $200 cap → deny.
+      const result = await runCheckWithHistory(
+        {
+          orderId: "gid://shopify/Order/1",
+          amount: { amount: "90.00", currencyCode: "USD" },
+        },
+        [9000, 9000],
+      );
+      expect(result).toBe("deny");
+    });
+
+    it("escalates to ask when the sum crosses the ask threshold", async () => {
+      // $20 already refunded; another $20 is individually auto-allowed
+      // but cumulatively $40 > the $25 ask threshold → ask.
+      const result = await runCheckWithHistory(
+        {
+          orderId: "gid://shopify/Order/1",
+          amount: { amount: "20.00", currencyCode: "USD" },
+        },
+        [2000],
+      );
+      expect(result).toBe("ask");
+    });
+
+    it("still auto-allows a small first refund with no history", async () => {
+      const result = await runCheckWithHistory(
+        {
+          orderId: "gid://shopify/Order/1",
+          amount: { amount: "20.00", currencyCode: "USD" },
+        },
+        [],
+      );
+      expect(result).toBe("allow");
+    });
   });
 
   it("does NOT touch non-refund tools (passes through static rule)", async () => {

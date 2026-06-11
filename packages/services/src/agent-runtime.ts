@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Either, Layer, Option, Schema } from "effect";
 import {
   AgentRegistry,
   PermissionService,
@@ -35,6 +35,12 @@ import {
   TenantRepository,
   type TenantSettings,
 } from "./tenant-repository.js";
+import { parseRefundAmount } from "./permission-service-live.js";
+import {
+  ProcessedMessageStore,
+  ToolExecutionStore,
+} from "./idempotency-store.js";
+import { parseThreadId } from "./conversation-thread-id.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
 
 // ============================================================
@@ -254,6 +260,44 @@ const deriveSubject = (input: unknown): string | null => {
   return null;
 };
 
+/**
+ * Money details stamped onto `tool.invoked` audit rows for refund.create
+ * (audit L9). PermissionServiceLive sums these per case so the refund
+ * threshold compares the cumulative refunded amount, not each call alone.
+ */
+/**
+ * Stable execution key for the C2 dedup marker: the tool's input-derived
+ * idempotency key when declared (refund: orderId+amount+currency; reply:
+ * draftId) — so even a fresh LLM re-emission of the same action dedupes —
+ * otherwise the caller-provided fallback (LLM callId / approval id).
+ */
+const executionKeyFor = (
+  tool: AnyTool,
+  input: unknown,
+  fallback: string,
+): string => {
+  if (!tool.idempotencyKey) return fallback;
+  try {
+    return `${tool.name}:${tool.idempotencyKey(input as never)}`;
+  } catch {
+    return fallback;
+  }
+};
+
+const refundAuditDetails = (
+  toolName: string,
+  input: unknown,
+): Record<string, unknown> => {
+  if (toolName !== "refund.create") return {};
+  const parsed = parseRefundAmount(input);
+  return parsed
+    ? {
+        amountMinorUnits: parsed.amountMinorUnits,
+        currencyCode: parsed.currencyCode,
+      }
+    : {};
+};
+
 const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
   switch (tool.risk) {
     case "read":
@@ -355,12 +399,18 @@ export const AgentRuntimeDefault = Layer.effect(
     // many test layers that don't, in which case duplicate-photo detection
     // is simply skipped.
     const maybeImageHashStore = yield* Effect.serviceOption(ImageHashStore);
+    // Optional idempotency stores (audit C2/C3) — present in the worker,
+    // absent in lean test layers (which then skip the dedup, as before).
+    const maybeProcessed = yield* Effect.serviceOption(ProcessedMessageStore);
+    const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
 
     // `applyOverride` (a pure module-level helper, defined above) overlays the
     // per-(tenant, agent) override row onto the in-code AgentConfig before each
     // turn — model, appended system prompt, and per-tool permission toggles.
 
-    const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
+    const tickBody = (
+      event: DomainEvent,
+    ): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
         const lookup = eventToCaseLookup(event);
         if (!lookup) {
@@ -426,6 +476,33 @@ export const AgentRuntimeDefault = Layer.effect(
 
         let working = caseRow;
 
+        // Park the case in `human_takeover` with an audit row, in one tx.
+        // Every path that returns `HumanTakeoverRequired` must leave the
+        // case durably parked (audit L4) — a result the worker merely logs
+        // is invisible to the dashboard and the case dangles forever.
+        const escalateToHuman = (
+          caseId: typeof working.id,
+          reason: string,
+          details: Record<string, unknown> = {},
+        ) =>
+          tx.run(
+            Effect.gen(function* () {
+              const updated = yield* cases.transitionStatus(
+                caseId,
+                "human_takeover",
+                { reason },
+              );
+              yield* audit.record({
+                tenantId: updated.tenantId,
+                caseId: updated.id,
+                actor: { type: "system", id: "agent-runtime" },
+                action: "case.escalated_to_human",
+                details: { reason, ...details },
+              });
+              return updated;
+            }),
+          );
+
         // 2.5. Approval-resume short-circuit. `approval.approved` and
         // `approval.rejected` are NOT routed through the agent loop —
         // they execute (or escalate) the previously-gated tool directly.
@@ -453,6 +530,52 @@ export const AgentRuntimeDefault = Layer.effect(
               retryable: false,
             } as const;
           }
+          // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
+          // A re-delivered `approval.approved` for a case that already ran
+          // to completion must NOT execute the gated tool a second time —
+          // that's a double refund / double customer email.
+          if (working.status === "resolved") {
+            yield* tx.run(
+              audit.record({
+                tenantId: working.tenantId,
+                caseId: working.id,
+                actor: { type: "system", id: "runtime" },
+                action: "approval.duplicate_delivery_skipped",
+                details: { approvalId: approval.id },
+              }),
+            );
+            return { type: "Completed" } as const;
+          }
+          // A row that was rejected / cancelled / expired out-of-band must
+          // never execute, whatever the event says.
+          if (
+            approval.status === "rejected" ||
+            approval.status === "cancelled" ||
+            approval.status === "expired"
+          ) {
+            return {
+              type: "Failed",
+              reason: `approval ${approval.id} is ${approval.status}`,
+              retryable: false,
+            } as const;
+          }
+          // Expiry (audit L7): an undecided row past its expiry must not
+          // run a stale draft. (Rows already flipped to `approved` were
+          // validated at decision time; queue latency after a timely
+          // decision is fine.)
+          if (
+            approval.status === "pending" &&
+            approval.expiresAt.getTime() < Date.now()
+          ) {
+            yield* escalateToHuman(working.id, "approval_expired", {
+              approvalId: approval.id,
+              expiresAt: approval.expiresAt.toISOString(),
+            });
+            return {
+              type: "HumanTakeoverRequired",
+              reason: "approval_expired",
+            } as const;
+          }
           const toolToRun = yield* tools.tryGet(approval.tool);
           if (!toolToRun) {
             return {
@@ -461,7 +584,85 @@ export const AgentRuntimeDefault = Layer.effect(
               retryable: false,
             } as const;
           }
+          // Input validation (audit L8): `approvedInput` is manager-edited
+          // JSON from the dashboard and `proposedInput` may be days old —
+          // both must decode against the tool's schema before execute.
+          const rawToolInput =
+            approval.approvedInput ?? approval.proposedInput;
+          const decodedInput = Schema.decodeUnknownEither(
+            toolToRun.inputSchema as Schema.Schema<unknown>,
+          )(rawToolInput);
+          if (Either.isLeft(decodedInput)) {
+            yield* escalateToHuman(working.id, "approval_input_invalid", {
+              approvalId: approval.id,
+              tool: approval.tool,
+              issue: String(decodedInput.left.message).slice(0, 500),
+            });
+            return {
+              type: "HumanTakeoverRequired",
+              reason: "approval_input_invalid",
+            } as const;
+          }
+          // Policy re-check (audit L8): the approval can be acted on days
+          // later — if the tenant has since hard-denied the tool (e.g.
+          // refund mode flipped to always_deny, scope revoked), the manager's
+          // earlier yes must not override the newer policy. Only `deny`
+          // blocks; `ask` was satisfied by the manager's decision.
+          const resumeOverrides = yield* overrides
+            .getForTenant(working.tenantId)
+            .pipe(
+              Effect.catchAll(() =>
+                Effect.succeed(
+                  new Map() as ReadonlyMap<AgentConfig["id"], AgentOverride>,
+                ),
+              ),
+            );
+          const resumeAgent = yield* registry
+            .resolve(approval.agentId)
+            .pipe(Effect.option);
+          if (Option.isSome(resumeAgent)) {
+            const recheck = yield* perms.check({
+              tenantId: working.tenantId,
+              agent: applyOverride(resumeAgent.value, resumeOverrides),
+              tool: toolToRun,
+              payload: decodedInput.right,
+              caseId: working.id,
+            });
+            if (recheck === "deny") {
+              yield* escalateToHuman(
+                working.id,
+                "approval_denied_by_policy",
+                { approvalId: approval.id, tool: approval.tool },
+              );
+              return {
+                type: "HumanTakeoverRequired",
+                reason: "approval_denied_by_policy",
+              } as const;
+            }
+          }
           const callId = `approval-${approval.id}`;
+          const toolInput = decodedInput.right;
+          // C2: consult the execution marker BEFORE running the tool.
+          // pg-boss is at-least-once — a crash after the tool tx but
+          // before job completion re-delivers this event, and without
+          // the marker the gated tool (a refund, a customer email)
+          // executes twice. The key is input-derived when the tool
+          // declares an idempotencyKey, so even a second approval row
+          // for the same draft dedupes.
+          const executionKey = executionKeyFor(toolToRun, toolInput, callId);
+          const priorMarker = Option.isSome(maybeExecutions)
+            ? yield* maybeExecutions.value
+                .find(working.id, executionKey)
+                .pipe(Effect.catchAll(() => Effect.succeed(null)))
+            : null;
+          if (priorMarker && priorMarker.resultOk === false) {
+            // The original execution failed and that run already parked
+            // the case; nothing to redo here.
+            return {
+              type: "HumanTakeoverRequired",
+              reason: `approved tool ${approval.tool} failed`,
+            } as const;
+          }
           const ctx: ToolContext = {
             tenantId: working.tenantId,
             caseId: working.id,
@@ -469,34 +670,76 @@ export const AgentRuntimeDefault = Layer.effect(
             callId,
             attemptNumber: 1,
           };
-          const toolInput = approval.approvedInput ?? approval.proposedInput;
           const toolEffect = toolToRun.execute(
             toolInput,
             ctx,
           ) as unknown as Effect.Effect<unknown, unknown, never>;
-          const exec = yield* tx.run(
-            Effect.gen(function* () {
-              const result = yield* toolEffect.pipe(Effect.either);
-              yield* audit.record({
-                tenantId: working.tenantId,
-                caseId: working.id,
-                actor: { type: "user", id: event.managerId },
-                action: "tool.invoked",
-                details: {
-                  tool: approval.tool,
-                  callId,
-                  ok: result._tag === "Right",
-                  viaApprovalId: approval.id,
-                },
-              });
-              return result;
-            }),
-          );
+          const exec = priorMarker
+            ? // Already executed successfully in a prior delivery — skip
+              // the side effect, finish the resolve step below.
+              yield* tx
+                .run(
+                  audit.record({
+                    tenantId: working.tenantId,
+                    caseId: working.id,
+                    actor: { type: "system", id: "runtime" },
+                    action: "tool.execution_deduped",
+                    details: {
+                      tool: approval.tool,
+                      executionKey,
+                      viaApprovalId: approval.id,
+                    },
+                  }),
+                )
+                .pipe(
+                  Effect.map(
+                    () =>
+                      ({ _tag: "Right", right: { deduped: true } }) as const,
+                  ),
+                )
+            : yield* tx.run(
+                Effect.gen(function* () {
+                  const result = yield* toolEffect.pipe(Effect.either);
+                  yield* audit.record({
+                    tenantId: working.tenantId,
+                    caseId: working.id,
+                    actor: { type: "user", id: event.managerId },
+                    action: "tool.invoked",
+                    details: {
+                      tool: approval.tool,
+                      callId,
+                      ok: result._tag === "Right",
+                      viaApprovalId: approval.id,
+                      ...refundAuditDetails(approval.tool, toolInput),
+                    },
+                  });
+                  // Marker shares the tx with the audit row (audit C2):
+                  // both commit or neither does.
+                  if (Option.isSome(maybeExecutions)) {
+                    yield* maybeExecutions.value
+                      .record({
+                        tenantId: working.tenantId,
+                        caseId: working.id,
+                        callId: executionKey,
+                        tool: approval.tool,
+                        resultOk: result._tag === "Right",
+                      })
+                      .pipe(Effect.catchAll(() => Effect.void));
+                  }
+                  return result;
+                }),
+              );
           if (exec._tag === "Left") {
-            // Tool failed AFTER approval — escalate to human takeover so
-            // someone can intervene. The approval row is already approved,
-            // which is the right audit shape (the manager said yes; the
-            // platform tried; the platform failed).
+            // Tool failed AFTER approval — park the case in human_takeover
+            // so someone can intervene. The approval row is already
+            // approved, which is the right audit shape (the manager said
+            // yes; the platform tried; the platform failed). Without the
+            // transition the case dangles in `waiting_for_approval` with no
+            // pending row and nothing surfaces the failure (audit L4).
+            yield* escalateToHuman(working.id, "approved_tool_failed", {
+              approvalId: approval.id,
+              tool: approval.tool,
+            });
             return {
               type: "HumanTakeoverRequired",
               reason: `approved tool ${approval.tool} failed`,
@@ -826,7 +1069,30 @@ export const AgentRuntimeDefault = Layer.effect(
                 reason,
               } as const;
             }
-            return yield* Effect.fail(err);
+            // Deterministic LLM failures: retrying replays the exact same
+            // request, so park the case for a human instead of burning
+            // retries (audit C1).
+            if (
+              err._tag === "ContextTooLarge" ||
+              err._tag === "SafetyBlocked"
+            ) {
+              const reason =
+                err._tag === "ContextTooLarge"
+                  ? "llm_context_too_large"
+                  : "llm_safety_blocked";
+              yield* escalateToHuman(current.id, reason, { turn });
+              return { type: "HumanTakeoverRequired", reason } as const;
+            }
+            // Transient failures (provider 5xx/429, network, a malformed
+            // tool call that a fresh sample may fix): surface as a
+            // retryable Failed so the worker rethrows and pg-boss retries
+            // with backoff (audit C1 — previously these were swallowed as
+            // non-retryable and the event was lost forever).
+            return {
+              type: "Failed",
+              reason: `llm transient error: ${err._tag}`,
+              retryable: true,
+            } as const;
           }
           const decision: LLMDecision = decisionEither.right;
 
@@ -864,39 +1130,101 @@ export const AgentRuntimeDefault = Layer.effect(
               // Wrap the final transition + a "case.resolved" audit in one
               // tx — keeps the resolved status and its audit row atomically
               // consistent (master-plan §4).
-              current = yield* tx.run(
-                Effect.gen(function* () {
-                  const row = yield* cases.transitionStatus(
-                    current.id,
-                    "resolved",
-                    { reason: "runtime: final_message" },
-                  );
-                  yield* audit.record({
-                    tenantId: row.tenantId,
-                    caseId: row.id,
-                    actor: { type: "agent", id: agent.id },
-                    action: "case.resolved",
-                    details: { turn, finalMessage: decision.text },
-                  });
-                  return row;
-                }),
-              );
+              const resolveExit = yield* tx
+                .run(
+                  Effect.gen(function* () {
+                    const row = yield* cases.transitionStatus(
+                      current.id,
+                      "resolved",
+                      { reason: "runtime: final_message" },
+                    );
+                    yield* audit.record({
+                      tenantId: row.tenantId,
+                      caseId: row.id,
+                      actor: { type: "agent", id: agent.id },
+                      action: "case.resolved",
+                      details: { turn, finalMessage: decision.text },
+                    });
+                    return row;
+                  }),
+                )
+                .pipe(Effect.either);
+              if (resolveExit._tag === "Left") {
+                // The transition matrix blocked the resolve (audit L1):
+                // a manager took the case over mid-tick. The person owns
+                // the conversation now — hold, don't fight.
+                if (
+                  (resolveExit.left as { readonly _tag?: string })._tag ===
+                  "InvalidStatusTransition"
+                ) {
+                  return { type: "PausedForHumanTakeover" } as const;
+                }
+                // Anything else propagates to the outer classifier
+                // (Failed retryable — pg-boss retries).
+                return yield* Effect.fail(resolveExit.left);
+              }
+              current = resolveExit.right;
             }
             return { type: "Completed" } as const;
           }
 
           if (decision.type === "handoff") {
-            agent = applyOverride(
+            // Same allowlist as the `agent.handoff` pseudo-tool below
+            // (audit L13): a decision-level handoff to an agent outside
+            // `agent.handoffs` is blocked, audited, and the loop continues
+            // with the current agent.
+            const allowed = agent.handoffs.some(
+              (h) => (h as string) === (decision.targetAgent as string),
+            );
+            if (!allowed) {
+              yield* tx.run(
+                audit.record({
+                  tenantId: current.tenantId,
+                  caseId: current.id,
+                  actor: { type: "agent", id: agent.id },
+                  action: "agent.handoff_blocked",
+                  details: {
+                    target: decision.targetAgent,
+                    reason: decision.reason,
+                    turn,
+                  },
+                }),
+              );
+              continue;
+            }
+            const nextAgent = applyOverride(
               yield* registry.resolve(decision.targetAgent),
               overrideMap,
             );
-            current = yield* cases.update(current.id, {
-              currentAgentId: decision.targetAgent,
-            });
+            current = yield* tx.run(
+              Effect.gen(function* () {
+                const updated = yield* cases.update(current.id, {
+                  currentAgentId: decision.targetAgent,
+                });
+                yield* audit.record({
+                  tenantId: updated.tenantId,
+                  caseId: updated.id,
+                  actor: { type: "agent", id: agent.id },
+                  action: "agent.handoff",
+                  details: {
+                    target: decision.targetAgent,
+                    reason: decision.reason,
+                    turn,
+                  },
+                });
+                return updated;
+              }),
+            );
+            agent = nextAgent;
             continue;
           }
 
           if (decision.type === "wait_for_customer") {
+            // Not wired in Phase 1 — park the case durably instead of
+            // returning a result the worker merely logs (audit L4).
+            yield* escalateToHuman(current.id, "wait_for_customer_not_wired", {
+              turn,
+            });
             return {
               type: "HumanTakeoverRequired",
               reason: "wait_for_customer not wired in Phase 1",
@@ -904,6 +1232,11 @@ export const AgentRuntimeDefault = Layer.effect(
           }
 
           if (decision.type === "escalate_supplier") {
+            yield* escalateToHuman(
+              current.id,
+              "escalate_supplier_not_wired",
+              { turn },
+            );
             return {
               type: "HumanTakeoverRequired",
               reason: "escalate_supplier not wired in Phase 1",
@@ -1032,11 +1365,65 @@ export const AgentRuntimeDefault = Layer.effect(
             continue;
           }
 
+          // Validate the LLM's JSON against the tool's input schema before
+          // any permission check or execution (audit L10). On mismatch the
+          // model gets a structured `invalid_input` result and self-corrects
+          // next turn instead of the malformed payload failing deep inside
+          // connector code (or partially succeeding).
+          const decodedCall = Schema.decodeUnknownEither(
+            tool.inputSchema as Schema.Schema<unknown>,
+          )(decision.input);
+          if (Either.isLeft(decodedCall)) {
+            messages.push({
+              role: "tool",
+              toolCallId: decision.callId,
+              toolName: tool.name,
+              content: {
+                error: "invalid_input",
+                issue: String(decodedCall.left.message).slice(0, 500),
+              },
+            });
+            continue;
+          }
+          const callInput = decodedCall.right;
+
+          // C2 (in-loop): a redelivered job replays the whole tick from
+          // turn 0 — side-effecting tools whose semantic action already
+          // executed (matched via their input-derived idempotency key)
+          // are skipped with a structured dedup result. Checked before
+          // the permission gate: an already-done action must not re-ask.
+          const loopExecutionKey = executionKeyFor(
+            tool,
+            callInput,
+            decision.callId,
+          );
+          if (
+            tool.sideEffectClass !== "none" &&
+            Option.isSome(maybeExecutions)
+          ) {
+            const marker = yield* maybeExecutions.value
+              .find(current.id, loopExecutionKey)
+              .pipe(Effect.catchAll(() => Effect.succeed(null)));
+            if (marker) {
+              messages.push({
+                role: "tool",
+                toolCallId: decision.callId,
+                toolName: tool.name,
+                content: {
+                  deduped: true,
+                  priorResultOk: marker.resultOk,
+                },
+              });
+              continue;
+            }
+          }
+
           const permission = yield* perms.check({
             tenantId: current.tenantId,
             agent,
             tool,
-            payload: decision.input,
+            payload: callInput,
+            caseId: current.id,
           });
 
           if (permission === "deny") {
@@ -1050,38 +1437,68 @@ export const AgentRuntimeDefault = Layer.effect(
           }
 
           if (permission === "ask") {
-            const approval = yield* approvals.create({
-              tenantId: current.tenantId,
-              caseId: current.id,
-              agentId: agent.id,
-              tool: tool.name,
-              proposedInput: decision.input,
-              reasoning: decision.reasoning ?? "",
-              riskLevel: riskFor(tool),
-              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            });
-            current = yield* cases.transitionStatus(
-              current.id,
-              "waiting_for_approval",
-              { reason: `tool ${tool.name} pending approval` },
+            // Approval row + park transition + audit row in ONE tx (audit
+            // L6) — a crash between them previously left a pending approval
+            // on an un-parked case, so the agent could keep acting and a
+            // second approval could be created. master-plan §4: the audit
+            // write shares the transaction with the state change.
+            const parked = yield* tx.run(
+              Effect.gen(function* () {
+                const approval = yield* approvals.create({
+                  tenantId: current.tenantId,
+                  caseId: current.id,
+                  agentId: agent.id,
+                  tool: tool.name,
+                  proposedInput: callInput,
+                  reasoning: decision.reasoning ?? "",
+                  riskLevel: riskFor(tool),
+                  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                });
+                const row = yield* cases.transitionStatus(
+                  current.id,
+                  "waiting_for_approval",
+                  { reason: `tool ${tool.name} pending approval` },
+                );
+                yield* audit.record({
+                  tenantId: row.tenantId,
+                  caseId: row.id,
+                  actor: { type: "agent", id: agent.id },
+                  action: "case.waiting_for_approval",
+                  details: {
+                    approvalId: approval.id,
+                    tool: tool.name,
+                    turn,
+                  },
+                });
+                return { approval, row };
+              }),
             );
+            const approval = parked.approval;
+            current = parked.row;
 
             // Fire the approval-link email. Best-effort: a Resend outage,
             // a tenant without `notificationEmail` configured, or any other
             // mail failure must NOT block the case. The approval row is
             // the source of truth and the dashboard (when it lands) will
-            // pick it up regardless. Both URLs use the SAME signed token
-            // — the action is encoded in the path, not the token.
-            const token = signApprovalToken({
+            // pick it up regardless. Each URL carries its OWN signed token
+            // with the action bound into the HMAC (audit S3) — holding a
+            // reject link must not allow approving by editing the path.
+            const approveToken = signApprovalToken({
               approvalId: approval.id,
+              action: "approve",
               secret: linkConfig.signingKey,
               ttlMs: linkConfig.ttlMs,
             });
-            const encodedToken = encodeURIComponent(token);
-            const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodedToken}`;
-            const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodedToken}`;
-            const draftPreview = derivePreview(decision.input);
-            const draftSubject = deriveSubject(decision.input);
+            const rejectToken = signApprovalToken({
+              approvalId: approval.id,
+              action: "reject",
+              secret: linkConfig.signingKey,
+              ttlMs: linkConfig.ttlMs,
+            });
+            const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodeURIComponent(approveToken)}`;
+            const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodeURIComponent(rejectToken)}`;
+            const draftPreview = derivePreview(callInput);
+            const draftSubject = deriveSubject(callInput);
             yield* mail
               .sendApprovalLink({
                 tenantId: current.tenantId,
@@ -1116,7 +1533,7 @@ export const AgentRuntimeDefault = Layer.effect(
           // concrete dependencies a tool actually needs are satisfied by the
           // runtime's outer Layer, so we narrow R to never at the call site.
           const toolEffect = tool.execute(
-            decision.input,
+            callInput,
             ctx,
           ) as unknown as Effect.Effect<unknown, unknown, never>;
           const exec = yield* tx.run(
@@ -1135,9 +1552,26 @@ export const AgentRuntimeDefault = Layer.effect(
                   tool: tool.name,
                   callId: decision.callId,
                   ok: result._tag === "Right",
+                  ...refundAuditDetails(tool.name, callInput),
                   ...outputDetails,
                 },
               });
+              // C2 marker — same tx as the audit row; only meaningful
+              // for tools with externally-visible effects.
+              if (
+                tool.sideEffectClass !== "none" &&
+                Option.isSome(maybeExecutions)
+              ) {
+                yield* maybeExecutions.value
+                  .record({
+                    tenantId: current.tenantId,
+                    caseId: current.id,
+                    callId: loopExecutionKey,
+                    tool: tool.name,
+                    resultOk: result._tag === "Right",
+                  })
+                  .pipe(Effect.catchAll(() => Effect.void));
+              }
               return result;
             }),
           );
@@ -1183,19 +1617,74 @@ export const AgentRuntimeDefault = Layer.effect(
           }
         }
 
+        // Turn budget exhausted — park the case durably (audit L4). Guard
+        // against clobbering a terminal status a tool legitimately set on
+        // the final turn.
+        if (
+          current.status !== "resolved" &&
+          current.status !== "human_takeover"
+        ) {
+          yield* escalateToHuman(current.id, "max_turns_exceeded", {
+            maxTurnsPerTick: agent.maxTurnsPerTick,
+          });
+        }
         return {
           type: "HumanTakeoverRequired",
           reason: "max_turns_exceeded",
         } as const;
       }).pipe(
+        // Anything that escapes the tick (repo/DB failures, defects) is
+        // worth retrying — pg-boss applies backoff and the dead-letter
+        // consumer escalates after exhaustion (audit C1). Deterministic
+        // dead-ends return Failed retryable:false explicitly above.
         Effect.catchAllCause((cause) =>
           Effect.succeed({
             type: "Failed",
             reason: `runtime error: ${String(cause)}`,
-            retryable: false,
+            retryable: true,
           } as const),
         ),
       );
+
+    // C3: processed-message dedup around the tick. The check is a READ
+    // at the top and the claim is only WRITTEN after the tick completes
+    // — a retryable failure leaves the key unclaimed so pg-boss's retry
+    // genuinely reprocesses the event (claiming up-front would turn
+    // every transient failure into a silently dropped message).
+    const tick = (event: DomainEvent): Effect.Effect<WorkflowResult, never> =>
+      Effect.gen(function* () {
+        const claimInput =
+          event.type === "message.received" && Option.isSome(maybeProcessed)
+            ? {
+                tenantId: makeTenantId(event.tenantId),
+                provider:
+                  parseThreadId(event.threadId)?.provider ?? "gmail",
+                messageId: event.payload.messageId,
+                threadId: event.threadId as string,
+              }
+            : null;
+        if (claimInput && Option.isSome(maybeProcessed)) {
+          const dup = yield* maybeProcessed.value
+            .seen(claimInput)
+            .pipe(Effect.catchAll(() => Effect.succeed(false)));
+          if (dup) {
+            return { type: "Completed" } as const;
+          }
+        }
+        const result = yield* tickBody(event);
+        if (
+          claimInput &&
+          Option.isSome(maybeProcessed) &&
+          !(result.type === "Failed" && result.retryable)
+        ) {
+          // Best-effort: a failed claim just means the next duplicate
+          // runs a redundant tick (at-least-once, same as before C3).
+          yield* maybeProcessed.value
+            .claim(claimInput)
+            .pipe(Effect.catchAll(() => Effect.succeed("new" as const)));
+        }
+        return result;
+      });
 
     return AgentRuntime.of({
       handleEvent: tick,

@@ -13,7 +13,12 @@ import {
   type TenantId,
   type ThreadId,
   CaseId as makeCaseId,
+  isStatusTransitionAllowed,
 } from "@support-agent/agent-core";
+import {
+  parseThreadId,
+  type ConversationProviderId,
+} from "./conversation-thread-id.js";
 
 // ============================================================
 // Errors
@@ -36,9 +41,23 @@ export class CaseRepositoryDbError extends Data.TaggedError(
   readonly cause: unknown;
 }> {}
 
+/**
+ * The requested status change violates the case state machine
+ * (master-plan §10, audit L1) — e.g. resolving a case a manager has
+ * taken over. Callers re-read the case and respect the current owner.
+ */
+export class InvalidStatusTransition extends Data.TaggedError(
+  "InvalidStatusTransition",
+)<{
+  readonly caseId: CaseId;
+  readonly from: CaseStatus;
+  readonly to: CaseStatus;
+}> {}
+
 export type CaseRepositoryError =
   | CaseNotFound
   | CaseStateConflict
+  | InvalidStatusTransition
   | CaseRepositoryDbError;
 
 // ============================================================
@@ -52,6 +71,12 @@ export interface CreateCaseInput {
   readonly customerId?: CustomerId | null;
   readonly orderId?: OrderId | null;
   readonly threadId?: ThreadId | null;
+  /**
+   * Conversation connector that owns `threadId` (audit D2). When omitted it
+   * is derived from a provider-namespaced `threadId` (`gmail:…`); pass it
+   * explicitly when the inbound edge knows the provider (always preferred).
+   */
+  readonly provider?: ConversationProviderId | null;
   readonly category?: string | null;
   readonly priority?: CasePriority;
   readonly status?: CaseStatus;
@@ -59,6 +84,21 @@ export interface CreateCaseInput {
   readonly summary?: string | null;
   readonly context?: CaseContext;
 }
+
+/**
+ * Provider stamp for a new case: the explicit input wins; otherwise it is
+ * derived from a namespaced threadId. Shared by the Live and Test impls so
+ * they can't drift.
+ */
+export const resolveCaseProvider = (
+  input: Pick<CreateCaseInput, "provider" | "threadId">,
+): ConversationProviderId | null => {
+  if (input.provider !== undefined && input.provider !== null) {
+    return input.provider;
+  }
+  if (input.threadId) return parseThreadId(input.threadId)?.provider ?? null;
+  return null;
+};
 
 /**
  * Fields callers may patch via `update`. `status` is intentionally excluded —
@@ -84,12 +124,24 @@ export interface TransitionStatusOptions {
   readonly expectedFromStatus?: CaseStatus;
   readonly eventId?: string;
   readonly reason?: string;
+  /**
+   * Defense-in-depth tenant scope (audit D9): when present, a case outside
+   * the tenant is treated as not found and nothing is written.
+   */
+  readonly tenantId?: TenantId;
 }
 
 // ============================================================
 // Tag
 // ============================================================
 
+/**
+ * `tenantId` on the bare-id methods (`getById`/`update`/`transitionStatus`
+ * via opts) is OPTIONAL for caller compatibility but ENFORCED when present
+ * (audit D9): a case that exists under another tenant behaves exactly like
+ * a missing case (`CaseNotFound`), disclosure-safe. New callers should
+ * always pass it.
+ */
 export class CaseRepository extends Context.Tag("CaseRepository")<
   CaseRepository,
   {
@@ -99,16 +151,31 @@ export class CaseRepository extends Context.Tag("CaseRepository")<
 
     readonly getById: (
       id: CaseId,
+      tenantId?: TenantId,
     ) => Effect.Effect<Case, CaseRepositoryError>;
 
     readonly findByThreadId: (
       tenantId: TenantId,
       threadId: ThreadId,
+      /** When present, only a case stamped with this provider matches (D2). */
+      provider?: ConversationProviderId,
     ) => Effect.Effect<Case | null, CaseRepositoryError>;
+
+    /**
+     * The conversation provider stamped on the case holding `threadId`, or
+     * null when the case is missing or unstamped (legacy). Lets the
+     * conversation router dispatch legacy (un-namespaced) thread ids by the
+     * case's own stamp instead of guessing tenant-wide (audit D2).
+     */
+    readonly findThreadProvider: (
+      tenantId: TenantId,
+      threadId: ThreadId,
+    ) => Effect.Effect<ConversationProviderId | null, CaseRepositoryError>;
 
     readonly update: (
       id: CaseId,
       patch: UpdatableCaseFields,
+      tenantId?: TenantId,
     ) => Effect.Effect<Case, CaseRepositoryError>;
 
     readonly transitionStatus: (
@@ -146,34 +213,61 @@ export const CaseRepositoryTest = Layer.effect(
   CaseRepository,
   Effect.sync(() => {
     const store = new Map<string, Case>();
+    // Provider stamp lives off to the side: the `Case` domain type doesn't
+    // carry it (it's routing metadata, not agent-visible state).
+    const providerOf = new Map<string, ConversationProviderId | null>();
+
+    // D9: enforce the optional tenant scope exactly like the Live impl — a
+    // case under another tenant is indistinguishable from a missing one.
+    const scoped = (id: CaseId, tenantId?: TenantId): Case | null => {
+      const c = store.get(id);
+      if (!c) return null;
+      if (tenantId !== undefined && c.tenantId !== tenantId) return null;
+      return c;
+    };
 
     return CaseRepository.of({
       create: (input) =>
         Effect.sync(() => {
           const c = buildCase(input, new Date());
           store.set(c.id, c);
+          providerOf.set(c.id, resolveCaseProvider(input));
           return c;
         }),
 
-      getById: (id) =>
+      getById: (id, tenantId) =>
         Effect.suspend((): Effect.Effect<Case, CaseRepositoryError> => {
-          const c = store.get(id);
+          const c = scoped(id, tenantId);
           return c
             ? Effect.succeed(c)
             : Effect.fail(new CaseNotFound({ caseId: id }));
         }),
 
-      findByThreadId: (tenantId, threadId) =>
+      findByThreadId: (tenantId, threadId, provider) =>
         Effect.sync(() => {
           for (const c of store.values()) {
-            if (c.tenantId === tenantId && c.threadId === threadId) return c;
+            if (c.tenantId !== tenantId || c.threadId !== threadId) continue;
+            if (provider !== undefined && providerOf.get(c.id) !== provider) {
+              continue;
+            }
+            return c;
           }
           return null;
         }),
 
-      update: (id, patch) =>
+      findThreadProvider: (tenantId, threadId) =>
+        Effect.sync(() => {
+          for (const c of store.values()) {
+            if (c.tenantId === tenantId && c.threadId === threadId) {
+              return providerOf.get(c.id) ?? null;
+            }
+          }
+          return null;
+        }),
+
+      update: (id, patch, tenantId) =>
         Effect.suspend((): Effect.Effect<Case, CaseRepositoryError> => {
-          const existing = store.get(id);
+          const existing = scoped(id, tenantId);
           if (!existing) return Effect.fail(new CaseNotFound({ caseId: id }));
           const updated: Case = {
             ...existing,
@@ -186,7 +280,7 @@ export const CaseRepositoryTest = Layer.effect(
 
       transitionStatus: (id, toStatus, opts = {}) =>
         Effect.suspend((): Effect.Effect<Case, CaseRepositoryError> => {
-          const existing = store.get(id);
+          const existing = scoped(id, opts.tenantId);
           if (!existing) return Effect.fail(new CaseNotFound({ caseId: id }));
           if (
             opts.expectedFromStatus !== undefined &&
@@ -197,6 +291,17 @@ export const CaseRepositoryTest = Layer.effect(
                 caseId: id,
                 expected: opts.expectedFromStatus,
                 actual: existing.status,
+              }),
+            );
+          }
+          // Master-plan §10 (audit L1): every status write obeys the
+          // transition matrix — Test and Live enforce identically.
+          if (!isStatusTransitionAllowed(existing.status, toStatus)) {
+            return Effect.fail(
+              new InvalidStatusTransition({
+                caseId: id,
+                from: existing.status,
+                to: toStatus,
               }),
             );
           }

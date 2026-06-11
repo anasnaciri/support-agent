@@ -157,6 +157,76 @@ describe("conversation.reply tool", () => {
     expect(conversationReply.defaultPermission).toBe("ask");
     expect(conversationReply.sideEffectClass).toBe("external_message");
   });
+
+  // Audit S9 — the recipient list is LLM output and the LLM's context
+  // contains the (attacker-controlled) inbound email. Without a
+  // participant constraint, a prompt-injected email can exfiltrate case
+  // content to an arbitrary address the moment replies run on auto.
+  describe("recipient constraint (audit S9)", () => {
+    const replyInput = (email: string) =>
+      ({
+        threadId: "thread-1",
+        to: [{ name: null, email }],
+        subject: null,
+        bodyText: "Order details inside.",
+        bodyHtml: null,
+        inReplyToMessageId: "msg-1",
+        draftId: "draft-s9",
+      }) as never;
+
+    it("refuses a recipient that is not a participant of the thread", async () => {
+      const { layer, handle } = makeConversationServiceTest({
+        threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationReply.execute(
+            replyInput("attacker@evil.example"),
+            baseCtx("c-s9"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      // Nothing went out over the wire.
+      expect(handle.sent).toHaveLength(0);
+    });
+
+    it("allows a recipient who participates in the thread", async () => {
+      const { layer, handle } = makeConversationServiceTest({
+        threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationReply.execute(
+            replyInput("customer@example.com"),
+            baseCtx("c-s9b"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(handle.sent).toHaveLength(1);
+    });
+
+    it("fails open when the thread history is unavailable (connector without fetch support)", async () => {
+      // No seeded thread → fetchThread fails. The constraint can only be
+      // enforced when history is available; the connector's own send will
+      // fail on a genuinely bogus thread.
+      const { layer, handle } = makeConversationServiceTest({});
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationReply.execute(
+            replyInput("customer@example.com"),
+            baseCtx("c-s9c"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(handle.sent).toHaveLength(1);
+    });
+  });
 });
 
 describe("conversation.ask_customer tool", () => {

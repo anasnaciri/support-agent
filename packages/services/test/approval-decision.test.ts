@@ -111,7 +111,7 @@ const makeService = () => {
     }),
   );
 
-  return { layer, seed };
+  return { layer, seed, store };
 };
 
 const tenantA = TenantId("11111111-1111-1111-1111-111111111111");
@@ -143,6 +143,30 @@ describe("applyApprovalDecision", () => {
       expect(result.approval.status).toBe("approved");
       expect(result.approval.decidedBy).toBe(manager);
     }
+  });
+
+  it("refuses to decide an expired pending approval (audit L7)", async () => {
+    const svc = makeService();
+    const row = svc.seed({
+      tenantId: tenantA,
+      caseId: caseA,
+      agentId,
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        applyApprovalDecision({
+          approvalId: row.id,
+          action: "approve",
+          managerId: manager,
+        }),
+        svc.layer,
+      ),
+    );
+    expect(result.kind).toBe("expired");
+    // The row must NOT have been flipped to approved.
+    const after = svc.store.get(row.id);
+    expect(after?.status).toBe("pending");
   });
 
   it("approves with manager-edited approvedInput (Edit-and-Approve path)", async () => {

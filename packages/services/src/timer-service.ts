@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
-import type { CaseId } from "@support-agent/agent-core";
+import type { CaseId, TenantId } from "@support-agent/agent-core";
 
 export type TimerReason = "follow_up" | "sla" | "escalation";
 
@@ -17,11 +17,20 @@ export interface ScheduleTimerInput {
   readonly caseId: CaseId;
   readonly fireAt: Date;
   readonly reason: TimerReason;
+  /**
+   * Defense-in-depth tenant scope (audit D9): when present, scheduling
+   * against a case outside the tenant fails instead of arming a timer on a
+   * foreign case. Timers carry no tenant column — the check goes through
+   * the case row.
+   */
+  readonly tenantId?: TenantId;
 }
 
 export interface CancelTimersOptions {
   readonly reason?: TimerReason;
   readonly now?: Date;
+  /** See {@link ScheduleTimerInput.tenantId} (audit D9). */
+  readonly tenantId?: TenantId;
 }
 
 export class TimerServiceDbError extends Data.TaggedError("TimerServiceDbError")<{
@@ -52,6 +61,9 @@ export const TimerServiceTest = Layer.effect(
   TimerService,
   Effect.sync(() => {
     const timers: TimerRecord[] = [];
+    // D9: the in-memory layer has no case table to check tenancy against, so
+    // it records the tenant given at schedule time and enforces it on cancel.
+    const tenantOf = new Map<string, TenantId>();
 
     return TimerService.of({
       schedule: (input) =>
@@ -65,6 +77,9 @@ export const TimerServiceTest = Layer.effect(
             cancelledAt: null,
           };
           timers.push(timer);
+          if (input.tenantId !== undefined) {
+            tenantOf.set(timer.id, input.tenantId);
+          }
           return timer;
         }),
 
@@ -77,6 +92,10 @@ export const TimerServiceTest = Layer.effect(
             if (timer.caseId !== caseId) continue;
             if (timer.firedAt || timer.cancelledAt) continue;
             if (opts.reason && timer.reason !== opts.reason) continue;
+            if (opts.tenantId !== undefined) {
+              const owner = tenantOf.get(timer.id);
+              if (owner !== undefined && owner !== opts.tenantId) continue;
+            }
             timers[i] = { ...timer, cancelledAt: now };
             count += 1;
           }

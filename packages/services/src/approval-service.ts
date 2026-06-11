@@ -61,18 +61,31 @@ export interface ApproveInput {
   /** Set when the manager edited the proposed input before approving. */
   readonly approvedInput?: unknown;
   readonly decisionReason?: string | null;
+  /**
+   * Defense-in-depth tenant scope (audit D9): when present, an approval
+   * outside the tenant is treated as not found and nothing is decided.
+   */
+  readonly tenantId?: TenantId;
 }
 
 export interface RejectInput {
   readonly id: ApprovalId;
   readonly decidedBy: UserId;
   readonly decisionReason?: string | null;
+  /** See {@link ApproveInput.tenantId} (audit D9). */
+  readonly tenantId?: TenantId;
 }
 
 // ============================================================
 // Tag
 // ============================================================
 
+/**
+ * `tenantId` on the bare-id methods (`getById`, `approve`/`reject` via their
+ * inputs) is OPTIONAL for caller compatibility but ENFORCED when present
+ * (audit D9): an approval under another tenant behaves exactly like a
+ * missing one (`ApprovalNotFound`). New callers should always pass it.
+ */
 export class ApprovalService extends Context.Tag("ApprovalService")<
   ApprovalService,
   {
@@ -82,6 +95,7 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
 
     readonly getById: (
       id: ApprovalId,
+      tenantId?: TenantId,
     ) => Effect.Effect<Approval, ApprovalServiceError>;
 
     readonly approve: (
@@ -107,13 +121,22 @@ export const ApprovalServiceTest = Layer.effect(
   Effect.sync(() => {
     const store = new Map<string, Approval>();
 
+    // D9: a cross-tenant approval is indistinguishable from a missing one.
+    const scoped = (id: ApprovalId, tenantId?: TenantId): Approval | null => {
+      const a = store.get(id);
+      if (!a) return null;
+      if (tenantId !== undefined && a.tenantId !== tenantId) return null;
+      return a;
+    };
+
     const transition = (
       id: ApprovalId,
       expected: ApprovalStatus,
       patch: Partial<Approval>,
+      tenantId?: TenantId,
     ): Effect.Effect<Approval, ApprovalServiceError> =>
       Effect.suspend((): Effect.Effect<Approval, ApprovalServiceError> => {
-        const existing = store.get(id);
+        const existing = scoped(id, tenantId);
         if (!existing)
           return Effect.fail(new ApprovalNotFound({ approvalId: id }));
         if (existing.status !== expected) {
@@ -155,31 +178,41 @@ export const ApprovalServiceTest = Layer.effect(
           return approval;
         }),
 
-      getById: (id) =>
+      getById: (id, tenantId) =>
         Effect.suspend((): Effect.Effect<Approval, ApprovalServiceError> => {
-          const a = store.get(id);
+          const a = scoped(id, tenantId);
           return a
             ? Effect.succeed(a)
             : Effect.fail(new ApprovalNotFound({ approvalId: id }));
         }),
 
       approve: (input) =>
-        transition(input.id, "pending", {
-          status: "approved",
-          decidedBy: input.decidedBy,
-          decidedAt: new Date(),
-          decisionReason: input.decisionReason ?? null,
-          approvedInput:
-            input.approvedInput !== undefined ? input.approvedInput : null,
-        }),
+        transition(
+          input.id,
+          "pending",
+          {
+            status: "approved",
+            decidedBy: input.decidedBy,
+            decidedAt: new Date(),
+            decisionReason: input.decisionReason ?? null,
+            approvedInput:
+              input.approvedInput !== undefined ? input.approvedInput : null,
+          },
+          input.tenantId,
+        ),
 
       reject: (input) =>
-        transition(input.id, "pending", {
-          status: "rejected",
-          decidedBy: input.decidedBy,
-          decidedAt: new Date(),
-          decisionReason: input.decisionReason ?? null,
-        }),
+        transition(
+          input.id,
+          "pending",
+          {
+            status: "rejected",
+            decidedBy: input.decidedBy,
+            decidedAt: new Date(),
+            decisionReason: input.decisionReason ?? null,
+          },
+          input.tenantId,
+        ),
 
       listPending: (tenantId) =>
         Effect.sync(() => {

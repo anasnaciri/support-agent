@@ -31,6 +31,7 @@ export * from "./platform-mail.js";
 export * from "./org-directory.js";
 export * from "./approval-link-config.js";
 export * from "./timer-service.js";
+export * from "./idempotency-store.js";
 export * from "./image-hash-store.js";
 export * from "./transaction-runner.js";
 export * from "./workflow-queue.js";

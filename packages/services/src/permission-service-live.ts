@@ -1,6 +1,7 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import {
   PermissionService,
+  type CaseId,
   type Permission,
   type AnyTool,
   type TenantId,
@@ -14,6 +15,7 @@ import {
   ConnectorCredentialStore,
   type ConnectorConnection,
 } from "./connector-credential-store.js";
+import { AuditLogService } from "./audit-log.js";
 import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
 
 // Re-exported for back-compat: the canonical implementation now lives in
@@ -159,11 +161,43 @@ export const checkRequiredScopes = (
   return "ok";
 };
 
+/**
+ * Sum prior successful refund amounts for a case from its audit rows
+ * (audit L9). The runtime stamps `amountMinorUnits`/`currencyCode` into
+ * the `tool.invoked` details for refund.create. Returns null when any
+ * prior refund is in a different currency (can't sum safely — caller
+ * falls back to `ask`).
+ */
+export const sumPriorRefundsMinorUnits = (
+  rows: ReadonlyArray<{
+    readonly action: string;
+    readonly details: unknown;
+  }>,
+  currencyCode: string,
+): number | null => {
+  let sum = 0;
+  for (const row of rows) {
+    if (row.action !== "tool.invoked") continue;
+    const d = row.details as Record<string, unknown> | null;
+    if (!d || d["tool"] !== REFUND_TOOL || d["ok"] !== true) continue;
+    const minor = d["amountMinorUnits"];
+    const ccy = d["currencyCode"];
+    if (typeof minor !== "number" || typeof ccy !== "string") continue;
+    if (ccy.toUpperCase() !== currencyCode.toUpperCase()) return null;
+    sum += minor;
+  }
+  return sum;
+};
+
 export const PermissionServiceLive = Layer.effect(
   PermissionService,
   Effect.gen(function* () {
     const tenants = yield* TenantRepository;
     const connectors = yield* ConnectorCredentialStore;
+    // Optional — present in the worker (and in tests that exercise the
+    // aggregation); absent layers simply skip case-history aggregation
+    // rather than failing every permission check.
+    const maybeAudit = yield* Effect.serviceOption(AuditLogService);
 
     // Defensive read of all active connections for a tenant. DB errors
     // collapse to an empty list — any tool with declared scopes will
@@ -176,8 +210,25 @@ export const PermissionServiceLive = Layer.effect(
         .listForTenant(tenantId)
         .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<ConnectorConnection>)));
 
+    // Case-cumulative refund total (audit L9): read the case's audit
+    // rows and sum prior successful refund.create amounts. Best-effort —
+    // audit unavailability degrades to per-call evaluation, never to a
+    // failed check.
+    const priorRefundTotal = (
+      caseId: CaseId | undefined,
+      currencyCode: string,
+    ): Effect.Effect<number | null> =>
+      caseId !== undefined && Option.isSome(maybeAudit)
+        ? maybeAudit.value.forCase(caseId).pipe(
+            Effect.map((rows) =>
+              sumPriorRefundsMinorUnits(rows, currencyCode),
+            ),
+            Effect.catchAll(() => Effect.succeed(0)),
+          )
+        : Effect.succeed(0);
+
     return PermissionService.of({
-      check: ({ tenantId, agent, tool, payload }) =>
+      check: ({ tenantId, agent, tool, payload, caseId }) =>
         Effect.gen(function* () {
           // Step 1: static rule.
           const override = agent.permissionOverrides[tool.name];
@@ -216,6 +267,32 @@ export const PermissionServiceLive = Layer.effect(
           );
 
           const amount = parseRefundAmount(payload);
+
+          // Audit L9: evaluate the policy against the case-cumulative
+          // refunded amount, not this call in isolation — otherwise N
+          // small refunds walk past the cap one step at a time. A null
+          // prior total means mixed currencies in the history: we can't
+          // sum safely, so a human reviews (never auto-allow).
+          if (amount && caseId !== undefined) {
+            const prior = yield* priorRefundTotal(
+              caseId,
+              amount.currencyCode,
+            );
+            if (prior === null) {
+              return staticPermission === "deny" ? "deny" : "ask";
+            }
+            if (prior > 0) {
+              return applyRefundPolicy(
+                staticPermission,
+                settings.refundPolicy,
+                {
+                  amountMinorUnits: amount.amountMinorUnits + prior,
+                  currencyCode: amount.currencyCode,
+                },
+              );
+            }
+          }
+
           return applyRefundPolicy(
             staticPermission,
             settings.refundPolicy,

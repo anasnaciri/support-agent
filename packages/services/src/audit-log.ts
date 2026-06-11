@@ -44,6 +44,12 @@ export interface RecordAuditEntryInput {
 export interface ForCaseOptions {
   readonly limit?: number;
   readonly afterId?: bigint;
+  /**
+   * Defense-in-depth tenant scope (audit D9): when present, only entries
+   * belonging to the tenant are returned — a cross-tenant caseId reads as
+   * an empty history.
+   */
+  readonly tenantId?: TenantId;
 }
 
 // ============================================================
@@ -94,6 +100,10 @@ export const AuditLogServiceTest = Layer.effect(
         Effect.sync(() => {
           const limit = opts.limit ?? 100;
           let filtered = entries.filter((e) => e.caseId === caseId);
+          if (opts.tenantId !== undefined) {
+            const tenantId = opts.tenantId;
+            filtered = filtered.filter((e) => e.tenantId === tenantId);
+          }
           if (opts.afterId !== undefined) {
             const after = opts.afterId;
             filtered = filtered.filter((e) => e.id > after);

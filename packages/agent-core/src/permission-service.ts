@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import type { AgentConfig, Permission } from "./agent.js";
-import type { TenantId } from "./ids.js";
+import type { CaseId, TenantId } from "./ids.js";
 import type { AnyTool } from "./tool-registry.js";
 
 export interface PermissionCheckInput {
@@ -8,6 +8,13 @@ export interface PermissionCheckInput {
   readonly agent: AgentConfig;
   readonly tool: AnyTool;
   readonly payload: unknown;
+  /**
+   * The case this tool call belongs to. Optional for back-compat;
+   * when present, conditional rules may consult per-case history —
+   * e.g. the refund threshold compares the case-cumulative refunded
+   * amount, not each call in isolation (audit L9).
+   */
+  readonly caseId?: CaseId;
 }
 
 /**

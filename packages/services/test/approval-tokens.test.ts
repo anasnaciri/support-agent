@@ -11,6 +11,7 @@ describe("approval tokens", () => {
   it("round-trips a valid token", () => {
     const token = signApprovalToken({
       approvalId: "appr-abc",
+      action: "approve",
       secret: SECRET,
       ttlMs: 60_000,
       nowMs: NOW,
@@ -23,13 +24,61 @@ describe("approval tokens", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.approvalId).toBe("appr-abc");
+      expect(result.action).toBe("approve");
       expect(result.expiresAt).toBe(NOW + 60_000);
+    }
+  });
+
+  it("binds the action into the signature (audit S3)", () => {
+    // A reject link must not be usable to approve by editing the URL
+    // path — the action travels inside the HMAC body, so the endpoint
+    // compares the token's action against the path's action.
+    const rejectToken = signApprovalToken({
+      approvalId: "appr-1",
+      action: "reject",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const verified = verifyApprovalToken({
+      token: rejectToken,
+      secret: SECRET,
+      nowMs: NOW + 1_000,
+    });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) {
+      expect(verified.action).toBe("reject");
+    }
+    // Tampering the action inside the token invalidates the signature.
+    const parts = rejectToken.split(".");
+    const tampered = `${parts[0]}.approve.${parts[2]}.${parts[3]}`;
+    expect(
+      verifyApprovalToken({ token: tampered, secret: SECRET, nowMs: NOW }),
+    ).toEqual({ ok: false, reason: "invalid_signature" });
+  });
+
+  it("defaults the TTL to 24 hours (matches the approval row expiry)", () => {
+    const token = signApprovalToken({
+      approvalId: "appr-ttl",
+      action: "approve",
+      secret: SECRET,
+      nowMs: NOW,
+    });
+    const result = verifyApprovalToken({
+      token,
+      secret: SECRET,
+      nowMs: NOW + 1_000,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.expiresAt).toBe(NOW + 24 * 60 * 60 * 1000);
     }
   });
 
   it("rejects an expired token", () => {
     const token = signApprovalToken({
       approvalId: "appr-1",
+      action: "approve",
       secret: SECRET,
       ttlMs: 1_000,
       nowMs: NOW,
@@ -45,6 +94,7 @@ describe("approval tokens", () => {
   it("rejects a token signed with a different secret", () => {
     const token = signApprovalToken({
       approvalId: "appr-1",
+      action: "approve",
       secret: SECRET,
       ttlMs: 60_000,
       nowMs: NOW,
@@ -60,13 +110,14 @@ describe("approval tokens", () => {
   it("rejects a token whose body has been tampered with", () => {
     const token = signApprovalToken({
       approvalId: "appr-original",
+      action: "approve",
       secret: SECRET,
       ttlMs: 60_000,
       nowMs: NOW,
     });
     // Replace the approval id but keep the original signature.
     const parts = token.split(".");
-    const tampered = `appr-tampered.${parts[1]}.${parts[2]}`;
+    const tampered = `appr-tampered.${parts[1]}.${parts[2]}.${parts[3]}`;
     const result = verifyApprovalToken({
       token: tampered,
       secret: SECRET,
@@ -75,13 +126,17 @@ describe("approval tokens", () => {
     expect(result).toEqual({ ok: false, reason: "invalid_signature" });
   });
 
-  it("rejects malformed tokens", () => {
+  it("rejects malformed and legacy-format tokens", () => {
     for (const bad of [
       "not-a-token",
       "only.two",
-      "..",
-      "appr.notanumber.sig",
-      "appr.-1.sig",
+      "...",
+      "appr.approve.notanumber.sig",
+      "appr.approve.-1.sig",
+      // Legacy 3-part token (no action) must not verify.
+      "appr-1.1700000060000.c2ln",
+      // Unknown action.
+      "appr.destroy.1700000060000.c2ln",
     ]) {
       const result = verifyApprovalToken({
         token: bad,
@@ -100,6 +155,7 @@ describe("approval tokens", () => {
     for (let i = 0; i < 30; i++) {
       const token = signApprovalToken({
         approvalId: `appr-${i}-${"x".repeat(i)}`,
+        action: i % 2 === 0 ? "approve" : "reject",
         secret: SECRET,
         ttlMs: 60_000,
         nowMs: NOW + i,

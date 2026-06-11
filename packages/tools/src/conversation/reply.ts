@@ -3,6 +3,7 @@ import {
   ThreadId,
   defineTool,
   ToolOutputInvalid,
+  type ConversationThread,
 } from "@support-agent/agent-core";
 import { ConversationService } from "@support-agent/services";
 
@@ -10,6 +11,60 @@ const Participant = Schema.Struct({
   name: Schema.NullOr(Schema.String),
   email: Schema.String,
 });
+
+/**
+ * Recipient constraint (audit S9). The `to` list is LLM output, and the
+ * LLM's context contains the customer's (attacker-controlled) email body
+ * — without this check a prompt-injected message can exfiltrate case
+ * content to an arbitrary address once replies run on auto. A recipient
+ * is allowed iff their address already participates in the thread
+ * (thread-level participants or any message's from/to).
+ *
+ * Fails OPEN when the thread history is unavailable: some connectors
+ * have weak `fetchThread` support, and a genuinely bogus thread id makes
+ * the send itself fail. The exfiltration shape this guards against
+ * (real thread, foreign recipient) always has fetchable history.
+ */
+export const assertRecipientsInThread = (
+  tenantId: import("@support-agent/agent-core").TenantId,
+  recipients: ReadonlyArray<{ readonly email: string }>,
+  threadId: string,
+  toolName: string,
+): Effect.Effect<void, ToolOutputInvalid, ConversationService> =>
+  Effect.gen(function* () {
+    const convo = yield* ConversationService;
+    const threadEither = yield* convo
+      .fetchThread(tenantId, ThreadId(threadId))
+      .pipe(Effect.either);
+    if (threadEither._tag === "Left") return;
+    const allowed = participantEmails(threadEither.right);
+    const offThread = recipients.filter(
+      (r) => !allowed.has(r.email.trim().toLowerCase()),
+    );
+    if (offThread.length > 0) {
+      return yield* Effect.fail(
+        new ToolOutputInvalid({
+          tool: toolName,
+          issues: offThread.map(
+            (r) => `recipient_not_in_thread:${r.email}`,
+          ),
+        }),
+      );
+    }
+  });
+
+export const participantEmails = (
+  thread: ConversationThread,
+): ReadonlySet<string> => {
+  const set = new Set<string>();
+  const add = (email: string) => set.add(email.trim().toLowerCase());
+  for (const p of thread.participants) add(p.email);
+  for (const m of thread.messages) {
+    add(m.from.email);
+    for (const p of m.to) add(p.email);
+  }
+  return set;
+};
 
 const Input = Schema.Struct({
   threadId: Schema.String,
@@ -40,7 +95,7 @@ const Output = Schema.Struct({
 export const conversationReply = defineTool({
   name: "conversation.reply",
   description:
-    "Send a customer-facing reply on an existing thread. Threading is handled by `threadId` — the same connector that delivered the inbound message is the one that sends the reply, so the customer sees a natural continuation in their inbox / portal. Set `subject` to null to inherit the thread subject (`Re: <original>`). `draftId` is the idempotency key: re-running this tool with the same draftId returns the prior send instead of double-sending. Permission policy: `ask` by default — every reply requires a human approval until the agent has earned trust per-tenant.",
+    "Send a customer-facing reply on an existing thread. Threading is handled by `threadId` — the same connector that delivered the inbound message is the one that sends the reply, so the customer sees a natural continuation in their inbox / portal. Set `subject` to null to inherit the thread subject (`Re: <original>`). Recipients in `to` MUST already participate in the thread — off-thread addresses are rejected. Choose a stable `draftId` for the reply and reuse it if you retry the same send. Permission policy: `ask` by default — every reply requires a human approval until the agent has earned trust per-tenant.",
   displayName: "Send customer reply",
   displayDescription:
     "When a customer writes in, the agent drafts and sends the reply on the existing email thread.",
@@ -53,14 +108,16 @@ export const conversationReply = defineTool({
   // defaultPermission unless agent-level overrides upgrade it.
   defaultPermission: "ask",
   sideEffectClass: "external_message",
-  // Idempotency: the runtime's tool dispatch ties (caseId, callId) to the
-  // single execution. `draftId` further binds the connector's send-side
-  // dedup. Together: no double-sends across runtime retries or LLM
-  // re-emissions.
   idempotencyKey: (input) => input.draftId,
   execute: (input, ctx) =>
     Effect.gen(function* () {
       const convo = yield* ConversationService;
+      yield* assertRecipientsInThread(
+        ctx.tenantId,
+        input.to,
+        input.threadId,
+        "conversation.reply",
+      );
       const sent = yield* convo
         .reply(ctx.tenantId, {
           threadId: ThreadId(input.threadId),

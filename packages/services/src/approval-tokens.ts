@@ -5,20 +5,31 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // ============================================================
 //
 // When the runtime parks a case in `waiting_for_approval`, the platform
-// emails the merchant's operator with two one-click URLs:
+// emails the merchant's operator with two URLs:
 //
-//   GET /approvals/:id/approve?token=<sig>
+//   GET /approvals/:id/approve?token=<sig>   (renders a confirm page)
 //   GET /approvals/:id/reject?token=<sig>
 //
+// The GET renders a confirmation page whose form POSTs the same token
+// back — only the POST mutates (audit S2: email-security scanners
+// follow GET links, and must not be able to decide an approval).
+//
 // The token is a stateless, HMAC-signed cryptogram binding the approval
-// id to an expiry. It carries enough auth on its own — no server-side
+// id AND the action to an expiry (audit S3: approve and reject carry
+// different tokens, so holding a reject link doesn't let you approve by
+// editing the path). It carries enough auth on its own — no server-side
 // session, no per-link table row. Verification is constant-time.
 //
-// Format: `<approvalId>.<expiresAtMs>.<b64url(HMAC-SHA256(secret, body))>`
-// where `body = "<approvalId>.<expiresAtMs>"`. We use base64url (RFC 4648
-// §5) so the token drops into a URL without %-encoding.
+// Format: `<approvalId>.<action>.<expiresAtMs>.<b64url(HMAC-SHA256(secret, body))>`
+// where `body = "<approvalId>.<action>.<expiresAtMs>"`. We use base64url
+// (RFC 4648 §5) so the token drops into a URL without %-encoding.
 
 const HMAC_ALGO = "sha256";
+
+export type ApprovalTokenAction = "approve" | "reject";
+
+const isApprovalTokenAction = (s: string): s is ApprovalTokenAction =>
+  s === "approve" || s === "reject";
 
 const b64urlEncode = (buf: Buffer): string =>
   buf
@@ -36,21 +47,32 @@ const b64urlDecode = (s: string): Buffer => {
 
 export interface SignApprovalTokenInput {
   readonly approvalId: string;
+  /** The decision this token authorizes — bound into the HMAC body. */
+  readonly action: ApprovalTokenAction;
   readonly secret: string;
-  /** Time-to-live in milliseconds. Default 7 days. */
+  /**
+   * Time-to-live in milliseconds. Default 24 hours — matches the
+   * `expiresAt` the runtime stamps on the approval row, so a link can
+   * never outlive the approval it points at (audit S3: the previous
+   * 7-day default left a long-lived bearer capability in inboxes and
+   * request logs).
+   */
   readonly ttlMs?: number;
   /** Clock override for tests. */
   readonly nowMs?: number;
 }
 
+export const DEFAULT_APPROVAL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
 export const signApprovalToken = (input: SignApprovalTokenInput): string => {
   const now = input.nowMs ?? Date.now();
-  const ttl = input.ttlMs ?? 7 * 24 * 60 * 60 * 1000;
+  const ttl = input.ttlMs ?? DEFAULT_APPROVAL_TOKEN_TTL_MS;
   const expiresAt = now + ttl;
-  // Approval ids never contain `.` (they're UUIDs), so `.` is a safe
-  // separator. If we ever widen the id format, swap to a length-prefix
-  // encoding — until then this is the simplest thing that works.
-  const body = `${input.approvalId}.${expiresAt}`;
+  // Approval ids never contain `.` (they're UUIDs) and the action is a
+  // fixed enum, so `.` is a safe separator. If we ever widen the id
+  // format, swap to a length-prefix encoding — until then this is the
+  // simplest thing that works.
+  const body = `${input.approvalId}.${input.action}.${expiresAt}`;
   const sig = createHmac(HMAC_ALGO, input.secret).update(body).digest();
   return `${body}.${b64urlEncode(sig)}`;
 };
@@ -59,6 +81,7 @@ export type VerifyApprovalTokenResult =
   | {
       readonly ok: true;
       readonly approvalId: string;
+      readonly action: ApprovalTokenAction;
       readonly expiresAt: number;
     }
   | {
@@ -77,9 +100,17 @@ export const verifyApprovalToken = (
   input: VerifyApprovalTokenInput,
 ): VerifyApprovalTokenResult => {
   const parts = input.token.split(".");
-  if (parts.length !== 3) return { ok: false, reason: "malformed" };
-  const [approvalId, expiresAtStr, sigB64] = parts as [string, string, string];
-  if (!approvalId || !expiresAtStr || !sigB64) {
+  if (parts.length !== 4) return { ok: false, reason: "malformed" };
+  const [approvalId, action, expiresAtStr, sigB64] = parts as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (!approvalId || !action || !expiresAtStr || !sigB64) {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!isApprovalTokenAction(action)) {
     return { ok: false, reason: "malformed" };
   }
   const expiresAt = Number.parseInt(expiresAtStr, 10);
@@ -87,7 +118,7 @@ export const verifyApprovalToken = (
     return { ok: false, reason: "malformed" };
   }
 
-  const body = `${approvalId}.${expiresAtStr}`;
+  const body = `${approvalId}.${action}.${expiresAtStr}`;
   const expected = createHmac(HMAC_ALGO, input.secret).update(body).digest();
   let provided: Buffer;
   try {
@@ -107,5 +138,5 @@ export const verifyApprovalToken = (
   const now = input.nowMs ?? Date.now();
   if (now >= expiresAt) return { ok: false, reason: "expired" };
 
-  return { ok: true, approvalId, expiresAt };
+  return { ok: true, approvalId, action, expiresAt };
 };
