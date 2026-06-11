@@ -50,10 +50,22 @@ export class TimerService extends Context.Tag("TimerService")<
       caseId: CaseId,
       opts?: CancelTimersOptions,
     ) => Effect.Effect<number, TimerServiceError>;
-    readonly fireDue: (
+    /**
+     * Due, unfired, uncancelled timers — WITHOUT marking them (audit
+     * L3a). The sweep enqueues each timer's event first and only then
+     * calls `markFired`; the old single-shot claim-and-mark meant a
+     * crash or enqueue failure after the mark silently dropped the
+     * wake-up forever.
+     */
+    readonly listDue: (
       now: Date,
       limit?: number,
     ) => Effect.Effect<ReadonlyArray<TimerRecord>, TimerServiceError>;
+    /** Stamp `firedAt` after the timer's event was durably enqueued. */
+    readonly markFired: (
+      timerId: string,
+      firedAt: Date,
+    ) => Effect.Effect<void, TimerServiceError>;
   }
 >() {}
 
@@ -102,19 +114,26 @@ export const TimerServiceTest = Layer.effect(
           return count;
         }),
 
-      fireDue: (now, limit = 100) =>
+      listDue: (now, limit = 100) =>
         Effect.sync(() => {
           const due: TimerRecord[] = [];
-          for (let i = 0; i < timers.length; i += 1) {
+          for (const timer of timers) {
             if (due.length >= limit) break;
-            const timer = timers[i]!;
             if (timer.firedAt || timer.cancelledAt) continue;
             if (timer.fireAt.getTime() > now.getTime()) continue;
-            const fired = { ...timer, firedAt: now };
-            timers[i] = fired;
-            due.push(fired);
+            due.push(timer);
           }
           return due;
+        }),
+
+      markFired: (timerId, firedAt) =>
+        Effect.sync(() => {
+          for (let i = 0; i < timers.length; i += 1) {
+            const timer = timers[i]!;
+            if (timer.id === timerId && !timer.firedAt) {
+              timers[i] = { ...timer, firedAt };
+            }
+          }
         }),
     });
   }),

@@ -409,6 +409,19 @@ export const LLMServiceLive = Layer.effect(
             : null;
           const call = result.toolCalls[0];
           if (call) {
+            // The runtime executes ONE tool call per turn. When a model
+            // parallel-calls, the extras are deliberately not entered
+            // into the conversation history (the runtime records only
+            // this decision), so the model re-emits them on following
+            // turns and they execute sequentially. Log so a chronically
+            // parallel-calling model is visible instead of silently
+            // slower (audit L14).
+            if (result.toolCalls.length > 1) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[llm] model ${req.model} emitted ${result.toolCalls.length} parallel tool calls; executing the first (${call.toolName}) — the rest will be re-emitted on later turns`,
+              );
+            }
             return {
               type: "tool_call",
               callId: call.toolCallId,

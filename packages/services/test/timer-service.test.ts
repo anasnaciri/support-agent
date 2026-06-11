@@ -10,7 +10,7 @@ const run = <A, E>(eff: Effect.Effect<A, E, TimerService>) =>
   Effect.runPromise(Effect.provide(eff, TimerServiceTest));
 
 describe("TimerService (Test layer)", () => {
-  it("schedules and fires due timers once", async () => {
+  it("lists due timers without marking, then marks fired explicitly (audit L3a)", async () => {
     const result = await run(
       Effect.gen(function* () {
         const timers = yield* TimerService;
@@ -19,12 +19,20 @@ describe("TimerService (Test layer)", () => {
           fireAt: new Date("2026-05-26T12:00:00.000Z"),
           reason: "follow_up",
         });
-        const early = yield* timers.fireDue(new Date("2026-05-26T11:59:00.000Z"));
-        const due = yield* timers.fireDue(new Date("2026-05-26T12:00:00.000Z"));
-        const duplicate = yield* timers.fireDue(
+        const early = yield* timers.listDue(
+          new Date("2026-05-26T11:59:00.000Z"),
+        );
+        const due = yield* timers.listDue(new Date("2026-05-26T12:00:00.000Z"));
+        // listDue is a pure read — calling it again still returns the timer
+        // (the sweep marks only after a successful enqueue).
+        const stillDue = yield* timers.listDue(
           new Date("2026-05-26T12:01:00.000Z"),
         );
-        return { timer, early, due, duplicate };
+        yield* timers.markFired(timer.id, new Date("2026-05-26T12:01:00.000Z"));
+        const afterMark = yield* timers.listDue(
+          new Date("2026-05-26T12:02:00.000Z"),
+        );
+        return { timer, early, due, stillDue, afterMark };
       }),
     );
 
@@ -32,10 +40,8 @@ describe("TimerService (Test layer)", () => {
     expect(result.early).toEqual([]);
     expect(result.due).toHaveLength(1);
     expect(result.due[0]?.id).toBe(result.timer.id);
-    expect(result.due[0]?.firedAt).toEqual(
-      new Date("2026-05-26T12:00:00.000Z"),
-    );
-    expect(result.duplicate).toEqual([]);
+    expect(result.stillDue).toHaveLength(1);
+    expect(result.afterMark).toEqual([]);
   });
 
   it("cancels open timers for a case", async () => {

@@ -60,6 +60,15 @@ export interface SendAccountDeletedInput {
   readonly recipientEmail: string;
 }
 
+export interface SendConnectorAlertInput {
+  readonly tenantId: TenantId;
+  readonly provider: string;
+  /** Mailbox / shop the connector is bound to, for the email body. */
+  readonly mailbox: string;
+  /** Human-readable failure description (e.g. "refresh token revoked"). */
+  readonly reason: string;
+}
+
 export class PlatformMailService extends Context.Tag("PlatformMailService")<
   PlatformMailService,
   {
@@ -68,6 +77,15 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
     ) => Effect.Effect<void, PlatformMailError>;
     readonly sendAccountDeleted: (
       input: SendAccountDeletedInput,
+    ) => Effect.Effect<void, PlatformMailError>;
+    /**
+     * Operational alert to the tenant's operator when a conversation
+     * connector goes dark (audit L5): a lapsed Graph subscription or a
+     * revoked refresh token silently stops inbound customer mail —
+     * someone must be told.
+     */
+    readonly sendConnectorAlert: (
+      input: SendConnectorAlertInput,
     ) => Effect.Effect<void, PlatformMailError>;
   }
 >() {}
@@ -81,6 +99,10 @@ export type PlatformMailTestRecord =
   | {
       readonly kind: "account-deleted";
       readonly input: SendAccountDeletedInput;
+    }
+  | {
+      readonly kind: "connector-alert";
+      readonly input: SendConnectorAlertInput;
     };
 
 export interface PlatformMailTestHandle {
@@ -141,6 +163,26 @@ export const makePlatformMailServiceTest = (
               );
             }
             sent.push({ kind: "account-deleted", input });
+            return Effect.succeed(undefined);
+          },
+        ),
+      sendConnectorAlert: (input) =>
+        Effect.suspend(
+          (): Effect.Effect<void, PlatformMailError> => {
+            if (fixtures.unconfiguredFor?.has(input.tenantId)) {
+              return Effect.fail(
+                new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+              );
+            }
+            if (fixtures.failAll) {
+              return Effect.fail(
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause: "fixture: failAll",
+                }),
+              );
+            }
+            sent.push({ kind: "connector-alert", input });
             return Effect.succeed(undefined);
           },
         ),

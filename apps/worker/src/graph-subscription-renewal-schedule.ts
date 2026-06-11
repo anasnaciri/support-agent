@@ -14,6 +14,7 @@ import {
 } from "./graph-subscription-renewal.js";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
+import { reportRenewalResultsHealth } from "./connector-health.js";
 
 export const GRAPH_SUBSCRIPTION_RENEWAL_QUEUE = "graph.subscription-renewal";
 
@@ -104,6 +105,25 @@ export const registerGraphSubscriptionRenewal = async (
             }`,
           );
         }
+        // Audit L5: stamp connector health + alert the operator once per
+        // ok→broken transition. A lapsed Graph subscription is a hard
+        // outage (no replayable cursor) — it must not stay invisible.
+        await Effect.runPromise(
+          Effect.provide(
+            reportRenewalResultsHealth("outlook", results),
+            opts.runtimeLayer,
+          ).pipe(
+            Effect.catchAllCause((cause) =>
+              Effect.sync(() => {
+                // eslint-disable-next-line no-console
+                console.error(
+                  "[graph-subscription-renewal] health report crashed:",
+                  cause,
+                );
+              }),
+            ),
+          ) as Effect.Effect<unknown, never, never>,
+        );
       }
     },
   );

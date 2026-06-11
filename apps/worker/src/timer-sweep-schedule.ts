@@ -61,15 +61,35 @@ export const fireDueTimersOnce = (
 ) =>
   Effect.gen(function* () {
     const timers = yield* TimerService;
-    const fired = yield* timers.fireDue(now, limit);
-    for (const timer of fired) {
-      yield* enqueueWorkflowEvent(
+    // Enqueue-then-mark (audit L3a): the old order marked timers fired
+    // and then enqueued, so a crash or enqueue failure in between
+    // silently dropped the wake-up forever. A timer whose enqueue fails
+    // stays unmarked and the next sweep pass retries it; a crash between
+    // enqueue and mark yields a duplicate timer.expired, which the
+    // case-keyed FIFO + runtime guards absorb.
+    const due = yield* timers.listDue(now, limit);
+    let fired = 0;
+    for (const timer of due) {
+      const enqueued = yield* enqueueWorkflowEvent(
         boss,
         timerExpiredEventFor(timer),
         timerExpiredEventOptions(timer),
-      );
+      ).pipe(Effect.either);
+      if (enqueued._tag === "Left") {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[timer-sweep] enqueue failed for timer=${timer.id}; will retry next pass:`,
+          enqueued.left,
+        );
+        continue;
+      }
+      // Mark failure → duplicate next pass; safe by design.
+      yield* timers
+        .markFired(timer.id, now)
+        .pipe(Effect.catchAll(() => Effect.void));
+      fired += 1;
     }
-    return fired.length;
+    return fired;
   });
 
 export const registerTimerSweep = async (

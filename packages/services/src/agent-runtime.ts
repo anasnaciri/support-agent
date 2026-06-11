@@ -298,6 +298,50 @@ const refundAuditDetails = (
     : {};
 };
 
+/**
+ * Lock key for serializing a tick (audit L2): the case id when the event
+ * references (or correlates to) an existing case; the thread key for a
+ * first message whose case doesn't exist yet; null for events with no
+ * case affinity (fresh ticket create, unsupported types).
+ */
+const deriveTickLockKey = (
+  event: DomainEvent,
+  cases: Context.Tag.Service<CaseRepository>,
+): Effect.Effect<string | null> => {
+  switch (event.type) {
+    case "customer.replied":
+    case "approval.approved":
+    case "approval.rejected":
+    case "supplier.updated":
+    case "timer.expired":
+    case "manual.takeover":
+    case "case.resumed":
+      return Effect.succeed(`case-tick:${event.caseId}`);
+    case "message.received":
+      return cases
+        .findByThreadId(
+          makeTenantId(event.tenantId),
+          makeThreadId(event.threadId),
+          parseThreadId(event.threadId)?.provider,
+        )
+        .pipe(
+          Effect.map((row) =>
+            row
+              ? `case-tick:${row.id}`
+              : `thread-tick:${event.tenantId}:${event.threadId}`,
+          ),
+          Effect.catchAll(() =>
+            Effect.succeed(
+              `thread-tick:${event.tenantId}:${event.threadId}`,
+            ),
+          ),
+        );
+    case "ticket.created":
+    case "tracking.changed":
+      return Effect.succeed(null);
+  }
+};
+
 const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
   switch (tool.risk) {
     case "read":
@@ -449,6 +493,9 @@ export const AgentRuntimeDefault = Layer.effect(
               const existing = yield* cases.findByThreadId(
                 makeTenantId(lookup.tenantId),
                 makeThreadId(lookup.threadId),
+                // Scope by the connector that owns the thread (audit D2)
+                // so cross-provider threadId collisions can't correlate.
+                parseThreadId(lookup.threadId)?.provider,
               );
               if (existing) {
                 row = existing;
@@ -490,7 +537,7 @@ export const AgentRuntimeDefault = Layer.effect(
               const updated = yield* cases.transitionStatus(
                 caseId,
                 "human_takeover",
-                { reason },
+                { reason, tenantId: working.tenantId },
               );
               yield* audit.record({
                 tenantId: updated.tenantId,
@@ -517,7 +564,9 @@ export const AgentRuntimeDefault = Layer.effect(
         // widen this branch to push the tool result into a fresh tick
         // and re-enter the agent loop.
         if (event.type === "approval.approved") {
-          const approval = yield* approvals.getById(event.approvalId).pipe(
+          const approval = yield* approvals
+            .getById(event.approvalId, working.tenantId)
+            .pipe(
             Effect.catchTag("ApprovalNotFound", () =>
               Effect.succeed(null),
             ),
@@ -670,65 +719,68 @@ export const AgentRuntimeDefault = Layer.effect(
             callId,
             attemptNumber: 1,
           };
-          const toolEffect = toolToRun.execute(
+          // The external side effect runs OUTSIDE the SQL tx (audit D6);
+          // the audit row + execution marker then commit together. A
+          // declared tool timeout is honored here too (audit L15).
+          const rawResumeEffect = toolToRun.execute(
             toolInput,
             ctx,
           ) as unknown as Effect.Effect<unknown, unknown, never>;
-          const exec = priorMarker
-            ? // Already executed successfully in a prior delivery — skip
-              // the side effect, finish the resolve step below.
-              yield* tx
-                .run(
-                  audit.record({
-                    tenantId: working.tenantId,
-                    caseId: working.id,
-                    actor: { type: "system", id: "runtime" },
-                    action: "tool.execution_deduped",
-                    details: {
+          const resumeEffect = toolToRun.timeout
+            ? rawResumeEffect.pipe(Effect.timeout(toolToRun.timeout))
+            : rawResumeEffect;
+          let exec: { readonly _tag: "Right" | "Left"; readonly right?: unknown; readonly left?: unknown };
+          if (priorMarker) {
+            // Already executed successfully in a prior delivery — skip
+            // the side effect, finish the resolve step below.
+            yield* tx.run(
+              audit.record({
+                tenantId: working.tenantId,
+                caseId: working.id,
+                actor: { type: "system", id: "runtime" },
+                action: "tool.execution_deduped",
+                details: {
+                  tool: approval.tool,
+                  executionKey,
+                  viaApprovalId: approval.id,
+                },
+              }),
+            );
+            exec = { _tag: "Right", right: { deduped: true } };
+          } else {
+            const result = yield* resumeEffect.pipe(Effect.either);
+            yield* tx.run(
+              Effect.gen(function* () {
+                yield* audit.record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "user", id: event.managerId },
+                  action: "tool.invoked",
+                  details: {
+                    tool: approval.tool,
+                    callId,
+                    ok: result._tag === "Right",
+                    viaApprovalId: approval.id,
+                    ...refundAuditDetails(approval.tool, toolInput),
+                  },
+                });
+                // Marker shares the tx with the audit row (audit C2):
+                // both commit or neither does.
+                if (Option.isSome(maybeExecutions)) {
+                  yield* maybeExecutions.value
+                    .record({
+                      tenantId: working.tenantId,
+                      caseId: working.id,
+                      callId: executionKey,
                       tool: approval.tool,
-                      executionKey,
-                      viaApprovalId: approval.id,
-                    },
-                  }),
-                )
-                .pipe(
-                  Effect.map(
-                    () =>
-                      ({ _tag: "Right", right: { deduped: true } }) as const,
-                  ),
-                )
-            : yield* tx.run(
-                Effect.gen(function* () {
-                  const result = yield* toolEffect.pipe(Effect.either);
-                  yield* audit.record({
-                    tenantId: working.tenantId,
-                    caseId: working.id,
-                    actor: { type: "user", id: event.managerId },
-                    action: "tool.invoked",
-                    details: {
-                      tool: approval.tool,
-                      callId,
-                      ok: result._tag === "Right",
-                      viaApprovalId: approval.id,
-                      ...refundAuditDetails(approval.tool, toolInput),
-                    },
-                  });
-                  // Marker shares the tx with the audit row (audit C2):
-                  // both commit or neither does.
-                  if (Option.isSome(maybeExecutions)) {
-                    yield* maybeExecutions.value
-                      .record({
-                        tenantId: working.tenantId,
-                        caseId: working.id,
-                        callId: executionKey,
-                        tool: approval.tool,
-                        resultOk: result._tag === "Right",
-                      })
-                      .pipe(Effect.catchAll(() => Effect.void));
-                  }
-                  return result;
-                }),
-              );
+                      resultOk: result._tag === "Right",
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                }
+              }),
+            );
+            exec = result;
+          }
           if (exec._tag === "Left") {
             // Tool failed AFTER approval — park the case in human_takeover
             // so someone can intervene. The approval row is already
@@ -1517,11 +1569,15 @@ export const AgentRuntimeDefault = Layer.effect(
             } as const;
           }
 
-          // allow → execute (tool side effects + tool.invoked audit in one
-          // tx — master-plan §4 audit-in-transaction invariant). If the tool
-          // mutated case state (e.g. via case.update_status), the row write,
-          // the case_state_transitions row, AND the audit entry all commit
-          // together. If anything fails, all three roll back.
+          // allow → execute. The tool's external side effect runs OUTSIDE
+          // the SQL transaction (audit D6): holding a pool connection across
+          // provider HTTP latency starved the pool, and a commit failure
+          // AFTER an email was actually sent rolled back the audit record of
+          // a send that really happened. The audit row + execution marker
+          // then commit together in one tx (master-plan §4: the audit write
+          // shares the transaction with the state change — the external
+          // effect itself was never transactional). Tools that mutate case
+          // state (case.update_status) keep their own atomic writes.
           const ctx: ToolContext = {
             tenantId: current.tenantId,
             caseId: current.id,
@@ -1532,13 +1588,20 @@ export const AgentRuntimeDefault = Layer.effect(
           // Tool<unknown, unknown> declares R=unknown (master-plan §17). The
           // concrete dependencies a tool actually needs are satisfied by the
           // runtime's outer Layer, so we narrow R to never at the call site.
-          const toolEffect = tool.execute(
+          const rawToolEffect = tool.execute(
             callInput,
             ctx,
           ) as unknown as Effect.Effect<unknown, unknown, never>;
+          // Honor the tool's declared timeout (audit L15) — a hung connector
+          // call must not pin the tick (and previously its DB tx) until the
+          // HTTP client's own timeout while the job clock runs toward
+          // redelivery.
+          const toolEffect = tool.timeout
+            ? rawToolEffect.pipe(Effect.timeout(tool.timeout))
+            : rawToolEffect;
+          const result = yield* toolEffect.pipe(Effect.either);
           const exec = yield* tx.run(
             Effect.gen(function* () {
-              const result = yield* toolEffect.pipe(Effect.either);
               const outputDetails =
                 tool.name === "refund.recommend" && result._tag === "Right"
                   ? { output: result.right }
@@ -1604,7 +1667,7 @@ export const AgentRuntimeDefault = Layer.effect(
               content: exec.right,
             });
             // The tool may have mutated the case (e.g. transitioned status).
-            current = yield* cases.getById(current.id);
+            current = yield* cases.getById(current.id, current.tenantId);
           } else {
             const errTag =
               (exec.left as { readonly _tag?: string })._tag ?? "ToolFailure";
@@ -1671,7 +1734,18 @@ export const AgentRuntimeDefault = Layer.effect(
             return { type: "Completed" } as const;
           }
         }
-        const result = yield* tickBody(event);
+        // Per-case serialization (audit L2): the queue keys
+        // message.received by THREAD and approval/timer/resume events by
+        // CASE, so two events for the same case can run concurrently
+        // across those keys (a customer reply racing the manager's
+        // approval → double reply). Hold a cluster-wide advisory lock on
+        // the case for the whole tick; a not-yet-created case locks on
+        // its thread key instead (creation itself is guarded by the
+        // unique (tenant, thread) index).
+        const lockKey = yield* deriveTickLockKey(event, cases);
+        const result = lockKey
+          ? yield* tx.withLock(lockKey, tickBody(event))
+          : yield* tickBody(event);
         if (
           claimInput &&
           Option.isSome(maybeProcessed) &&

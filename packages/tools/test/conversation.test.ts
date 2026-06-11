@@ -271,7 +271,9 @@ describe("conversation.ask_customer tool", () => {
             baseCtx("c-reminder"),
           );
           const timers = yield* TimerService;
-          return yield* timers.fireDue(new Date(Date.now() + 3 * 60 * 60 * 1000));
+          return yield* timers.listDue(
+            new Date(Date.now() + 3 * 60 * 60 * 1000),
+          );
         }) as Effect.Effect<unknown, unknown, never>,
         env,
       ),
@@ -295,7 +297,8 @@ describe("conversation.ask_customer tool", () => {
           }),
         ),
       cancelOpenForCase: () => Effect.succeed(0),
-      fireDue: () => Effect.succeed([]),
+      listDue: () => Effect.succeed([]),
+      markFired: () => Effect.succeed(undefined as void),
     });
     const env = Layer.merge(conversationLayer, timerLayer);
 

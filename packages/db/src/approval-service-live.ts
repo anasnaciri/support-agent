@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalNotFound,
@@ -27,7 +27,7 @@ import type { DrizzleDb } from "./client.js";
 
 const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
-import { approvals, type ApprovalRow } from "./schema.js";
+import { approvals, cases, type ApprovalRow } from "./schema.js";
 
 const rowToApproval = (r: ApprovalRow): Approval => ({
   id: ApprovalId(r.id),
@@ -239,12 +239,73 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
+    // Audit L7: expire overdue pendings (CAS on status='pending' inside
+    // the UPDATE, so racing deciders win cleanly).
+    const expireOverdue = (
+      now: Date,
+      limit = 100,
+    ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "expireOverdue",
+          db
+            .update(approvals)
+            .set({ status: "expired" })
+            .where(
+              and(
+                eq(approvals.status, "pending"),
+                sql`${approvals.expiresAt} < ${now}`,
+                sql`${approvals.id} IN (
+                  SELECT id FROM ${approvals}
+                  WHERE ${approvals.status} = 'pending'
+                    AND ${approvals.expiresAt} < ${now}
+                  ORDER BY ${approvals.expiresAt} ASC
+                  LIMIT ${limit}
+                )`,
+              ),
+            )
+            .returning(),
+        );
+        return rows.map(rowToApproval);
+      });
+
+    // Audit L3b: decided rows whose case never resumed — the decision
+    // committed but the workflow event was lost. Joined against cases so
+    // the sweep doesn't rescan history forever.
+    const listDecidedUnresumed = (opts: {
+      readonly decidedBefore: Date;
+      readonly limit?: number;
+    }): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "listDecidedUnresumed",
+          db
+            .select({ approval: approvals })
+            .from(approvals)
+            .innerJoin(cases, eq(cases.id, approvals.caseId))
+            .where(
+              and(
+                inArray(approvals.status, ["approved", "rejected"]),
+                sql`${approvals.decidedAt} < ${opts.decidedBefore}`,
+                eq(cases.status, "waiting_for_approval"),
+              ),
+            )
+            .orderBy(sql`${approvals.decidedAt} ASC`)
+            .limit(opts.limit ?? 100),
+        );
+        return rows.map((r) => rowToApproval(r.approval));
+      });
+
     return ApprovalService.of({
       create,
       getById,
       approve,
       reject,
       listPending,
+      expireOverdue,
+      listDecidedUnresumed,
     });
   }),
 );

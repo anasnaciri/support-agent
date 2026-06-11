@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, ManagedRuntime } from "effect";
 import type { DomainEvent } from "@support-agent/agent-core";
 import { AgentRuntime } from "@support-agent/services";
 import { buildWorker } from "./bootstrap.js";
@@ -30,6 +30,10 @@ import {
   registerTimerSweep,
 } from "./timer-sweep-schedule.js";
 import {
+  APPROVAL_MAINTENANCE_QUEUE,
+  registerApprovalMaintenance,
+} from "./approval-maintenance-schedule.js";
+import {
   ACCOUNT_CLEANUP_QUEUE,
   registerAccountCleanup,
 } from "./account-cleanup-schedule.js";
@@ -49,6 +53,14 @@ const main = async (): Promise<void> => {
   const { boss, runtimeLayer, credentialEncryptionKey, shutdown } =
     await buildWorker();
 
+  // Build the full layer graph ONCE for the job hot path (audit L12).
+  // `Effect.provide(…, runtimeLayer)` inside the handler rebuilt every
+  // service — including a fresh Postgres pool — per job; under burst
+  // load that churned connections and turned pool exhaustion into
+  // dropped events. Cron schedules still take the layer (they run every
+  // few minutes; per-pass rebuild is immaterial there).
+  const managedRuntime = ManagedRuntime.make(runtimeLayer);
+
   // pg-boss requires the queue exist before work() will register a worker.
   // We call ensureWorkflowQueue (idempotent) inside an Effect runtime so we
   // get the same error mapping path as the EventBus side.
@@ -67,11 +79,8 @@ const main = async (): Promise<void> => {
         console.log(
           `[worker] ${event.type} eventId=${job.data.eventId} key=${job.data.key}`,
         );
-        const exit = await Effect.runPromiseExit(
-          Effect.provide(
-            Effect.flatMap(AgentRuntime, (r) => r.handleEvent(event)),
-            runtimeLayer,
-          ),
+        const exit = await managedRuntime.runPromiseExit(
+          Effect.flatMap(AgentRuntime, (r) => r.handleEvent(event)),
         );
         if (Exit.isSuccess(exit)) {
           console.log(
@@ -169,6 +178,14 @@ const main = async (): Promise<void> => {
     `[worker] scheduled timer-sweep cron on queue=${TIMER_SWEEP_QUEUE}`,
   );
 
+  // Approvals maintenance: expires overdue pendings (escalating their
+  // case to a human) and re-publishes decision events that were lost
+  // between the decision commit and the pg-boss publish.
+  await registerApprovalMaintenance({ boss, runtimeLayer });
+  console.log(
+    `[worker] scheduled approval-maintenance cron on queue=${APPROVAL_MAINTENANCE_QUEUE}`,
+  );
+
   // Account-deletion cleanup: deletes the WorkOS org + sends the deletion
   // email for tenants wiped by apps/api's account-delete endpoints.
   await registerAccountCleanup({
@@ -189,6 +206,7 @@ const main = async (): Promise<void> => {
 
   const onShutdown = async (signal: NodeJS.Signals) => {
     console.log(`[worker] received ${signal}, shutting down`);
+    await managedRuntime.dispose();
     await shutdown();
     process.exit(0);
   };

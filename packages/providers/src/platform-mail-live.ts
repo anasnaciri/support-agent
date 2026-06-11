@@ -192,6 +192,49 @@ export const PlatformMailServiceLive = Layer.effect(
           // this deletion's retries / duplicate jobs (within its 24h window).
           `account-deleted:${input.tenantId}`,
         ),
+      // Audit L5: a dead connector (lapsed Graph subscription, revoked
+      // refresh token) silently stops inbound customer mail — alert the
+      // operator. Recipient resolved like the approval email; tenants
+      // without a notificationEmail surface PlatformMailUnconfigured and
+      // the caller degrades to the health flag alone.
+      sendConnectorAlert: (input) =>
+        Effect.gen(function* () {
+          const settings = yield* tenantRepo.getSettings(input.tenantId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause,
+                }),
+            ),
+          );
+          const recipient = settings.notificationEmail;
+          if (!recipient) {
+            return yield* Effect.fail(
+              new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+            );
+          }
+          const subject = `[support-agent] ${input.provider} connection needs attention`;
+          const text = [
+            `Your ${input.provider} connection (${input.mailbox}) has stopped working:`,
+            "",
+            `  ${input.reason}`,
+            "",
+            "Inbound customer email is NOT being received until it is reconnected.",
+            "Open your dashboard → Settings → Integrations and reconnect the mailbox.",
+          ].join("\n");
+          yield* post(
+            input.tenantId,
+            recipient,
+            {
+              subject,
+              text,
+              html: `<p>Your <strong>${input.provider}</strong> connection (${input.mailbox}) has stopped working:</p><p><code>${input.reason}</code></p><p><strong>Inbound customer email is NOT being received until it is reconnected.</strong></p><p>Open your dashboard → Settings → Integrations and reconnect the mailbox.</p>`,
+            },
+            // One alert per connector per day even across cron retries.
+            `connector-alert:${input.tenantId}:${input.provider}:${input.mailbox}`,
+          );
+        }),
       sendApprovalLink: (input) =>
         Effect.gen(function* () {
           // 1. Resolve recipient via the TenantRepository Tag (db Live impl

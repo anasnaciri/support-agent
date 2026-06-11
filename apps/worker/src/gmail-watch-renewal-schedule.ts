@@ -16,6 +16,7 @@ import {
 } from "./gmail-watch-renewal.js";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
+import { reportRenewalResultsHealth } from "./connector-health.js";
 
 export const GMAIL_WATCH_RENEWAL_QUEUE = "gmail.watch-renewal";
 
@@ -117,6 +118,23 @@ export const registerGmailWatchRenewal = async (
             );
           }
         }
+        // Audit L5: connector health flag + one-time operator alert.
+        await Effect.runPromise(
+          Effect.provide(
+            reportRenewalResultsHealth("gmail", results),
+            opts.runtimeLayer,
+          ).pipe(
+            Effect.catchAllCause((cause) =>
+              Effect.sync(() => {
+                // eslint-disable-next-line no-console
+                console.error(
+                  "[gmail-watch-renewal] health report crashed:",
+                  cause,
+                );
+              }),
+            ),
+          ) as Effect.Effect<unknown, never, never>,
+        );
       }
     },
   );

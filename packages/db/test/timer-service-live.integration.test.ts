@@ -55,20 +55,30 @@ describeIfDb("TimerServiceLive", () => {
               fireAt: new Date("2026-05-26T13:00:00.000Z"),
               reason: "sla",
             });
-            const fired = yield* svc.fireDue(
+            const due = yield* svc.listDue(
               new Date("2026-05-26T12:00:00.000Z"),
             );
+            // listDue is a pure read (audit L3a) — still due until marked.
+            const stillDue = yield* svc.listDue(
+              new Date("2026-05-26T12:00:00.000Z"),
+            );
+            yield* svc.markFired(
+              due[0]!.id,
+              new Date("2026-05-26T12:00:30.000Z"),
+            );
+            const afterMark = yield* svc.listDue(
+              new Date("2026-05-26T12:01:00.000Z"),
+            );
             const cancelled = yield* svc.cancelOpenForCase(CaseId(caseId));
-            return { followUp, fired, cancelled };
+            return { followUp, due, stillDue, afterMark, cancelled };
           }),
           layer,
         ),
       );
 
-      expect(out.fired.map((t) => t.id)).toEqual([out.followUp.id]);
-      expect(out.fired[0]?.firedAt).toEqual(
-        new Date("2026-05-26T12:00:00.000Z"),
-      );
+      expect(out.due.map((t) => t.id)).toEqual([out.followUp.id]);
+      expect(out.stillDue.map((t) => t.id)).toEqual([out.followUp.id]);
+      expect(out.afterMark).toEqual([]);
       expect(out.cancelled).toBe(1);
     } finally {
       await db.delete(timers).where(eq(timers.caseId, caseId));

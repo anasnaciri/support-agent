@@ -109,6 +109,28 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     readonly listPending: (
       tenantId: TenantId,
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /**
+     * Flip `pending` rows past their `expiresAt` to `expired` (audit L7).
+     * Returns the rows it expired so the caller can escalate their cases.
+     * CAS on pending — racing deciders win cleanly.
+     */
+    readonly expireOverdue: (
+      now: Date,
+      limit?: number,
+    ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /**
+     * Decided (approved/rejected) approvals older than `decidedBefore`
+     * whose case is STILL parked in `waiting_for_approval` (audit L3b):
+     * the decision committed but the workflow event was never published
+     * (or was lost), so the runtime never resumed. The maintenance sweep
+     * re-publishes their events; re-delivery is idempotent.
+     */
+    readonly listDecidedUnresumed: (opts: {
+      readonly decidedBefore: Date;
+      readonly limit?: number;
+    }) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
   }
 >() {}
 
@@ -213,6 +235,36 @@ export const ApprovalServiceTest = Layer.effect(
           },
           input.tenantId,
         ),
+
+      expireOverdue: (now, limit = 100) =>
+        Effect.sync(() => {
+          const expired: Approval[] = [];
+          for (const a of store.values()) {
+            if (expired.length >= limit) break;
+            if (a.status !== "pending") continue;
+            if (a.expiresAt.getTime() >= now.getTime()) continue;
+            const next: Approval = { ...a, status: "expired" };
+            store.set(a.id, next);
+            expired.push(next);
+          }
+          return expired;
+        }),
+
+      // In-memory approximation: no case table to join, so this returns
+      // decided rows older than the cutoff; the maintenance sweep
+      // re-checks the case status itself before republishing.
+      listDecidedUnresumed: ({ decidedBefore, limit = 100 }) =>
+        Effect.sync(() => {
+          const out: Approval[] = [];
+          for (const a of store.values()) {
+            if (out.length >= limit) break;
+            if (a.status !== "approved" && a.status !== "rejected") continue;
+            if (!a.decidedAt || a.decidedAt.getTime() >= decidedBefore.getTime())
+              continue;
+            out.push(a);
+          }
+          return out;
+        }),
 
       listPending: (tenantId) =>
         Effect.sync(() => {

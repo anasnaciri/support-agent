@@ -58,6 +58,7 @@ import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
   ConversationRouterLive,
+  makeCaseProviderResolver,
   makeGmailConversation,
   makeGraphConversation,
   makeImapSmtpConversation,
@@ -417,8 +418,20 @@ export const buildWorker = async (
   }
   const conversation =
     credKeyB64 && connectorBuilders.length > 0
-      ? ConversationRouterLive(connectorBuilders).pipe(
-          Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+      ? // The case-provider resolver (audit D2) routes a legacy
+        // (un-namespaced) thread through the provider stamped on its
+        // case before falling back to most-recently-installed — so
+        // connecting a second mailbox no longer breaks open cases.
+        ConversationRouterLive(
+          connectorBuilders,
+          makeCaseProviderResolver,
+        ).pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+              CaseRepositoryLive.pipe(Layer.provide(dbLayer)),
+            ),
+          ),
         )
       : ConversationServiceTest({});
 

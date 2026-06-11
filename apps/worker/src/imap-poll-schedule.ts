@@ -15,6 +15,7 @@ import {
 import { enqueueWorkflowEvent } from "./workflow-queue-live.js";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
+import { reportRenewalResultsHealth } from "./connector-health.js";
 
 export const IMAP_POLL_QUEUE = "imap.poll";
 
@@ -95,6 +96,20 @@ export const registerImapPoll = async (
             }`,
           );
         }
+        // Audit L5: connector health flag + one-time operator alert.
+        await Effect.runPromise(
+          Effect.provide(
+            reportRenewalResultsHealth("imap", results),
+            opts.runtimeLayer,
+          ).pipe(
+            Effect.catchAllCause((cause) =>
+              Effect.sync(() => {
+                // eslint-disable-next-line no-console
+                console.error("[imap-poll] health report crashed:", cause);
+              }),
+            ),
+          ) as Effect.Effect<unknown, never, never>,
+        );
       }
     },
   );

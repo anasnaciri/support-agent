@@ -5,6 +5,7 @@ import {
   DecryptError,
   decrypt,
   decryptToString,
+  decryptWithKeys,
   encrypt,
   parseKey,
 } from "../src/crypto.js";
@@ -55,5 +56,35 @@ describe("crypto — encrypt/decrypt", () => {
 
   it("fails with DecryptError when the buffer is shorter than iv+tag", () => {
     expect(() => decrypt(goodKey, Buffer.alloc(10))).toThrow(DecryptError);
+  });
+
+  // Audit S15 — versioned ciphertext + multi-key decrypt enable key
+  // rotation without an all-at-once re-encryption migration.
+  describe("key versioning + rotation (audit S15)", () => {
+    it("writes a v1 version byte on new ciphertexts", () => {
+      const ct = encrypt(goodKey, "secret");
+      expect(ct[0]).toBe(0x01);
+    });
+
+    it("still decrypts legacy (unversioned) ciphertexts", () => {
+      // Legacy layout is exactly the v1 layout minus the version byte.
+      const v1 = encrypt(goodKey, "legacy-secret");
+      const legacy = v1.subarray(1);
+      expect(decryptToString(goodKey, legacy)).toBe("legacy-secret");
+    });
+
+    it("decryptWithKeys falls back to the previous key", () => {
+      const oldKey = randomBytes(32);
+      const ct = encrypt(oldKey, "rotated-secret");
+      const out = decryptWithKeys([goodKey, oldKey], ct);
+      expect(out.toString("utf8")).toBe("rotated-secret");
+    });
+
+    it("decryptWithKeys fails when no key matches", () => {
+      const ct = encrypt(randomBytes(32), "secret");
+      expect(() => decryptWithKeys([goodKey, randomBytes(32)], ct)).toThrow(
+        DecryptError,
+      );
+    });
   });
 });

@@ -52,13 +52,22 @@ export const parseKey = (b64: string): Buffer => {
 // ============================================================
 
 /**
- * AES-256-GCM encrypt. Layout of the returned buffer:
+ * Ciphertext format version (audit S15). v1 prefixes a single version
+ * byte so the layout can evolve and key rotation can be implemented
+ * with a decrypt-key set instead of an all-at-once re-encryption
+ * migration. Legacy (pre-versioning) buffers have no prefix — `decrypt`
+ * accepts both.
+ */
+const VERSION_V1 = 0x01;
+
+/**
+ * AES-256-GCM encrypt. Layout of the returned buffer (v1):
  *
- *   iv (12 bytes) || gcm_tag (16 bytes) || ciphertext (variable)
+ *   version (1 byte, 0x01) || iv (12 bytes) || gcm_tag (16 bytes) || ciphertext
  *
  * The 12-byte IV is randomly generated per call so the same plaintext +
- * key encrypts to different ciphertexts. Storing iv + tag inline keeps
- * the schema to a single bytea column.
+ * key encrypts to different ciphertexts. Storing version + iv + tag
+ * inline keeps the schema to a single bytea column.
  */
 export const encrypt = (key: Buffer, plaintext: Buffer | string): Buffer => {
   const iv = randomBytes(IV_BYTES);
@@ -67,17 +76,10 @@ export const encrypt = (key: Buffer, plaintext: Buffer | string): Buffer => {
     typeof plaintext === "string" ? Buffer.from(plaintext, "utf8") : plaintext;
   const ct = Buffer.concat([cipher.update(buf), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, ct]);
+  return Buffer.concat([Buffer.from([VERSION_V1]), iv, tag, ct]);
 };
 
-/**
- * Inverse of `encrypt`. Returns the decrypted plaintext bytes. Fails with
- * `DecryptError` if the buffer is too short, if the GCM tag doesn't
- * authenticate, or if the wrong key is used — the GCM AEAD construction
- * guarantees that tampering or wrong-key produces a tag-mismatch error
- * rather than silently-garbled plaintext.
- */
-export const decrypt = (key: Buffer, buf: Buffer): Buffer => {
+const decryptRaw = (key: Buffer, buf: Buffer): Buffer => {
   if (buf.length < IV_BYTES + TAG_BYTES) {
     throw new DecryptError({ reason: "ciphertext shorter than iv+tag header" });
   }
@@ -93,6 +95,47 @@ export const decrypt = (key: Buffer, buf: Buffer): Buffer => {
       reason: cause instanceof Error ? cause.message : "unknown",
     });
   }
+};
+
+/**
+ * Inverse of `encrypt`. Accepts both v1 (version-prefixed) and legacy
+ * (bare iv||tag||ct) layouts: a legacy buffer whose first IV byte
+ * happens to be 0x01 mis-parses as v1, fails GCM authentication, and is
+ * retried as legacy — the AEAD tag makes the disambiguation safe. Fails
+ * with `DecryptError` if the buffer is malformed, the GCM tag doesn't
+ * authenticate, or the wrong key is used.
+ */
+export const decrypt = (key: Buffer, buf: Buffer): Buffer => {
+  if (buf.length > IV_BYTES + TAG_BYTES && buf[0] === VERSION_V1) {
+    try {
+      return decryptRaw(key, buf.subarray(1));
+    } catch {
+      // Could be a legacy buffer starting with 0x01 — fall through.
+    }
+  }
+  return decryptRaw(key, buf);
+};
+
+/**
+ * Decrypt with a key set, primary first (audit S15). Enables rotation:
+ * point CREDENTIAL_ENCRYPTION_KEY at the new key and pass the previous
+ * one(s) as fallbacks; writes use the new key while reads keep working
+ * until rows are re-encrypted on touch.
+ */
+export const decryptWithKeys = (
+  keys: ReadonlyArray<Buffer>,
+  buf: Buffer,
+): Buffer => {
+  let lastError: unknown = null;
+  for (const key of keys) {
+    try {
+      return decrypt(key, buf);
+    } catch (cause) {
+      lastError = cause;
+    }
+  }
+  if (lastError instanceof DecryptError) throw lastError;
+  throw new DecryptError({ reason: "no decryption key matched" });
 };
 
 export const decryptToString = (key: Buffer, buf: Buffer): string =>

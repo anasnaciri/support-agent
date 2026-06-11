@@ -119,39 +119,51 @@ export const TimerServiceLive = Layer.effect(
         return rows.length;
       });
 
-    const fireDue = (
+    // Audit L3a: list-then-mark instead of claim-and-mark. The sweep
+    // enqueues each timer's event before `markFired`; duplicates across
+    // racing sweep passes are absorbed downstream (case-keyed FIFO + the
+    // runtime's guards), while a lost wake-up never recovers.
+    const listDue = (
       now: Date,
       limit = 100,
     ): Effect.Effect<ReadonlyArray<TimerRecord>, TimerServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
-          "fireDue",
-          db.transaction(async (tx) => {
-            const due = await tx
-              .select()
-              .from(timers)
-              .where(
-                and(
-                  lte(timers.fireAt, now),
-                  isNull(timers.firedAt),
-                  isNull(timers.cancelledAt),
-                ),
-              )
-              .orderBy(asc(timers.fireAt), asc(timers.id))
-              .limit(limit);
-            const ids = due.map((t) => t.id);
-            if (ids.length === 0) return [];
-            return tx
-              .update(timers)
-              .set({ firedAt: now })
-              .where(inArray(timers.id, ids))
-              .returning();
-          }),
+          "listDue",
+          db
+            .select()
+            .from(timers)
+            .where(
+              and(
+                lte(timers.fireAt, now),
+                isNull(timers.firedAt),
+                isNull(timers.cancelledAt),
+              ),
+            )
+            .orderBy(asc(timers.fireAt), asc(timers.id))
+            .limit(limit),
         );
         return rows.map(rowToTimer);
       });
 
-    return TimerService.of({ schedule, cancelOpenForCase, fireDue });
+    const markFired = (
+      timerId: string,
+      firedAt: Date,
+    ): Effect.Effect<void, TimerServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        // CAS on firedAt IS NULL: a concurrent sweep that already marked
+        // the timer is a no-op here.
+        yield* wrap(
+          "markFired",
+          db
+            .update(timers)
+            .set({ firedAt })
+            .where(and(eq(timers.id, timerId), isNull(timers.firedAt))),
+        );
+      });
+
+    return TimerService.of({ schedule, cancelOpenForCase, listDue, markFired });
   }),
 );
