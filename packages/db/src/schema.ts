@@ -68,6 +68,9 @@ export const cases = pgTable(
     shopifyOrderId: text("shopify_order_id"),
     channel: text("channel").notNull(),
     threadId: text("thread_id"),
+    // Exact connected mailbox that owns `thread_id`. Provider ids are opaque
+    // within a mailbox, not guaranteed unique across two mailboxes.
+    mailbox: text("mailbox"),
     // Conversation-connector discriminator stamped at case create (audit D2):
     // which provider owns `thread_id` (gmail/outlook/imap). NULL for cases
     // created before the stamp existed and for non-conversation channels.
@@ -114,12 +117,18 @@ export const cases = pgTable(
       sql`${t.updatedAt} DESC`,
     ),
     index("cases_customer_idx").on(t.customerId),
-    // One case per (tenant, thread): `findByThreadId` runs on every inbound
-    // email — this both indexes the hottest lookup and makes case-per-thread
-    // uniqueness a DB invariant instead of a queue-FIFO accident (audit D4).
-    uniqueIndex("cases_tenant_thread_unique")
+    // One case per exact mailbox thread. Provider thread ids are opaque and
+    // can collide across two mailboxes connected by the same tenant.
+    uniqueIndex("cases_tenant_provider_mailbox_thread_unique")
+      .on(t.tenantId, t.provider, t.mailbox, t.threadId)
+      .where(
+        sql`${t.threadId} IS NOT NULL AND ${t.provider} IS NOT NULL AND ${t.mailbox} IS NOT NULL`,
+      ),
+    // Preserve uniqueness for pre-mailbox legacy cases until a future
+    // backfill can bind them to a connection.
+    uniqueIndex("cases_tenant_legacy_thread_unique")
       .on(t.tenantId, t.threadId)
-      .where(sql`${t.threadId} IS NOT NULL`),
+      .where(sql`${t.threadId} IS NOT NULL AND ${t.mailbox} IS NULL`),
   ],
 );
 

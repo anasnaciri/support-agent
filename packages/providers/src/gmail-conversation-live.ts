@@ -123,10 +123,10 @@ export const makeGmailConversation = (
       // Fetch the live token, refreshing first if expired (or close to).
       // Returns the freshest known access token + the connection record so
       // callers can derive the mailbox address for outbound `From`.
-      const resolveToken = (tenantId: TenantId) =>
+      const resolveToken = (tenantId: TenantId, mailbox?: string) =>
         Effect.gen(function* () {
           const conn = yield* store
-            .get(tenantId, "gmail")
+            .get(tenantId, "gmail", mailbox)
             .pipe(
               Effect.mapError(
                 (): ConversationError =>
@@ -194,9 +194,10 @@ export const makeGmailConversation = (
       const fetchThread = (
         tenantId: TenantId,
         threadId: ThreadId,
+        mailbox?: string,
       ): Effect.Effect<ConversationThread, ConversationError> =>
         Effect.gen(function* () {
-          const conn = yield* resolveToken(tenantId);
+          const conn = yield* resolveToken(tenantId, mailbox);
           const thread = yield* Effect.tryPromise({
             try: () =>
               gmailGetThread({
@@ -220,7 +221,7 @@ export const makeGmailConversation = (
         inReplyTo: string | null,
       ): Effect.Effect<SentMessage, ConversationError> =>
         Effect.gen(function* () {
-          const conn = yield* resolveToken(tenantId);
+          const conn = yield* resolveToken(tenantId, draft.mailbox);
           let subject = draft.subject;
           let inReplyToMessageId = inReplyTo;
           let references: ReadonlyArray<string> = [];

@@ -91,6 +91,50 @@ const emptyStore = () =>
   );
 
 describe("GmailConversationLive — fetchThread", () => {
+  it("resolves the exact mailbox requested by the case", async () => {
+    const get = vi.fn(() =>
+      Effect.succeed({
+        tenantId,
+        provider: "gmail" as const,
+        shopDomain: "first@merchant.com",
+        accessToken: "live-token",
+        refreshToken: "refresh-token",
+        tokenExpiresAt: new Date(Date.now() + 60 * 60_000),
+        metadata: {},
+        scopes: [],
+        apiVersion: null,
+        installedAt: new Date(),
+        status: "active" as const,
+      }),
+    );
+    const store = Layer.succeed(
+      ConnectorCredentialStore,
+      ConnectorCredentialStore.of({
+        get,
+        put: () => Effect.die("unused"),
+        revoke: () => Effect.die("unused"),
+        listForTenant: () => Effect.succeed([]),
+        patchTokens: () => Effect.die("unused"),
+        patchMetadata: () => Effect.die("unused"),
+      }),
+    );
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: (async () =>
+        okJson({ id: "t-1", messages: [] })) as unknown as typeof fetch,
+    }).pipe(Layer.provide(store));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.fetchThread(tenantId, ThreadId("t-1"), "first@merchant.com"),
+        ),
+        layer,
+      ),
+    );
+    expect(get).toHaveBeenCalledWith(tenantId, "gmail", "first@merchant.com");
+  });
+
   it("returns a normalised thread when Gmail responds OK", async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({

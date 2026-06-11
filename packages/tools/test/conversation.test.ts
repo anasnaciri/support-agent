@@ -29,7 +29,13 @@ const baseCtx = (caseId: string): ToolContext => ({
   agentId: AgentId("support-triage"),
   callId: "call_1",
   attemptNumber: 1,
+  mailbox: "support@example.com",
 });
+
+const legacyCtx = (caseId: string): ToolContext => {
+  const { mailbox: _mailbox, ...ctx } = baseCtx(caseId);
+  return ctx;
+};
 
 const seedThread = (id: string): ConversationThread => ({
   id: ThreadId(id),
@@ -101,6 +107,30 @@ describe("conversation.fetch_thread tool", () => {
       }
     }
   });
+
+  it("fails closed when the case is not bound to a mailbox", async () => {
+    const env = ConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationFetchThread.execute(
+          { threadId: "thread-1" } as never,
+          legacyCtx("c-legacy-fetch"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["mailbox_not_bound"]);
+      }
+    }
+  });
 });
 
 describe("conversation.reply tool", () => {
@@ -136,6 +166,30 @@ describe("conversation.reply tool", () => {
     expect(handle.sent).toHaveLength(1);
     expect(handle.sent[0]!.kind).toBe("reply");
     expect(handle.sent[0]!.tenantId).toBe(tenantId);
+  });
+
+  it("fails closed when the case is not bound to a mailbox", async () => {
+    const { layer, handle } = makeConversationServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Your order is in transit.",
+            bodyHtml: null,
+            inReplyToMessageId: "msg-1",
+            draftId: "draft-legacy",
+          } as never,
+          legacyCtx("c-legacy-reply"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(0);
   });
 
   it("declares an idempotencyKey derived from draftId", () => {
@@ -250,6 +304,29 @@ describe("conversation.ask_customer tool", () => {
     );
     expect(handle.sent).toHaveLength(1);
     expect(handle.sent[0]!.kind).toBe("askCustomer");
+  });
+
+  it("fails closed when the case is not bound to a mailbox", async () => {
+    const { layer, handle } = makeConversationServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationAskCustomer.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Can you confirm the order number?",
+            bodyHtml: null,
+            draftId: "ask-legacy",
+          } as never,
+          legacyCtx("c-legacy-ask"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(0);
   });
 
   it("schedules a follow-up timer when remindAfterHours is present", async () => {

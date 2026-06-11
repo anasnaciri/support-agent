@@ -71,6 +71,8 @@ export interface CreateCaseInput {
   readonly customerId?: CustomerId | null;
   readonly orderId?: OrderId | null;
   readonly threadId?: ThreadId | null;
+  /** Exact connected mailbox that owns `threadId`. */
+  readonly mailbox?: string | null;
   /**
    * Conversation connector that owns `threadId` (audit D2). When omitted it
    * is derived from a provider-namespaced `threadId` (`gmail:…`); pass it
@@ -111,6 +113,7 @@ export type UpdatableCaseFields = Partial<
     | "customerId"
     | "orderId"
     | "threadId"
+    | "mailbox"
     | "category"
     | "currentAgentId"
     | "priority"
@@ -159,6 +162,8 @@ export class CaseRepository extends Context.Tag("CaseRepository")<
       threadId: ThreadId,
       /** When present, only a case stamped with this provider matches (D2). */
       provider?: ConversationProviderId,
+      /** When present, only the case owned by this mailbox matches. */
+      mailbox?: string,
     ) => Effect.Effect<Case | null, CaseRepositoryError>;
 
     /**
@@ -197,6 +202,7 @@ const buildCase = (input: CreateCaseInput, now: Date): Case => ({
   orderId: input.orderId ?? null,
   channel: input.channel,
   threadId: input.threadId ?? null,
+  mailbox: input.mailbox ?? null,
   category: input.category ?? null,
   status: input.status ?? "new",
   currentAgentId: input.currentAgentId,
@@ -243,13 +249,14 @@ export const CaseRepositoryTest = Layer.effect(
             : Effect.fail(new CaseNotFound({ caseId: id }));
         }),
 
-      findByThreadId: (tenantId, threadId, provider) =>
+      findByThreadId: (tenantId, threadId, provider, mailbox) =>
         Effect.sync(() => {
           for (const c of store.values()) {
             if (c.tenantId !== tenantId || c.threadId !== threadId) continue;
             if (provider !== undefined && providerOf.get(c.id) !== provider) {
               continue;
             }
+            if (mailbox !== undefined && c.mailbox !== mailbox) continue;
             return c;
           }
           return null;

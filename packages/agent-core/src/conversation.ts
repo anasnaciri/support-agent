@@ -78,6 +78,8 @@ export interface ConversationThread {
  */
 export interface ConversationReply {
   readonly threadId: ThreadId;
+  /** Exact connected mailbox that owns the thread. */
+  readonly mailbox?: string;
   readonly to: ReadonlyArray<MessageParticipant>;
   /** `null` means inherit the thread's subject (`Re: <subject>`). */
   readonly subject: string | null;
@@ -111,6 +113,8 @@ export interface SentMessage {
  */
 export interface AskCustomerDraft {
   readonly threadId: ThreadId;
+  /** Exact connected mailbox that owns the thread. */
+  readonly mailbox?: string;
   readonly to: ReadonlyArray<MessageParticipant>;
   readonly subject: string | null;
   readonly bodyText: string;

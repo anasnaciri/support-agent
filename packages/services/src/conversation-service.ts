@@ -35,6 +35,7 @@ export class ConversationService extends Context.Tag("ConversationService")<
     readonly fetchThread: (
       tenantId: TenantId,
       threadId: ThreadId,
+      mailbox?: string,
     ) => Effect.Effect<ConversationThread, ConversationError>;
 
     /**

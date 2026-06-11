@@ -83,6 +83,48 @@ describe("CaseRepository (Test layer)", () => {
     expect(result.miss).toBeNull();
   });
 
+  it("distinguishes the same provider thread id across tenant mailboxes", async () => {
+    const result = await newRun(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const first = yield* repo.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          threadId: ThreadId("gmail:thread-1"),
+          provider: "gmail",
+          mailbox: "first@merchant.com",
+        });
+        const second = yield* repo.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          threadId: ThreadId("gmail:thread-1"),
+          provider: "gmail",
+          mailbox: "second@merchant.com",
+        });
+        return {
+          first: yield* repo.findByThreadId(
+            TenantId("tenant-a"),
+            ThreadId("gmail:thread-1"),
+            "gmail",
+            "first@merchant.com",
+          ),
+          second: yield* repo.findByThreadId(
+            TenantId("tenant-a"),
+            ThreadId("gmail:thread-1"),
+            "gmail",
+            "second@merchant.com",
+          ),
+          firstId: first.id,
+          secondId: second.id,
+        };
+      }),
+    );
+    expect(result.first?.id).toBe(result.firstId);
+    expect(result.second?.id).toBe(result.secondId);
+  });
+
   it("update applies a partial patch and bumps updatedAt", async () => {
     const result = await newRun(
       Effect.gen(function* () {

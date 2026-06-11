@@ -52,9 +52,17 @@ export const conversationFetchThread = defineTool({
   sideEffectClass: "none",
   execute: (input, ctx) =>
     Effect.gen(function* () {
+      if (!ctx.mailbox) {
+        return yield* Effect.fail(
+          new ToolOutputInvalid({
+            tool: "conversation.fetch_thread",
+            issues: ["mailbox_not_bound"],
+          }),
+        );
+      }
       const convo = yield* ConversationService;
       const thread = yield* convo
-        .fetchThread(ctx.tenantId, ThreadId(input.threadId))
+        .fetchThread(ctx.tenantId, ThreadId(input.threadId), ctx.mailbox)
         .pipe(
           Effect.mapError(
             (e) =>

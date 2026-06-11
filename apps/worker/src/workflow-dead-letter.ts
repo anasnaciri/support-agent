@@ -37,6 +37,7 @@ const eventCaseRef = (
       readonly kind: "thread";
       readonly tenantId: string;
       readonly threadId: string;
+      readonly mailbox: string | undefined;
     }
   | { readonly kind: "none" } => {
   switch (event.type) {
@@ -53,6 +54,7 @@ const eventCaseRef = (
         kind: "thread",
         tenantId: event.tenantId,
         threadId: event.threadId,
+        mailbox: event.payload.mailbox,
       };
     case "ticket.created":
     case "tracking.changed":
@@ -93,7 +95,12 @@ export const escalateDeadLetteredEvent = (
             .getById(ref.caseId as never)
             .pipe(Effect.catchAll(() => Effect.succeed(null)))
         : yield* cases
-            .findByThreadId(ref.tenantId as never, ref.threadId as never)
+            .findByThreadId(
+              ref.tenantId as never,
+              ref.threadId as never,
+              undefined,
+              ref.mailbox,
+            )
             .pipe(Effect.catchAll(() => Effect.succeed(null)));
 
     if (!row) {

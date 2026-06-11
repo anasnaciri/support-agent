@@ -126,6 +126,9 @@ describe("handleGraphNotification", () => {
     expect(
       (published[0]!.payload as { threadId?: string }).threadId,
     ).toBe("outlook:conv-1");
+    expect(
+      (published[0]!.payload as { mailbox?: string }).mailbox,
+    ).toBe(mailbox);
   });
 
   it("rejects a notification whose clientState does not match", async () => {

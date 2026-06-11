@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   ConversationAuthMissing,
+  ConversationProviderUnavailable,
   TenantId,
   ThreadId,
   ThreadNotFound,
@@ -203,5 +204,44 @@ describe("makeConversationRouter (thread-id prefix dispatch)", () => {
     const err = (exit.cause as { error?: unknown }).error;
     expect(err).toBeInstanceOf(ThreadNotFound);
     expect((err as ThreadNotFound).threadId).toBe("gmail:gone");
+  });
+
+  it("rejects a connector response for a different raw thread", async () => {
+    const mismatched: ConversationServiceShape = {
+      fetchThread: () =>
+        Effect.succeed({
+          id: ThreadId("other-thread"),
+          subject: "wrong",
+          participants: [],
+          messages: [
+            {
+              id: "m-1",
+              threadId: ThreadId("other-thread"),
+              direction: "inbound",
+              from: { name: null, email: "other@example.com" },
+              to: [],
+              subject: "wrong",
+              bodyText: "wrong",
+              bodyHtml: null,
+              sentAt: new Date(0),
+              attachments: [],
+            },
+          ],
+        }),
+      reply: () => Effect.die("unused"),
+      askCustomer: () => Effect.die("unused"),
+    };
+    const router = makeConversationRouter(
+      new Map<ConnectorProvider, ConversationServiceShape>([
+        ["gmail", mismatched],
+      ]),
+    );
+    const exit = await Effect.runPromiseExit(
+      router.fetchThread(tenantA, ThreadId("gmail:expected-thread")),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    const err = (exit.cause as { error?: unknown }).error;
+    expect(err).toBeInstanceOf(ConversationProviderUnavailable);
   });
 });

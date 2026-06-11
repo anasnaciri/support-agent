@@ -31,9 +31,15 @@ describe("case timeline navigation", () => {
     expect(formatAttachmentSize(2 * 1024 * 1024)).toBe("2 MB");
   });
 
-  it("marks only mailbox-auth failures as reconnectable", () => {
+  it("shows reconnect actions for mailbox failures that need operator action", () => {
     expect(conversationThreadUnavailableView("auth_required")).toMatchObject({
       title: "Reconnect the mailbox",
+      showIntegrationsLink: true,
+    });
+    expect(
+      conversationThreadUnavailableView("mailbox_ambiguous"),
+    ).toMatchObject({
+      title: "Mailbox cannot be safely identified",
       showIntegrationsLink: true,
     });
     expect(

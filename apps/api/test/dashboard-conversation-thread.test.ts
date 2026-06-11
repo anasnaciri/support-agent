@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   conversationUnavailableReason,
   projectConversationThread,
+  resolveCaseConversationMailbox,
   sanitizeEmailHtml,
+  stripQuotedText,
 } from "../src/dashboard-conversation-thread.js";
 import {
   ConversationAuthFailed,
@@ -106,6 +108,47 @@ describe("dashboard conversation thread", () => {
     expect(out).toContain("<table><tr><td>kept</td></tr></table>");
   });
 
+  it("removes quoted reply history from HTML and plain text", () => {
+    expect(
+      sanitizeEmailHtml(
+        '<p>Latest reply</p><div class="gmail_quote"><p>Earlier message</p></div>',
+      ),
+    ).toBe("<p>Latest reply</p>");
+    expect(
+      stripQuotedText(
+        "Latest reply\n\nOn Wed, Jun 10, 2026 at 12:00 PM Customer wrote:\n> Earlier message",
+      ),
+    ).toBe("Latest reply");
+    expect(
+      stripQuotedText(
+        "Latest reply\n\n-----Original Message-----\nFrom: Customer\nEarlier message",
+      ),
+    ).toBe("Latest reply");
+  });
+
+  it("deduplicates repeated provider message ids before display", () => {
+    const message: ConversationThread["messages"][number] = {
+      id: "message-1",
+      threadId,
+      direction: "inbound",
+      from: { name: "Customer", email: "customer@example.com" },
+      to: [{ name: null, email: "support@example.com" }],
+      subject: "Return request",
+      bodyText: "Latest reply\n\n> Earlier message",
+      bodyHtml: null,
+      sentAt: new Date("2026-06-11T10:30:00.000Z"),
+      attachments: [],
+    };
+    const projected = projectConversationThread({
+      id: threadId,
+      subject: "Return request",
+      participants: [],
+      messages: [message, { ...message }],
+    });
+    expect(projected.messages).toHaveLength(1);
+    expect(projected.messages[0]?.bodyText).toBe("Latest reply");
+  });
+
   it("maps connector failures to stable dashboard reasons", () => {
     expect(
       conversationUnavailableReason(new ThreadNotFound({ tenantId, threadId })),
@@ -125,5 +168,47 @@ describe("dashboard conversation thread", () => {
         new ConversationProviderUnavailable({ provider: "gmail" }),
       ),
     ).toBe("provider_unavailable");
+  });
+
+  it("fails closed when an old case is ambiguous across active mailboxes", () => {
+    const connections = [
+      {
+        tenantId,
+        provider: "gmail" as const,
+        shopDomain: "first@merchant.com",
+        accessToken: "secret",
+        refreshToken: null,
+        tokenExpiresAt: null,
+        metadata: {},
+        scopes: [],
+        apiVersion: null,
+        installedAt: new Date(),
+        status: "active" as const,
+      },
+      {
+        tenantId,
+        provider: "gmail" as const,
+        shopDomain: "second@merchant.com",
+        accessToken: "secret",
+        refreshToken: null,
+        tokenExpiresAt: null,
+        metadata: {},
+        scopes: [],
+        apiVersion: null,
+        installedAt: new Date(),
+        status: "active" as const,
+      },
+    ];
+    expect(resolveCaseConversationMailbox(null, "gmail", connections)).toEqual({
+      ok: false,
+      reason: "mailbox_ambiguous",
+    });
+    expect(
+      resolveCaseConversationMailbox(
+        "first@merchant.com",
+        "gmail",
+        connections,
+      ),
+    ).toEqual({ ok: true, mailbox: "first@merchant.com" });
   });
 });

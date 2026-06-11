@@ -30,11 +30,12 @@ export const assertRecipientsInThread = (
   recipients: ReadonlyArray<{ readonly email: string }>,
   threadId: string,
   toolName: string,
+  mailbox?: string,
 ): Effect.Effect<void, ToolOutputInvalid, ConversationService> =>
   Effect.gen(function* () {
     const convo = yield* ConversationService;
     const threadEither = yield* convo
-      .fetchThread(tenantId, ThreadId(threadId))
+      .fetchThread(tenantId, ThreadId(threadId), mailbox)
       .pipe(Effect.either);
     if (threadEither._tag === "Left") return;
     const allowed = participantEmails(threadEither.right);
@@ -65,6 +66,19 @@ export const participantEmails = (
   }
   return set;
 };
+
+export const requireConversationMailbox = (
+  mailbox: string | undefined,
+  tool: string,
+): Effect.Effect<string, ToolOutputInvalid> =>
+  mailbox
+    ? Effect.succeed(mailbox)
+    : Effect.fail(
+        new ToolOutputInvalid({
+          tool,
+          issues: ["mailbox_not_bound"],
+        }),
+      );
 
 const Input = Schema.Struct({
   threadId: Schema.String,
@@ -111,16 +125,22 @@ export const conversationReply = defineTool({
   idempotencyKey: (input) => input.draftId,
   execute: (input, ctx) =>
     Effect.gen(function* () {
+      const mailbox = yield* requireConversationMailbox(
+        ctx.mailbox,
+        "conversation.reply",
+      );
       const convo = yield* ConversationService;
       yield* assertRecipientsInThread(
         ctx.tenantId,
         input.to,
         input.threadId,
         "conversation.reply",
+        mailbox,
       );
       const sent = yield* convo
         .reply(ctx.tenantId, {
           threadId: ThreadId(input.threadId),
+          mailbox,
           to: input.to.map((p) => ({ name: p.name, email: p.email })),
           subject: input.subject,
           bodyText: input.bodyText,

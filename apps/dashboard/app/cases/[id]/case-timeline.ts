@@ -66,6 +66,13 @@ export const conversationThreadUnavailableView = (
           "The connected mailbox must be reconnected before its email thread can be loaded.",
         showIntegrationsLink: true,
       };
+    case "mailbox_ambiguous":
+      return {
+        title: "Mailbox cannot be safely identified",
+        description:
+          "This older case is not bound to a specific mailbox, and more than one matching mailbox is connected.",
+        showIntegrationsLink: true,
+      };
     case "provider_unavailable":
       return {
         title: "Email provider temporarily unavailable",

@@ -14,6 +14,8 @@ import type { CustomerId, OrderId, ThreadId } from "./ids.js";
  */
 export interface InboundMessage {
   readonly threadId: ThreadId;
+  /** Connected mailbox that received this message. */
+  readonly mailbox?: string;
   readonly messageId: string;
   readonly from: { readonly name: string | null; readonly email: string };
   readonly to: ReadonlyArray<{ readonly name: string | null; readonly email: string }>;

@@ -272,6 +272,7 @@ export const handleGraphNotification = async (
       const inbound: InboundMessage = {
         ...toInboundMessage(msg),
         threadId: namespaceThreadId(PROVIDER, msg.threadId),
+        mailbox: conn.shopDomain,
       };
       const event: DomainEvent = {
         type: "message.received",

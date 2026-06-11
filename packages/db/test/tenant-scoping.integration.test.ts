@@ -169,6 +169,52 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     expect(mismatch).toBeNull();
   });
 
+  it("D2: isolates the same provider thread id across mailboxes", async () => {
+    const tenantId = await seedTenant();
+    const threadId = ThreadId(`gmail:${randomUUID()}`);
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const first = yield* repo.create({
+          tenantId,
+          channel: "email",
+          currentAgentId: agent,
+          threadId,
+          provider: "gmail",
+          mailbox: "first@merchant.com",
+        });
+        const second = yield* repo.create({
+          tenantId,
+          channel: "email",
+          currentAgentId: agent,
+          threadId,
+          provider: "gmail",
+          mailbox: "second@merchant.com",
+        });
+        return {
+          first,
+          second,
+          foundFirst: yield* repo.findByThreadId(
+            tenantId,
+            threadId,
+            "gmail",
+            "first@merchant.com",
+          ),
+          foundSecond: yield* repo.findByThreadId(
+            tenantId,
+            threadId,
+            "gmail",
+            "second@merchant.com",
+          ),
+        };
+      }),
+    );
+
+    expect(result.first.id).not.toBe(result.second.id);
+    expect(result.foundFirst?.id).toBe(result.first.id);
+    expect(result.foundSecond?.id).toBe(result.second.id);
+  });
+
   // ============================================================
   // D9 — CaseRepository
   // ============================================================

@@ -52,6 +52,7 @@ const rowToCase = (r: CaseRow): Case => ({
   orderId: r.shopifyOrderId ? makeOrderId(r.shopifyOrderId) : null,
   channel: r.channel as CaseChannel,
   threadId: r.threadId ? makeThreadId(r.threadId) : null,
+  mailbox: r.mailbox,
   category: r.category,
   status: r.status as CaseStatus,
   currentAgentId: makeAgentId(r.currentAgentId),
@@ -95,6 +96,7 @@ export const CaseRepositoryLive = Layer.effect(
               shopifyOrderId: input.orderId ?? null,
               channel: input.channel,
               threadId: input.threadId ?? null,
+              mailbox: input.mailbox ?? null,
               // D2: stamp the owning conversation connector — explicit input
               // first, else derived from a namespaced threadId.
               provider: resolveCaseProvider(input),
@@ -146,6 +148,7 @@ export const CaseRepositoryLive = Layer.effect(
       tenantId: TenantId,
       threadId: ThreadId,
       provider?: ConversationProviderId,
+      mailbox?: string,
     ): Effect.Effect<Case | null, CaseRepositoryError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
@@ -164,6 +167,7 @@ export const CaseRepositoryLive = Layer.effect(
                 ...(provider !== undefined
                   ? [eq(cases.provider, provider)]
                   : []),
+                ...(mailbox !== undefined ? [eq(cases.mailbox, mailbox)] : []),
               ),
             )
             .limit(1),
@@ -203,6 +207,7 @@ export const CaseRepositoryLive = Layer.effect(
         if (patch.customerId !== undefined) dbPatch["customerId"] = patch.customerId;
         if (patch.orderId !== undefined) dbPatch["shopifyOrderId"] = patch.orderId;
         if (patch.threadId !== undefined) dbPatch["threadId"] = patch.threadId;
+        if (patch.mailbox !== undefined) dbPatch["mailbox"] = patch.mailbox;
         if (patch.category !== undefined) dbPatch["category"] = patch.category;
         if (patch.currentAgentId !== undefined)
           dbPatch["currentAgentId"] = patch.currentAgentId;

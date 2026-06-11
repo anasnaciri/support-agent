@@ -61,6 +61,7 @@ type CaseLookup =
       readonly kind: "loadOrCreateByThread";
       readonly tenantId: string;
       readonly threadId: string;
+      readonly mailbox: string | undefined;
       readonly channel: CaseChannel;
       readonly subject: string | null;
       readonly initialUserMessage: string | null;
@@ -95,6 +96,7 @@ const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
         kind: "loadOrCreateByThread",
         tenantId: event.tenantId,
         threadId: event.threadId,
+        mailbox: event.payload.mailbox,
         channel: "email",
         subject: event.payload.subject,
         initialUserMessage: event.payload.bodyText,
@@ -360,16 +362,17 @@ const deriveTickLockKey = (
           makeTenantId(event.tenantId),
           makeThreadId(event.threadId),
           parseThreadId(event.threadId)?.provider,
+          event.payload.mailbox,
         )
         .pipe(
           Effect.map((row) =>
             row
               ? `case-tick:${row.id}`
-              : `thread-tick:${event.tenantId}:${event.threadId}`,
+              : `thread-tick:${event.tenantId}:${event.payload.mailbox ?? "legacy"}:${event.threadId}`,
           ),
           Effect.catchAll(() =>
             Effect.succeed(
-              `thread-tick:${event.tenantId}:${event.threadId}`,
+              `thread-tick:${event.tenantId}:${event.payload.mailbox ?? "legacy"}:${event.threadId}`,
             ),
           ),
         );
@@ -533,6 +536,7 @@ export const AgentRuntimeDefault = Layer.effect(
                 // Scope by the connector that owns the thread (audit D2)
                 // so cross-provider threadId collisions can't correlate.
                 parseThreadId(lookup.threadId)?.provider,
+                lookup.mailbox,
               );
               if (existing) {
                 row = existing;
@@ -543,6 +547,7 @@ export const AgentRuntimeDefault = Layer.effect(
                   currentAgentId: makeAgentId("support-triage"),
                   subject: lookup.subject,
                   threadId: makeThreadId(lookup.threadId),
+                  mailbox: lookup.mailbox ?? null,
                 });
                 wasCreated = true;
               }
@@ -752,6 +757,7 @@ export const AgentRuntimeDefault = Layer.effect(
           const ctx: ToolContext = {
             tenantId: working.tenantId,
             caseId: working.id,
+            ...(working.mailbox ? { mailbox: working.mailbox } : {}),
             agentId: approval.agentId,
             callId,
             attemptNumber: 1,
@@ -1619,6 +1625,7 @@ export const AgentRuntimeDefault = Layer.effect(
           const ctx: ToolContext = {
             tenantId: current.tenantId,
             caseId: current.id,
+            ...(current.mailbox ? { mailbox: current.mailbox } : {}),
             agentId: agent.id,
             callId: decision.callId,
             attemptNumber: 1,

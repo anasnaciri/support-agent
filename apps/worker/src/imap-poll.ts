@@ -98,6 +98,7 @@ export const pollOne = async (
       const inbound = {
         ...toInboundMessage(msg),
         threadId: namespaceThreadId("imap", msg.threadId),
+        mailbox: conn.shopDomain,
       };
       await deps.publish({
         type: "message.received",

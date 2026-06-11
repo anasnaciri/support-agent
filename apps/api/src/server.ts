@@ -23,6 +23,7 @@ import {
   encrypt,
   KnowledgeBaseService,
   legalAcceptanceIsCurrent,
+  parseThreadId,
   ShopifyAppProvisioningStore,
   TenantAgentOverridesService,
   TenantRepository,
@@ -75,6 +76,7 @@ import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
+  resolveCaseConversationMailbox,
 } from "./dashboard-conversation-thread.js";
 import {
   buildModelsResponse,
@@ -523,6 +525,7 @@ const handleDashboardCaseConversationThread = async (
       Effect.gen(function* () {
         const cases = yield* CaseRepository;
         const conversation = yield* ConversationService;
+        const connectorStore = yield* ConnectorCredentialStore;
         const caseRow = yield* cases
           .getById(CaseId(id), TenantId(auth.tenantId))
           .pipe(Effect.catchTag("CaseNotFound", () => Effect.succeed(null)));
@@ -536,8 +539,44 @@ const handleDashboardCaseConversationThread = async (
             },
           };
         }
+        const provider =
+          parseThreadId(caseRow.threadId)?.provider ??
+          (yield* cases.findThreadProvider(
+            TenantId(auth.tenantId),
+            caseRow.threadId,
+          ));
+        if (!provider) {
+          return {
+            kind: "result" as const,
+            result: {
+              status: "unavailable" as const,
+              reason: "mailbox_ambiguous" as const,
+            },
+          };
+        }
+        const connections = yield* connectorStore.listForTenant(
+          TenantId(auth.tenantId),
+        );
+        const mailbox = resolveCaseConversationMailbox(
+          caseRow.mailbox,
+          provider,
+          connections,
+        );
+        if (!mailbox.ok) {
+          return {
+            kind: "result" as const,
+            result: {
+              status: "unavailable" as const,
+              reason: mailbox.reason,
+            },
+          };
+        }
         const threadResult = yield* conversation
-          .fetchThread(TenantId(auth.tenantId), caseRow.threadId)
+          .fetchThread(
+            TenantId(auth.tenantId),
+            caseRow.threadId,
+            mailbox.mailbox,
+          )
           .pipe(
             Effect.match({
               onFailure: (error) => ({

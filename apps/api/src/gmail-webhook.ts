@@ -218,6 +218,7 @@ const resolveBlobStorage = async (
 
 const publishGmailMessageIds = async (opts: {
   readonly tenantId: string;
+  readonly mailbox: string;
   readonly accessToken: string;
   readonly messageIds: ReadonlyArray<string>;
   readonly layer: GmailConnectorLayer;
@@ -262,6 +263,7 @@ const publishGmailMessageIds = async (opts: {
       const inbound: InboundMessage = {
         ...toInboundMessage(msg, attachments),
         threadId: namespaceThreadId("gmail", msg.threadId),
+        mailbox: opts.mailbox,
       };
       const event: DomainEvent = {
         type: "message.received",
@@ -325,6 +327,7 @@ export const backfillUnreadGmailInbox = async (opts: {
   const publish = opts.publish ?? defaultPublish;
   const dispatched = await publishGmailMessageIds({
     tenantId: opts.tenantId,
+    mailbox: opts.mailbox,
     accessToken: conn.accessToken,
     messageIds,
     layer: opts.layer,
@@ -494,6 +497,7 @@ export const handleGmailPushNotification = async (
 
   await publishGmailMessageIds({
     tenantId: opts.tenantId,
+    mailbox: payload.emailAddress,
     accessToken: conn.accessToken,
     messageIds: listed.newMessageIds,
     layer: opts.layer,

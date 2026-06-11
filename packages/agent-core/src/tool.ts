@@ -14,6 +14,8 @@ export type ToolSideEffectClass =
 export interface ToolContext {
   readonly tenantId: TenantId;
   readonly caseId: CaseId;
+  /** Exact conversation mailbox for tools acting on a case thread. */
+  readonly mailbox?: string;
   readonly agentId: AgentId;
   readonly callId: string;
   readonly attemptNumber: number;

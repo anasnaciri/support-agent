@@ -64,9 +64,10 @@ export const makeImapSmtpConversation = (
 
     const resolve = (
       tenantId: TenantId,
+      mailbox?: string,
     ): Effect.Effect<{ ops: ImapSmtpOps; mailbox: string }, ConversationError> =>
       Effect.gen(function* () {
-        const conn = yield* store.get(tenantId, "imap").pipe(
+        const conn = yield* store.get(tenantId, "imap", mailbox).pipe(
           Effect.mapError(
             (): ConversationError =>
               new ConversationAuthMissing({ tenantId, provider: "imap" }),
@@ -84,18 +85,19 @@ export const makeImapSmtpConversation = (
     const fetchThread = (
       tenantId: TenantId,
       threadId: ThreadId,
+      mailbox?: string,
     ): Effect.Effect<ConversationThread, ConversationError> =>
       Effect.gen(function* () {
-        const { ops, mailbox } = yield* resolve(tenantId);
+        const resolved = yield* resolve(tenantId, mailbox);
         const raws = yield* Effect.tryPromise({
-          try: () => ops.fetchThread(threadId),
+          try: () => resolved.ops.fetchThread(threadId),
           catch: (): ConversationError =>
             new ConversationProviderUnavailable({ provider: "imap" }),
         });
         if (raws.length === 0) {
           return yield* Effect.fail(new ThreadNotFound({ threadId, tenantId }));
         }
-        return buildThread(raws, threadId, mailbox);
+        return buildThread(raws, threadId, resolved.mailbox);
       });
 
     const send = (
@@ -103,7 +105,7 @@ export const makeImapSmtpConversation = (
       draft: ConversationReply | AskCustomerDraft,
     ): Effect.Effect<SentMessage, ConversationError> =>
       Effect.gen(function* () {
-        const { ops, mailbox } = yield* resolve(tenantId);
+        const { ops, mailbox } = yield* resolve(tenantId, draft.mailbox);
         const root = String(draft.threadId);
         let subject = draft.subject;
         let inReplyTo =

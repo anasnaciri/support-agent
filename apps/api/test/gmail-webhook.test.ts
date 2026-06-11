@@ -186,6 +186,7 @@ describe("backfillUnreadGmailInbox", () => {
       threadId: "gmail:t-1",
       payload: {
         threadId: "gmail:t-1",
+        mailbox,
         messageId: "m-unread",
         subject: "Still waiting on order #1001",
         bodyText: "Can someone help with this?",

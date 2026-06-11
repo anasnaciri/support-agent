@@ -187,6 +187,7 @@ export type CaseConversationThreadUnavailableReason =
   | "no_thread"
   | "thread_not_found"
   | "auth_required"
+  | "mailbox_ambiguous"
   | "provider_unavailable";
 
 export type CaseConversationThreadResult =

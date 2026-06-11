@@ -90,6 +90,8 @@ export interface Case {
   readonly orderId: OrderId | null;
   readonly channel: CaseChannel;
   readonly threadId: ThreadId | null;
+  /** Connected conversation mailbox that owns `threadId`. */
+  readonly mailbox: string | null;
   readonly category: string | null;
   readonly status: CaseStatus;
   readonly currentAgentId: AgentId;

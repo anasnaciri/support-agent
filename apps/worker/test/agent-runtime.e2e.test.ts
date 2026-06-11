@@ -612,6 +612,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             channel: "email",
             currentAgentId: askingAgent.id,
             subject: "Need more information",
+            threadId: "thread-x" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
           });
 
           const result = yield* runtime.handleEvent({
@@ -1247,6 +1250,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     threadId: string,
     bodyText: string,
     tenantId = "tenant-acme",
+    mailbox?: string,
   ): DomainEvent => ({
     type: "message.received",
     tenantId: TenantId(tenantId),
@@ -1261,6 +1265,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       bodyHtml: null,
       receivedAt: new Date(),
       attachments: [],
+      ...(mailbox ? { mailbox } : {}),
     },
   });
 
@@ -1372,6 +1377,82 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       (e) => e.action === "event.received",
     ).length;
     expect(eventReceivedCount).toBe(2);
+  });
+
+  it("creates separate cases for the same provider thread id in different mailboxes", async () => {
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted([...triageScript, ...triageScript]),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const threadId = "gmail:provider-thread-collision" as never;
+
+          yield* runtime.handleEvent(
+            messageReceived(
+              threadId,
+              "first mailbox message",
+              "tenant-acme",
+              "first@merchant.com",
+            ),
+          );
+          yield* runtime.handleEvent(
+            messageReceived(
+              threadId,
+              "second mailbox message",
+              "tenant-acme",
+              "second@merchant.com",
+            ),
+          );
+
+          return {
+            first: yield* repo.findByThreadId(
+              TenantId("tenant-acme"),
+              threadId,
+              "gmail",
+              "first@merchant.com",
+            ),
+            second: yield* repo.findByThreadId(
+              TenantId("tenant-acme"),
+              threadId,
+              "gmail",
+              "second@merchant.com",
+            ),
+          };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.first).not.toBeNull();
+    expect(out.second).not.toBeNull();
+    expect(out.first?.id).not.toBe(out.second?.id);
   });
 
   it("holds an inbound reply on a human_takeover case instead of running the agent", async () => {
@@ -3087,6 +3168,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             channel: "email",
             currentAgentId: supportTriage.id,
             subject: "Refund please",
+            threadId: "thread-refund-closed-loop" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
           });
 
           // Tick #1 — runs the agent loop, parks waiting on approval.

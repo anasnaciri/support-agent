@@ -73,6 +73,7 @@ export const makeConversationRouter = (
   ): Effect.Effect<
     {
       readonly impl: ConversationServiceShape;
+      readonly provider: ConversationProviderId;
       readonly raw: ThreadId;
       readonly wrapId: (rawId: string) => ThreadId;
     },
@@ -82,7 +83,7 @@ export const makeConversationRouter = (
     if (!impl) {
       return Effect.fail(new ConversationAuthMissing({ tenantId, provider }));
     }
-    return Effect.succeed({ impl, raw, wrapId });
+    return Effect.succeed({ impl, provider, raw, wrapId });
   };
 
   const resolve = (
@@ -91,6 +92,7 @@ export const makeConversationRouter = (
   ): Effect.Effect<
     {
       readonly impl: ConversationServiceShape;
+      readonly provider: ConversationProviderId;
       readonly raw: ThreadId;
       /** Maps a connector-returned raw id back to the caller's id space. */
       readonly wrapId: (rawId: string) => ThreadId;
@@ -131,18 +133,25 @@ export const makeConversationRouter = (
         : e;
 
   return ConversationService.of({
-    fetchThread: (tenantId, threadId) =>
+    fetchThread: (tenantId, threadId, mailbox) =>
       resolve(tenantId, threadId).pipe(
-        Effect.flatMap(({ impl, raw, wrapId }) =>
-          impl.fetchThread(tenantId, raw).pipe(
-            Effect.map((thread) => ({
-              ...thread,
-              id: wrapId(thread.id),
-              messages: thread.messages.map((m) => ({
-                ...m,
-                threadId: wrapId(m.threadId),
-              })),
-            })),
+        Effect.flatMap(({ impl, provider, raw, wrapId }) =>
+          impl.fetchThread(tenantId, raw, mailbox).pipe(
+            Effect.flatMap((thread) =>
+              thread.id !== raw ||
+              thread.messages.some((message) => message.threadId !== raw)
+                ? Effect.fail(
+                    new ConversationProviderUnavailable({ provider }),
+                  )
+                : Effect.succeed({
+                    ...thread,
+                    id: wrapId(thread.id),
+                    messages: thread.messages.map((m) => ({
+                      ...m,
+                      threadId: wrapId(m.threadId),
+                    })),
+                  }),
+            ),
             Effect.mapError(renameError(tenantId, threadId)),
           ),
         ),

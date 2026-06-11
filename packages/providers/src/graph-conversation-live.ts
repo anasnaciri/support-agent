@@ -100,9 +100,9 @@ export const makeGraphConversation = (
     const skew = cfg.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
 
     // Freshest access token + the connection record (for the mailbox address).
-    const resolveToken = (tenantId: TenantId) =>
+    const resolveToken = (tenantId: TenantId, mailbox?: string) =>
       Effect.gen(function* () {
-        const conn = yield* store.get(tenantId, "outlook").pipe(
+        const conn = yield* store.get(tenantId, "outlook", mailbox).pipe(
           Effect.mapError(
             (): ConversationError =>
               new ConversationAuthMissing({ tenantId, provider: "outlook" }),
@@ -155,9 +155,10 @@ export const makeGraphConversation = (
     const fetchThread = (
       tenantId: TenantId,
       threadId: ThreadId,
+      mailbox?: string,
     ): Effect.Effect<ConversationThread, ConversationError> =>
       Effect.gen(function* () {
-        const conn = yield* resolveToken(tenantId);
+        const conn = yield* resolveToken(tenantId, mailbox);
         const thread = yield* Effect.tryPromise({
           try: () =>
             graphGetConversation({
@@ -182,7 +183,7 @@ export const makeGraphConversation = (
       draft: ConversationReply | AskCustomerDraft,
     ): Effect.Effect<SentMessage, ConversationError> =>
       Effect.gen(function* () {
-        const conn = yield* resolveToken(tenantId);
+        const conn = yield* resolveToken(tenantId, draft.mailbox);
         const thread = yield* Effect.tryPromise({
           try: () =>
             graphGetConversation({
