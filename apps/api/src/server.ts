@@ -57,10 +57,13 @@ import {
   casesList,
   connectionsList,
   createTenantForOrg,
+  createWorkspaceForOrg,
   DbClient,
   findTenantIdByWorkosOrg,
   findWorkspaceForOrg,
   knowledgeDocuments,
+  listWorkspacesByWorkosOrg,
+  renameWorkspaceForOrg,
   parsePageNumber,
   parsePageSize,
   resumeCase,
@@ -154,6 +157,7 @@ import {
 import {
   buildConnectorGrants,
   makePgBossAccountCleanupPublisher,
+  resolveCleanupTargets,
   type AccountCleanupJobData,
   type EncryptedConnectorGrant,
 } from "./account-deletion.js";
@@ -1097,11 +1101,24 @@ const deleteTenantAccount = async (
   // Operator identity for the surviving admin-audit record (re-audit #2):
   // "admin" (platform console) or "tenant_self" (dashboard self-service).
   actor: string,
+  // Workspace semantics: a single-workspace delete must neither delete the
+  // shared WorkOS org nor email the owner; the org is only ever deleted
+  // along with its LAST workspace (resolveCleanupTargets).
+  opts: { readonly allowOrgDelete: boolean; readonly sendEmail: boolean },
 ): Promise<DeleteAccountResult> => {
   const snapshot = await runWithDb(layer, (db) =>
     tenantDeletionSnapshot(db, tenantId),
   );
   if (!snapshot) return { kind: "tenant_not_found" };
+
+  const orgWorkspaceCount = snapshot.workosOrganizationId
+    ? (
+        await runWithDb(layer, (db) =>
+          listWorkspacesByWorkosOrg(db, snapshot.workosOrganizationId!),
+        )
+      ).length
+    : 0;
+  const targets = resolveCleanupTargets(snapshot, { ...opts, orgWorkspaceCount });
 
   // 1. Capture provider grants (any status) before anything is destroyed.
   const connectorGrants = await captureConnectorGrants(cfg, layer, tenantId);
@@ -1114,8 +1131,8 @@ const deleteTenantAccount = async (
     cleanupJobId = await accountCleanupPublisher(cfg.databaseUrl)({
       tenantId: snapshot.id,
       tenantName: snapshot.name,
-      workosOrganizationId: snapshot.workosOrganizationId,
-      notificationEmail: snapshot.notificationEmail,
+      workosOrganizationId: targets.workosOrganizationId,
+      notificationEmail: targets.notificationEmail,
       connectorGrants,
     });
   } catch (cause) {
@@ -1147,6 +1164,8 @@ const deleteTenantAccount = async (
         details: {
           tenantName: snapshot.name,
           workosOrganizationId: snapshot.workosOrganizationId,
+          scope: opts.allowOrgDelete ? "account" : "workspace",
+          orgDeleted: targets.workosOrganizationId !== null,
         },
       }),
       layer,
@@ -1159,7 +1178,9 @@ const deleteTenantAccount = async (
     deletedCases: wipe.deletedCases,
     deletedAuditRows: wipe.deletedAuditRows,
     deletedConnectorRows: wipe.deletedConnectorRows,
-    workosOrganizationId: snapshot.workosOrganizationId,
+    // The org the cleanup job will actually delete (null when suppressed —
+    // workspace-scoped delete, or sibling workspaces still use the org).
+    workosOrganizationId: targets.workosOrganizationId,
     cleanupEnqueued: true,
   };
 };
@@ -1178,25 +1199,70 @@ const deleteResultStatus = (result: DeleteAccountResult): number => {
   }
 };
 
-// POST /dashboard/account/delete — a manager deletes their OWN tenant.
+// POST /dashboard/account/delete — a manager deletes their WHOLE account:
+// every workspace the org owns, newest first so the DEFAULT (oldest) goes
+// last and is the only one whose cleanup job deletes the WorkOS org and
+// emails the owner. A mid-sweep failure aborts BEFORE that workspace's wipe
+// (capture/enqueue precede it), so the remainder — org included — is intact
+// and the request is retriable.
 const handleDashboardAccountDelete = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
+  const auth = authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const result = await deleteTenantAccount(
-    cfg,
-    layer,
-    auth.tenantId,
-    "tenant_self",
+  const workspaces = await runWithDb(layer, (db) =>
+    listWorkspacesByWorkosOrg(db, auth.organizationId),
   );
-  return sendJson(res, deleteResultStatus(result), result);
+  if (workspaces.length === 0) {
+    return sendJson(res, 403, { error: "no_tenant_for_organization" });
+  }
+  const order = [...workspaces].reverse(); // default (oldest) last
+  let deletedWorkspaces = 0;
+  const totals = {
+    deletedCases: 0,
+    deletedAuditRows: 0,
+    deletedConnectorRows: 0,
+  };
+  let last: Extract<DeleteAccountResult, { kind: "deleted" }> | null = null;
+  for (const ws of order) {
+    const isFinal = ws === order[order.length - 1];
+    const result = await deleteTenantAccount(cfg, layer, ws.id, "tenant_self", {
+      allowOrgDelete: true, // suppressed by the last-workspace rule until final
+      sendEmail: isFinal,
+    });
+    // Already gone (another tab won this workspace) — keep sweeping.
+    if (result.kind === "tenant_not_found") continue;
+    if (result.kind !== "deleted") {
+      return sendJson(res, deleteResultStatus(result), {
+        ...result,
+        deletedWorkspaces,
+      });
+    }
+    deletedWorkspaces += 1;
+    totals.deletedCases += result.deletedCases;
+    totals.deletedAuditRows += result.deletedAuditRows;
+    totals.deletedConnectorRows += result.deletedConnectorRows;
+    last = result;
+  }
+  if (!last) {
+    // Everything vanished mid-flight (concurrent delete) — org has no tenant.
+    return sendJson(res, 403, { error: "no_tenant_for_organization" });
+  }
+  return sendJson(res, 200, {
+    ...last,
+    ...totals,
+    deletedWorkspaces,
+  });
 };
 
-// POST /admin/tenants/:id/delete — platform operator deletes ANY tenant.
+// POST /admin/tenants/:id/delete — platform operator deletes ANY single
+// tenant (workspace). The deletion email still goes out; the WorkOS org is
+// deleted only when this is the org's last workspace (the last-workspace
+// rule in resolveCleanupTargets), so deleting one of two workspaces can't
+// kill the sibling's login.
 const handleAdminTenantDelete = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -1212,7 +1278,10 @@ const handleAdminTenantDelete = async (
   );
   if (!parsed.ok) return sendJson(res, parsed.status, { error: parsed.message });
   const { id } = req.params as { id: string };
-  const result = await deleteTenantAccount(cfg, layer, id, "admin");
+  const result = await deleteTenantAccount(cfg, layer, id, "admin", {
+    allowOrgDelete: true,
+    sendEmail: true,
+  });
   return sendJson(res, deleteResultStatus(result), result);
 };
 
@@ -1519,6 +1588,156 @@ const handleDashboardTenant = async (
   return sendJson(res, 200, {
     tenant: tenant ? { tenantId: tenant.id, name: tenant.name } : null,
   });
+};
+
+// GET /dashboard/workspaces — every workspace (tenant row) the org owns,
+// default first. Org-auth on purpose: the switcher must render (empty) for
+// an org that hasn't onboarded its first workspace yet, and the dashboard's
+// context gate maps the empty list to /onboarding itself.
+const handleDashboardWorkspaces = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const workspaces = await runWithDb(layer, (db) =>
+    listWorkspacesByWorkosOrg(db, auth.organizationId),
+  );
+  return sendJson(res, 200, {
+    workspaces: workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      createdAt: w.createdAt.toISOString(),
+      shopifyDomain: w.shopifyDomain,
+    })),
+    defaultWorkspaceId: workspaces[0]?.id ?? null,
+  });
+};
+
+// POST /dashboard/workspaces — mint an ADDITIONAL workspace under the org.
+// The org's current legal acceptance is copied verbatim onto the new row
+// (who/when preserved): the connector gates hard-require a current
+// acceptance per tenant row, so a workspace minted without one could never
+// connect anything. No current acceptance anywhere → the manager re-accepts
+// first (403, same signal the legal page already handles). Zero workspaces →
+// onboarding owns first-workspace creation (409).
+const handleDashboardWorkspaceCreate = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+  const email =
+    typeof body["notificationEmail"] === "string"
+      ? body["notificationEmail"].trim()
+      : "";
+  if (name.length < 2) return sendJson(res, 400, { error: "bad_name" });
+  if (!email.includes("@")) return sendJson(res, 400, { error: "bad_email" });
+
+  const workspaces = await runWithDb(layer, (db) =>
+    listWorkspacesByWorkosOrg(db, auth.organizationId),
+  );
+  if (workspaces.length === 0) {
+    return sendJson(res, 409, { error: "use_onboarding" });
+  }
+  // First current acceptance among the org's workspaces (default first) —
+  // scanning all avoids a dead end when only a newer workspace re-accepted.
+  let acceptance: LegalAcceptance | null = null;
+  for (const ws of workspaces) {
+    const candidate = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          const settings = yield* repo.getSettings(TenantId(ws.id));
+          return settings.legalAcceptance;
+        }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+        layer,
+      ),
+    );
+    if (legalAcceptanceIsCurrent(candidate)) {
+      acceptance = candidate;
+      break;
+    }
+  }
+  if (!acceptance) return sendLegalAcceptanceRequired(res);
+
+  const result = await runWithDb(layer, (db) =>
+    createWorkspaceForOrg(db, {
+      organizationId: auth.organizationId,
+      name: name.slice(0, 120),
+      notificationEmail: email.slice(0, 254),
+      legalAcceptance: acceptance,
+    }),
+  );
+  return sendJson(res, 200, result);
+};
+
+// POST /dashboard/workspaces/:id/rename — names are load-bearing (delete
+// confirmations match on them), so renames go through the same org-ownership
+// check as everything else. Foreign/unknown → 404, like the auth path.
+const handleDashboardWorkspaceRename = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!isWorkspaceIdShape(id)) {
+    return sendJson(res, 400, { error: "invalid_workspace_id" });
+  }
+  const body = parseJsonBody(req);
+  const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+  if (name.length < 2) return sendJson(res, 400, { error: "bad_name" });
+  const renamed = await runWithDb(layer, (db) =>
+    renameWorkspaceForOrg(db, {
+      organizationId: auth.organizationId,
+      workspaceId: id,
+      name: name.slice(0, 120),
+    }),
+  );
+  if (!renamed) return sendJson(res, 404, { error: "workspace_not_found" });
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/workspaces/:id/delete — wipe ONE workspace. The WorkOS
+// org and sibling workspaces survive (allowOrgDelete: false), and no
+// deletion email goes out. The LAST workspace is refused — deleting it is
+// account deletion, which has its own flow and confirmation.
+const handleDashboardWorkspaceDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = authenticateDashboardOrg(cfg, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  if (!isWorkspaceIdShape(id)) {
+    return sendJson(res, 400, { error: "invalid_workspace_id" });
+  }
+  const owned = await runWithDb(layer, (db) =>
+    findWorkspaceForOrg(db, auth.organizationId, id),
+  );
+  if (!owned) return sendJson(res, 404, { error: "workspace_not_found" });
+  const count = (
+    await runWithDb(layer, (db) =>
+      listWorkspacesByWorkosOrg(db, auth.organizationId),
+    )
+  ).length;
+  if (count <= 1) return sendJson(res, 409, { error: "last_workspace" });
+  const result = await deleteTenantAccount(cfg, layer, id, "tenant_self", {
+    allowOrgDelete: false,
+    sendEmail: false,
+  });
+  return sendJson(res, deleteResultStatus(result), result);
 };
 
 // GET /dashboard/shop-currency — best-effort store currency (ISO 4217) for
@@ -5057,6 +5276,11 @@ export const startServer = async (
     handleDashboardTenant,
   );
   dashboardGet(
+    "/dashboard/workspaces",
+    "The org's workspaces, default first",
+    handleDashboardWorkspaces,
+  );
+  dashboardGet(
     "/dashboard/settings",
     "Resolved tenant settings (refund policy + supplier sheet)",
     handleDashboardSettings,
@@ -5118,6 +5342,21 @@ export const startServer = async (
     "/dashboard/onboarding",
     "Create a tenant for the org",
     handleDashboardOnboarding,
+  );
+  dashboardPost(
+    "/dashboard/workspaces",
+    "Create an additional workspace under the org",
+    handleDashboardWorkspaceCreate,
+  );
+  dashboardPost(
+    "/dashboard/workspaces/:id/rename",
+    "Rename a workspace",
+    handleDashboardWorkspaceRename,
+  );
+  dashboardPost(
+    "/dashboard/workspaces/:id/delete",
+    "Delete one workspace (org + siblings survive)",
+    handleDashboardWorkspaceDelete,
   );
   dashboardPost(
     "/dashboard/legal-acceptance",

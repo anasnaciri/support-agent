@@ -56,6 +56,39 @@ export const REVOCABLE_GRANT_PROVIDERS: ReadonlyArray<
   EncryptedConnectorGrant["provider"]
 > = ["shopify", "gmail", "google_sheets", "outlook"];
 
+/**
+ * What the cleanup job is allowed to touch beyond revoking grants. The
+ * WorkOS org is shared by ALL of an org's workspaces (tenant rows), so it is
+ * deleted only when (a) the caller allows it (account-scoped delete, not a
+ * single-workspace delete) AND (b) this is the org's last remaining
+ * workspace — deleting one of two workspaces must never kill the sibling's
+ * login. The email is independently suppressible (intermediate workspaces
+ * of an account sweep stay silent; only the final one notifies).
+ */
+export const resolveCleanupTargets = (
+  snapshot: {
+    readonly workosOrganizationId: string | null;
+    readonly notificationEmail: string | null;
+  },
+  opts: {
+    readonly allowOrgDelete: boolean;
+    readonly sendEmail: boolean;
+    /** Tenant rows the org still owns, INCLUDING the one being deleted. */
+    readonly orgWorkspaceCount: number;
+  },
+): {
+  readonly workosOrganizationId: string | null;
+  readonly notificationEmail: string | null;
+} => ({
+  workosOrganizationId:
+    opts.allowOrgDelete &&
+    snapshot.workosOrganizationId !== null &&
+    opts.orgWorkspaceCount <= 1
+      ? snapshot.workosOrganizationId
+      : null,
+  notificationEmail: opts.sendEmail ? snapshot.notificationEmail : null,
+});
+
 /** A connector row, narrowed to the fields grant-capture needs. */
 export interface ConnectorGrantSource {
   readonly provider: string;

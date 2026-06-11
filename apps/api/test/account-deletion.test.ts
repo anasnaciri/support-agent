@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildConnectorGrants,
   makePgBossAccountCleanupPublisher,
+  resolveCleanupTargets,
   type ConnectorGrantSource,
 } from "../src/account-deletion.js";
 
@@ -115,5 +116,55 @@ describe("makePgBossAccountCleanupPublisher", () => {
     };
     const publish = makePgBossAccountCleanupPublisher(async () => boss);
     expect(await publish(data)).toBeNull();
+  });
+});
+
+describe("resolveCleanupTargets", () => {
+  const snapshot = {
+    workosOrganizationId: "org_1",
+    notificationEmail: "owner@example.com",
+  };
+
+  it("carries the org id only when org-delete is allowed AND this is the org's last workspace", () => {
+    expect(
+      resolveCleanupTargets(snapshot, {
+        allowOrgDelete: true,
+        sendEmail: true,
+        orgWorkspaceCount: 1,
+      }),
+    ).toEqual({
+      workosOrganizationId: "org_1",
+      notificationEmail: "owner@example.com",
+    });
+  });
+
+  it("suppresses the org delete while sibling workspaces remain", () => {
+    const t = resolveCleanupTargets(snapshot, {
+      allowOrgDelete: true,
+      sendEmail: true,
+      orgWorkspaceCount: 2,
+    });
+    expect(t.workosOrganizationId).toBeNull();
+    // The deletion email still goes out when requested.
+    expect(t.notificationEmail).toBe("owner@example.com");
+  });
+
+  it("suppresses the org delete for a workspace-scoped delete even when it is the last", () => {
+    const t = resolveCleanupTargets(snapshot, {
+      allowOrgDelete: false,
+      sendEmail: false,
+      orgWorkspaceCount: 1,
+    });
+    expect(t.workosOrganizationId).toBeNull();
+    expect(t.notificationEmail).toBeNull();
+  });
+
+  it("passes a null org/email through untouched (headless tenants)", () => {
+    expect(
+      resolveCleanupTargets(
+        { workosOrganizationId: null, notificationEmail: null },
+        { allowOrgDelete: true, sendEmail: true, orgWorkspaceCount: 1 },
+      ),
+    ).toEqual({ workosOrganizationId: null, notificationEmail: null });
   });
 });

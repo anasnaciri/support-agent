@@ -460,6 +460,34 @@ export interface OnboardingResult {
 }
 
 // ============================================================
+// Workspaces — GET/POST /dashboard/workspaces (+ :id/rename, :id/delete)
+// ============================================================
+//
+// One WorkOS org owns many workspaces (tenant rows); each has its own store,
+// mailboxes, LLM credential, cases, knowledge, and settings. Requests pin a
+// workspace via the `x-workspace-id` header; without it the api uses the
+// DEFAULT workspace (oldest row — `workspaces[0]`).
+
+export interface WorkspaceSummary {
+  readonly id: string;
+  readonly name: string;
+  /** ISO timestamp. */
+  readonly createdAt: string;
+  /** Connected Shopify shop, or null — the switcher's at-a-glance hint. */
+  readonly shopifyDomain: string | null;
+}
+
+export interface WorkspacesResponse {
+  /** Default first; empty → the org needs onboarding. */
+  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
+  readonly defaultWorkspaceId: string | null;
+}
+
+export interface CreateWorkspaceResult {
+  readonly workspaceId: string;
+}
+
+// ============================================================
 // Tenant settings — GET /dashboard/settings
 // ============================================================
 //
