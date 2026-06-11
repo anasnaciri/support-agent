@@ -34,9 +34,22 @@ const asPort = (v: unknown, fallback: number): number => {
 const asBool = (v: unknown, fallback: boolean): boolean =>
   typeof v === "boolean" ? v : fallback;
 
+// TLS is mandatory (S7): `secure: false` means *required* STARTTLS — the
+// transport layer (`makeImapSmtpOps`) aborts pre-auth when the server can't
+// upgrade. A body that explicitly asks to skip TLS entirely is refused here
+// so the dashboard form surfaces the misconfiguration instead of the fields
+// being silently ignored.
+const requestsCleartext = (body: Record<string, unknown>): boolean =>
+  body["requireTLS"] === false ||
+  body["doSTARTTLS"] === false ||
+  body["starttls"] === false ||
+  body["tls"] === false ||
+  body["ignoreTLS"] === true;
+
 export const parseImapConnectBody = (
   body: Record<string, unknown>,
 ): ImapConnectParse => {
+  if (requestsCleartext(body)) return { ok: false, error: "tls_required" };
   const mailbox = asString(body["mailbox"]) ?? asString(body["user"]);
   const password = asString(body["password"]);
   const imapHost = asString(body["imapHost"]);

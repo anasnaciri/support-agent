@@ -181,6 +181,43 @@ export const imapConfigFromConnection = (
 };
 
 // ============================================================
+// TLS policy (S7) — never authenticate over cleartext
+// ============================================================
+//
+// `secure: true` is implicit TLS. `secure: false` is MANDATORY STARTTLS: the
+// connection aborts before any credentials are sent when the server (or a
+// MITM stripping the capability) can't upgrade. Both transports are floored
+// at TLS 1.2 with certificate verification on.
+
+const TLS_FLOOR = { minVersion: "TLSv1.2", rejectUnauthorized: true } as const;
+
+/** imapflow options for a stored config. Exported for unit tests. */
+export const imapClientOptions = (config: ImapSmtpConfig) => ({
+  host: config.imapHost,
+  port: config.imapPort,
+  secure: config.imapSecure,
+  // doSTARTTLS=true makes the upgrade a requirement — imapflow fails the
+  // connect (pre-auth) when the server lacks STARTTLS. It is invalid
+  // combined with secure=true, hence the conditional spread.
+  ...(config.imapSecure ? {} : { doSTARTTLS: true }),
+  auth: { user: config.user, pass: config.password },
+  logger: false as const,
+  tls: TLS_FLOOR,
+});
+
+/** nodemailer transport options for a stored config. Exported for unit tests. */
+export const smtpTransportOptions = (config: ImapSmtpConfig) => ({
+  host: config.smtpHost,
+  port: config.smtpPort,
+  secure: config.smtpSecure,
+  // requireTLS makes STARTTLS mandatory on a non-implicit-TLS connection —
+  // verify/send fail instead of continuing in cleartext.
+  ...(config.smtpSecure ? {} : { requireTLS: true }),
+  auth: { user: config.user, pass: config.password },
+  tls: TLS_FLOOR,
+});
+
+// ============================================================
 // MIME parsing (mailparser)
 // ============================================================
 
@@ -246,28 +283,24 @@ const formatAddress = (p: MessageParticipant): string =>
  * replies live in the Sent folder and are not included in v1.
  */
 export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
-  const newImap = () =>
-    new ImapFlow({
-      host: config.imapHost,
-      port: config.imapPort,
-      secure: config.imapSecure,
-      auth: { user: config.user, pass: config.password },
-      logger: false,
-    });
+  const connectImap = async (): Promise<ImapFlow> => {
+    const client = new ImapFlow(imapClientOptions(config));
+    await client.connect();
+    // Belt-and-braces alongside doSTARTTLS: never operate on a session that
+    // somehow ended up cleartext, even if the strict option regresses.
+    if (!client.secureConnection) {
+      await client.logout().catch(() => undefined);
+      throw new Error("imap connection is not secure (TLS required)");
+    }
+    return client;
+  };
 
-  const newSmtp = () =>
-    nodemailer.createTransport({
-      host: config.smtpHost,
-      port: config.smtpPort,
-      secure: config.smtpSecure,
-      auth: { user: config.user, pass: config.password },
-    });
+  const newSmtp = () => nodemailer.createTransport(smtpTransportOptions(config));
 
   const fetchThread = async (
     rootId: string,
   ): Promise<ReadonlyArray<RawImapMessage>> => {
-    const client = newImap();
-    await client.connect();
+    const client = await connectImap();
     try {
       const lock = await client.getMailboxLock("INBOX");
       try {
@@ -302,8 +335,7 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
   const listSince = async (
     sinceUid: number,
   ): Promise<{ messages: ReadonlyArray<RawImapMessage>; latestUid: number }> => {
-    const client = newImap();
-    await client.connect();
+    const client = await connectImap();
     try {
       const lock = await client.getMailboxLock("INBOX");
       try {
@@ -330,8 +362,7 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
   };
 
   const latestUid = async (): Promise<number> => {
-    const client = newImap();
-    await client.connect();
+    const client = await connectImap();
     try {
       const mb = await client.mailboxOpen("INBOX");
       // `uidNext` is the UID the next message will get, so the highest current
@@ -365,8 +396,7 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
   };
 
   const verify = async (): Promise<void> => {
-    const client = newImap();
-    await client.connect();
+    const client = await connectImap();
     await client.logout();
     const transport = newSmtp();
     try {

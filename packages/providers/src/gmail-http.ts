@@ -28,7 +28,9 @@ export type GmailHttpFailure =
   | { readonly kind: "auth_failed"; readonly status: number }
   | { readonly kind: "rate_limited"; readonly retryAfterMs: number }
   | { readonly kind: "not_found"; readonly status: number }
-  | { readonly kind: "network"; readonly status: number; readonly body: string };
+  | { readonly kind: "network"; readonly status: number; readonly body: string }
+  /** An outbound header address failed validation (possible CRLF injection). */
+  | { readonly kind: "invalid_address"; readonly detail: string };
 
 export class GmailHttpError extends Error {
   readonly failure: GmailHttpFailure;
@@ -597,8 +599,32 @@ export interface OutboundMimeOptions {
   readonly references?: ReadonlyArray<string>;
 }
 
-const encodeHeaderAddress = (p: MessageParticipant): string =>
-  p.name ? `"${p.name.replace(/"/g, "")}" <${p.email}>` : p.email;
+// SECURITY (S8): `to[].email` / display names are LLM-influenced. Anything
+// interpolated into a raw MIME header must be incapable of smuggling a CRLF
+// (or any other control character) — otherwise a prompt-injected
+// "x@y.com\r\nBcc: …" adds headers. Emails are validated against a
+// reasonable addr-spec pattern (the WHATWG HTML5 email pattern — its
+// character classes exclude whitespace and control chars outright) and the
+// send fails with a typed error on violation; names are stripped.
+const EMAIL_PATTERN =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
+
+// ASCII control characters, including CR and LF (0x00–0x1F, 0x7F).
+// eslint-disable-next-line no-control-regex
+const ASCII_CONTROL = /[\u0000-\u001f\u007f]/g;
+
+const encodeHeaderAddress = (p: MessageParticipant): string => {
+  if (!EMAIL_PATTERN.test(p.email)) {
+    throw new GmailHttpError(
+      { kind: "invalid_address", detail: p.email.slice(0, 120) },
+      "gmail mime: invalid header address",
+    );
+  }
+  const name = p.name
+    ? p.name.replace(ASCII_CONTROL, "").replace(/"/g, "").trim()
+    : null;
+  return name ? `"${name}" <${p.email}>` : p.email;
+};
 
 /**
  * Build an RFC 5322-shaped message and base64url-encode it for the Gmail
