@@ -175,6 +175,9 @@ const buildThread = (
 ): ConversationThread => {
   const threadId = makeThreadId(conversationId);
   const messages = (raw.value ?? [])
+    // `/me/messages` spans Drafts and Sent Items. A reply draft can coexist
+    // with its sent copy and must never appear as another outbound message.
+    .filter((message) => message.isDraft !== true)
     .map((m) => normaliseMessage(m, threadId, mailbox))
     // Graph filter + orderby on different fields is restricted, so we sort
     // client-side oldest → newest.

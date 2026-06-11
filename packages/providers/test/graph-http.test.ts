@@ -95,6 +95,42 @@ describe("graphGetConversation", () => {
     expect(thread.messages[0]!.bodyHtml).toBe("<p>Hello <b>there</b></p>");
   });
 
+  it("excludes reply drafts from the customer conversation thread", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        value: [
+          {
+            id: "draft-1",
+            conversationId: "c",
+            isDraft: true,
+            from: { emailAddress: { address: mailbox } },
+            toRecipients: [{ emailAddress: { address: "jane@example.com" } }],
+            sentDateTime: "2026-06-01T01:00:00Z",
+            body: { contentType: "text", content: "draft copy" },
+          },
+          {
+            id: "sent-1",
+            conversationId: "c",
+            isDraft: false,
+            from: { emailAddress: { address: mailbox } },
+            toRecipients: [{ emailAddress: { address: "jane@example.com" } }],
+            sentDateTime: "2026-06-01T01:00:00Z",
+            body: { contentType: "text", content: "sent copy" },
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    const thread = await graphGetConversation({
+      token: "t",
+      conversationId: "c",
+      mailbox,
+      fetchImpl,
+    });
+
+    expect(thread.messages.map((message) => message.id)).toEqual(["sent-1"]);
+  });
+
   const cases: ReadonlyArray<{ status: number; kind: GraphHttpFailure["kind"] }> = [
     { status: 401, kind: "auth_failed" },
     { status: 403, kind: "auth_failed" },
