@@ -215,7 +215,16 @@ export const makePinnedFetch =
                   typeof Response
                 >[0]);
           try {
-            resolve(new Response(body, { status, headers: resHeaders }));
+            // The runtime object is Node's own web Response; the cast only
+            // bridges the duplicate-global gap between @types/node's
+            // undici-typed `Response` value and lib.dom's `Response` type
+            // (which has since grown `bytes()`).
+            resolve(
+              new Response(body, {
+                status,
+                headers: resHeaders,
+              }) as unknown as Response,
+            );
           } catch (cause) {
             res.resume();
             reject(cause);
