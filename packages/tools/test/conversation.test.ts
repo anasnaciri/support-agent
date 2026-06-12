@@ -446,4 +446,54 @@ describe("conversation.ask_customer tool", () => {
   it("default permission is `allow` — clarifying questions are routine", () => {
     expect(conversationAskCustomer.defaultPermission).toBe("allow");
   });
+
+  // ask_customer auto-executes (`allow`), so the S9 recipient constraint
+  // matters even more here than on reply: a prompt-injected clarifying
+  // question could otherwise exfiltrate to an arbitrary address with no
+  // human in the loop. Same `assertRecipientsInThread` guard as reply.
+  describe("recipient constraint (audit S9)", () => {
+    const askInput = (email: string) =>
+      ({
+        threadId: "thread-1",
+        to: [{ name: null, email }],
+        subject: null,
+        bodyText: "Can you confirm the order number?",
+        bodyHtml: null,
+        draftId: "ask-s9",
+      }) as never;
+
+    it("refuses a recipient that is not a participant of the thread", async () => {
+      const { layer, handle } = makeConversationServiceTest({
+        threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationAskCustomer.execute(
+            askInput("attacker@evil.example"),
+            baseCtx("c-ask-s9"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(handle.sent).toHaveLength(0);
+    });
+
+    it("allows a recipient who participates in the thread", async () => {
+      const { layer, handle } = makeConversationServiceTest({
+        threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationAskCustomer.execute(
+            askInput("customer@example.com"),
+            baseCtx("c-ask-s9b"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(handle.sent).toHaveLength(1);
+    });
+  });
 });
