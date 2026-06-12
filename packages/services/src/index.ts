@@ -28,6 +28,7 @@ export * from "./tracking-no-provider.js";
 export * from "./conversation-service.js";
 export * from "./conversation-thread-id.js";
 export * from "./platform-mail.js";
+export * from "./merchant-notification.js";
 export * from "./org-directory.js";
 export * from "./approval-link-config.js";
 export * from "./timer-service.js";
