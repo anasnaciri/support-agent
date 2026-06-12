@@ -338,6 +338,77 @@ describe("ShopifyServiceLive — getShopInfo", () => {
   });
 });
 
+describe("ShopifyServiceLive — getOnlineStorePages", () => {
+  it("queries pages and maps title, handle, body, isPublished", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              pages: {
+                nodes: [
+                  {
+                    title: "FAQ",
+                    handle: "faq",
+                    body: "<p>Answers.</p>",
+                    isPublished: true,
+                  },
+                  {
+                    title: "Drafty",
+                    handle: "drafty",
+                    body: "<p>WIP.</p>",
+                    isPublished: false,
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const pages = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOnlineStorePages(tenantId),
+        ),
+        layer,
+      ),
+    );
+    // The service reports pages as-is (including unpublished, flagged) —
+    // publication filtering is the importer's policy decision.
+    expect(pages).toEqual([
+      { title: "FAQ", handle: "faq", body: "<p>Answers.</p>", isPublished: true },
+      {
+        title: "Drafty",
+        handle: "drafty",
+        body: "<p>WIP.</p>",
+        isPublished: false,
+      },
+    ]);
+    expect(captures).toHaveLength(1);
+    const body = JSON.parse(captures[0]!.body) as { query: string };
+    expect(body.query).toContain("query OnlineStorePages");
+  });
+
+  it("returns an empty array when the store has no pages", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { pages: { nodes: [] } } }),
+      ]),
+    );
+    const pages = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOnlineStorePages(tenantId),
+        ),
+        layer,
+      ),
+    );
+    expect(pages).toEqual([]);
+  });
+});
+
 describe("ShopifyServiceLive — getShopPolicies", () => {
   it("queries shop policies and maps the response", async () => {
     reset();

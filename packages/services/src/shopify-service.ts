@@ -111,6 +111,20 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
     ) => Effect.Effect<ReadonlyArray<ShopPolicy>, ShopifyError>;
 
+    /**
+     * Read the store's Online Store pages (About, Contact, FAQ, blog
+     * landing pages, …) with their publication flag. Backs the
+     * post-connect knowledge import's page leg — the importer applies a
+     * conservative About/Contact/FAQ heuristic and publication filter on
+     * top; this method reports pages as-is. Returns an empty array when
+     * the store has none. Needs the `read_online_store_pages` scope, so
+     * connections installed before that scope was requested fail here
+     * with a Shopify auth error — callers treat it as best-effort.
+     */
+    readonly getOnlineStorePages: (
+      tenantId: TenantId,
+    ) => Effect.Effect<ReadonlyArray<ShopPage>, ShopifyError>;
+
     readonly searchByEmail: (
       tenantId: TenantId,
       email: string,
@@ -242,6 +256,20 @@ export interface ShopPolicy {
 }
 
 /**
+ * One Online Store page as authored in the Shopify admin. `body` is
+ * HTML; `handle` is the URL slug (the public page lives at
+ * `<primary domain>/pages/<handle>` when `isPublished` is true). Kept
+ * raw at this boundary — selection and publication filtering are the
+ * importer's policy decisions, not the service's.
+ */
+export interface ShopPage {
+  readonly title: string;
+  readonly handle: string;
+  readonly body: string;
+  readonly isPublished: boolean;
+}
+
+/**
  * Aggregated refund history for a single customer.
  *
  * `totalRefundedAmount` is `null` when the customer has no refunds —
@@ -330,6 +358,16 @@ export interface ShopifyTestFixtures {
     ReadonlyArray<ShopPolicy>,
     ShopifyError
   >;
+  /**
+   * Fixture for `getOnlineStorePages`. A thunk for the same reason as
+   * `shopPolicies` — the page import's silent boundary needs a failure
+   * path (a pre-scope-widening connection fails this call). When unset
+   * the default Test impl returns an empty list.
+   */
+  readonly onlineStorePages?: () => Effect.Effect<
+    ReadonlyArray<ShopPage>,
+    ShopifyError
+  >;
 }
 
 /**
@@ -373,6 +411,10 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           : Effect.fail(new ShopifyAuthMissing({ tenantId })),
       getShopPolicies: (_tenantId) =>
         fixtures.shopPolicies ? fixtures.shopPolicies() : Effect.succeed([]),
+      getOnlineStorePages: (_tenantId) =>
+        fixtures.onlineStorePages
+          ? fixtures.onlineStorePages()
+          : Effect.succeed([]),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
       findOrderByName: (_tenantId, name) => {

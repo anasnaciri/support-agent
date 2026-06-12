@@ -620,6 +620,17 @@ const SHOP_POLICIES_QUERY = `
   }
 `;
 
+// Online Store pages for the post-connect KB import. 50 covers any real
+// store's page count for our purposes — the importer only keeps the
+// About/Contact/FAQ handful anyway. Needs `read_online_store_pages`.
+const ONLINE_STORE_PAGES_QUERY = `
+  query OnlineStorePages($n: Int!) {
+    pages(first: $n) {
+      nodes { title handle body isPublished }
+    }
+  }
+`;
+
 const SEARCH_CUSTOMER_QUERY = `
   query SearchCustomer($q: String!) {
     customers(first: 1, query: $q) {
@@ -912,6 +923,29 @@ export const ShopifyServiceLive = Layer.effect(
                   url: p.url,
                 }),
               ),
+            ),
+          ),
+        ),
+
+      getOnlineStorePages: (tenantId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{
+            pages: {
+              nodes: ReadonlyArray<{
+                title: string;
+                handle: string;
+                body: string;
+                isPublished: boolean;
+              }>;
+            };
+          }>(http, creds, tenantId, ONLINE_STORE_PAGES_QUERY, { n: 50 }).pipe(
+            Effect.map((data) =>
+              data.pages.nodes.map((p) => ({
+                title: p.title,
+                handle: p.handle,
+                body: p.body,
+                isPublished: p.isPublished,
+              })),
             ),
           ),
         ),

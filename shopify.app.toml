@@ -61,7 +61,12 @@ embedded = false
 # tenant knowledge base with them. Not protected customer data. Without this
 # scope the import silently no-ops (best-effort), so the connect flow still
 # succeeds — but the policies won't be imported until the scope is granted.
-scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies"
+#
+# read_online_store_pages → the same import job's page leg: seeds the
+# knowledge base with the store's About / Contact / FAQ pages (conservative
+# name match only). Not protected customer data. Same best-effort behavior —
+# installs predating this scope skip the page leg until re-OAuth.
+scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies,read_online_store_pages"
 
 [auth]
 redirect_urls = [

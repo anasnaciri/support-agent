@@ -83,6 +83,11 @@ export interface ShopifyAppConfig {
  *                             knowledge base with the store's shipping +
  *                             refund policy text). Not tied to a tool — the
  *                             import is a best-effort worker job.
+ *      - `read_online_store_pages` → the same import job's page leg
+ *                             (About / Contact / FAQ → knowledge base).
+ *                             Best-effort: installs predating this scope
+ *                             skip the page leg until the merchant
+ *                             re-OAuths.
  *
  * Keep aligned with the Partner Dashboard config AND `shopify.app.toml`.
  * The `shopify-tool-scopes` test asserts every Shopify tool's
@@ -95,6 +100,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_products",
   "write_orders",
   "read_legal_policies",
+  "read_online_store_pages",
 ];
 
 export interface GoogleAppConfig {
