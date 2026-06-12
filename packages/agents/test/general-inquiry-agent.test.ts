@@ -33,6 +33,19 @@ describe("general-inquiry-agent config", () => {
     expect(generalInquiryAgent.promptTemplate.length).toBeGreaterThan(50);
   });
 
+  it("cross-checks shipping answers against BOTH the policy doc and store settings", () => {
+    const p = generalInquiryAgent.promptTemplate;
+    // Destination questions must pull store settings AND the shipping
+    // policy doc, then compare before answering.
+    expect(p).toContain("SHIPPING CONSISTENCY CHECK");
+    expect(p).toContain("shipsToCountries");
+    // On contradiction: ping the merchant with both sources + the open
+    // question, and never assert either contradictory fact to the customer.
+    expect(p).toContain("contradict");
+    expect(p).toMatch(/contradict[\s\S]*merchant\.notify/u);
+    expect(p).toMatch(/never (assert|state) either/iu);
+  });
+
   it("uses the knowledge.search tool so the system-prompt grounding header binds", () => {
     // buildSystemPrompt injects the `[Store knowledge base — …]` header
     // only when the agent's tools include `knowledge.search`. This agent
