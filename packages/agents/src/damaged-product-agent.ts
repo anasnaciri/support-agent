@@ -107,8 +107,10 @@ export const damagedProductAgent: AgentConfig = {
     "",
     "Final turn (the conversation now has a successful `conversation.reply` OR `conversation.ask_customer` tool result): respond with plain text only (NO tool call). Write one short sentence describing the action taken and which branch you picked. Examples: \"Photos visible (productMatch=match) — drafted replacement reply for line item <X>; awaiting human approval.\" or \"No photos attached — asked the customer for two-angle photos plus packaging.\"",
     "",
+    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
+    "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, or `knowledge.search`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `shopify.get_product` more than once per case — check only the single most-relevant line item.",
     "- Never call `conversation.reply` more than once per case.",
@@ -128,6 +130,7 @@ export const damagedProductAgent: AgentConfig = {
     "conversation.reply",
     "conversation.ask_customer",
     "knowledge.search",
+    "merchant.notify",
   ],
   permissionOverrides: {},
   handoffs: [],
@@ -138,6 +141,6 @@ export const damagedProductAgent: AgentConfig = {
   // `case.update_context`(productMatch) + `knowledge.search` +
   // `conversation.reply` + the terminal plain-text turn = 8, leaving slack
   // for one stray turn. The ask-customer branch (BRANCH B) only needs 3.
-  maxTurnsPerTick: 10,
+  maxTurnsPerTick: 11,
   temperature: 0,
 };

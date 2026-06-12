@@ -82,8 +82,10 @@ export const missingPackageAgent: AgentConfig = {
     "",
     "Turn 3 (the conversation has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the draft was prepared and which branch was picked. Example: \"Draft missing-package reply prepared (branch A: marked delivered); awaiting human approval.\"",
     "",
+    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
+    "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, `conversation.reply`, or `knowledge.search`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `supplier.read_sheet_columns` or `supplier.add_sheet_row` more than once per case. Only call them inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present. Always read columns before appending.",
@@ -105,6 +107,7 @@ export const missingPackageAgent: AgentConfig = {
     "supplier.add_sheet_row",
     "conversation.reply",
     "knowledge.search",
+    "merchant.notify",
   ],
   permissionOverrides: {
     // The reply is still operator-gated (ask); the supplier-sheet read +
@@ -122,6 +125,6 @@ export const missingPackageAgent: AgentConfig = {
   // knowledge.search) before the reply, so give the agent headroom:
   // get_order + read + append + knowledge + reply + final-text = 6 turns,
   // +slack.
-  maxTurnsPerTick: 10,
+  maxTurnsPerTick: 11,
   temperature: 0,
 };

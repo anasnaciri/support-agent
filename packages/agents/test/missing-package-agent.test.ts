@@ -22,7 +22,9 @@ describe("missing-package-agent config", () => {
       "supplier.add_sheet_row",
       "conversation.reply",
       "knowledge.search",
+      "merchant.notify",
     ]);
+    expect(missingPackageAgent.promptTemplate).toContain("merchant.notify");
     expect(missingPackageAgent.tools).not.toContain("refund.create");
     expect(missingPackageAgent.tools).not.toContain("agent.handoff");
     expect(missingPackageAgent.handoffs).toEqual([]);

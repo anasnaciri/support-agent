@@ -86,8 +86,10 @@ export const refundReviewAgent: AgentConfig = {
     "  • After `refund.create` success: \"Refund of <amount> issued for order <name>.\"",
     "  • After `conversation.reply` success: \"Draft refund-review reply prepared; awaiting human approval.\"",
     "",
+    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
+    "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, or `knowledge.search`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Make at most ONE RETURN CAPTURE `case.update_context` call yourself (ignore triage's earlier classification call already in the history) — and only when the message is a return.",
     "- Never call `refund.create` more than once per case.",
@@ -113,6 +115,7 @@ export const refundReviewAgent: AgentConfig = {
     "refund.create",
     "refund.recommend",
     "knowledge.search",
+    "merchant.notify",
   ],
   permissionOverrides: {},
   handoffs: [],
@@ -120,6 +123,6 @@ export const refundReviewAgent: AgentConfig = {
   // the RETURN CAPTURE case.update_context + refund.recommend), and the turn
   // budget is shared across the triage handoff (the counter doesn't reset), so
   // give the agent room to keep tail slack on the longest return path.
-  maxTurnsPerTick: 9,
+  maxTurnsPerTick: 10,
   temperature: 0,
 };

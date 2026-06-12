@@ -13,6 +13,8 @@ describe("refund-review-agent config", () => {
     expect(refundReviewAgent.tools).toContain("case.update_context");
     expect(refundReviewAgent.tools).toContain("refund.create");
     expect(refundReviewAgent.tools).toContain("conversation.reply");
+    expect(refundReviewAgent.tools).toContain("merchant.notify");
+    expect(refundReviewAgent.promptTemplate).toContain("merchant.notify");
     expect(refundReviewAgent.handoffs).toEqual([]);
   });
 

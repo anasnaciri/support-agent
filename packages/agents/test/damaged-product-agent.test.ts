@@ -24,7 +24,9 @@ describe("damaged-product-agent config", () => {
       "conversation.reply",
       "conversation.ask_customer",
       "knowledge.search",
+      "merchant.notify",
     ]);
+    expect(damagedProductAgent.promptTemplate).toContain("merchant.notify");
     expect(damagedProductAgent.tools).not.toContain("refund.create");
     expect(damagedProductAgent.tools).not.toContain("agent.handoff");
     expect(damagedProductAgent.handoffs).toEqual([]);

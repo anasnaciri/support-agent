@@ -51,8 +51,10 @@ export const orderStatusAgent: AgentConfig = {
     "",
     "Turn N (the conversation already has a `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the order-status reply was prepared.",
     "",
+    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
+    "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, or `knowledge.search`.",
+    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `tracking.lookup` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
@@ -65,12 +67,14 @@ export const orderStatusAgent: AgentConfig = {
     "case.update_context",
     "conversation.reply",
     "knowledge.search",
+    "merchant.notify",
   ],
   permissionOverrides: {},
   handoffs: [],
   // BRANCH path may emit up to 5 tool calls (shopify.get_order +
   // tracking.lookup + case.update_context + knowledge.search +
-  // conversation.reply) before the final plain-text turn. Give +1 to keep slack.
-  maxTurnsPerTick: 8,
+  // conversation.reply) before the final plain-text turn, plus an optional
+  // merchant.notify heads-up. Give +1 to keep slack.
+  maxTurnsPerTick: 9,
   temperature: 0,
 };

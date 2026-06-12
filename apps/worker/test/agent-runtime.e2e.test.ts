@@ -28,6 +28,7 @@ import {
   conversationAskCustomer,
   conversationReply,
   knowledgeSearch,
+  merchantNotify,
   shopifyRefundCreate,
   shopifyRefundRecommend,
   shopifyGetCustomer,
@@ -136,6 +137,7 @@ const tickEnv = Layer.mergeAll(
   ApprovalServiceTest,
   AgentRegistryWith([supportTriage, orderStatusAgent]),
   ToolRegistryWith([
+        merchantNotify as never,
     caseUpdateStatus as never,
     caseUpdateContext as never,
     agentHandoff as never,
@@ -381,6 +383,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -581,7 +584,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([askingAgent]),
-      ToolRegistryWith([conversationAskCustomer as never]),
+      ToolRegistryWith([
+        merchantNotify as never,conversationAskCustomer as never]),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -776,6 +780,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -935,6 +940,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1024,6 +1030,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1156,6 +1163,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1215,6 +1223,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1325,6 +1334,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1394,6 +1404,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1475,6 +1486,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1555,6 +1567,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1647,6 +1660,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1767,6 +1781,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -1934,6 +1949,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -2139,6 +2155,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -2321,6 +2338,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -2480,6 +2498,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, missingPackageAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -2715,6 +2734,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, missingPackageAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -2928,6 +2948,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, damagedProductAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3125,6 +3146,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, damagedProductAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3289,6 +3311,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3500,6 +3523,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3675,6 +3699,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3803,6 +3828,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ApprovalServiceTest,
       AgentRegistryWith([parkedAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -3913,6 +3939,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -4015,6 +4042,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -4078,6 +4106,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -4134,6 +4163,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -4293,6 +4323,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,
@@ -4427,6 +4458,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       ApprovalServiceTest,
       AgentRegistryWith([refundReviewAgent]),
       ToolRegistryWith([
+        merchantNotify as never,
         caseUpdateStatus as never,
         caseUpdateContext as never,
         agentHandoff as never,

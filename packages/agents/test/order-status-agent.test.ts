@@ -20,7 +20,9 @@ describe("order-status-agent config", () => {
       "case.update_context",
       "conversation.reply",
       "knowledge.search",
+      "merchant.notify",
     ]);
+    expect(orderStatusAgent.promptTemplate).toContain("merchant.notify");
     expect(orderStatusAgent.handoffs).toEqual([]);
     expect(orderStatusAgent.maxTurnsPerTick).toBeGreaterThan(1);
     expect(orderStatusAgent.promptTemplate.length).toBeGreaterThan(50);

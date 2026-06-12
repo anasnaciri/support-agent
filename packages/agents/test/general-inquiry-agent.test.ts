@@ -22,7 +22,9 @@ describe("general-inquiry-agent config", () => {
       "shopify.list_pickup_locations",
       "case.update_context",
       "conversation.reply",
+      "merchant.notify",
     ]);
+    expect(generalInquiryAgent.promptTemplate).toContain("merchant.notify");
     expect(generalInquiryAgent.handoffs).toEqual([]);
     // Shared with triage (the runtime doesn't reset the counter on
     // handoff): 2 triage turns + 4 grounding tools + the gated reply = 7
