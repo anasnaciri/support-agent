@@ -8,6 +8,7 @@ import {
   resolvePageSize,
   ROWS_COOKIE,
 } from "@/lib/pagination";
+import { auditActionLabel } from "@/lib/labels";
 import { actorVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,12 +28,12 @@ import {
 
 const ACTION_FILTERS = [
   { label: "Any action", value: "" },
-  { label: "Tool invocations", value: "tool.invoked" },
-  { label: "LLM decisions", value: "llm.decision" },
-  { label: "Events received", value: "event.received" },
-  { label: "Case resolved", value: "case.resolved" },
-  { label: "Escalated to human", value: "case.escalated_to_human" },
-  { label: "Compliance webhooks", value: "compliance." },
+  { label: "Actions taken", value: "tool.invoked" },
+  { label: "Agent decisions", value: "llm.decision" },
+  { label: "Messages received", value: "event.received" },
+  { label: "Cases resolved", value: "case.resolved" },
+  { label: "Escalated to you", value: "case.escalated_to_human" },
+  { label: "Data & privacy requests", value: "compliance." },
 ] as const;
 
 const ACTOR_FILTERS = [
@@ -107,7 +108,7 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Audit log</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Cross-case chronological view. Tenant-scoped, newest first.
+          Everything that happened across your cases, newest first.
         </p>
       </div>
 
@@ -187,9 +188,7 @@ export default async function AuditLogPage({ searchParams }: SearchParams) {
                     {r.occurredAt.slice(0, 19).replace("T", " ")}
                   </TableCell>
                   <TableCell>
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                      {r.action}
-                    </code>
+                    <span className="text-xs">{auditActionLabel(r.action)}</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">

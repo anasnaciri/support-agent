@@ -14,7 +14,7 @@ describe("riskFlagLabel", () => {
     );
   });
 
-  it("falls back to the raw flag for anything unknown", () => {
-    expect(riskFlagLabel("some_future_flag")).toBe("some_future_flag");
+  it("humanises unknown flags instead of leaking snake_case", () => {
+    expect(riskFlagLabel("some_future_flag")).toBe("Some future flag");
   });
 });

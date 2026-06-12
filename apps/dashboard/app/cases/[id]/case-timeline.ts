@@ -2,6 +2,8 @@ import type {
   CaseConversationThreadUnavailableReason,
 } from "@support-agent/dashboard-contracts";
 
+import { humanizeSlug } from "../../../lib/labels";
+
 export type CaseTimelineMode = "full" | "simplified" | "email";
 
 /**
@@ -85,8 +87,8 @@ const OUTBOUND_EMAIL_TOOLS = new Set([
 ]);
 
 /** Merchant-facing copy for escalation reason codes (mirrors the
- * runtime's Telegram copy); unknown codes are quoted verbatim — better
- * an ugly line than a hidden escalation. */
+ * runtime's Telegram copy); unknown codes are humanized — still shown
+ * (better than a hidden escalation), but never as a raw snake_case code. */
 const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
   max_turns_exceeded: "The agent hit its work limit before finishing.",
   approval_expired: "An approval request expired before anyone decided.",
@@ -169,7 +171,7 @@ export const curatedTimelineEvent = (
       id: `audit-${entry.id}`,
       title: "Needs you — the agent stopped here",
       description: reason
-        ? (ESCALATION_REASON_COPY[reason] ?? `Reason: ${reason}`)
+        ? (ESCALATION_REASON_COPY[reason] ?? `${humanizeSlug(reason)}.`)
         : null,
       occurredAt: entry.occurredAt,
     };

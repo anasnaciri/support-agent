@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 
 import { api, getDashboardContext } from "@/lib/api-client";
+import { approvalStatusLabel, toolActionLabel } from "@/lib/labels";
 import {
   approvalStatusVariant,
   riskVariant,
@@ -39,18 +40,23 @@ export default async function ApprovalDetailPage({ params }: Params) {
     <div className="space-y-6">
       <PageBreadcrumb
         items={[{ href: "/approvals", label: "Approvals" }]}
-        current={row.tool}
+        current={toolActionLabel(row.tool)}
       />
 
       <div>
         <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
           Approval
-          <code className="rounded bg-muted px-2 py-1 text-sm">{row.tool}</code>
+          <span className="text-muted-foreground" aria-hidden>
+            ·
+          </span>
+          {toolActionLabel(row.tool)}
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant={approvalStatusVariant(row.status)}>{row.status}</Badge>
+          <Badge variant={approvalStatusVariant(row.status)}>
+            {approvalStatusLabel(row.status)}
+          </Badge>
           <Badge variant={riskVariant(row.riskLevel)}>
-            risk: {row.riskLevel}
+            Risk: {row.riskLevel}
           </Badge>
           <span>·</span>
           <span>
@@ -125,11 +131,8 @@ export default async function ApprovalDetailPage({ params }: Params) {
                   Approve
                 </SubmitButton>
                 <p className="text-xs text-muted-foreground">
-                  Your edits land in{" "}
-                  <code className="rounded bg-muted px-1.5 py-0.5">
-                    approvedInput
-                  </code>
-                  ; the runtime resume sends exactly this text to the customer.
+                  What you approve here — including any edits you make above —
+                  is exactly what's sent to the customer.
                 </p>
               </form>
             ) : (
@@ -153,9 +156,9 @@ export default async function ApprovalDetailPage({ params }: Params) {
             </form>
 
             <p className="text-sm text-muted-foreground">
-              Approving sends the (possibly edited) reply to the customer
-              through the tenant's configured connector. Rejecting escalates
-              the case to human takeover; no customer reply goes out.
+              Approving sends the reply — with any edits you made — to the
+              customer from your connected mailbox. Rejecting sends nothing
+              and hands the case over to you.
             </p>
           </CardContent>
         </Card>

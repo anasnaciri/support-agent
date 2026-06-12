@@ -132,14 +132,14 @@ describe("curatedTimelineEvent", () => {
     expect(status.description ?? "").not.toContain("max_turns_exceeded");
   });
 
-  it("quotes unknown escalation reasons verbatim", () => {
+  it("humanises unknown escalation reasons instead of quoting the code", () => {
     const item = curatedTimelineEvent(
       entry("case.escalated_to_human", { reason: "weird_new_reason" }),
       null,
     );
-    expect((item as { description: string | null }).description).toContain(
-      "weird_new_reason",
-    );
+    const description = (item as { description: string | null }).description;
+    expect(description).toContain("Weird new reason");
+    expect(description).not.toContain("weird_new_reason");
   });
 
   it("shows takeover, hand-back, and resolution milestones", () => {

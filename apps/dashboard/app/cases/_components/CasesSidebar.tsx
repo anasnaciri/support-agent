@@ -8,6 +8,7 @@ import { Search } from "lucide-react";
 import type { CaseListRow, Page } from "@support-agent/dashboard-contracts";
 import { cn } from "@/lib/utils";
 import { buildSignInRedirect } from "@/lib/auth-redirect";
+import { caseStatusLabel } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -282,7 +283,7 @@ export function CasesSidebar() {
                           variant={caseStatusVariant(row.status)}
                           className="shrink-0 px-1.5 py-0 text-[10px]"
                         >
-                          {row.status}
+                          {caseStatusLabel(row.status)}
                         </Badge>
                         <span className="ml-auto shrink-0 tabular-nums text-xs text-muted-foreground">
                           {row.updatedAt.slice(5, 10)}

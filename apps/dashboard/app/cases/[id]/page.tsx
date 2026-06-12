@@ -8,6 +8,12 @@ import type {
 } from "@support-agent/dashboard-contracts";
 
 import { api, getDashboardContext } from "@/lib/api-client";
+import {
+  auditActionLabel,
+  caseStatusLabel,
+  humanizeSlug,
+  toolActionLabel,
+} from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -566,10 +572,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Badge variant={caseStatusVariant(caseRow.status)}>
-            {caseRow.status}
+            {caseStatusLabel(caseRow.status)}
           </Badge>
           <span>·</span>
-          <span>{caseRow.category ?? "uncategorized"}</span>
+          <span>{caseRow.category ? humanizeSlug(caseRow.category) : "Uncategorized"}</span>
           <span>·</span>
           <span>
             agent:{" "}
@@ -587,9 +593,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               <span
                 title={`${tokenRollup.input.toLocaleString()} input + ${tokenRollup.output.toLocaleString()} output`}
               >
-                tokens:{" "}
+                AI usage:{" "}
                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  {tokenRollup.total.toLocaleString()}
+                  {tokenRollup.total.toLocaleString()} tokens
                 </code>
               </span>
             </>
@@ -744,7 +750,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                               {approvalStatusLabel(item.approval)}
                             </div>
                             <Badge variant="outline">
-                              {item.approval.tool}
+                              {toolActionLabel(item.approval.tool)}
                             </Badge>
                           </div>
                           <div className="text-xs text-muted-foreground">
@@ -827,7 +833,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                         Refund recommendation
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {e.actorType}:{e.actorId} · {formatDateTime(e.occurredAt)}
+                        {e.actorType}
+                        {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
+                        {formatDateTime(e.occurredAt)}
                       </div>
                       <RefundRecommendationBlock
                         recommendation={refundRecommendationFromEntry(e)!}
@@ -835,9 +843,12 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                     </CardContent>
                   ) : (
                     <CardContent className="space-y-1.5 p-4">
-                      <div className="font-medium text-sm">{e.action}</div>
+                      <div className="font-medium text-sm">
+                        {auditActionLabel(e.action)}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        {e.actorType}:{e.actorId} ·{" "}
+                        {e.actorType}
+                        {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
                         {formatDateTime(e.occurredAt)}
                       </div>
                       {e.details ? (

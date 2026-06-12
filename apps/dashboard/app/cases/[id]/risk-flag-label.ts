@@ -1,8 +1,9 @@
+import { humanizeSlug } from "../../../lib/labels";
+
 /**
  * Map a raw `case.context.riskFlags` entry to operator-facing copy. The flags
  * are stamped by the runtime's fraud / prompt-injection guards; unknown flags
- * fall through to their raw string so a newly-added guard still renders
- * something rather than nothing.
+ * are humanized so a newly-added guard still renders words, not snake_case.
  */
 export const riskFlagLabel = (flag: string): string => {
   if (flag.startsWith("duplicate_photo_seen_in_case_")) {
@@ -11,5 +12,5 @@ export const riskFlagLabel = (flag: string): string => {
   if (flag === "refund_customer_mismatch") {
     return "Refund order belongs to a different customer";
   }
-  return flag;
+  return humanizeSlug(flag);
 };

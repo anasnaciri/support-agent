@@ -15,6 +15,7 @@ import {
   resolvePageSize,
   ROWS_COOKIE,
 } from "@/lib/pagination";
+import { approvalStatusLabel, toolActionLabel } from "@/lib/labels";
 import {
   approvalStatusVariant,
   riskVariant,
@@ -263,14 +264,14 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
                   <TableCell>
                     <Link
                       href={`/approvals/${r.id}`}
-                      className="font-mono text-xs text-primary hover:underline"
+                      className="text-sm font-medium text-primary hover:underline"
                     >
-                      {r.tool}
+                      {toolActionLabel(r.tool)}
                     </Link>
                   </TableCell>
                   <TableCell>
                     <Badge variant={approvalStatusVariant(r.status)}>
-                      {r.status}
+                      {approvalStatusLabel(r.status)}
                     </Badge>
                   </TableCell>
                   <TableCell>

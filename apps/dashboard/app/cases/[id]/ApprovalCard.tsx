@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ClipboardCheck, Lightbulb } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
+import { toolActionLabel } from "@/lib/labels";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -115,15 +116,15 @@ export const ApprovalCard = ({
               <span className="text-base font-semibold text-warning">
                 Awaiting approval
               </span>
-              <Badge variant="outline" className="font-mono text-xs">
-                {approval.tool}
+              <Badge variant="outline" className="text-xs">
+                {toolActionLabel(approval.tool)}
               </Badge>
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span>{approval.agentId}</span>
               <span>·</span>
               <Badge variant={riskVariant(approval.riskLevel)} className="px-1.5 py-0">
-                risk: {approval.riskLevel}
+                Risk: {approval.riskLevel}
               </Badge>
               <span>·</span>
               <span>{formatRelativeTime(approval.createdAt)}</span>

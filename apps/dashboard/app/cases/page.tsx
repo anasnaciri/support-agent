@@ -8,6 +8,7 @@ import {
   resolvePageSize,
   ROWS_COOKIE,
 } from "@/lib/pagination";
+import { caseStatusLabel, humanizeSlug } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -88,11 +89,11 @@ export default async function CasesPage({ searchParams }: SearchParams) {
                   </TableCell>
                   <TableCell>
                     <Badge variant={caseStatusVariant(r.status)}>
-                      {r.status}
+                      {caseStatusLabel(r.status)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {r.category ?? "—"}
+                    {r.category ? humanizeSlug(r.category) : "—"}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {r.currentAgentId}
