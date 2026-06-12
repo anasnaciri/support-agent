@@ -24,7 +24,8 @@ export type ConnectorProvider =
   | "imap"
   | "openrouter"
   | "anthropic"
-  | "openai";
+  | "openai"
+  | "telegram";
 
 export interface ConnectorConnection {
   readonly tenantId: TenantId;

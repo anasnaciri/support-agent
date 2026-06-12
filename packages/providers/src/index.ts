@@ -20,6 +20,7 @@ export * from "./sheets-service-live.js";
 export * from "./seventeentrack-http.js";
 export * from "./tracking-service-live.js";
 export * from "./platform-mail-live.js";
+export * from "./telegram-notification-live.js";
 export * from "./org-directory-live.js";
 export * from "./models-catalog.js";
 export * from "./blob-storage-live.js";
