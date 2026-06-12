@@ -577,8 +577,10 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
       warehouses, dropshippers, and fulfillment origins. If exact shipping rates or delivery promises are needed,
       treat that as a separate address/cart-aware capability; continue using `knowledge.search` for policy and
       timeframe claims. Scope impact: product enrichment stays on `read_products`; pickup locations require
-      `read_locations`. Also consider importing customer-facing About / Contact / FAQ pages into knowledge rather
-      than creating one-off tools for hours and general store copy.
+      `read_locations`; basic shop info and `shop.shipsToCountries` need no new scope. Optional later scopes:
+      `read_online_store_pages` for importing customer-facing About / Contact / FAQ pages, `read_inventory` only
+      if exposing exact stock quantities, and `read_markets` only for market-specific domains/config. Do not add
+      `read_shipping` for this slice.
 - [ ] Evidence upload (object storage), photo handling
 - [x] `TimerService` Tag + Live; `timer.expired` event — landed 2026-05-27. Abstract Tag/Test layer in `packages/services/src/timer-service.ts`; Drizzle schema + migration + `TimerServiceLive` in `packages/db`; worker `timer-sweep` cron fires due timer rows into `timer.expired` workflow events using the timer id as `eventId` and case singleton key. `conversation.ask_customer` can set `remindAfterHours`, schedules a `follow_up` timer, maps timer failures to `ToolOutputInvalid`, and the runtime parks the case in `waiting_for_customer` after the ask sends. Verified with focused tool tests, `pnpm build`, worker `build:deps`, and full `pnpm test` (441 passed / 58 skipped).
 - [ ] Replay/test mode for agents against historical cases
