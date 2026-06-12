@@ -618,26 +618,102 @@ describe("ShopifyServiceLive — getProduct", () => {
 });
 
 describe("ShopifyServiceLive — searchProducts", () => {
-  it("queries products(query:) and maps title, type, vendor, trimmed description", async () => {
+  // A full GraphQL node as the enriched SearchProducts query returns it.
+  // Overrides let each test vary one aspect without restating the rest.
+  const searchNode = (overrides: Record<string, unknown> = {}) => ({
+    id: "gid://shopify/Product/1",
+    title: "Ceramic Mug",
+    productType: "Drinkware",
+    vendor: "Acme",
+    description: "  Holds 12oz of coffee.  ",
+    status: "ACTIVE",
+    onlineStoreUrl: "https://test-shop.example.com/products/ceramic-mug",
+    priceRangeV2: {
+      minVariantPrice: { amount: "12.99", currencyCode: "EUR" },
+      maxVariantPrice: { amount: "15.99", currencyCode: "EUR" },
+    },
+    options: [{ name: "Size", values: ["Small", "Large"] }],
+    variants: {
+      nodes: [
+        { title: "Small", availableForSale: true, price: "12.99" },
+        { title: "Large", availableForSale: false, price: "15.99" },
+      ],
+    },
+    ...overrides,
+  });
+
+  it("queries products(query:) and maps the enriched search fields", async () => {
+    reset();
+    const SEARCH_PAYLOAD = {
+      data: { products: { nodes: [searchNode()] } },
+    };
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, SEARCH_PAYLOAD)]),
+    );
+    const products = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "mug", 5),
+        ),
+        layer,
+      ),
+    );
+    expect(products).toHaveLength(1);
+    const p = products[0]!;
+    expect(p.title).toBe("Ceramic Mug");
+    expect(p.description).toBe("Holds 12oz of coffee.");
+    // Price range carries the store's real currency — never a default.
+    expect(p.priceMin).toEqual({ amount: "12.99", currencyCode: "EUR" });
+    expect(p.priceMax).toEqual({ amount: "15.99", currencyCode: "EUR" });
+    // Any purchasable variant → product is available.
+    expect(p.availableForSale).toBe(true);
+    expect(p.onlineStoreUrl).toBe(
+      "https://test-shop.example.com/products/ceramic-mug",
+    );
+    expect(p.options).toEqual([{ name: "Size", values: ["Small", "Large"] }]);
+    // Variant prices inherit the price-range currency (Shopify's variant
+    // `price` is a bare decimal in the store currency).
+    expect(p.variants).toEqual([
+      {
+        title: "Small",
+        price: { amount: "12.99", currencyCode: "EUR" },
+        availableForSale: true,
+      },
+      {
+        title: "Large",
+        price: { amount: "15.99", currencyCode: "EUR" },
+        availableForSale: false,
+      },
+    ]);
+
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: { q: string; n: number };
+    };
+    expect(body.query).toContain("query SearchProducts");
+    expect(body.variables.q).toBe("mug");
+    expect(body.variables.n).toBe(5);
+  });
+
+  it("collapses the single default variant and placeholder option to empty arrays", async () => {
     reset();
     const SEARCH_PAYLOAD = {
       data: {
         products: {
           nodes: [
-            {
-              id: "gid://shopify/Product/1",
-              title: "Ceramic Mug",
-              productType: "Drinkware",
-              vendor: "Acme",
-              description: "  Holds 12oz of coffee.  ",
-            },
-            {
-              id: "gid://shopify/Product/2",
-              title: "Travel Mug",
-              productType: "Drinkware",
-              vendor: "Acme",
+            searchNode({
               description: null,
-            },
+              options: [{ name: "Title", values: ["Default Title"] }],
+              variants: {
+                nodes: [
+                  {
+                    title: "Default Title",
+                    availableForSale: false,
+                    price: "12.99",
+                  },
+                ],
+              },
+            }),
           ],
         },
       },
@@ -653,19 +729,45 @@ describe("ShopifyServiceLive — searchProducts", () => {
         layer,
       ),
     );
-    expect(products).toHaveLength(2);
-    expect(products[0]!.title).toBe("Ceramic Mug");
-    expect(products[0]!.description).toBe("Holds 12oz of coffee.");
+    const p = products[0]!;
     // A null description passes through as null (no invented copy).
-    expect(products[1]!.description).toBeNull();
+    expect(p.description).toBeNull();
+    // "Title: Default Title" is Shopify's placeholder for no-options
+    // products — pure noise to an agent, so it collapses away.
+    expect(p.options).toEqual([]);
+    expect(p.variants).toEqual([]);
+    // …but its availability still feeds the product-level flag.
+    expect(p.availableForSale).toBe(false);
+  });
 
-    const body = JSON.parse(captures[0]!.body) as {
-      query: string;
-      variables: { q: string; n: number };
+  it("filters out non-ACTIVE products so drafts and archived items never reach the agent", async () => {
+    reset();
+    const SEARCH_PAYLOAD = {
+      data: {
+        products: {
+          nodes: [
+            searchNode({ id: "gid://shopify/Product/10", status: "DRAFT" }),
+            searchNode({ id: "gid://shopify/Product/11", status: "ACTIVE" }),
+            searchNode({
+              id: "gid://shopify/Product/12",
+              status: "ARCHIVED",
+            }),
+          ],
+        },
+      },
     };
-    expect(body.query).toContain("query SearchProducts");
-    expect(body.variables.q).toBe("mug");
-    expect(body.variables.n).toBe(5);
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, SEARCH_PAYLOAD)]),
+    );
+    const products = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.searchProducts(tenantId, "mug", 5),
+        ),
+        layer,
+      ),
+    );
+    expect(products.map((p) => p.id)).toEqual(["gid://shopify/Product/11"]);
   });
 
   it("returns an empty array when there are no matches", async () => {
@@ -696,13 +798,13 @@ describe("ShopifyServiceLive — searchProducts", () => {
             data: {
               products: {
                 nodes: [
-                  {
+                  searchNode({
                     id: "gid://shopify/Product/3",
                     title: "Wordy",
                     productType: null,
                     vendor: null,
                     description: longDesc,
-                  },
+                  }),
                 ],
               },
             },

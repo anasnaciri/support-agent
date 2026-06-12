@@ -390,12 +390,36 @@ const mapProduct = (p: GqlProduct): ShopifyProduct => ({
   ),
 });
 
+type GqlMoneyV2 = {
+  readonly amount: string;
+  readonly currencyCode: string;
+};
+
 type GqlProductSearchNode = {
   readonly id: string;
   readonly title: string;
   readonly productType: string | null;
   readonly vendor: string | null;
   readonly description: string | null;
+  readonly status: string;
+  readonly onlineStoreUrl: string | null;
+  readonly priceRangeV2: {
+    readonly minVariantPrice: GqlMoneyV2;
+    readonly maxVariantPrice: GqlMoneyV2;
+  };
+  readonly options: ReadonlyArray<{
+    readonly name: string;
+    readonly values: ReadonlyArray<string>;
+  }>;
+  readonly variants: {
+    readonly nodes: ReadonlyArray<{
+      readonly title: string;
+      readonly availableForSale: boolean;
+      // Admin API variant `price` is a bare decimal string in the store
+      // currency — the currency code lives on the product's price range.
+      readonly price: string;
+    }>;
+  };
 };
 
 // Keep product descriptions from blowing up the token budget when an
@@ -414,15 +438,51 @@ const truncateDescription = (d: string | null): string | null => {
     : trimmed;
 };
 
+// Shopify models a no-options product as a single placeholder variant
+// ("Title: Default Title"). That's noise to an agent — the price range and
+// availability flag already say everything — so it collapses to empty
+// options/variants in the mapped result.
+const isDefaultPlaceholderVariants = (
+  p: GqlProductSearchNode,
+): boolean =>
+  p.variants.nodes.length === 1 &&
+  p.variants.nodes[0]!.title === "Default Title";
+
 const mapProductSearchNode = (
   p: GqlProductSearchNode,
-): ShopifyProductSearchResult => ({
-  id: p.id,
-  title: p.title,
-  productType: p.productType,
-  vendor: p.vendor,
-  description: truncateDescription(p.description),
-});
+): ShopifyProductSearchResult => {
+  // Variant `price` has no currency of its own; the store currency comes
+  // from the product's price range (never a hardcoded default).
+  const currencyCode = p.priceRangeV2.minVariantPrice.currencyCode;
+  const collapse = isDefaultPlaceholderVariants(p);
+  return {
+    id: p.id,
+    title: p.title,
+    productType: p.productType,
+    vendor: p.vendor,
+    description: truncateDescription(p.description),
+    priceMin: {
+      amount: p.priceRangeV2.minVariantPrice.amount,
+      currencyCode: p.priceRangeV2.minVariantPrice.currencyCode,
+    },
+    priceMax: {
+      amount: p.priceRangeV2.maxVariantPrice.amount,
+      currencyCode: p.priceRangeV2.maxVariantPrice.currencyCode,
+    },
+    availableForSale: p.variants.nodes.some((v) => v.availableForSale),
+    onlineStoreUrl: p.onlineStoreUrl,
+    options: collapse
+      ? []
+      : p.options.map((o) => ({ name: o.name, values: [...o.values] })),
+    variants: collapse
+      ? []
+      : p.variants.nodes.map((v) => ({
+          title: v.title,
+          price: { amount: v.price, currencyCode },
+          availableForSale: v.availableForSale,
+        })),
+  };
+};
 
 // ============================================================
 // Queries
@@ -496,10 +556,34 @@ const GET_PRODUCT_QUERY = `
   }
 `;
 
+// Pre-sale grounding fields beyond the basics: price range (MoneyV2, the
+// only place the store currency appears — variant `price` is a bare
+// decimal), customer-facing `availableForSale` per variant (a boolean,
+// never an inventory count — we deliberately don't request quantities),
+// `onlineStoreUrl` (null when not published to the Online Store channel),
+// and `status` so the mapper can drop DRAFT/ARCHIVED products a customer
+// could never see. Variants capped at 10: the options matrix already
+// conveys the full shape, and per-variant rows are token-expensive.
 const SEARCH_PRODUCTS_QUERY = `
   query SearchProducts($q: String!, $n: Int!) {
     products(first: $n, query: $q) {
-      nodes { id title productType vendor description }
+      nodes {
+        id
+        title
+        productType
+        vendor
+        description
+        status
+        onlineStoreUrl
+        priceRangeV2 {
+          minVariantPrice { amount currencyCode }
+          maxVariantPrice { amount currencyCode }
+        }
+        options { name values }
+        variants(first: 10) {
+          nodes { title availableForSale price }
+        }
+      }
     }
   }
 `;
@@ -765,7 +849,15 @@ export const ShopifyServiceLive = Layer.effect(
             // this is defence-in-depth against a bad caller.
             { q: query, n: Math.min(Math.max(limit, 1), 50) },
           ).pipe(
-            Effect.map((data) => data.products.nodes.map(mapProductSearchNode)),
+            Effect.map((data) =>
+              data.products.nodes
+                // Admin search sees DRAFT/ARCHIVED products; a customer
+                // never does. Filter post-fetch (may under-fill the page —
+                // fine for a "do you sell X?" answer) rather than splicing
+                // `status:active` into the merchant-facing query string.
+                .filter((p) => p.status === "ACTIVE")
+                .map(mapProductSearchNode),
+            ),
           ),
         ),
 

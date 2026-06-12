@@ -48,6 +48,17 @@ describe("general-inquiry-agent config", () => {
     }
   });
 
+  it("grounds pre-sale claims in the enriched search fields, never invented", () => {
+    const p = generalInquiryAgent.promptTemplate;
+    // Price must be stated with its real currency; availability is the
+    // boolean flag (never a stock count); links only via onlineStoreUrl.
+    expect(p).toContain("priceMin");
+    expect(p).toContain("currencyCode");
+    expect(p).toContain("availableForSale");
+    expect(p).toContain("onlineStoreUrl");
+    expect(p).toContain("NEVER quantities");
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([generalInquiryAgent]);
     const resolved = await Effect.runPromise(

@@ -472,9 +472,26 @@ describe("shopify.search_products tool", () => {
     productType: "Drinkware",
     vendor: "Acme",
     description,
+    priceMin: { amount: "12.99", currencyCode: "EUR" },
+    priceMax: { amount: "15.99", currencyCode: "EUR" },
+    availableForSale: true,
+    onlineStoreUrl: "https://shop.example.com/products/ceramic-mug",
+    options: [{ name: "Size", values: ["Small", "Large"] }],
+    variants: [
+      {
+        title: "Small",
+        price: { amount: "12.99", currencyCode: "EUR" },
+        availableForSale: true,
+      },
+      {
+        title: "Large",
+        price: { amount: "15.99", currencyCode: "EUR" },
+        availableForSale: false,
+      },
+    ],
   });
 
-  it("returns matching products on success", async () => {
+  it("returns matching products with pre-sale grounding fields on success", async () => {
     const env = ShopifyServiceTest({
       searchProducts: (q) =>
         q.includes("mug")
@@ -499,6 +516,24 @@ describe("shopify.search_products tool", () => {
     expect(products[0]!["title"]).toBe("Ceramic Mug");
     expect(products[0]!["description"]).toBe("Holds 12oz");
     expect(products[0]!["vendor"]).toBe("Acme");
+    // The enriched pre-sale fields pass through to the agent: price range
+    // (with the store's real currency), availability, URL, options, variants.
+    expect(products[0]!["priceMin"]).toEqual({
+      amount: "12.99",
+      currencyCode: "EUR",
+    });
+    expect(products[0]!["priceMax"]).toEqual({
+      amount: "15.99",
+      currencyCode: "EUR",
+    });
+    expect(products[0]!["availableForSale"]).toBe(true);
+    expect(products[0]!["onlineStoreUrl"]).toBe(
+      "https://shop.example.com/products/ceramic-mug",
+    );
+    expect(products[0]!["options"]).toEqual([
+      { name: "Size", values: ["Small", "Large"] },
+    ]);
+    expect(products[0]!["variants"]).toHaveLength(2);
   });
 
   it("returns an empty list when nothing matches (a miss is not an error)", async () => {

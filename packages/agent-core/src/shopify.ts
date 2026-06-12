@@ -115,13 +115,46 @@ export type ShopifyProduct = {
 };
 
 /**
+ * One product option axis as shown on the storefront, e.g.
+ * `{ name: "Size", values: ["S", "M", "L"] }`. The provider drops
+ * Shopify's placeholder option (`Title: Default Title`) for
+ * single-variant products, so an empty array means "no options".
+ */
+export type ShopifyProductOption = {
+  readonly name: string;
+  readonly values: ReadonlyArray<string>;
+};
+
+/**
+ * A variant as it appears in a search result. `availableForSale` is the
+ * customer-facing storefront boolean — never an inventory count (we
+ * deliberately don't read stock quantities). `price` carries the store
+ * currency taken from the product's price range; it is never defaulted.
+ */
+export type ShopifyProductVariantSummary = {
+  readonly title: string; // e.g. "Blue / M"
+  readonly price: ShopifyMoney;
+  readonly availableForSale: boolean;
+};
+
+/**
  * A product as it appears in a catalog *search* result. Lighter than
  * `ShopifyProduct`: no images (search answers "do you sell X?" and basic
  * attribute questions from text), and it carries a plain-text
  * `description` so an agent can ground its answer in the merchant's own
  * product copy rather than inventing specs. `description` is the
  * storefront body text, truncated by the provider to keep token cost
- * bounded; `null` when the product has no description. Used by
+ * bounded; `null` when the product has no description.
+ *
+ * The pre-sale grounding fields are all customer-facing by construction:
+ * `priceMin`/`priceMax` mirror the storefront price range (single price →
+ * min equals max); `availableForSale` is true when any variant is
+ * purchasable (a boolean, never a stock count); `onlineStoreUrl` is
+ * Shopify's canonical product URL and is `null` when the product isn't
+ * published to the Online Store channel — callers must not synthesise a
+ * URL from the handle in that case. `variants` is capped by the provider
+ * and collapsed to `[]` for single-variant products (the price range and
+ * availability flag already carry their information). Used by
  * `shopify.search_products`.
  */
 export type ShopifyProductSearchResult = {
@@ -130,6 +163,12 @@ export type ShopifyProductSearchResult = {
   readonly productType: string | null;
   readonly vendor: string | null;
   readonly description: string | null;
+  readonly priceMin: ShopifyMoney;
+  readonly priceMax: ShopifyMoney;
+  readonly availableForSale: boolean;
+  readonly onlineStoreUrl: string | null;
+  readonly options: ReadonlyArray<ShopifyProductOption>;
+  readonly variants: ReadonlyArray<ShopifyProductVariantSummary>;
 };
 
 export type ShopifyCustomer = {
