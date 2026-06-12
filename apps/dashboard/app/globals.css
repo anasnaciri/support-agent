@@ -218,8 +218,8 @@
     top: -16px;
     bottom: -16px;
     width: 60px;
-    background: var(--destructive);
-    opacity: 0.16;
+    /* No background — invisible on purpose. A transparent pseudo-element
+       still hit-tests inside its clip-path, which is all the bridge needs. */
     clip-path: polygon(
       var(--cone-x, 0%) var(--cone-y, 50%),
       100% 0,

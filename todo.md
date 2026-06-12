@@ -29,10 +29,11 @@ The single source of truth for **what's done**, **what's next**, and **what inva
   close-on-reversal still fires at any retreat speed but twitches never flip it (a pure LERP can never flip
   on an antiparallel reversal — caught in design review). Also: clip-path fallback apex `50% 50%` → `0% 50%`
   (widest wedge between open and first move), and the S13 sign-out POST guard test re-pointed at
-  `SignOutButton.tsx` where the form now lives. Adjacent papercut (not fixed): the 60px cone strip overlaps
-  the rail's right edge, so while the confirm is open the visible wedge tints over rail rows and can eat
-  hover/clicks on the right ~12px of the Settings row until a leftward retreat flips the cone away; shrink
-  `CONE_REACH` or drop the debug-ish `background`/`opacity` tint if it bothers in practice.
+  `SignOutButton.tsx` where the form now lives. The cone's red debug tint was then removed (same session) —
+  the pseudo-element is invisible, hit-test-only. Adjacent papercut (not fixed): the 60px cone strip
+  overlaps the rail's right edge, so while the confirm is open the wedge can eat hover/clicks on the right
+  ~12px of the Settings row until a leftward retreat flips the cone away; shrink `CONE_REACH` if it bothers
+  in practice.
 - **2026-06-11 — Workspaces (multi-store per account):** A WorkOS org now owns MANY tenant rows — each row is
   one **workspace** with its own Shopify store, mailboxes, LLM key, cases, knowledge, policies. Architecture:
   workspace = tenant row (no new scoping column anywhere; services/runtime/worker/webhook routing untouched).
