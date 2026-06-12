@@ -19,6 +19,7 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["/settings/usage", "/settings/usage"],
   ["/settings/integrations", "/settings/integrations"],
   ["/settings/integrations/shopify", "/settings/integrations"],
+  ["/settings/notifications", "/settings/notifications"],
   // Supplier escalation lives under the Google Sheets connector now — no
   // standalone nav entry — so its pages keep Integrations highlighted.
   ["/settings/integrations/google_sheets", "/settings/integrations"],

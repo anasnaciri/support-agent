@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Banknote,
   BarChart3,
+  Bell,
   Bot,
   FileText,
   KeyRound,
@@ -28,6 +29,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings/refund-policy": Banknote,
   "/settings/knowledge": Library,
   "/settings/usage": BarChart3,
+  "/settings/notifications": Bell,
   "/settings/integrations": Plug,
   "/settings/legal": FileText,
   "/settings/account": Trash2,

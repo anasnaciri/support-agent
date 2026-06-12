@@ -727,6 +727,17 @@ export const api = {
       on403: "return",
     }),
 
+  // Mint a signed Telegram linking deep link (t.me/<bot>?start=<token>)
+  // for the authenticated tenant. The merchant opens it and presses
+  // Start; the api's bot webhook binds their chat. 503 → bot not
+  // configured on this deployment.
+  connectTelegram: (ctx: CallCtx): Promise<CallResult> =>
+    call("/connections/telegram", {
+      method: "POST",
+      ctx,
+      on403: "return",
+    }),
+
   // Mint a signed install grant for the authenticated tenant and get the
   // provider OAuth install URL (5th-audit #2). The tenant is derived
   // server-side from the session, never client-supplied.

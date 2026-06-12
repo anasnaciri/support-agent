@@ -56,6 +56,11 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
     label: "Connections",
     items: [
       {
+        href: "/settings/notifications",
+        label: "Notifications",
+        match: prefix("/settings/notifications"),
+      },
+      {
         href: "/settings/integrations",
         label: "Integrations",
         // Covers every provider, including the Google Sheets connector that
