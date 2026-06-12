@@ -34,7 +34,7 @@ export const orderStatusAgent: AgentConfig = {
     "  If the `shopify.get_order` tool result has at least one fulfillment carrying a non-null `trackingNumbers[0]`, call `tracking.lookup` ONCE with:",
     "    - `trackingNumber`: the first fulfillment's first tracking number, unchanged.",
     "    - `carrier`: that fulfillment's `trackingCompany` (or null if absent).",
-    "  Then call `case.update_context` ONCE with `extra.liveTrackingStatus` set to the full `tracking.lookup` tool result (the discriminated union object). This stamps the carrier-side state onto the case context so a takeover operator sees it.",
+    "  Then call `case.update_context` ONCE with `liveTrackingStatus` set to the full `tracking.lookup` tool result (the discriminated union object). This stamps the carrier-side state onto the case context so a takeover operator sees it.",
     "  If the order has NO fulfillments OR the first fulfillment has no tracking number, SKIP both `tracking.lookup` and `case.update_context` and go straight to the `conversation.reply` step below.",
     "",
     "Turn 3 — customer reply: call `conversation.reply` ONCE. Use the `[Thread context: ...]` header in the original customer message to fill `threadId` and the `to[0].email` value. Other fields:",

@@ -3,9 +3,13 @@ import { defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
 import { CaseRepository } from "@support-agent/services";
 
 /**
- * Free-form context patch. The named fields below are hints to the LLM about
- * the keys the runtime knows how to consume; arbitrary extra keys are
- * preserved too. The patch is shallow-merged into the case's `context`.
+ * Context patch — a FIXED set of named fields, shallow-merged into the case's
+ * `context`. There is deliberately no free-form `extra` / open record: the
+ * context blob is re-injected into the model verbatim on `case.resumed`, so an
+ * open schema would let a prompt-injected tool call plant arbitrary keys that
+ * resurface as text the agent reads on its next turn. New derived facts get a
+ * named field here, not an escape hatch. The runtime decodes every call
+ * against this schema (audit L10), which drops any unknown keys.
  */
 const Input = Schema.Struct({
   classification: Schema.optional(Schema.String),
@@ -22,8 +26,49 @@ const Input = Schema.Struct({
   productMatch: Schema.optional(
     Schema.Literal("match", "mismatch", "uncertain"),
   ),
-  extra: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  /**
+   * Carrier-side shipment state — the `tracking.lookup` result, stamped by
+   * order-status-agent so a takeover operator sees live tracking on the case.
+   *
+   * A single named field with an EXPLICIT shape — deliberately not an open
+   * `Record`/`extra` map. That keeps two properties: an injection can only
+   * write this one key (never a runtime-reserved key like `customerEmail` /
+   * `riskFlags`), AND unknown sub-keys are dropped at decode, so the value
+   * re-injected on resume (inside the untrusted fence) is a known shape, not
+   * attacker-chosen text. It's a tolerant projection of the tracking union
+   * (cross-arm fields optional so one struct validates either `live` /
+   * `no_provider` arm) rather than a reuse of the tool's strict union, so a
+   * lossy model copy degrades a field instead of dropping the whole stamp.
+   */
+  liveTrackingStatus: Schema.optional(
+    Schema.Struct({
+      kind: Schema.Literal("live", "no_provider"),
+      status: Schema.optional(
+        Schema.Literal(
+          "in_transit",
+          "delivered",
+          "exception",
+          "pending",
+          "unknown",
+        ),
+      ),
+      carrier: Schema.optional(Schema.NullOr(Schema.String)),
+      trackingNumber: Schema.optional(Schema.String),
+      lastScan: Schema.optional(
+        Schema.NullOr(
+          Schema.Struct({
+            occurredAt: Schema.String,
+            location: Schema.NullOr(Schema.String),
+            description: Schema.String,
+          }),
+        ),
+      ),
+      estimatedDeliveryAt: Schema.optional(Schema.NullOr(Schema.String)),
+      trackingUrl: Schema.optional(Schema.String),
+      reason: Schema.optional(
+        Schema.Literal("no_api_key", "unsupported_carrier"),
+      ),
+    }),
   ),
 });
 
@@ -65,7 +110,8 @@ export const caseUpdateContext = defineTool({
       if (input.notes !== undefined) patch["notes"] = input.notes;
       if (input.productMatch !== undefined)
         patch["productMatch"] = input.productMatch;
-      if (input.extra !== undefined) Object.assign(patch, input.extra);
+      if (input.liveTrackingStatus !== undefined)
+        patch["liveTrackingStatus"] = input.liveTrackingStatus;
 
       // The dashboard's category chip and the cases-list search filter read
       // the `category` column, not the context blob — mirror the

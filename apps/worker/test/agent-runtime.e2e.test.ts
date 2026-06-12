@@ -745,11 +745,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         callId: "c4",
         tool: "case.update_context",
         input: {
-          extra: {
-            liveTrackingStatus: {
-              kind: "live",
-              status: "in_transit",
-            },
+          liveTrackingStatus: {
+            kind: "live",
+            status: "in_transit",
+            carrier: "UPS",
+            trackingNumber: "1Z777",
           },
         },
       },
@@ -835,7 +835,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const entries = yield* audit.forCase(created.id);
-          return { result, entries };
+          const fetched = yield* repo.getById(created.id);
+          return { result, entries, fetched };
         }),
         layer,
       ),
@@ -854,6 +855,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(tools).toContain("case.update_context");
     expect(tools).toContain("shopify.get_order");
     expect(tools).not.toContain("conversation.reply");
+
+    // The live tracking status actually landed on the case context (via the
+    // named `liveTrackingStatus` field — the operator-visible carrier state).
+    expect(out.fetched.context["liveTrackingStatus"]).toMatchObject({
+      kind: "live",
+      status: "in_transit",
+    });
   });
 
   // ----------------------------------------------------------------
