@@ -2232,6 +2232,159 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // Return request: refund-review-agent stamps the structured return
+  // intent (returnReason + requestedResolution) onto the case via the
+  // RETURN CAPTURE step, then drafts a reply (PATH B) — proving the
+  // producer wiring lands the closed-vocabulary fields the dashboard
+  // chips read. (A dedicated returns agent is deferred; see todo.md.)
+  // ----------------------------------------------------------------
+  it("refund-review stamps returnReason + requestedResolution for a return request", async () => {
+    const orderId = OrderId("gid://shopify/Order/88002");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#8002",
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/556"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "30.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Mug",
+          quantity: 1,
+          sku: "MUG-01",
+          variantTitle: null,
+          productId: null,
+        },
+      ],
+      fulfillments: [],
+      createdAt: new Date("2026-05-20T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-21T00:00:00.000Z"),
+    };
+
+    // Script: triage classifies + hands off → refund-review fetches the
+    // order → RETURN CAPTURE stamps returnReason/requestedResolution →
+    // refund.recommend → drafts a reply → reply parks for approval.
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: { classification: "refund_request", identifiedOrderId: orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: { targetAgent: "refund-review-agent", reason: "return" },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "case.update_context",
+        input: { returnReason: "defective", requestedResolution: "replacement" },
+      },
+      {
+        type: "tool_call",
+        callId: "c4",
+        tool: "refund.recommend",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c5",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-return-a",
+          to: [{ name: null, email: "buyer@example.com" }],
+          subject: null,
+          bodyText:
+            "Thanks for letting us know the mug arrived defective — we can send a replacement. Could you confirm your address?",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "return-reply-8002",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, refundReviewAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+        shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Return for #8002",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-return-a" as never,
+              messageId: "msg-8002",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Return for #8002",
+              bodyText: `The mug from order ${orderId} arrived defective — can I get a replacement?`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          return { result, fetched };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    // The structured return intent landed on the case context (closed
+    // vocabulary the dashboard chips read).
+    expect(out.fetched.context["returnReason"]).toBe("defective");
+    expect(out.fetched.context["requestedResolution"]).toBe("replacement");
+  });
+
+  // ----------------------------------------------------------------
   // Triage → missing-package-agent → shopify.get_order → draft a
   // conversation.reply matching the fulfillment state → pause for
   // approval. Same shape as the refund-review handoff test above, but

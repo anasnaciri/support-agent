@@ -27,6 +27,36 @@ const Input = Schema.Struct({
     Schema.Literal("match", "mismatch", "uncertain"),
   ),
   /**
+   * Why the customer wants to return/refund — captured by refund-review-agent
+   * when the message is a return. Narrow literal union (not free text) so the
+   * dashboard maps it to a chip, it re-orients the agent on resume as a stable
+   * fact, and an injection can't stuff arbitrary prose into the key.
+   */
+  returnReason: Schema.optional(
+    Schema.Literal(
+      "defective",
+      "wrong_item",
+      "no_longer_needed",
+      "arrived_late",
+      "other",
+    ),
+  ),
+  /**
+   * What the customer is asking for as the outcome. Same rationale as
+   * `returnReason` — a closed vocabulary, not free text. `refund` here is the
+   * customer's stated wish; the actual money movement still goes through
+   * `refund.create`'s permission gate.
+   */
+  requestedResolution: Schema.optional(
+    Schema.Literal(
+      "refund",
+      "replacement",
+      "exchange",
+      "store_credit",
+      "repair",
+    ),
+  ),
+  /**
    * Carrier-side shipment state — the `tracking.lookup` result, stamped by
    * order-status-agent so a takeover operator sees live tracking on the case.
    *
@@ -110,6 +140,10 @@ export const caseUpdateContext = defineTool({
       if (input.notes !== undefined) patch["notes"] = input.notes;
       if (input.productMatch !== undefined)
         patch["productMatch"] = input.productMatch;
+      if (input.returnReason !== undefined)
+        patch["returnReason"] = input.returnReason;
+      if (input.requestedResolution !== undefined)
+        patch["requestedResolution"] = input.requestedResolution;
       if (input.liveTrackingStatus !== undefined)
         patch["liveTrackingStatus"] = input.liveTrackingStatus;
 

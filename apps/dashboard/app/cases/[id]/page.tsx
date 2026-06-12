@@ -34,6 +34,10 @@ import {
   refundRecommendationFromEntry,
   type RefundRecommendationSummary,
 } from "./refund-recommendation";
+import {
+  parseReturnReason,
+  parseRequestedResolution,
+} from "./return-labels";
 
 interface Params {
   readonly params: Promise<{
@@ -509,6 +513,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         (f): f is string => typeof f === "string",
       )
     : [];
+  const returnReason = parseReturnReason(context["returnReason"]);
+  const requestedResolution = parseRequestedResolution(
+    context["requestedResolution"],
+  );
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
@@ -652,6 +660,8 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           productMatch={productMatch}
           photoSignals={photoSignals}
           riskFlags={riskFlags}
+          returnReason={returnReason}
+          requestedResolution={requestedResolution}
         />
       ))}
 

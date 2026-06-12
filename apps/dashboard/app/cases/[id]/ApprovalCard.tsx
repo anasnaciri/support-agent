@@ -20,6 +20,12 @@ import {
   type RefundRecommendationSummary,
 } from "./refund-recommendation";
 import { riskFlagLabel } from "./risk-flag-label";
+import {
+  returnReasonLabel,
+  requestedResolutionLabel,
+  type ReturnReason,
+  type RequestedResolution,
+} from "./return-labels";
 
 interface Props {
   readonly approval: ApprovalDetail;
@@ -57,6 +63,13 @@ interface Props {
    * as destructive chips so the operator sees them before approving.
    */
   readonly riskFlags?: ReadonlyArray<string>;
+  /**
+   * Structured return intent stamped by refund-review-agent when the message
+   * is a return (item back / non-refund resolution). Surfaced as chips so the
+   * operator sees the reason + requested outcome before approving the reply.
+   */
+  readonly returnReason?: ReturnReason | null;
+  readonly requestedResolution?: RequestedResolution | null;
 }
 
 const PRODUCT_MATCH_LABEL: Record<
@@ -80,6 +93,8 @@ export const ApprovalCard = ({
   productMatch,
   photoSignals,
   riskFlags,
+  returnReason,
+  requestedResolution,
 }: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -129,6 +144,24 @@ export const ApprovalCard = ({
             <Badge variant={productMatchVariant(productMatch)} className="text-xs">
               {PRODUCT_MATCH_LABEL[productMatch]}
             </Badge>
+          </div>
+        ) : null}
+
+        {returnReason || requestedResolution ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Return
+            </span>
+            {requestedResolution ? (
+              <Badge variant="outline" className="text-xs">
+                Wants: {requestedResolutionLabel(requestedResolution)}
+              </Badge>
+            ) : null}
+            {returnReason ? (
+              <Badge variant="outline" className="text-xs">
+                Reason: {returnReasonLabel(returnReason)}
+              </Badge>
+            ) : null}
           </div>
         ) : null}
 

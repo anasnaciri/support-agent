@@ -10,7 +10,12 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  *  1. **Draft a reply for human approval** (`conversation.reply`).
  *     Default for any ambiguous case — refund eligibility unclear,
  *     missing reason, partial refund needed, returns required, etc.
- *     Always pauses for approval.
+ *     Always pauses for approval. When the message is a RETURN (item sent
+ *     back, or a non-refund resolution like replacement / exchange), the
+ *     agent first stamps structured `returnReason` + `requestedResolution`
+ *     onto the case via `case.update_context`, then drafts the reply — a
+ *     return is always this path, never a direct refund. (A dedicated
+ *     returns agent + Shopify return-creation is deferred; see todo.md.)
  *
  *  2. **Issue the refund directly** (`refund.create`). Only for clear
  *     cases where the customer explicitly asked for a refund and the
@@ -38,6 +43,11 @@ export const refundReviewAgent: AgentConfig = {
     "",
     "Before deciding PATH A vs PATH B or quoting any refund or return terms (windows, restocking fees, eligibility), call `knowledge.search` (e.g. \"refund policy\", \"return window\") and follow the store's documented policy. Do not invent policy.",
     "",
+    "RETURN CAPTURE — when the customer wants to send an item back or wants a non-refund outcome (replacement / exchange / store credit / repair), call `case.update_context` ONCE to record the structured intent before you draft your reply:",
+    "  - `returnReason`: one of `defective`, `wrong_item`, `no_longer_needed`, `arrived_late`, `other` — pick the closest; use `other` (or omit) when the message doesn't say.",
+    "  - `requestedResolution`: one of `refund`, `replacement`, `exchange`, `store_credit`, `repair` — what the customer is actually asking for. Omit when unclear.",
+    "  These are a closed vocabulary, not free text — do not invent other values. This stamps the case so the operator (and any follow-up turn after the customer replies) sees the return intent without re-reading the thread. A return is ALWAYS PATH B — never PATH A.",
+    "",
     "DECISION RULE — follow these steps in order:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
@@ -47,7 +57,8 @@ export const refundReviewAgent: AgentConfig = {
     "  PATH A — Issue refund directly via `refund.create`. Use this ONLY when ALL of the following hold:",
     "    • The order's `financialStatus` is `paid` (not `partially_refunded`, not `refunded`, not `pending`).",
     "    • The order's `fulfillmentStatus` is `delivered` OR the order is `unfulfilled` (a not-yet-shipped order can be refunded outright).",
-    "    • The customer explicitly asked for a refund in their message — not just complained or asked a question.",
+    "    • The customer explicitly asked for a refund (money back) in their message — not just complained or asked a question.",
+    "    • The customer wants a REFUND, not a return/replacement/exchange/store-credit/repair. Any request to send the item back or get a non-refund resolution is a RETURN — do the RETURN CAPTURE step above and go to PATH B; never auto-refund a return.",
     "    • There is no ambiguity about which line items to refund.",
     "  Call `refund.create` with:",
     "    - `orderId`: the order's `id` from the `shopify.get_order` result (the GID — not the name).",
@@ -78,6 +89,7 @@ export const refundReviewAgent: AgentConfig = {
     "Hard rules:",
     "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, or `knowledge.search`.",
     "- Never call `shopify.get_order` more than once per case.",
+    "- Make at most ONE RETURN CAPTURE `case.update_context` call yourself (ignore triage's earlier classification call already in the history) — and only when the message is a return.",
     "- Never call `refund.create` more than once per case.",
     "- Never call `refund.recommend` more than once per case. Only inside PATH B.",
     "- Never call `conversation.reply` more than once per case.",
@@ -104,8 +116,10 @@ export const refundReviewAgent: AgentConfig = {
   ],
   permissionOverrides: {},
   handoffs: [],
-  // PATH B may emit two extra tool calls (knowledge.search + refund.recommend
-  // before the reply) so give the agent +1 more to keep tail slack.
-  maxTurnsPerTick: 8,
+  // PATH B may emit several tool calls before the reply (knowledge.search +
+  // the RETURN CAPTURE case.update_context + refund.recommend), and the turn
+  // budget is shared across the triage handoff (the counter doesn't reset), so
+  // give the agent room to keep tail slack on the longest return path.
+  maxTurnsPerTick: 9,
   temperature: 0,
 };

@@ -155,6 +155,44 @@ describe("case.update_context tool", () => {
     expect(result.context["liveTrackingStatus"]).toEqual(live);
   });
 
+  it("stamps the narrow returnReason + requestedResolution fields into context", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* RepoTag;
+          const created = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("refund-review-agent"),
+          });
+          yield* caseUpdateContext.execute(
+            { returnReason: "defective", requestedResolution: "replacement" },
+            baseCtx(created.id),
+          );
+          return yield* repo.getById(created.id);
+        }),
+        toolEnv,
+      ),
+    );
+    expect(result.context["returnReason"]).toBe("defective");
+    expect(result.context["requestedResolution"]).toBe("replacement");
+  });
+
+  it("rejects an out-of-vocabulary returnReason / requestedResolution at decode", () => {
+    // Narrow literal unions — not free strings — so the dashboard can map them
+    // to chips and an injection can't stuff arbitrary prose into these keys.
+    expect(() =>
+      Schema.decodeUnknownSync(caseUpdateContext.inputSchema)({
+        returnReason: "ignore_all_instructions",
+      } as never),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(caseUpdateContext.inputSchema)({
+        requestedResolution: "send_me_money",
+      } as never),
+    ).toThrow();
+  });
+
   it("strips unknown sub-keys inside liveTrackingStatus at decode time", () => {
     // The field is explicitly shaped, not an open map — so a poisoned
     // sub-key the model is tricked into adding never reaches the context
