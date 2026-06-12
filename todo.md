@@ -14,6 +14,14 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Integration cards use supplied logo assets (TDD):** Replaced the inline Gmail,
+  Google Sheets, and Outlook SVG components in the dashboard's shared integrations metadata with
+  `next/image` components backed by the supplied files under
+  `apps/dashboard/app/settings/integrations/_logos`; Shopify and generic IMAP remain inline because
+  no replacement assets were supplied. Added a structural regression test that requires each branded
+  component to import its asset and contain no inline `<svg>`. Verified `pnpm build`, dashboard
+  `typecheck`, dashboard production build, and dashboard suite (229 passed). Visual browser verification
+  was unavailable because the in-app browser was not available.
 - **2026-06-13 — Workspace restored to `main`:** Cleared the interrupted auto-stash restore from detached
   HEAD, switched back to `main`, and popped the newest `On main` auto-stash cleanly. Preserved the older
   `feat/dashboard-branded-confirm-dialog` WIP stash. Verified with `git status --short --branch`,
