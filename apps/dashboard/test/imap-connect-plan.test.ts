@@ -1,0 +1,162 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  planImapConnect,
+  type ImapDiscoveryResponse,
+  type ImapFormValues,
+} from "../app/connect/imap/connect-plan";
+
+// The connect form only shows email + app password by default; server
+// settings come from the api's autodiscovery unless the merchant filled the
+// Advanced section. This plans the action's next move from form values +
+// a discovery callback (only invoked when discovery is actually needed).
+
+const values = (over: Partial<ImapFormValues> = {}): ImapFormValues => ({
+  mailbox: "support@mystore.com",
+  password: "app-pass",
+  user: "",
+  imapHost: "",
+  imapPort: "",
+  imapSecure: "",
+  smtpHost: "",
+  smtpPort: "",
+  smtpSecure: "",
+  ...over,
+});
+
+const settingsDiscovery: ImapDiscoveryResponse = {
+  kind: "settings",
+  source: "ispdb",
+  providerName: "Zoho Mail",
+  appPasswordUrl: "https://accounts.zoho.com/home#security",
+  settings: {
+    imapHost: "imap.zoho.com",
+    imapPort: 993,
+    imapSecure: true,
+    smtpHost: "smtp.zoho.com",
+    smtpPort: 465,
+    smtpSecure: true,
+    username: null,
+  },
+};
+
+const never = vi.fn(async (): Promise<ImapDiscoveryResponse | null> => {
+  throw new Error("discover must not be called");
+});
+
+describe("planImapConnect", () => {
+  it("requires mailbox and password before anything else", async () => {
+    expect(await planImapConnect(values({ mailbox: "" }), never)).toEqual({
+      action: "error",
+      error: "missing_fields",
+    });
+    expect(await planImapConnect(values({ password: " " }), never)).toEqual({
+      action: "error",
+      error: "missing_fields",
+    });
+    expect(never).not.toHaveBeenCalled();
+  });
+
+  it("uses manual settings verbatim without calling discovery", async () => {
+    const plan = await planImapConnect(
+      values({
+        imapHost: "imap.example.com",
+        imapPort: "143",
+        imapSecure: "false",
+        smtpHost: "smtp.example.com",
+        smtpPort: "587",
+        smtpSecure: "false",
+        user: "login@example.com",
+      }),
+      never,
+    );
+    expect(plan).toEqual({
+      action: "connect",
+      discovered: null,
+      input: {
+        mailbox: "support@mystore.com",
+        password: "app-pass",
+        imapHost: "imap.example.com",
+        imapPort: 143,
+        imapSecure: false,
+        smtpHost: "smtp.example.com",
+        smtpPort: 587,
+        smtpSecure: false,
+        user: "login@example.com",
+      },
+    });
+    expect(never).not.toHaveBeenCalled();
+  });
+
+  it("defaults manual ports/security like the old form did", async () => {
+    const plan = await planImapConnect(
+      values({ imapHost: "imap.example.com", smtpHost: "smtp.example.com" }),
+      never,
+    );
+    expect(plan.action).toBe("connect");
+    if (plan.action !== "connect") return;
+    expect(plan.input).toMatchObject({
+      imapPort: 993,
+      imapSecure: true,
+      smtpPort: 465,
+      smtpSecure: true,
+    });
+    expect(plan.input).not.toHaveProperty("user");
+  });
+
+  it("flags a half-filled Advanced section instead of discovering", async () => {
+    expect(
+      await planImapConnect(values({ imapHost: "imap.example.com" }), never),
+    ).toEqual({ action: "error", error: "missing_hosts" });
+    expect(
+      await planImapConnect(values({ smtpHost: "smtp.example.com" }), never),
+    ).toEqual({ action: "error", error: "missing_hosts" });
+  });
+
+  it("routes gmail-style addresses to the OAuth connector", async () => {
+    const plan = await planImapConnect(values(), async () => ({
+      kind: "oauth",
+      provider: "google",
+    }));
+    expect(plan).toEqual({ action: "oauth", provider: "google" });
+  });
+
+  it("connects with discovered settings and carries the prefill for failures", async () => {
+    const discover = vi.fn(async () => settingsDiscovery);
+    const plan = await planImapConnect(values(), discover);
+    expect(discover).toHaveBeenCalledWith("support@mystore.com");
+    expect(plan).toEqual({
+      action: "connect",
+      discovered: settingsDiscovery,
+      input: {
+        mailbox: "support@mystore.com",
+        password: "app-pass",
+        imapHost: "imap.zoho.com",
+        imapPort: 993,
+        imapSecure: true,
+        smtpHost: "smtp.zoho.com",
+        smtpPort: 465,
+        smtpSecure: true,
+      },
+    });
+  });
+
+  it("passes a discovered non-default username through as the login user", async () => {
+    const plan = await planImapConnect(values(), async () => ({
+      ...settingsDiscovery,
+      settings: { ...settingsDiscovery.settings, username: "support" },
+    }));
+    expect(plan.action).toBe("connect");
+    if (plan.action !== "connect") return;
+    expect(plan.input.user).toBe("support");
+  });
+
+  it("asks for manual settings when discovery comes up empty or fails", async () => {
+    expect(
+      await planImapConnect(values(), async () => ({ kind: "unknown" })),
+    ).toEqual({ action: "needs_settings" });
+    expect(await planImapConnect(values(), async () => null)).toEqual({
+      action: "needs_settings",
+    });
+  });
+});

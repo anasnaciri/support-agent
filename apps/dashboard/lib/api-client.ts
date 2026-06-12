@@ -727,6 +727,16 @@ export const api = {
       on403: "return",
     }),
 
+  // Autodiscover a mailbox's IMAP/SMTP server settings from just the
+  // address (api-side: ISPDB + MX heuristics + DNS-checked guesses), so the
+  // connect form can hide host/port fields from non-technical merchants.
+  // Read-only — nothing is persisted.
+  discoverImap: (
+    ctx: CallCtx,
+    input: { readonly email: string },
+  ): Promise<CallResult> =>
+    call("/connections/imap/discover", { method: "POST", body: input, ctx }),
+
   // Mint a signed Telegram linking deep link (t.me/<bot>?start=<token>)
   // for the authenticated tenant. The merchant opens it and presses
   // Start; the api's bot webhook binds their chat. 503 → bot not

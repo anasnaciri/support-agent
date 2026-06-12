@@ -28,10 +28,10 @@ export default async function ConnectImapPage() {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           For any provider without a dedicated connector — PrivateEmail, Zoho,
-          Fastmail, cPanel, or a custom domain. Use an{" "}
-          <strong>app password</strong> if your provider offers one. We verify
-          the login against both servers before saving; the password is stored
-          encrypted.
+          Fastmail, cPanel, or a custom domain. Enter the address and an{" "}
+          <strong>app password</strong>; we detect the server settings
+          automatically and verify the login before saving. The password is
+          stored encrypted.
         </p>
       </div>
 
