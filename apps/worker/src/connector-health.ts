@@ -15,11 +15,13 @@
 // Everything is best-effort: health bookkeeping must never break the
 // renewal loop it observes.
 
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { TenantId } from "@support-agent/agent-core";
 import {
   ConnectorCredentialStore,
+  MerchantNotificationService,
   PlatformMailService,
+  connectorBrokenNotification,
 } from "@support-agent/services";
 
 export type ConnectorHealthState = "ok" | "broken";
@@ -125,6 +127,23 @@ export const reportConnectorHealth = (
             ),
           ),
         );
+      // Same one-time alert on the merchant's push channel (Telegram, …).
+      // Optional service + best-effort, mirroring the email above.
+      const maybeNotifications = yield* Effect.serviceOption(
+        MerchantNotificationService,
+      );
+      if (Option.isSome(maybeNotifications)) {
+        yield* maybeNotifications.value
+          .notify(
+            TenantId(input.tenantId),
+            connectorBrokenNotification({
+              provider: input.provider,
+              mailbox: input.mailbox,
+              reason: input.reason ?? "connector failure",
+            }),
+          )
+          .pipe(Effect.ignore);
+      }
       // eslint-disable-next-line no-console
       console.warn(
         `[connector-health] ${input.provider}/${input.mailbox} (tenant=${input.tenantId}) marked BROKEN: ${input.reason ?? "unknown"}`,

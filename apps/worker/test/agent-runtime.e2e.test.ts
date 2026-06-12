@@ -66,6 +66,7 @@ import {
   TimerService,
   TransactionRunnerPassthrough,
   makeConversationServiceTest,
+  makeMerchantNotificationServiceTest,
   makePlatformMailServiceTest,
   type ConnectorConnection,
 } from "@support-agent/services";
@@ -4524,5 +4525,177 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     expect(out.fetched.context["riskFlags"]).toContain(
       "refund_customer_mismatch",
     );
+  });
+});
+
+// ----------------------------------------------------------------
+// Merchant notifications (Telegram, …) — best-effort pings emitted by
+// the runtime at the business moments a merchant cares about. The
+// service is OPTIONAL (Effect.serviceOption): every other test in this
+// file omits it and must keep passing.
+// ----------------------------------------------------------------
+describe("AgentRuntime — merchant notifications", () => {
+  const notifEnv = (
+    script: ReadonlyArray<LLMDecision>,
+    notifLayer: Layer.Layer<never, never, never>,
+  ) => {
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith([
+        merchantNotify as never,
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+      notifLayer as never,
+    );
+    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  };
+
+  const replyCall: LLMDecision = {
+    type: "tool_call",
+    callId: "n1",
+    tool: "conversation.reply",
+    input: {
+      threadId: "thread-x",
+      to: [{ name: null, email: "cust@example.com" }],
+      subject: null,
+      bodyText: "Your order is on its way.",
+      bodyHtml: null,
+      inReplyToMessageId: null,
+      draftId: "order-status-reply-notif-1",
+    },
+  };
+
+  const customerReplied = (caseId: string): DomainEvent => ({
+    type: "customer.replied",
+    caseId: caseId as never,
+    payload: {
+      threadId: "thread-x" as never,
+      messageId: "msg-n1",
+      from: { name: null, email: "cust@example.com" },
+      to: [],
+      subject: "Re: Where is my order?",
+      bodyText: "Any update?",
+      bodyHtml: null,
+      receivedAt: new Date(),
+      attachments: [],
+    },
+  });
+
+  it("pings the merchant with approve/reject links when a tool pauses for approval", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: orderStatusAgent.id,
+            subject: "Where is my order?",
+          });
+          const result = yield* runtime.handleEvent(customerReplied(created.id));
+          return { result, caseId: created.id };
+        }),
+        notifEnv([replyCall], notifLayer as never),
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!;
+    expect(sent.notification.kind).toBe("approval_requested");
+    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.body).toContain("/approve?token=");
+    expect(sent.notification.body).toContain("/reject?token=");
+    expect(sent.notification.body).toContain("conversation.reply");
+  });
+
+  it("pings the merchant when the runtime escalates to human_takeover", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const loopScript: ReadonlyArray<LLMDecision> = Array.from(
+      { length: 10 },
+      (_, i) => ({
+        type: "tool_call",
+        callId: `t${i}`,
+        tool: "case.update_context",
+        input: { notes: `loop ${i}` },
+      }),
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          return yield* runtime.handleEvent(ticketCreated("loop forever"));
+        }),
+        notifEnv(loopScript, notifLayer as never),
+      ),
+    );
+
+    expect(result.type).toBe("HumanTakeoverRequired");
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!;
+    expect(sent.notification.kind).toBe("human_takeover");
+    // Merchant-facing copy, not the internal code.
+    expect(sent.notification.body).not.toContain("max_turns_exceeded");
+    expect(sent.notification.title.length).toBeGreaterThan(0);
+  });
+
+  it("delivers an agent_note when the agent calls merchant.notify mid-case", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "m1",
+        tool: "merchant.notify",
+        input: {
+          title: "Unverifiable claim",
+          message: "Customer cites a promo code I cannot find anywhere.",
+        },
+      },
+      { type: "final_message", text: "Flagged to the merchant; resolved." },
+    ];
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: orderStatusAgent.id,
+            subject: "Where is my order?",
+          });
+          const result = yield* runtime.handleEvent(customerReplied(created.id));
+          return { result, caseId: created.id };
+        }),
+        notifEnv(script, notifLayer as never),
+      ),
+    );
+
+    expect(out.result.type).toBe("Completed");
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!;
+    expect(sent.notification.kind).toBe("agent_note");
+    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.title).toBe("Unverifiable claim");
   });
 });

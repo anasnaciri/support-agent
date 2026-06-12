@@ -10,6 +10,7 @@ import {
   type ChatMessage,
   type DomainEvent,
   type LLMDecision,
+  type TenantId,
   type ThreadId,
   type ToolContext,
   type WorkflowResult,
@@ -27,6 +28,12 @@ import { LLMService } from "./llm-service.js";
 import { ShopifyService } from "./shopify-service.js";
 import { TransactionRunner } from "./transaction-runner.js";
 import { PlatformMailService } from "./platform-mail.js";
+import {
+  MerchantNotificationService,
+  approvalRequestedNotification,
+  humanTakeoverNotification,
+  type MerchantNotification,
+} from "./merchant-notification.js";
 import { ImageHashStore, type SimilarImageHit } from "./image-hash-store.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
 import { signApprovalToken } from "./approval-tokens.js";
@@ -542,6 +549,24 @@ export const AgentRuntimeDefault = Layer.effect(
     // absent in lean test layers (which then skip the dedup, as before).
     const maybeProcessed = yield* Effect.serviceOption(ProcessedMessageStore);
     const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
+    // Optional merchant push channel (Telegram, …) — present when the
+    // deployment wires one; absent in lean test layers. Strictly
+    // best-effort: a ping must never change a tick's outcome.
+    const maybeNotifications = yield* Effect.serviceOption(
+      MerchantNotificationService,
+    );
+
+    // Best-effort merchant ping. Swallows every failure and runs OUTSIDE
+    // any SQL transaction (audit D6 — external HTTP never shares a tx).
+    const notifyMerchant = (
+      tenantId: TenantId,
+      notification: MerchantNotification,
+    ): Effect.Effect<void> =>
+      Option.isSome(maybeNotifications)
+        ? maybeNotifications.value
+            .notify(tenantId, notification)
+            .pipe(Effect.ignore)
+        : Effect.void;
 
     // `applyOverride` (a pure module-level helper, defined above) overlays the
     // per-(tenant, agent) override row onto the in-code AgentConfig before each
@@ -629,23 +654,36 @@ export const AgentRuntimeDefault = Layer.effect(
           reason: string,
           details: Record<string, unknown> = {},
         ) =>
-          tx.run(
-            Effect.gen(function* () {
-              const updated = yield* cases.transitionStatus(
-                caseId,
-                "human_takeover",
-                { reason, tenantId: working.tenantId },
-              );
-              yield* audit.record({
-                tenantId: updated.tenantId,
+          Effect.gen(function* () {
+            const updated = yield* tx.run(
+              Effect.gen(function* () {
+                const row = yield* cases.transitionStatus(
+                  caseId,
+                  "human_takeover",
+                  { reason, tenantId: working.tenantId },
+                );
+                yield* audit.record({
+                  tenantId: row.tenantId,
+                  caseId: row.id,
+                  actor: { type: "system", id: "agent-runtime" },
+                  action: "case.escalated_to_human",
+                  details: { reason, ...details },
+                });
+                return row;
+              }),
+            );
+            // Ping the merchant AFTER the park committed (and outside the
+            // tx): the case just became theirs.
+            yield* notifyMerchant(
+              updated.tenantId,
+              humanTakeoverNotification({
                 caseId: updated.id,
-                actor: { type: "system", id: "agent-runtime" },
-                action: "case.escalated_to_human",
-                details: { reason, ...details },
-              });
-              return updated;
-            }),
-          );
+                subject: updated.subject,
+                reason,
+              }),
+            );
+            return updated;
+          });
 
         // 2.5. Approval-resume short-circuit. `approval.approved` and
         // `approval.rejected` are NOT routed through the agent loop —
@@ -939,6 +977,15 @@ export const AgentRuntimeDefault = Layer.effect(
               return updated;
             }),
           );
+          // Confirmation ping: rejecting the draft makes the case theirs.
+          yield* notifyMerchant(
+            working.tenantId,
+            humanTakeoverNotification({
+              caseId: working.id,
+              subject: working.subject,
+              reason: "approval rejected",
+            }),
+          );
           return {
             type: "HumanTakeoverRequired",
             reason: "approval rejected",
@@ -1218,6 +1265,14 @@ export const AgentRuntimeDefault = Layer.effect(
                     },
                   });
                   return updated;
+                }),
+              );
+              yield* notifyMerchant(
+                current.tenantId,
+                humanTakeoverNotification({
+                  caseId: current.id,
+                  subject: current.subject,
+                  reason,
                 }),
               );
               return {
@@ -1697,6 +1752,20 @@ export const AgentRuntimeDefault = Layer.effect(
                 rejectUrl,
               })
               .pipe(Effect.either);
+            // Same best-effort fan-out on the merchant's push channel
+            // (master-plan §9): the chat ping carries the same signed
+            // decision links as the email.
+            yield* notifyMerchant(
+              current.tenantId,
+              approvalRequestedNotification({
+                caseId: current.id,
+                toolName: tool.name,
+                draftSubject,
+                draftPreview,
+                approveUrl,
+                rejectUrl,
+              }),
+            );
 
             return {
               type: "PausedWaitingForApproval",

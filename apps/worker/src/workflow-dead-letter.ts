@@ -1,9 +1,11 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import type { DomainEvent } from "@support-agent/agent-core";
 import {
   AuditLogService,
   CaseRepository,
+  MerchantNotificationService,
   TransactionRunner,
+  humanTakeoverNotification,
 } from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
 import {
@@ -113,7 +115,7 @@ export const escalateDeadLetteredEvent = (
       return;
     }
 
-    yield* tx
+    const parked = yield* tx
       .run(
         Effect.gen(function* () {
           const updated = yield* cases.transitionStatus(
@@ -131,15 +133,36 @@ export const escalateDeadLetteredEvent = (
               eventType: event.type,
             },
           });
+          return updated;
         }),
       )
       .pipe(
         Effect.catchAllCause((cause) =>
           Effect.logError(
             `[dead-letter] failed to escalate case ${row.id}: ${String(cause)}`,
-          ),
+          ).pipe(Effect.as(null)),
         ),
       );
+
+    // Ping the merchant once the park committed. Optional service +
+    // best-effort, like everything else in this consumer.
+    if (parked) {
+      const maybeNotifications = yield* Effect.serviceOption(
+        MerchantNotificationService,
+      );
+      if (Option.isSome(maybeNotifications)) {
+        yield* maybeNotifications.value
+          .notify(
+            parked.tenantId,
+            humanTakeoverNotification({
+              caseId: parked.id,
+              subject: parked.subject,
+              reason: "workflow_retries_exhausted",
+            }),
+          )
+          .pipe(Effect.ignore);
+      }
+    }
   });
 
 export const registerWorkflowDeadLetterConsumer = async (opts: {

@@ -1,7 +1,15 @@
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
+import {
+  ConnectorCredentialStoreTest,
+  PlatformMailServiceTest,
+  makeMerchantNotificationServiceTest,
+  type ConnectorConnection,
+} from "@support-agent/services";
 import {
   connectorHealthOf,
   decideHealthTransition,
+  reportConnectorHealth,
 } from "../src/connector-health.js";
 
 // Audit L5 — a dead connector (revoked refresh token, lapsed Graph
@@ -51,5 +59,83 @@ describe("decideHealthTransition", () => {
     const d = decideHealthTransition("ok", "ok", null, at);
     expect(d.alert).toBe(false);
     expect(d.patch).toBeNull();
+  });
+});
+
+describe("reportConnectorHealth — merchant notification", () => {
+  const connection: ConnectorConnection = {
+    tenantId: "t1" as never,
+    provider: "outlook",
+    shopDomain: "support@merchant.com",
+    accessToken: "tok",
+    refreshToken: "ref",
+    tokenExpiresAt: null,
+    metadata: {},
+    scopes: [],
+    apiVersion: null,
+    installedAt: at,
+    status: "active",
+  };
+
+  const baseInput = {
+    tenantId: "t1",
+    provider: "outlook",
+    mailbox: "support@merchant.com",
+    next: "broken" as const,
+    reason: "refresh token revoked",
+    now: at,
+  };
+
+  it("pings the merchant once on ok → broken", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const layer = Layer.mergeAll(
+      ConnectorCredentialStoreTest([connection]),
+      PlatformMailServiceTest(),
+      notifLayer,
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        reportConnectorHealth({ ...baseInput, metadata: {} }),
+        layer,
+      ),
+    );
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!;
+    expect(sent.notification.kind).toBe("connector_broken");
+    expect(sent.notification.body).toContain("support@merchant.com");
+  });
+
+  it("does not re-ping on broken → broken", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const layer = Layer.mergeAll(
+      ConnectorCredentialStoreTest([
+        { ...connection, metadata: { connectorHealth: "broken" } },
+      ]),
+      PlatformMailServiceTest(),
+      notifLayer,
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        reportConnectorHealth({
+          ...baseInput,
+          metadata: { connectorHealth: "broken" },
+        }),
+        layer,
+      ),
+    );
+    expect(handle.sent).toHaveLength(0);
+  });
+
+  it("stays best-effort without a notification channel wired", async () => {
+    const layer = Layer.mergeAll(
+      ConnectorCredentialStoreTest([connection]),
+      PlatformMailServiceTest(),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        reportConnectorHealth({ ...baseInput, metadata: {} }),
+        layer,
+      ),
+    );
   });
 });

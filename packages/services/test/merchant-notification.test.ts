@@ -4,6 +4,9 @@ import { TenantId, CaseId } from "@support-agent/agent-core";
 import {
   MerchantNotificationService,
   MerchantNotificationSendFailed,
+  approvalRequestedNotification,
+  connectorBrokenNotification,
+  humanTakeoverNotification,
   makeMerchantNotificationServiceTest,
   type MerchantNotification,
 } from "../src/index.js";
@@ -107,5 +110,82 @@ describe("MerchantNotificationSendFailed", () => {
     });
     expect(err._tag).toBe("MerchantNotificationSendFailed");
     expect(err.tenantId).toBe(t1);
+  });
+});
+
+describe("approvalRequestedNotification", () => {
+  const base = {
+    caseId: CaseId("c1"),
+    toolName: "conversation.reply",
+    draftSubject: "Re: refund for #1001",
+    draftPreview: "Hi Jane — we can refund order #1001 on receipt.",
+    approveUrl: "https://api.example.com/approvals/a1/approve?token=A",
+    rejectUrl: "https://api.example.com/approvals/a1/reject?token=R",
+  };
+
+  it("carries the draft preview and both decision links", () => {
+    const n = approvalRequestedNotification(base);
+    expect(n.kind).toBe("approval_requested");
+    expect(n.caseId).toBe(base.caseId);
+    expect(n.title).toContain("Re: refund for #1001");
+    expect(n.body).toContain(base.draftPreview);
+    expect(n.body).toContain(base.approveUrl);
+    expect(n.body).toContain(base.rejectUrl);
+    expect(n.body).toContain("conversation.reply");
+  });
+
+  it("falls back to the tool name when the draft has no subject", () => {
+    const n = approvalRequestedNotification({ ...base, draftSubject: null });
+    expect(n.title).toContain("conversation.reply");
+  });
+});
+
+describe("humanTakeoverNotification", () => {
+  it("maps known escalation reasons to merchant-friendly copy", () => {
+    const n = humanTakeoverNotification({
+      caseId: CaseId("c1"),
+      subject: "Where is my order?",
+      reason: "max_turns_exceeded",
+    });
+    expect(n.kind).toBe("human_takeover");
+    expect(n.caseId).toBe(CaseId("c1"));
+    expect(n.body).toContain("Where is my order?");
+    // Friendly copy, not the internal reason code.
+    expect(n.body).not.toContain("max_turns_exceeded");
+    expect(n.body.toLowerCase()).toContain("dashboard");
+  });
+
+  it("points at the provider key settings for credential escalations", () => {
+    const n = humanTakeoverNotification({
+      caseId: CaseId("c1"),
+      subject: null,
+      reason: "llm_credential_missing",
+    });
+    expect(n.body.toLowerCase()).toContain("key");
+  });
+
+  it("falls back to quoting an unknown reason verbatim", () => {
+    const n = humanTakeoverNotification({
+      caseId: CaseId("c1"),
+      subject: null,
+      reason: "weird_new_reason",
+    });
+    expect(n.body).toContain("weird_new_reason");
+  });
+});
+
+describe("connectorBrokenNotification", () => {
+  it("names the provider + mailbox and says inbound mail is stopped", () => {
+    const n = connectorBrokenNotification({
+      provider: "outlook",
+      mailbox: "support@merchant.com",
+      reason: "refresh token revoked",
+    });
+    expect(n.kind).toBe("connector_broken");
+    expect(n.caseId).toBeUndefined();
+    expect(n.title).toContain("outlook");
+    expect(n.body).toContain("support@merchant.com");
+    expect(n.body).toContain("refresh token revoked");
+    expect(n.body.toLowerCase()).toContain("not");
   });
 });

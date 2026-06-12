@@ -75,6 +75,110 @@ export class MerchantNotificationService extends Context.Tag(
 >() {}
 
 // ============================================================
+// Pure notification builders
+// ============================================================
+//
+// Copy lives here — pure and unit-tested — so the runtime / worker
+// emitters and any future channel stay consistent. All plain text
+// (channel impls don't interpret markup).
+
+export interface ApprovalRequestedNotificationInput {
+  readonly caseId: CaseId;
+  readonly toolName: string;
+  readonly draftSubject: string | null;
+  readonly draftPreview: string;
+  readonly approveUrl: string;
+  readonly rejectUrl: string;
+}
+
+export const approvalRequestedNotification = (
+  input: ApprovalRequestedNotificationInput,
+): MerchantNotification => ({
+  kind: "approval_requested",
+  title: input.draftSubject
+    ? `Approval needed: ${input.draftSubject}`
+    : `Approval needed (${input.toolName})`,
+  body: [
+    `The agent prepared a "${input.toolName}" action that needs your approval.`,
+    ``,
+    input.draftPreview,
+    ``,
+    `Approve: ${input.approveUrl}`,
+    `Reject:  ${input.rejectUrl}`,
+  ].join("\n"),
+  caseId: input.caseId,
+});
+
+/**
+ * Internal escalation reason codes → copy a merchant can act on. The
+ * default branch quotes the code verbatim — better an ugly ping than a
+ * silent one when a new reason appears.
+ */
+const HUMAN_TAKEOVER_REASON_COPY: Readonly<Record<string, string>> = {
+  max_turns_exceeded:
+    "The agent hit its work limit before it could finish this case.",
+  approval_expired:
+    "An approval request expired before anyone decided, so the case stopped.",
+  approval_input_invalid:
+    "An edited approval no longer matched what the action expects, so nothing was sent.",
+  approval_denied_by_policy:
+    "Your policy settings blocked the approved action from running.",
+  approved_tool_failed:
+    "The action you approved failed while executing — nothing further was sent.",
+  "approval rejected":
+    "You rejected the agent's draft, so the case is now with you.",
+  llm_credential_missing:
+    "Your AI provider key is missing — reconnect it under Settings so the agent can work.",
+  llm_credential_revoked:
+    "Your AI provider key was revoked — reconnect it under Settings so the agent can work.",
+  workflow_retries_exhausted:
+    "Processing kept failing and was stopped after several retries.",
+};
+
+export interface HumanTakeoverNotificationInput {
+  readonly caseId: CaseId;
+  readonly subject: string | null;
+  readonly reason: string;
+}
+
+export const humanTakeoverNotification = (
+  input: HumanTakeoverNotificationInput,
+): MerchantNotification => {
+  const friendly =
+    HUMAN_TAKEOVER_REASON_COPY[input.reason] ??
+    `The agent stopped and needs a person to continue (${input.reason}).`;
+  return {
+    kind: "human_takeover",
+    title: "A case needs your attention",
+    body: [
+      ...(input.subject ? [`Case: ${input.subject}`, ``] : []),
+      friendly,
+      `Open the dashboard to take it from here.`,
+    ].join("\n"),
+    caseId: input.caseId,
+  };
+};
+
+export interface ConnectorBrokenNotificationInput {
+  readonly provider: string;
+  readonly mailbox: string;
+  readonly reason: string;
+}
+
+export const connectorBrokenNotification = (
+  input: ConnectorBrokenNotificationInput,
+): MerchantNotification => ({
+  kind: "connector_broken",
+  title: `Your ${input.provider} connection stopped working`,
+  body: [
+    `Your ${input.provider} connection (${input.mailbox}) is broken: ${input.reason}.`,
+    ``,
+    `Inbound customer email is NOT being received until it is reconnected.`,
+    `Open Settings → Integrations to reconnect it.`,
+  ].join("\n"),
+});
+
+// ============================================================
 // Test layer
 // ============================================================
 

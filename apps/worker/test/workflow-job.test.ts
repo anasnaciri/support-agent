@@ -12,6 +12,7 @@ import {
   CaseRepository,
   CaseRepositoryTest,
   TransactionRunnerPassthrough,
+  makeMerchantNotificationServiceTest,
 } from "@support-agent/services";
 import { settleWorkflowResult } from "../src/workflow-job.js";
 import { escalateDeadLetteredEvent } from "../src/workflow-dead-letter.js";
@@ -214,5 +215,85 @@ describe("escalateDeadLetteredEvent", () => {
         layer,
       ),
     );
+  });
+});
+
+describe("escalateDeadLetteredEvent — merchant notification", () => {
+  it("pings the merchant after parking the case (best-effort)", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const layer = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      TransactionRunnerPassthrough,
+      notifLayer,
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: "t1" as never,
+            channel: "email",
+            currentAgentId: "support-triage" as never,
+            subject: "Where is my order?",
+          });
+          yield* escalateDeadLetteredEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "th-1" as never,
+              messageId: "m1",
+              from: { name: null, email: "c@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "hello?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          return { caseId: created.id, row: yield* repo.getById(created.id) };
+        }),
+        layer,
+      ),
+    );
+    expect(out.row.status).toBe("human_takeover");
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!;
+    expect(sent.notification.kind).toBe("human_takeover");
+    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.body).not.toContain("workflow_retries_exhausted");
+  });
+
+  it("does not ping when the case is already parked or resolved", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const layer = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      TransactionRunnerPassthrough,
+      notifLayer,
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: "t1" as never,
+            channel: "email",
+            currentAgentId: "support-triage" as never,
+          });
+          yield* repo.transitionStatus(created.id, "human_takeover", {
+            reason: "manual",
+          });
+          yield* escalateDeadLetteredEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            payload: { trigger: "dashboard_retry" },
+          } as never);
+        }),
+        layer,
+      ),
+    );
+    expect(handle.sent).toHaveLength(0);
   });
 });
