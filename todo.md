@@ -14,6 +14,10 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-13 — Workspace restored to `main`:** Cleared the interrupted auto-stash restore from detached
+  HEAD, switched back to `main`, and popped the newest `On main` auto-stash cleanly. Preserved the older
+  `feat/dashboard-branded-confirm-dialog` WIP stash. Verified with `git status --short --branch`,
+  `git stash list`, and `pnpm build` (green). No architecture or code behavior change.
 - **2026-06-12 — Dashboard copy audit: no internal jargon reaches merchants (TDD where logic changed):**
   Full sweep of `apps/dashboard` user-facing copy. (1) New `lib/labels.ts` (+12 tests) — `caseStatusLabel`
   (`human_takeover` → "With you", `waiting_for_approval` → "Needs approval", …), `approvalStatusLabel`,
