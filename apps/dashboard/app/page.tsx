@@ -55,7 +55,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
       {justOnboarded ? (
         <Alert variant="success">
           <Sprout className="size-4" />
-          <AlertTitle>Tenant created</AlertTitle>
+          <AlertTitle>Your workspace is ready</AlertTitle>
           <AlertDescription>
             Connect Shopify or Gmail from{" "}
             <Link

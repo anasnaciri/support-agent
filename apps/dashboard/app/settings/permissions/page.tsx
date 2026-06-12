@@ -30,11 +30,11 @@ export default async function PermissionsMatrixPage() {
     overrides.find((o) => o.agentId === agentId) ?? null;
   return (
     <div className="space-y-6">
-      <SettingsBreadcrumb current="Tool permissions" />
+      <SettingsBreadcrumb current="Permissions" />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">
-          Tool permissions
+          Permissions
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           What each agent may do on its own, including your changes.{" "}

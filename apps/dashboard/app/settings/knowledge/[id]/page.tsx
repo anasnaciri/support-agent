@@ -122,7 +122,7 @@ export default async function KnowledgeEditPage({
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <Link2 className="size-4" aria-hidden />
-              Snapshot
+              Saved copy
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">

@@ -35,10 +35,10 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
       { href: "/settings/agents", label: "Agents", match: prefix("/settings/agents") },
       {
         href: "/settings/permissions",
-        label: "Tool permissions",
+        label: "Permissions",
         match: prefix("/settings/permissions"),
       },
-      { href: "/settings/llm", label: "LLM provider", match: prefix("/settings/llm") },
+      { href: "/settings/llm", label: "AI provider", match: prefix("/settings/llm") },
       {
         href: "/settings/refund-policy",
         label: "Refund policy",

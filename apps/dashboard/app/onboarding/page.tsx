@@ -27,8 +27,8 @@ export default async function OnboardingPage() {
             <span className="font-medium text-foreground">{org.email}</span>.{" "}
             {org.organizationId ? (
               <>
-                Your team doesn&apos;t have a support-agent tenant yet — name it
-                below to get started.
+                Your team doesn&apos;t have a workspace yet — name it below to
+                get started.
               </>
             ) : (
               <>
@@ -42,7 +42,7 @@ export default async function OnboardingPage() {
             <span className="font-medium text-foreground">
               Settings → Integrations
             </span>{" "}
-            once the tenant exists.
+            once your workspace is ready.
           </p>
           <OnboardingForm
             defaultEmail={org.email}

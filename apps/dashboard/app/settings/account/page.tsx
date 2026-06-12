@@ -118,7 +118,7 @@ export default async function AccountSettingsPage({ searchParams }: PageProps) {
             </p>
             <ul className="list-disc space-y-1 pl-5">
               <li>every case, conversation, approval, and audit record;</li>
-              <li>all connected integrations (Shopify, Gmail, Sheets, LLM keys);</li>
+              <li>all connected integrations (Shopify, Gmail, Sheets, AI keys);</li>
               <li>
                 your organization and every manager&apos;s access to this
                 dashboard.

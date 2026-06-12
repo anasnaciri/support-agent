@@ -25,54 +25,55 @@ const TILES = [
     href: "/settings/agents",
     icon: Bot,
     title: "Agents",
-    description: "Prompts, models, tools, and handoffs per agent.",
+    description:
+      "What each agent does, which AI model it uses, and the actions it may take.",
   },
   {
     href: "/settings/permissions",
     icon: ShieldCheck,
-    title: "Tool permissions",
-    description: "Allow / ask / deny per (agent, tool) pair.",
+    title: "Permissions",
+    description:
+      "Choose which actions run automatically and which wait for your approval.",
   },
   {
     href: "/settings/integrations",
     icon: Plug,
     title: "Integrations",
-    description: "Shopify and Gmail connection status for your tenant.",
+    description: "Your store and mailbox connections.",
   },
   {
     href: "/settings/llm",
     icon: KeyRound,
-    title: "LLM provider",
+    title: "AI provider",
     description:
-      "Bring your own OpenRouter, Anthropic, or OpenAI key. Required for any agent run.",
+      "Bring your own OpenRouter, Anthropic, or OpenAI key. Required for agents to respond.",
   },
   {
     href: "/settings/legal",
     icon: FileText,
     title: "Legal",
     description:
-      "Accept the data processing notice and DPA before connecting production providers.",
+      "Accept the data processing notice and addendum before connecting your accounts.",
   },
   {
     href: "/settings/refund-policy",
     icon: Banknote,
     title: "Refund policy",
     description:
-      "Amount thresholds that gate refund.create — auto-allow small refunds, ask on mid-range, deny above the cap.",
+      "Set refund limits — small refunds run automatically, mid-range ask you first, large ones are blocked.",
   },
   {
     href: "/settings/usage",
     icon: BarChart3,
     title: "Usage",
-    description:
-      "Tenant-wide LLM tokens by day and model with estimated OpenRouter spend.",
+    description: "AI usage by day and model, with estimated spend.",
   },
   {
     href: "/settings/account",
     icon: Trash2,
     title: "Delete account",
     description:
-      "Permanently delete this tenant and every record tied to it. This cannot be undone.",
+      "Permanently delete this workspace or your whole account. This cannot be undone.",
   },
 ] as const;
 
@@ -82,10 +83,10 @@ export default async function SettingsLanding() {
   const valueFor = (href: string): string | null => {
     if (href === "/settings/agents") return String(catalog.agents.length);
     if (href === "/settings/permissions") return String(catalog.tools.length);
-    if (href === "/settings/llm") return "BYOK";
-    if (href === "/settings/legal") return "DPA";
+    if (href === "/settings/llm") return "Key";
+    if (href === "/settings/legal") return "Terms";
     if (href === "/settings/refund-policy") return "$";
-    if (href === "/settings/usage") return "LLM";
+    if (href === "/settings/usage") return "AI";
     return null;
   };
 
@@ -96,9 +97,8 @@ export default async function SettingsLanding() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Configuration is currently read-only. Agents and tools live in code
-          today; editing surfaces will land when configs move into per-tenant
-          rows.
+          Tune how your support agents work — what they may do on their own,
+          your refund policy, and the accounts they connect to.
         </p>
       </div>
 

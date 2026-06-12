@@ -66,8 +66,8 @@ export default async function UsageSettingsPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Usage</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tenant-wide LLM token usage from audit log entries. USD is estimated
-          when OpenRouter model pricing is available.
+          AI usage across this workspace, by day and model. Spend is estimated
+          when model pricing is available.
         </p>
       </div>
 
@@ -158,7 +158,7 @@ export default async function UsageSettingsPage({ searchParams }: PageProps) {
                   colSpan={7}
                   className="py-8 text-center text-sm italic text-muted-foreground"
                 >
-                  No LLM usage found for this month.
+                  No AI usage found for this month.
                 </TableCell>
               </TableRow>
             ) : (

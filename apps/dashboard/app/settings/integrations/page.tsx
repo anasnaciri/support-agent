@@ -108,20 +108,18 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Integrations</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Per-tenant credentials read by the worker. Click Connect and the
-          provider (Shopify or Google) takes over; on completion the connection
-          flips to{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">active</code>
-          . Open <strong>Manage</strong> on a connector to see its account,
-          scopes, and granted capabilities.
+          Connect the accounts your agents work with. Click Connect and
+          Shopify or Google will ask you to approve access; once you finish,
+          the connection shows as active. Open <strong>Manage</strong> to see
+          the connected account and what your agents can do with it.
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
-          Looking for your LLM provider key? It lives on its own page —{" "}
+          Looking for your AI provider key? It lives on its own page —{" "}
           <Link
             href="/settings/llm"
             className="font-medium text-primary hover:underline"
           >
-            Settings → LLM provider
+            Settings → AI provider
           </Link>
           .
         </p>

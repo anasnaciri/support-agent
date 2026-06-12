@@ -9,9 +9,9 @@ interface SearchParams {
 const messageFor = (reason: string | undefined): string => {
   switch (reason) {
     case "no_organization":
-      return "Your account isn't linked to a team. Ask your administrator to invite you to their support-agent organization.";
+      return "Your account isn't part of a team yet. Ask your administrator to invite you.";
     case "no_tenant_mapping":
-      return "Your team doesn't have a support-agent tenant configured yet. Contact support to finish onboarding.";
+      return "Your team's workspace isn't set up yet. Contact support to finish setup.";
     default:
       return "You don't have access to this dashboard.";
   }

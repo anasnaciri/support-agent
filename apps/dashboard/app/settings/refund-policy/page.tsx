@@ -47,16 +47,13 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Refund policy</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Per-tenant amount thresholds for the{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-            refund.create
-          </code>{" "}
-          tool. Refunds at or below the <strong>ask threshold</strong> auto-run.
-          Refunds between the two thresholds pause for human approval. Refunds
-          above the <strong>deny threshold</strong> are blocked and the agent
-          falls back to drafting a reply. Or skip the amounts entirely:{" "}
-          <strong>always ask</strong> holds every refund for approval, and{" "}
-          <strong>always deny</strong> blocks them all.
+          Set amount limits for refunds. Refunds at or below the{" "}
+          <strong>ask threshold</strong> run automatically. Refunds between
+          the two thresholds pause for your approval. Refunds above the{" "}
+          <strong>deny threshold</strong> are blocked — the agent drafts a
+          reply for you instead. Or skip the amounts entirely:{" "}
+          <strong>always ask</strong> holds every refund for your approval,
+          and <strong>always deny</strong> blocks them all.
         </p>
       </div>
 

@@ -203,7 +203,7 @@ export default async function ConnectorManagePage({
             </div>
           ) : (
             <p className="text-sm italic text-muted-foreground">
-              Not connected for this tenant.
+              Not connected yet.
             </p>
           )}
 
@@ -307,7 +307,7 @@ export default async function ConnectorManagePage({
                 Missing a capability? Click <strong>Reinstall</strong>{" "}
                 {provider === "shopify"
                   ? "above — Shopify shows the merchant an “update permissions” prompt without losing the existing connection."
-                  : "above to re-run the OAuth grant with the latest scope set."}
+                  : "above to reconnect and grant the latest permissions."}
               </p>
             ) : null}
           </CardContent>

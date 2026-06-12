@@ -41,8 +41,8 @@ export default async function LegalSettingsPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Legal</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Connector credentials can only be written after your tenant accepts
-          the current data processing notice and DPA.
+          Accounts can only be connected after you accept the current data
+          processing notice and addendum.
         </p>
       </div>
 
@@ -94,8 +94,8 @@ export default async function LegalSettingsPage({ searchParams }: PageProps) {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Accept once for this tenant before connecting Shopify, Gmail,
-              Google Sheets, or a tenant LLM provider.
+              Accept once for this workspace before connecting Shopify, Gmail,
+              Google Sheets, or an AI provider.
             </p>
           )}
 

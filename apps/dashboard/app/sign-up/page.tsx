@@ -36,7 +36,7 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Accept the data processing terms, then continue with Google to set
-            up your support-agent team.
+            up your team.
           </p>
           <SignUpForm legalUrl={legalUrl} returnTo={returnTo} />
         </CardContent>

@@ -17,7 +17,7 @@ export default function GoodbyePage() {
           Your account has been deleted
         </h1>
         <p className="text-sm text-muted-foreground">
-          Your tenant and all associated data have been permanently removed. A
+          Your account and all associated data have been permanently removed. A
           confirmation has been emailed to the address on file. Thanks for
           trying the platform.
         </p>

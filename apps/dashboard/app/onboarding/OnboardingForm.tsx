@@ -111,7 +111,7 @@ export const OnboardingForm = ({
         </Alert>
       ) : null}
       <Button type="submit" disabled={pending}>
-        {pending ? "Creating…" : "Create tenant & continue"}
+        {pending ? "Creating…" : "Create workspace & continue"}
       </Button>
     </form>
   );

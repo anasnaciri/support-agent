@@ -30,8 +30,8 @@ export default async function AgentsListPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {agents.length} agent{agents.length === 1 ? "" : "s"} registered in
-          the worker.
+          {agents.length} support agent{agents.length === 1 ? "" : "s"} working
+          your cases.
         </p>
       </div>
 

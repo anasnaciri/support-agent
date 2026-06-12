@@ -172,11 +172,8 @@ export const RefundPolicyForm = ({ policy }: { policy: RefundPolicyView }) => {
               Always deny
             </span>
             <span className="text-xs text-muted-foreground">
-              Block every refund. The agent never runs{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-                refund.create
-              </code>{" "}
-              and falls back to a drafted reply — you handle refunds yourself.
+              Block every refund. The agent never issues a refund — it drafts
+              a reply instead, and you handle refunds yourself.
             </span>
           </span>
         </label>

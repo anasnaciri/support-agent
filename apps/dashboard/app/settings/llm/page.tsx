@@ -26,11 +26,11 @@ const PROVIDER_LABEL: Readonly<Record<LlmProvider, string>> = {
 
 const PROVIDER_DESCRIPTION: Readonly<Record<LlmProvider, string>> = {
   openrouter:
-    "Single key that fronts every model your agents request (anthropic/*, google/*, openai/*, …). Recommended unless you need direct provider billing.",
+    "One key that works with every AI model your agents use. Recommended unless you need direct provider billing.",
   anthropic:
-    "Native Anthropic API. Your agents' model strings must be Anthropic ids (claude-opus-4-7, claude-sonnet-4-6, …).",
+    "Direct Anthropic access. Your agents must use Anthropic models (claude-opus-4-7, claude-sonnet-4-6, …).",
   openai:
-    "Native OpenAI API. Your agents' model strings must be OpenAI ids (gpt-5o, gpt-4o, …).",
+    "Direct OpenAI access. Your agents must use OpenAI models (gpt-5o, gpt-4o, …).",
 };
 
 const isLlmProvider = (p: string): p is LlmProvider =>
@@ -58,7 +58,6 @@ interface PageProps {
 
 export default async function LlmSettingsPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
-  const tenantId = ctx.tenantId;
   const params = (await searchParams) ?? {};
   const connectedBanner =
     (Array.isArray(params["connected"])
@@ -95,29 +94,25 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <SettingsBreadcrumb current="LLM provider" />
+      <SettingsBreadcrumb current="AI provider" />
 
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">LLM provider</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">AI provider</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Bring your own key. Every agent run on your tenant uses the credential
-          below — the platform never falls back to its own key. Without an
-          active row, cases park in{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-            human_takeover
-          </code>{" "}
-          at the first message.
+          Bring your own key. Your agents use it for every reply they write —
+          we never fall back to a key of our own. Without one, new cases pause
+          and wait for you from the first message.
         </p>
       </div>
 
       {connectedBanner ? (
         <Alert variant="success">
-          <AlertDescription>LLM provider connected.</AlertDescription>
+          <AlertDescription>AI provider connected.</AlertDescription>
         </Alert>
       ) : null}
       {revokedBanner ? (
         <Alert variant="success">
-          <AlertDescription>LLM provider revoked.</AlertDescription>
+          <AlertDescription>AI provider disconnected.</AlertDescription>
         </Alert>
       ) : null}
       {errorRaw === "bad_provider" ? (
@@ -137,14 +132,24 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
       {errorRaw === "legal_acceptance_required" ? (
         <Alert variant="warning">
           <AlertDescription>
-            Accept the current data processing notice and DPA in{" "}
+            Accept the current data processing notice and addendum in{" "}
             <Link
               href="/settings/legal"
               className="font-medium text-primary hover:underline"
             >
               Settings → Legal
             </Link>{" "}
-            before connecting an LLM provider.
+            before connecting an AI provider.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {errorRaw &&
+      !["bad_provider", "missing_key", "legal_acceptance_required"].includes(
+        errorRaw,
+      ) ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            Something went wrong saving your key. Please try again.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -196,8 +201,8 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
                 </div>
               </div>
               <form action={revokeLlmAction}>
-                <SubmitButton variant="outline" pendingLabel="Revoking…">
-                  Revoke
+                <SubmitButton variant="outline" pendingLabel="Disconnecting…">
+                  Disconnect
                 </SubmitButton>
               </form>
             </>
@@ -229,11 +234,7 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Stored encrypted (AES-256-GCM) in{" "}
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                    connector_connections
-                  </code>
-                  . Tenant {tenantId.slice(0, 8)}…
+                  Stored encrypted and used only to run your support agents.
                 </p>
               </div>
               <div className="grid gap-2">
@@ -260,15 +261,11 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
           <AlertTitle>Model mismatch</AlertTitle>
           <AlertDescription>
             <p>
-              Your active provider is{" "}
+              Your provider is{" "}
               <strong>{PROVIDER_LABEL[activeProvider]}</strong>, but the
-              following agents declare model ids that won&apos;t resolve through
-              it. Those agents will fail at the first LLM call and their cases
-              will park in{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                human_takeover
-              </code>
-              .
+              following agents are set to AI models it can&apos;t serve. Those
+              agents won&apos;t be able to respond — their cases will pause and
+              wait for you.
             </p>
             <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">
               {mismatched.map((a) => (

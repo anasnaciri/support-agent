@@ -194,14 +194,14 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
           {!credential ? (
             <Alert variant="warning">
               <AlertTriangle className="size-4" />
-              <AlertTitle>No LLM provider connected</AlertTitle>
+              <AlertTitle>No AI provider connected</AlertTitle>
               <AlertDescription>
                 Connect a provider on{" "}
                 <Link
                   href="/settings/llm"
                   className="font-medium text-primary hover:underline"
                 >
-                  Settings → LLM provider
+                  Settings → AI provider
                 </Link>{" "}
                 before picking per-agent models. The picker shows models from
                 the connected provider only.
