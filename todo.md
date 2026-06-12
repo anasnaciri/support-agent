@@ -14,6 +14,30 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Shipping consistency check + curated case timeline (TDD):** Three follow-ons to the
+  Telegram-notifications slice, same session. (1) **Shipping cross-check** — `general-inquiry-agent`
+  now pulls BOTH `shopify.get_store_info` AND `knowledge.search` for shipping-destination questions and
+  runs a prompt-level SHIPPING CONSISTENCY CHECK: agreement (or a destination-silent policy doc) →
+  answer from store settings (what checkout enforces); contradiction → `merchant.notify` ping stating
+  what each source says + asking what customers should be told, AND a draft reply that asserts NEITHER
+  claim (just "double-checking shipping coverage") — the human approving the gated draft decides with
+  the heads-up in hand. NOTE: this is prompt-enforced, not deterministic; a mechanical
+  policy-vs-`shipsToCountries` comparison at import time (mirroring the refund currency-mismatch
+  warning) remains a recorded follow-up. (2) **Heads-up content in the audit trail** — the runtime's
+  `tool.invoked` row for `merchant.notify` now carries `notify: {title, message, delivered}` (same
+  pattern as `refund.recommend`'s output capture). (3) **Curated timeline is the dashboard default** —
+  `parseCaseTimelineMode` defaults to `simplified` (`?timeline=full` opts into the raw audit view);
+  the view is rebuilt as an allow-list in pure `curatedTimelineEvent`
+  (`apps/dashboard/app/cases/[id]/case-timeline.ts`): customer emails in, agent replies out, refund
+  recommendations, approval cards (any decision channel — dashboard, email link, telegram link — since
+  they share the approval rows), `merchant.notify` heads-ups with their audited content + delivered
+  state, and human touchpoints (`case.escalated_to_human` with merchant-friendly reason copy mirroring
+  the Telegram copy map, `case.taken_over`, `case.resumed` incl. dashboard_retry, `case.resolved`).
+  Hidden on purpose: `agent.handoff`, Shopify/knowledge/tracking lookups, `case.update_*`,
+  `llm.decision`, `event.held_human_takeover`, `case.waiting_for_approval` (the approval card carries
+  that story). Mode buttons relabeled Activity / Email thread / Full audit. Tests: +1 agents prompt,
+  e2e audit-details assertions, case-timeline 13 (mode default flip + curation rules). Verified
+  `pnpm build`, dashboard `next build`, ci-local green per commit (1568 passed / 5 skipped).
 - **2026-06-12 — Merchant Telegram notifications (full slice, TDD):** Channel-neutral
   `MerchantNotificationService` (services Tag + test layer + pure copy builders in
   `merchant-notification.ts`) with Telegram as the first transport — the first realization of the
