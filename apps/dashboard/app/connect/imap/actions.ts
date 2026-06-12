@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { api, getDashboardContext } from "@/lib/api-client";
 import {
+  friendlyConnectDetail,
   planImapConnect,
   type DiscoveredPrefill,
   type ImapDiscoveryResponse,
@@ -26,7 +27,8 @@ export interface ImapConnectState {
     | "imap_already_connected"
     | "legal_acceptance_required"
     | "unexpected";
-  /** Connectivity-check detail from the api (host/auth error text). */
+  /** Merchant-readable hint mapped from the api's connectivity-check
+   * failure (raw mail-library messages never pass through). */
   readonly detail?: string;
   /** The already-connected mailbox, for the conflict message. */
   readonly mailbox?: string;
@@ -90,9 +92,10 @@ export const connectImapAction = async (
   }
   if (res.status === 400) {
     const body = res.body as { detail?: string } | null;
+    const detail = friendlyConnectDetail(body?.detail);
     return {
       error: "imap_connect_failed",
-      ...(body?.detail ? { detail: body.detail } : {}),
+      ...(detail ? { detail } : {}),
       ...(plan.discovered ? { discovered: plan.discovered } : {}),
     };
   }

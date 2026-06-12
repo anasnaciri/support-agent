@@ -47,8 +47,8 @@ export const ImapConnectForm = () => {
       {state?.error === "missing_hosts" ? (
         <Alert variant="warning">
           <AlertDescription>
-            Enter both server hosts — incoming (IMAP) and outgoing (SMTP) —
-            or clear them both to let us detect them for you.
+            Enter both server addresses — incoming and outgoing — or clear
+            them both to let us detect them for you.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -66,8 +66,8 @@ export const ImapConnectForm = () => {
             >
               Settings → Integrations
             </Link>
-            , no app password needed. (To use IMAP anyway, fill in the server
-            settings below.)
+            , no app password needed. (Prefer to connect it here anyway? Fill
+            in the server settings below.)
           </AlertDescription>
         </Alert>
       ) : null}
@@ -105,12 +105,12 @@ export const ImapConnectForm = () => {
               </>
             ) : (
               <>
-                We couldn&apos;t log in to IMAP or SMTP with those details.
-                Check the host, port, and app password.
+                We couldn&apos;t sign in with those details. Check the server
+                settings and app password.
               </>
             )}
             {state.detail ? (
-              <span className="mt-1 block font-mono text-xs opacity-80">
+              <span className="mt-1 block text-xs opacity-90">
                 {state.detail}
               </span>
             ) : null}
@@ -224,7 +224,9 @@ export const ImapConnectForm = () => {
           </div>
 
           <fieldset className="grid gap-3 rounded-md border p-4" disabled={pending}>
-            <legend className="px-1 text-sm font-medium">Incoming (IMAP)</legend>
+            <legend className="px-1 text-sm font-medium">
+              Incoming mail (IMAP)
+            </legend>
             <div className="grid grid-cols-[1fr_7rem] gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="imapHost">Host</Label>
@@ -259,7 +261,9 @@ export const ImapConnectForm = () => {
           </fieldset>
 
           <fieldset className="grid gap-3 rounded-md border p-4" disabled={pending}>
-            <legend className="px-1 text-sm font-medium">Outgoing (SMTP)</legend>
+            <legend className="px-1 text-sm font-medium">
+              Outgoing mail (SMTP)
+            </legend>
             <div className="grid grid-cols-[1fr_7rem] gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="smtpHost">Host</Label>

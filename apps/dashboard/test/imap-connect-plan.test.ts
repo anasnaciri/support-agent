@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  friendlyConnectDetail,
   planImapConnect,
   type ImapDiscoveryResponse,
   type ImapFormValues,
@@ -158,5 +159,49 @@ describe("planImapConnect", () => {
     expect(await planImapConnect(values(), async () => null)).toEqual({
       action: "needs_settings",
     });
+  });
+});
+
+// The api's connectivity-check failure carries the raw mail-library error
+// (node-imap / nodemailer `Error#message`). Merchants must never see
+// `ECONNREFUSED`-style internals — map the common families to plain words
+// and drop anything unrecognized.
+describe("friendlyConnectDetail", () => {
+  it("maps auth failures to a password hint", () => {
+    expect(
+      friendlyConnectDetail("Invalid credentials (Failure)"),
+    ).toBe("The mail server rejected the username or password.");
+    expect(friendlyConnectDetail("535 5.7.8 Authentication failed")).toBe(
+      "The mail server rejected the username or password.",
+    );
+  });
+
+  it("maps DNS failures to a host-name hint", () => {
+    expect(friendlyConnectDetail("getaddrinfo ENOTFOUND imap.exmaple.com")).toBe(
+      "We couldn't find that mail server — double-check the server address.",
+    );
+  });
+
+  it("maps connection failures to a host/port hint", () => {
+    expect(friendlyConnectDetail("connect ECONNREFUSED 1.2.3.4:993")).toBe(
+      "We couldn't reach the mail server — double-check the server address and port.",
+    );
+    expect(friendlyConnectDetail("Socket timed out (ETIMEDOUT)")).toBe(
+      "We couldn't reach the mail server — double-check the server address and port.",
+    );
+  });
+
+  it("maps TLS failures to a security-setting hint", () => {
+    expect(friendlyConnectDetail("unable to verify the first certificate")).toBe(
+      "Secure connection failed — try the other security setting for this server.",
+    );
+  });
+
+  it("drops anything it doesn't recognize", () => {
+    expect(
+      friendlyConnectDetail("Error: weird internal stack frame at foo.js:12"),
+    ).toBeNull();
+    expect(friendlyConnectDetail(undefined)).toBeNull();
+    expect(friendlyConnectDetail("")).toBeNull();
   });
 });

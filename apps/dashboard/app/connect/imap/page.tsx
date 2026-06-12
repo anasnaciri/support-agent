@@ -24,11 +24,11 @@ export default async function ConnectImapPage() {
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Connect a mailbox (IMAP / SMTP)
+          Connect your support mailbox
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          For any provider without a dedicated connector — PrivateEmail, Zoho,
-          Fastmail, cPanel, or a custom domain. Enter the address and an{" "}
+          For any email provider without a one-click connection — PrivateEmail,
+          Zoho, Fastmail, cPanel, or a custom domain. Enter the address and an{" "}
           <strong>app password</strong>; we detect the server settings
           automatically and verify the login before saving. The password is
           stored encrypted.

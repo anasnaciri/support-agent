@@ -78,6 +78,31 @@ const parsePort = (raw: string, fallback: number): number => {
   return Number.isInteger(n) && n > 0 && n <= 65535 ? n : fallback;
 };
 
+/**
+ * The api's connectivity check fails with the raw mail-library message
+ * (node-imap / nodemailer `Error#message`). Map the common failure families
+ * to plain words for the form's error alert; anything unrecognized returns
+ * null and is dropped rather than shown verbatim.
+ */
+export const friendlyConnectDetail = (
+  detail: string | undefined,
+): string | null => {
+  if (!detail) return null;
+  if (/auth|credential|password|login|535/i.test(detail)) {
+    return "The mail server rejected the username or password.";
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|dns/i.test(detail)) {
+    return "We couldn't find that mail server — double-check the server address.";
+  }
+  if (/ECONNREFUSED|ETIMEDOUT|ECONNRESET|EHOSTUNREACH|timed? ?out/i.test(detail)) {
+    return "We couldn't reach the mail server — double-check the server address and port.";
+  }
+  if (/certificate|TLS|SSL|handshake/i.test(detail)) {
+    return "Secure connection failed — try the other security setting for this server.";
+  }
+  return null;
+};
+
 export const planImapConnect = async (
   raw: ImapFormValues,
   discover: (email: string) => Promise<ImapDiscoveryResponse | null>,
