@@ -14,6 +14,8 @@ import {
   type ToolContext,
   type WorkflowResult,
   summarizePhotoSignals,
+  wrapUntrusted,
+  UNTRUSTED_PREAMBLE,
   AgentId as makeAgentId,
   TenantId as makeTenantId,
   ThreadId as makeThreadId,
@@ -160,10 +162,15 @@ export const buildSystemPrompt = (
     );
   }
 
-  if (headers.length === 0) {
-    return agent.promptTemplate;
-  }
-  return `${agent.promptTemplate}\n\n${headers.join("\n\n")}`;
+  const body =
+    headers.length === 0
+      ? agent.promptTemplate
+      : `${agent.promptTemplate}\n\n${headers.join("\n\n")}`;
+  // Prefix the untrusted-content preamble so the model knows that fenced
+  // customer text and every tool result are data, not instructions
+  // (prompt-injection mitigation). buildInitialMessages / tool-result
+  // serialization wrap the matching spans in the sentinels this names.
+  return `${UNTRUSTED_PREAMBLE}\n\n${body}`;
 };
 
 // Build a user-role ChatMessage from a text body + the inbound message's
@@ -204,14 +211,15 @@ export const buildInitialMessages = (
     return [
       {
         role: "user",
-        content: `Subject: ${subject}\n\n${event.payload.body}`,
+        // Subject + body are both customer-authored — fence them as untrusted.
+        content: wrapUntrusted(`Subject: ${subject}\n\n${event.payload.body}`),
       },
     ];
   }
   if (event.type === "customer.replied") {
     return [
       buildUserMessageFromInbound(
-        event.payload.bodyText ?? "(empty reply)",
+        wrapUntrusted(event.payload.bodyText ?? "(empty reply)"),
         event.payload.attachments,
       ),
     ];
@@ -225,8 +233,14 @@ export const buildInitialMessages = (
     // without an extra `conversation.fetch_thread` round trip.
     const subject =
       event.payload.subject ?? caseSubject ?? "(no subject)";
+    // The runtime-built header (threadId / from) is trusted and stays OUTSIDE
+    // the fence so the agent can still wire conversation.* tools from it. The
+    // customer-authored subject + body go INSIDE the untrusted fence.
     const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
-    const text = `${header}\n\nSubject: ${subject}\n\n${event.payload.bodyText}`;
+    const customerBlock = wrapUntrusted(
+      `Subject: ${subject}\n\n${event.payload.bodyText}`,
+    );
+    const text = `${header}\n\n${customerBlock}`;
     return [buildUserMessageFromInbound(text, event.payload.attachments)];
   }
   if (event.type === "case.resumed") {
@@ -249,8 +263,13 @@ export const buildInitialMessages = (
       parts.push(`Subject: ${caseSubject}`);
     }
     if (Object.keys(caseRow.context).length > 0) {
+      // The context blob holds agent-derived fields plus free-text the LLM
+      // wrote on prior turns (notes, classification). Fence it so a prior
+      // turn's injected text can't act as instructions on resume.
       parts.push(
-        `Context gathered on previous attempts:\n${JSON.stringify(caseRow.context, null, 2)}`,
+        `Context gathered on previous attempts:\n${wrapUntrusted(
+          JSON.stringify(caseRow.context, null, 2),
+        )}`,
       );
     }
     if (caseRow.threadId) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
+  UNTRUSTED_PREAMBLE,
   type AgentConfig,
 } from "@support-agent/agent-core";
 import {
@@ -12,6 +13,13 @@ import {
   type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
+
+// Every system prompt is prefixed with the untrusted-content preamble
+// (prompt-injection mitigation). The header-composition tests below pin the
+// rest of the prompt by asserting equality against the bare body wrapped with
+// this prefix.
+const withPreamble = (body: string): string =>
+  `${UNTRUSTED_PREAMBLE}\n\n${body}`;
 
 // Pure-helper tests for the runtime's system-prompt composition. Full
 // end-to-end behavior lives in `apps/worker/test/agent-runtime.e2e.test.ts`;
@@ -48,7 +56,17 @@ describe("buildSystemPrompt", () => {
       range: "Escalations!A:F",
       description: null,
     });
-    expect(buildSystemPrompt(agent, settings)).toBe("Base prompt for testing.");
+    expect(buildSystemPrompt(agent, settings)).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+  });
+
+  it("prefixes every prompt with the untrusted-content preamble", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    const got = buildSystemPrompt(agent, null);
+    expect(got.startsWith(UNTRUSTED_PREAMBLE)).toBe(true);
+    expect(got.toLowerCase()).toContain("untrusted");
+    expect(got).toContain("Base prompt for testing.");
   });
 
   it("returns the bare prompt when the tenant has no sheet configured", () => {
@@ -56,13 +74,15 @@ describe("buildSystemPrompt", () => {
       tools: ["supplier.add_sheet_row", "conversation.reply"],
     });
     expect(buildSystemPrompt(agent, makeSettings(null))).toBe(
-      "Base prompt for testing.",
+      withPreamble("Base prompt for testing."),
     );
   });
 
   it("returns the bare prompt when tenantSettings is null (load failure)", () => {
     const agent = baseAgent({ tools: ["supplier.add_sheet_row"] });
-    expect(buildSystemPrompt(agent, null)).toBe("Base prompt for testing.");
+    expect(buildSystemPrompt(agent, null)).toBe(
+      withPreamble("Base prompt for testing."),
+    );
   });
 
   it("appends the supplier-escalation header when both conditions hold", () => {
@@ -84,13 +104,15 @@ describe("buildSystemPrompt", () => {
   it("ignores knowledge titles when the agent doesn't use knowledge.search", () => {
     const agent = baseAgent({ tools: ["conversation.reply"] });
     expect(buildSystemPrompt(agent, null, ["Shipping policy"])).toBe(
-      "Base prompt for testing.",
+      withPreamble("Base prompt for testing."),
     );
   });
 
   it("omits the knowledge-base header when the tenant has no documents", () => {
     const agent = baseAgent({ tools: ["knowledge.search"] });
-    expect(buildSystemPrompt(agent, null, [])).toBe("Base prompt for testing.");
+    expect(buildSystemPrompt(agent, null, [])).toBe(
+      withPreamble("Base prompt for testing."),
+    );
   });
 
   it("appends the knowledge-base header listing titles when the agent uses knowledge.search", () => {

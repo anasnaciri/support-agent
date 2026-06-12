@@ -1,5 +1,9 @@
 import { Effect, Schema } from "effect";
-import { defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
+import {
+  defineTool,
+  ToolOutputInvalid,
+  wrapUntrusted,
+} from "@support-agent/agent-core";
 import { KnowledgeBaseService, rankKnowledge } from "@support-agent/services";
 
 const Input = Schema.Struct({
@@ -49,7 +53,10 @@ export const knowledgeSearch = defineTool({
         results: ranked.map((r) => ({
           id: r.id,
           title: r.title,
-          content: r.snippet,
+          // The document body is merchant-pasted or URL-snapshotted prose —
+          // untrusted. Fence it so a poisoned document's "instructions" land
+          // as inert data inside the model's untrusted boundary.
+          content: wrapUntrusted(r.snippet),
         })),
       };
     }),
