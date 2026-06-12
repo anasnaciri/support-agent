@@ -1,7 +1,10 @@
 import Link from "next/link";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { effectivePermission } from "@/lib/catalog";
+import {
+  currentToolPermission,
+  merchantConfigurableTools,
+} from "@/lib/catalog";
 import { permissionVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -17,9 +20,14 @@ import {
 
 export default async function PermissionsMatrixPage() {
   const ctx = await getDashboardContext();
-  const catalog = await api.catalog(ctx);
+  const [catalog, overrides] = await Promise.all([
+    api.catalog(ctx),
+    api.agentOverrides(ctx),
+  ]);
   const agents = catalog.agents;
-  const tools = catalog.tools;
+  const tools = merchantConfigurableTools(catalog);
+  const overrideFor = (agentId: string) =>
+    overrides.find((o) => o.agentId === agentId) ?? null;
   return (
     <div className="space-y-6">
       <SettingsBreadcrumb current="Tool permissions" />
@@ -29,13 +37,9 @@ export default async function PermissionsMatrixPage() {
           Tool permissions
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Effective permission per (agent, tool).{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">ask</code>{" "}
-          tools pause the case in{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-            waiting_for_approval
-          </code>{" "}
-          until a human approves via the approval surface.
+          What each agent may do on its own, including your changes.{" "}
+          <Badge variant={permissionVariant("ask")}>ask</Badge> actions wait
+          for your approval before they run.
         </p>
       </div>
 
@@ -43,8 +47,7 @@ export default async function PermissionsMatrixPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Tool</TableHead>
-              <TableHead>Default</TableHead>
+              <TableHead>Action</TableHead>
               {agents.map((a) => (
                 <TableHead key={a.id}>
                   <Link
@@ -61,22 +64,17 @@ export default async function PermissionsMatrixPage() {
             {tools.map((t) => (
               <TableRow key={t.name}>
                 <TableCell>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                    {t.name}
-                  </code>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t.description}
+                  <div className="text-sm font-medium">
+                    {t.displayName ?? t.name}
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={permissionVariant(t.defaultPermission)}>
-                    {t.defaultPermission}
-                  </Badge>
+                  {t.displayDescription ? (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {t.displayDescription}
+                    </div>
+                  ) : null}
                 </TableCell>
                 {agents.map((a) => {
-                  const eff = effectivePermission(a, catalog, t.name);
-                  const inToolList = a.tools.includes(t.name);
-                  if (!inToolList) {
+                  if (!a.tools.includes(t.name)) {
                     return (
                       <TableCell key={a.id}>
                         <span className="text-xs text-muted-foreground">
@@ -85,6 +83,24 @@ export default async function PermissionsMatrixPage() {
                       </TableCell>
                     );
                   }
+                  if (t.tenantControl === "refund-threshold") {
+                    return (
+                      <TableCell key={a.id}>
+                        <Link
+                          href="/settings/refund-policy"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          refund policy
+                        </Link>
+                      </TableCell>
+                    );
+                  }
+                  const eff = currentToolPermission(
+                    a,
+                    catalog,
+                    overrideFor(a.id),
+                    t.name,
+                  );
                   if (!eff) {
                     return (
                       <TableCell key={a.id}>

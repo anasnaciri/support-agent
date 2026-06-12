@@ -31,6 +31,18 @@ export const effectivePermission = (
   return agent.permissionOverrides[toolName] ?? tool.defaultPermission;
 };
 
+/**
+ * Every catalog tool a merchant can configure (those carrying a
+ * `tenantControl`), in catalog order. The agent-agnostic counterpart of
+ * `tenantConfigurableActions` — the permissions matrix builds its rows from
+ * this, so internal plumbing tools (handoff, lookups, case bookkeeping)
+ * never reach that page either.
+ */
+export const merchantConfigurableTools = (
+  catalog: CatalogResponse,
+): ReadonlyArray<ToolDto> =>
+  catalog.tools.filter((t) => t.tenantControl !== undefined);
+
 /** One tenant-configurable action shown on the agent page's "Actions" card. */
 export interface ConfigurableAction {
   readonly tool: ToolDto;

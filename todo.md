@@ -14,6 +14,18 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Permissions matrix made merchant-facing (TDD):** `/settings/permissions` now
+  shows only merchant-configurable actions — rows come from the new pure
+  `merchantConfigurableTools(catalog)` in `apps/dashboard/lib/catalog.ts` (tools carrying a
+  `tenantControl`), so internal plumbing (`agent.handoff`, lookups, `knowledge.search`,
+  `case.update_*`, `merchant.notify`) no longer renders. Rows show `displayName` +
+  `displayDescription` (short tenant copy) instead of the raw tool name + agent-facing prompt
+  description. Cells show the CURRENT effective permission (`currentToolPermission` over the
+  fetched `agentOverrides` rows — the page previously ignored tenant toggles and showed shipped
+  defaults); the separate "Default" column is gone. `refund.create` cells link to
+  `/settings/refund-policy` instead of a misleading static badge (it's threshold-driven, mirroring
+  the agent page's special case). +1 unit test (`merchantConfigurableTools` filter). Verified
+  `pnpm build`, dashboard `tsc --noEmit`, dashboard suite 226 passed.
 - **2026-06-12 — Shipping consistency check + curated case timeline (TDD):** Three follow-ons to the
   Telegram-notifications slice, same session. (1) **Shipping cross-check** — `general-inquiry-agent`
   now pulls BOTH `shopify.get_store_info` AND `knowledge.search` for shipping-destination questions and

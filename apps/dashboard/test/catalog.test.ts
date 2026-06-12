@@ -8,6 +8,7 @@ import type {
 import {
   capabilitiesForProvider,
   currentToolPermission,
+  merchantConfigurableTools,
   tenantConfigurableActions,
 } from "../lib/catalog.js";
 
@@ -104,6 +105,17 @@ describe("tenantConfigurableActions", () => {
     expect(
       actions.find((a) => a.tool.name === "supplier.add_sheet_row")?.agentDefault,
     ).toBe("allow");
+  });
+});
+
+describe("merchantConfigurableTools", () => {
+  it("keeps only tools with a tenantControl, in catalog order", () => {
+    expect(merchantConfigurableTools(catalog).map((t) => t.name)).toEqual([
+      "conversation.reply",
+      "supplier.add_sheet_row",
+      "refund.create",
+    ]);
+    // shopify.get_order (internal plumbing) never reaches the matrix.
   });
 });
 
