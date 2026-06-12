@@ -14,6 +14,29 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Dashboard copy audit: no internal jargon reaches merchants (TDD where logic changed):**
+  Full sweep of `apps/dashboard` user-facing copy. (1) New `lib/labels.ts` (+12 tests) — `caseStatusLabel`
+  (`human_takeover` → "With you", `waiting_for_approval` → "Needs approval", …), `approvalStatusLabel`,
+  `toolActionLabel` (`conversation.reply` → "Send customer reply", mirrors catalog displayNames — keep in
+  sync), `auditActionLabel` (`llm.decision` → "Agent decision", `compliance.*` → "Data & privacy request"),
+  `humanizeSlug`; wired into cases list/sidebar/detail (status badges, category, approval tool badges,
+  full-audit rows), approvals list/detail (breadcrumb, H1, badges), and the audit page (filters +
+  description too). (2) Fallbacks humanized instead of leaking raw codes: `risk-flag-label.ts`,
+  `case-timeline.ts` escalation reasons (tests updated first). (3) "tenant" purged from all rendered copy
+  (→ workspace/account/you): settings landing+legal+usage+llm+refund-policy+integrations(+detail),
+  onboarding, no-access, goodbye, home banner, audit header, approval-detail footer; "LLM provider" →
+  "AI provider" everywhere (nav, tiles, breadcrumbs, alerts); `AES-256-GCM`/`connector_connections`/tenant-id
+  removed from the llm key help; BYOK/DPA/LLM tile badges → Key/Terms/AI; "registered in the worker",
+  "(agent, tool) pair", "OAuth grant/scope set" rewritten; "Tool permissions" → "Permissions" (nav + page);
+  case-header "tokens:" → "AI usage: … tokens". (4) Error pass-throughs sanitized: new
+  `friendlyConnectDetail` in `connect/imap/connect-plan.ts` (+5 tests) maps raw mail-library errors
+  (auth/DNS/conn/TLS) to plain words and DROPS unknown ones — wired into the imap action + form (detail no
+  longer rendered font-mono); `/settings/llm` gained a generic alert for unknown `?error=` codes (action
+  forwards backend codes the page didn't render). Verified: dashboard vitest 254 green, `pnpm build` +
+  dashboard `tsc --noEmit` green. NOTE: edits to `connect/imap/*` + `integrations/_shared.tsx` +
+  `imap-connect-plan.test.ts` left UNCOMMITTED — they ride with the in-flight IMAP-discovery/logos WIP in
+  those same files. Follow-up: approvals "risk: low" badges kept (plain words); `PROVIDER_LABELS.imap`
+  ("IMAP / SMTP") kept as the integrations-card name on purpose.
 - **2026-06-12 — IMAP connect form simplified to email + app password (TDD):** `/connect/imap` no longer
   shows host/port/security by default — server settings are autodiscovered. New pure
   `apps/api/src/imap-discovery.ts` (29 tests), chain ordered first-hit-wins: (1) OAuth-provider detection —
