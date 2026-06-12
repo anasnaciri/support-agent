@@ -145,6 +145,19 @@ export interface MicrosoftAppConfig {
   readonly webhookClientState: string | null;
 }
 
+export interface TelegramAppConfig {
+  /** Bot API token from @BotFather. */
+  readonly botToken: string;
+  /** Bot username WITHOUT the `@` — builds the t.me linking deep link. */
+  readonly botUsername: string;
+  /**
+   * Value Telegram echoes back in `X-Telegram-Bot-API-Secret-Token` on
+   * every webhook call (set when registering the webhook via
+   * `setWebhook`). The webhook's ONLY authentication — required.
+   */
+  readonly webhookSecret: string;
+}
+
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
@@ -163,6 +176,13 @@ export interface ApiConfig {
    * conversation connector; `null` makes those routes respond 503.
    */
   readonly microsoft: MicrosoftAppConfig | null;
+  /**
+   * `null` when the Telegram bot env vars are unset — merchant chat
+   * notifications are simply disabled (the worker falls back to a no-op
+   * notification layer). When set, the api exposes the linking endpoint
+   * + bot webhook.
+   */
+  readonly telegram: TelegramAppConfig | null;
   /**
    * Shared HMAC secret for approval-link tokens. Verifies the signed
    * `?token=...` on `/approvals/:id/approve|reject` URLs. MUST be the
@@ -264,6 +284,20 @@ export const loadApiConfig = (): ApiConfig => {
       "MICROSOFT_GRAPH_WEBHOOK_SECRET must be set when MICROSOFT_GRAPH_NOTIFICATION_URL is configured — Graph notifications are authenticated solely by clientState and are rejected without it.",
     );
   }
+  // Telegram bot (merchant notifications): all-or-nothing. A partial
+  // config is a deploy mistake — the bot can't link without a username,
+  // and an unsecured webhook would accept forged /start updates.
+  const tgBotToken = process.env["TELEGRAM_BOT_TOKEN"]?.trim() || null;
+  const tgBotUsername =
+    process.env["TELEGRAM_BOT_USERNAME"]?.trim().replace(/^@/u, "") || null;
+  const tgWebhookSecret = process.env["TELEGRAM_WEBHOOK_SECRET"]?.trim() || null;
+  const tgAny = !!tgBotToken || !!tgBotUsername || !!tgWebhookSecret;
+  const tgAll = !!tgBotToken && !!tgBotUsername && !!tgWebhookSecret;
+  if (tgAny && !tgAll) {
+    throw new Error(
+      "TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME and TELEGRAM_WEBHOOK_SECRET must be set together (or all unset to disable Telegram notifications).",
+    );
+  }
   // Pilot mode (SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true) is PURE per-tenant
   // provisioning — every tenant uses its own operator-provisioned custom app.
   // A deployment-wide ("global") Shopify app is NOT allowed: keeping one around
@@ -323,6 +357,13 @@ export const loadApiConfig = (): ApiConfig => {
           tenant: msTenant,
           notificationUrl: msNotificationUrl,
           webhookClientState: msWebhookClientState,
+        }
+      : null,
+    telegram: tgAll
+      ? {
+          botToken: tgBotToken!,
+          botUsername: tgBotUsername!,
+          webhookSecret: tgWebhookSecret!,
         }
       : null,
   };

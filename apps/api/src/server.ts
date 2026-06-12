@@ -81,6 +81,14 @@ import {
   parseDashboardAuth,
 } from "./dashboard-auth.js";
 import { retryCaseNow } from "./case-retry.js";
+import {
+  TELEGRAM_LINK_TTL_MS,
+  mintTelegramLinkToken,
+} from "./telegram-link.js";
+import {
+  isTelegramWebhookAuthorized,
+  processTelegramUpdate,
+} from "./telegram-webhook.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   conversationUnavailableReason,
@@ -1812,6 +1820,7 @@ const CONNECTOR_PROVIDERS = [
   "google_sheets",
   "outlook",
   "imap",
+  "telegram",
 ] as const;
 type DisconnectProvider = (typeof CONNECTOR_PROVIDERS)[number];
 const isDisconnectProvider = (p: string): p is DisconnectProvider =>
@@ -2780,6 +2789,36 @@ const handleDashboardDisconnect = async (
     ),
   );
   return sendJson(res, 200, outcome);
+};
+
+// POST /dashboard/connections/telegram — mint a signed Telegram linking
+// deep link for the AUTHENTICATED tenant. No credentials change hands
+// here: the merchant taps the t.me link, presses Start, and the bot
+// webhook binds their chat via the signed token (never a raw tenant id).
+const handleDashboardConnectTelegram = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!(await tenantHasCurrentLegalAcceptance(auth.tenantId, layer))) {
+    return sendLegalAcceptanceRequired(res);
+  }
+  if (!cfg.telegram) {
+    return sendJson(res, 503, { error: "telegram_not_configured" });
+  }
+  const expiresAtMs = Date.now() + TELEGRAM_LINK_TTL_MS;
+  const token = mintTelegramLinkToken(
+    cfg.stateSigningKey,
+    auth.tenantId,
+    expiresAtMs,
+  );
+  return sendJson(res, 200, {
+    url: `https://t.me/${cfg.telegram.botUsername}?start=${token}`,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  });
 };
 
 // ============================================================
@@ -5131,6 +5170,44 @@ export const startServer = async (
     },
   );
 
+  // ---- Telegram bot webhook (merchant notification channel linking) ----
+  app.post(
+    "/webhooks/notifications/telegram",
+    {
+      schema: {
+        tags: ["webhooks", "telegram"],
+        summary: "Telegram bot update (chat linking via /start)",
+        response: errorResponses,
+      },
+    },
+    async (req, res) => {
+      if (!cfg.telegram) {
+        return sendJson(res, 503, { error: "telegram_not_configured" });
+      }
+      const secretHeader = req.headers["x-telegram-bot-api-secret-token"];
+      if (
+        !isTelegramWebhookAuthorized(
+          typeof secretHeader === "string" ? secretHeader : undefined,
+          cfg.telegram.webhookSecret,
+        )
+      ) {
+        return sendJson(res, 401, { error: "unauthorized" });
+      }
+      const outcome = await Effect.runPromise(
+        Effect.provide(
+          processTelegramUpdate(parseJsonBody(req), {
+            signingKey: cfg.stateSigningKey,
+            botToken: cfg.telegram.botToken,
+          }),
+          layer,
+        ),
+      );
+      // Always 2xx after auth — Telegram retries non-2xx and a retry
+      // can't fix an invalid token or an ignorable update.
+      return sendJson(res, 200, { ok: true, outcome });
+    },
+  );
+
   // ---- Approval links ----
   // GET verifies the signed link and renders a confirmation page; only
   // the POST (submitted by the page's form) decides. Email-security
@@ -5447,6 +5524,11 @@ export const startServer = async (
     "/dashboard/connections/imap",
     "Connect a generic IMAP/SMTP mailbox (credentials, no OAuth)",
     handleDashboardConnectImap,
+  );
+  dashboardPost(
+    "/dashboard/connections/telegram",
+    "Mint a Telegram notification-channel linking deep link",
+    handleDashboardConnectTelegram,
   );
   dashboardPost(
     "/dashboard/connections/:provider/disconnect",

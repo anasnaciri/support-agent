@@ -20,7 +20,8 @@ export type RevocableProvider =
   | "gmail"
   | "google_sheets"
   | "outlook"
-  | "imap";
+  | "imap"
+  | "telegram";
 
 /** A connector grant to revoke provider-side. Tokens are plaintext here —
  * the worker decrypts them from the job payload just before calling. */
@@ -159,6 +160,10 @@ export const revokeConnectorGrant = async (
       // A generic IMAP/SMTP connection is just stored credentials (an app
       // password) — there is no provider-side grant or subscription to revoke.
       // Wiping the local row is the whole disconnect.
+      return { kind: "already_gone" };
+    case "telegram":
+      // The "credential" is just the bound chat id of OUR platform bot —
+      // nothing exists provider-side to revoke. Local revoke stops sends.
       return { kind: "already_gone" };
   }
 };
