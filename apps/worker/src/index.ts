@@ -41,6 +41,10 @@ import {
   SHOPIFY_POLICY_IMPORT_QUEUE,
   registerShopifyPolicyImport,
 } from "./shopify-policy-import-schedule.js";
+import {
+  LLM_CREDITS_QUEUE,
+  registerLlmCreditsCheck,
+} from "./llm-credits-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -202,6 +206,13 @@ const main = async (): Promise<void> => {
   await registerShopifyPolicyImport({ boss, runtimeLayer });
   console.log(
     `[worker] consuming shopify-policy-import on queue=${SHOPIFY_POLICY_IMPORT_QUEUE}`,
+  );
+
+  // OpenRouter credits-low check: pings the merchant once per
+  // below-threshold crossing so prepaid keys don't silently hit zero.
+  await registerLlmCreditsCheck({ boss, runtimeLayer });
+  console.log(
+    `[worker] scheduled llm-credits cron on queue=${LLM_CREDITS_QUEUE}`,
   );
 
   const onShutdown = async (signal: NodeJS.Signals) => {

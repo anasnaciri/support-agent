@@ -159,6 +159,30 @@ export const humanTakeoverNotification = (
   };
 };
 
+export interface LlmCreditsLowNotificationInput {
+  /** LLM provider whose balance is low (today always "openrouter"). */
+  readonly provider: string;
+  /**
+   * Remaining prepaid balance in USD. OpenRouter denominates credits in
+   * dollars, so this isn't a hardcoded-currency assumption — it's the
+   * unit the source API reports.
+   */
+  readonly remainingUsd: number;
+  readonly thresholdUsd: number;
+}
+
+export const llmCreditsLowNotification = (
+  input: LlmCreditsLowNotificationInput,
+): MerchantNotification => ({
+  kind: "llm_credits_low",
+  title: `Your ${input.provider} credits are running low`,
+  body: [
+    `Your ${input.provider} balance is down to $${input.remainingUsd.toFixed(2)} (alert threshold $${input.thresholdUsd}).`,
+    ``,
+    `The agent stops handling customer cases once credits run out — top up your ${input.provider} account to keep it running.`,
+  ].join("\n"),
+});
+
 export interface ConnectorBrokenNotificationInput {
   readonly provider: string;
   readonly mailbox: string;

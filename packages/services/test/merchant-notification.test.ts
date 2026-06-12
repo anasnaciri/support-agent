@@ -7,6 +7,7 @@ import {
   approvalRequestedNotification,
   connectorBrokenNotification,
   humanTakeoverNotification,
+  llmCreditsLowNotification,
   makeMerchantNotificationServiceTest,
   type MerchantNotification,
 } from "../src/index.js";
@@ -171,6 +172,21 @@ describe("humanTakeoverNotification", () => {
       reason: "weird_new_reason",
     });
     expect(n.body).toContain("weird_new_reason");
+  });
+});
+
+describe("llmCreditsLowNotification", () => {
+  it("states the remaining balance, the threshold, and what happens at zero", () => {
+    const n = llmCreditsLowNotification({
+      provider: "openrouter",
+      remainingUsd: 3.204,
+      thresholdUsd: 5,
+    });
+    expect(n.kind).toBe("llm_credits_low");
+    expect(n.caseId).toBeUndefined();
+    expect(n.body).toContain("$3.20");
+    expect(n.body).toContain("$5");
+    expect(n.body.toLowerCase()).toContain("openrouter");
   });
 });
 
