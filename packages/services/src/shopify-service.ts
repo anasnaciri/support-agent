@@ -86,8 +86,10 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     ) => Effect.Effect<ReadonlyArray<ShopifyProductSearchResult>, ShopifyError>;
 
     /**
-     * Read the connected store's basic info — currently just its default
-     * currency. Backs the dashboard refund-policy page's "your policy
+     * Read the connected store's public facts: name, customer-facing
+     * contact email, primary domain, default currency, and the countries
+     * the store ships to. Backs `shopify.get_store_info` (general-inquiry
+     * grounding) and the dashboard refund-policy page's "your policy
      * currency doesn't match your store" warning. `ShopifyAuthMissing`
      * when the tenant has no live Shopify connection; callers that only
      * want a best-effort hint catch it and fall back to "unknown".
@@ -205,13 +207,23 @@ export interface OrderPiiPresence {
 }
 
 /**
- * Minimal store metadata. `currencyCode` is the shop's default currency
- * (ISO 4217) — the currency Shopify denominates the store's prices and
- * refunds in. Used to flag a refund policy configured for a different
- * currency.
+ * Public store facts. Everything here is customer-facing by
+ * construction: `name` and `primaryDomainUrl` are what the storefront
+ * shows; `contactEmail` is the merchant's *customer-facing* contact
+ * address (Shopify's `shop.contactEmail` — never `shop.email`, which is
+ * the private account login); `shipsToCountries` is derived from the
+ * store's shipping zones (ISO country codes) and answers "where do you
+ * ship TO" — it says nothing about where orders ship *from*, which we
+ * deliberately never expose. `currencyCode` is the shop's default
+ * currency (ISO 4217); it also feeds the dashboard refund-policy
+ * currency-mismatch warning.
  */
 export interface ShopInfo {
+  readonly name: string;
+  readonly contactEmail: string | null;
+  readonly primaryDomainUrl: string;
   readonly currencyCode: string;
+  readonly shipsToCountries: ReadonlyArray<string>;
 }
 
 /**

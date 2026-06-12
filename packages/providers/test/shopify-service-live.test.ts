@@ -270,11 +270,22 @@ describe("ShopifyServiceLive — getOrder", () => {
 });
 
 describe("ShopifyServiceLive — getShopInfo", () => {
-  it("queries shop currency and maps the response", async () => {
+  it("queries public store facts and maps the response", async () => {
     reset();
     const layer = buildLayer(
       httpFromSequence([
-        () => respond(200, { data: { shop: { currencyCode: "EUR" } } }),
+        () =>
+          respond(200, {
+            data: {
+              shop: {
+                name: "Test Shop",
+                contactEmail: "hello@test-shop.example.com",
+                currencyCode: "EUR",
+                primaryDomain: { url: "https://test-shop.example.com" },
+                shipsToCountries: ["DE", "FR"],
+              },
+            },
+          }),
       ]),
     );
     const info = await Effect.runPromise(
@@ -283,10 +294,47 @@ describe("ShopifyServiceLive — getShopInfo", () => {
         layer,
       ),
     );
-    expect(info).toEqual({ currencyCode: "EUR" });
+    expect(info).toEqual({
+      name: "Test Shop",
+      contactEmail: "hello@test-shop.example.com",
+      currencyCode: "EUR",
+      primaryDomainUrl: "https://test-shop.example.com",
+      shipsToCountries: ["DE", "FR"],
+    });
     expect(captures).toHaveLength(1);
     const body = JSON.parse(captures[0]!.body) as { query: string };
     expect(body.query).toContain("query ShopInfo");
+    // The customer-facing address is `contactEmail`; `shop.email` is the
+    // merchant's private account email and must never be selected.
+    expect(body.query).toContain("contactEmail");
+    expect(/\bemail\b/.test(body.query)).toBe(false);
+  });
+
+  it("collapses an empty contactEmail to null", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              shop: {
+                name: "Test Shop",
+                contactEmail: "",
+                currencyCode: "EUR",
+                primaryDomain: { url: "https://test-shop.example.com" },
+                shipsToCountries: [],
+              },
+            },
+          }),
+      ]),
+    );
+    const info = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) => s.getShopInfo(tenantId)),
+        layer,
+      ),
+    );
+    expect(info.contactEmail).toBeNull();
   });
 });
 

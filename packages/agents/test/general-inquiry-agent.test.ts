@@ -18,6 +18,7 @@ describe("general-inquiry-agent config", () => {
     expect(generalInquiryAgent.tools).toEqual([
       "knowledge.search",
       "shopify.search_products",
+      "shopify.get_store_info",
       "case.update_context",
       "conversation.reply",
     ]);
@@ -57,6 +58,16 @@ describe("general-inquiry-agent config", () => {
     expect(p).toContain("availableForSale");
     expect(p).toContain("onlineStoreUrl");
     expect(p).toContain("NEVER quantities");
+  });
+
+  it("splits shipping-location semantics: ship-to from store info, ship-from never", () => {
+    const p = generalInquiryAgent.promptTemplate;
+    // "Where do you ship?" → shipsToCountries / shipsWorldwide.
+    expect(p).toContain("shipsToCountries");
+    expect(p).toContain("shipsWorldwide");
+    // "Where do orders ship from?" → never from store/location data; raw
+    // locations can expose private warehouses and dropship origins.
+    expect(p).toContain("Never state where orders ship FROM");
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {

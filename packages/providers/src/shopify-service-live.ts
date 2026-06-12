@@ -588,9 +588,20 @@ const SEARCH_PRODUCTS_QUERY = `
   }
 `;
 
+// Public store facts only. `contactEmail` is the customer-facing address;
+// the bare `shop.email` field is the merchant's private account login and
+// must never be selected here (a test pins this). `shipsToCountries`
+// derives from the shipping zones; none of these fields need an extra
+// OAuth scope beyond an active connection.
 const SHOP_INFO_QUERY = `
   query ShopInfo {
-    shop { currencyCode }
+    shop {
+      name
+      contactEmail
+      currencyCode
+      primaryDomain { url }
+      shipsToCountries
+    }
   }
 `;
 
@@ -863,14 +874,27 @@ export const ShopifyServiceLive = Layer.effect(
 
       getShopInfo: (tenantId) =>
         withCreds(tenantId, (creds) =>
-          runQuery<{ shop: { currencyCode: string } }>(
-            http,
-            creds,
-            tenantId,
-            SHOP_INFO_QUERY,
-            {},
-          ).pipe(
-            Effect.map((data) => ({ currencyCode: data.shop.currencyCode })),
+          runQuery<{
+            shop: {
+              name: string;
+              contactEmail: string | null;
+              currencyCode: string;
+              primaryDomain: { url: string };
+              shipsToCountries: ReadonlyArray<string>;
+            };
+          }>(http, creds, tenantId, SHOP_INFO_QUERY, {}).pipe(
+            Effect.map((data) => {
+              const contact = data.shop.contactEmail?.trim() ?? "";
+              return {
+                name: data.shop.name,
+                // Blank-string contact collapses to null so callers have
+                // one "no public contact" shape to handle.
+                contactEmail: contact.length > 0 ? contact : null,
+                currencyCode: data.shop.currencyCode,
+                primaryDomainUrl: data.shop.primaryDomain.url,
+                shipsToCountries: [...data.shop.shipsToCountries],
+              };
+            }),
           ),
         ),
 

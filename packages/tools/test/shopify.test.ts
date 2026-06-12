@@ -21,6 +21,7 @@ import {
   shopifyGetCustomer,
   shopifyGetOrder,
   shopifyGetProduct,
+  shopifyGetStoreInfo,
   shopifySearchProducts,
   shopifyRefundCreate,
   shopifyRefundRecommend,
@@ -597,6 +598,102 @@ describe("shopify.search_products tool", () => {
     ).toBeUndefined();
     expect(
       (shopifySearchProducts as { displayName?: unknown }).displayName,
+    ).toBeUndefined();
+  });
+});
+
+describe("shopify.get_store_info tool", () => {
+  const info = (countries: ReadonlyArray<string>) => ({
+    name: "Test Shop",
+    contactEmail: "hello@test-shop.example.com",
+    currencyCode: "EUR",
+    primaryDomainUrl: "https://test-shop.example.com",
+    shipsToCountries: countries,
+  });
+
+  it("returns public store facts with the explicit country list when small", async () => {
+    const env = ShopifyServiceTest({ shopInfo: info(["DE", "FR", "GB"]) });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetStoreInfo.execute(
+          {} as never,
+          baseCtx("c-si-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const out = exit.value as Record<string, unknown>;
+    expect(out["name"]).toBe("Test Shop");
+    expect(out["contactEmail"]).toBe("hello@test-shop.example.com");
+    expect(out["currencyCode"]).toBe("EUR");
+    expect(out["domain"]).toBe("https://test-shop.example.com");
+    expect(out["shipsWorldwide"]).toBe(false);
+    expect(out["shipsToCountries"]).toEqual(["DE", "FR", "GB"]);
+  });
+
+  it("compresses a rest-of-world zone to shipsWorldwide instead of ~240 codes", async () => {
+    const many = Array.from({ length: 240 }, (_, i) => `C${i}`);
+    const env = ShopifyServiceTest({ shopInfo: info(many) });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetStoreInfo.execute(
+          {} as never,
+          baseCtx("c-si-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const out = exit.value as Record<string, unknown>;
+    expect(out["shipsWorldwide"]).toBe(true);
+    // The list is dropped, not truncated — a partial list would read as
+    // "only these countries" and make the agent give wrong ship-to answers.
+    expect(out["shipsToCountries"]).toBeNull();
+  });
+
+  it("maps a ShopifyError to ToolOutputInvalid (no Shopify connection)", async () => {
+    // No shopInfo fixture → the Test layer fails with ShopifyAuthMissing.
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetStoreInfo.execute(
+          {} as never,
+          baseCtx("c-si-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.get_store_info");
+        expect(err.issues).toEqual(["ShopifyAuthMissing"]);
+      }
+    }
+  });
+
+  it("declares read risk, allow permission, an active-connection requirement, and no tenant-control surface", () => {
+    expect(shopifyGetStoreInfo.name).toBe("shopify.get_store_info");
+    expect(shopifyGetStoreInfo.risk).toBe("read");
+    expect(shopifyGetStoreInfo.defaultPermission).toBe("allow");
+    expect(shopifyGetStoreInfo.sideEffectClass).toBe("none");
+    // Basic shop fields need no extra OAuth scope, but the empty scopes
+    // array still makes PermissionService require an ACTIVE Shopify
+    // connection before the tool can run.
+    expect(shopifyGetStoreInfo.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: [],
+    });
+    expect(
+      (shopifyGetStoreInfo as { tenantControl?: unknown }).tenantControl,
+    ).toBeUndefined();
+    expect(
+      (shopifyGetStoreInfo as { displayName?: unknown }).displayName,
     ).toBeUndefined();
   });
 });
