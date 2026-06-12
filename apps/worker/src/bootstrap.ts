@@ -66,8 +66,11 @@ import {
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
   OrgDirectoryServiceLive,
+  MerchantNotificationNoopLive,
   PlatformMailServiceLive,
   ResendConfigFromEnv,
+  TelegramConfigFromEnv,
+  TelegramMerchantNotificationLive,
   WorkosConfigFromEnv,
   ShopifyCredentialStoreFromConnector,
   ShopifyCredentialStoreFromEnv,
@@ -334,6 +337,30 @@ export const buildWorker = async (
     );
   }
 
+  // Merchant push notifications (Telegram). The bot env trio + the
+  // encryption key (per-tenant chat bindings live in
+  // connector_connections) gate the Live layer; otherwise a no-op layer
+  // reports delivered:false so the merchant.notify tool and the
+  // runtime/cron emitters degrade exactly like "tenant not linked".
+  const tgBotToken = process.env["TELEGRAM_BOT_TOKEN"];
+  const tgBotUsername = process.env["TELEGRAM_BOT_USERNAME"];
+  const tgWebhookSecret = process.env["TELEGRAM_WEBHOOK_SECRET"];
+  const merchantNotifications =
+    credKeyB64 && tgBotToken && tgBotUsername && tgWebhookSecret
+      ? TelegramMerchantNotificationLive.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              TelegramConfigFromEnv,
+              ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+            ),
+          ),
+        )
+      : (warnProdFallback(
+          "Merchant notifications (Telegram)",
+          "TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET (with CREDENTIAL_ENCRYPTION_KEY)",
+        ),
+        MerchantNotificationNoopLive);
+
   // Org directory (WorkOS) — used by the account-cleanup consumer to delete
   // a tenant's organization after self-service / admin account deletion.
   // Live when WORKOS_API_KEY is set; otherwise an in-memory Test layer so
@@ -554,6 +581,7 @@ export const buildWorker = async (
     tracking,
     conversation,
     mail,
+    merchantNotifications,
     orgDirectory,
     approvalLinkLayer,
     blob,

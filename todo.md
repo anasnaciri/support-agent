@@ -14,6 +14,45 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Merchant Telegram notifications (full slice, TDD):** Channel-neutral
+  `MerchantNotificationService` (services Tag + test layer + pure copy builders in
+  `merchant-notification.ts`) with Telegram as the first transport — the first realization of the
+  master-plan §9 "NotificationService fan-out". (1) **providers:** `TelegramMerchantNotificationLive`
+  (plain-text Bot API sendMessage, deliberately NO parse_mode so customer-derived text can't act as
+  markup; chat binding = `connector_connections` provider `telegram`, chat id in the encrypted token
+  column; migration `0022_telegram_provider` widens the CHECK), `MerchantNotificationNoopLive` for
+  botless deploys (delivered:false ≡ "not linked"), shared `TelegramConfig(FromEnv)`. (2) **tool:**
+  `merchant.notify` (communicate / allow / external_message, internal — no tenantControl) registered on
+  all five specialists with a shared prompt block + 1-turn budget bump: the agent pings the STORE OWNER
+  when it's unsure or spots something they should know; never the customer, never pauses the case;
+  `delivered:false` tells the model to proceed without retrying. (3) **system emitters** (best-effort
+  via `Effect.serviceOption`, always outside SQL txs, never affect tick outcomes): runtime ask-branch
+  `approval_requested` ping carrying the SAME signed approve/reject links as the email; every
+  agent-driven `human_takeover` park (escalateToHuman, approval-rejected, missing/revoked LLM key,
+  dead-letter exhaustion) with merchant-friendly reason copy (`HUMAN_TAKEOVER_REASON_COPY`, unknown
+  reasons quoted verbatim); connector-health ok→broken alongside the one-time Resend alert.
+  (4) **worker cron** `llm.credits-check` (`30 */6 * * *`): each active openrouter BYOK key's balance
+  from `GET /api/v1/credits`; ONE `llm_credits_low` ping per below-threshold crossing (default $5,
+  `LLM_CREDITS_ALERT_THRESHOLD_USD`); the once-flag lives in connector metadata, is stamped ONLY after
+  a *delivered* ping (no channel yet → retried next pass) and re-arms on recovery; anthropic/openai
+  skipped (no balance API). (5) **api:** `POST /dashboard/connections/telegram` mints a 15-min signed
+  t.me deep link (fixed-width binary base64url token ≤64 chars — the dot-separated install-grant format
+  doesn't fit /start's charset; same authenticated-mint trust rules); bot webhook
+  `POST /webhooks/notifications/telegram` fails closed on `X-Telegram-Bot-API-Secret-Token`, binds the
+  sending chat on a valid `/start` (latest link wins — prior chats revoked, one chat per workspace),
+  confirms in-chat, acks everything else 2xx; disconnect rides the existing `:provider/disconnect`
+  (telegram = imap-style no-op provider-side revoke). (6) **dashboard:** `/settings/notifications`
+  under the Connections nav group — generate/open link, connected-chat state, confirm-gated disconnect,
+  "what gets sent" copy; `api.connectTelegram` in the api-client. Env (all-or-nothing trio, api +
+  worker must match): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`; the
+  worker Live layer also needs `CREDENTIAL_ENCRYPTION_KEY` (bindings are connector rows). Verified:
+  `pnpm build`, dashboard `next build`, full ci-local suite green at every commit (final run 1558
+  passed / 5 skipped). ⚠️ **NOT verified live** — needs a real @BotFather bot. Operator setup: create
+  bot → set the env trio on api+worker → register the webhook:
+  `curl https://api.telegram.org/bot<TOKEN>/setWebhook -d url=https://<api-host>/webhooks/notifications/telegram -d secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
+  **Follow-ups (recorded, not started):** Telegram inline approve/reject buttons (callback_query)
+  instead of bare links; per-kind notification preferences; Slack as the second channel through the
+  same Tag; an email leg for `llm_credits_low`; live end-to-end verification.
 - **2026-06-12 — Prompt-injection hardening (5 mitigations, TDD):** Shrank how often an injected
   customer email / poisoned knowledge doc / hostile order field can steer the agent. (1) **Untrusted-content
   framing** — new pure `agent-core/untrusted.ts` (`UNTRUSTED_OPEN/CLOSE` sentinels, `wrapUntrusted` which
