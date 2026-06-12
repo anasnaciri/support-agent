@@ -1,5 +1,9 @@
 import { Cause, Effect } from "effect";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  lookup as dnsLookup,
+  resolveMx as dnsResolveMx,
+} from "node:dns/promises";
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -215,6 +219,7 @@ import {
   parseImapConnectBody,
   imapConnectionMetadata,
 } from "./imap-connect.js";
+import { discoverImapSettings, type DiscoveryIo } from "./imap-discovery.js";
 import {
   backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
@@ -2763,6 +2768,54 @@ const handleDashboardConnectImap = async (
     });
   }
   return sendJson(res, 200, { ok: true, provider: "imap", mailbox });
+};
+
+// Live IO for IMAP/SMTP autodiscovery. The only HTTP target is the fixed,
+// trusted ISPDB host (the merchant-controlled domain is hostname-validated
+// before interpolation, see imap-discovery.ts) and the DNS legs return data
+// we never connect to here — discovered hosts come back as form prefill and
+// get the same verify-before-save treatment as merchant-typed ones.
+const liveDiscoveryIo: DiscoveryIo = {
+  fetchText: async (url) => {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(4_000),
+        headers: { accept: "text/xml,application/xml" },
+      });
+      return res.ok ? await res.text() : null;
+    } catch {
+      return null;
+    }
+  },
+  resolveMx: (domain) => dnsResolveMx(domain),
+  hostExists: async (host) => {
+    try {
+      return (await dnsLookup(host, { all: true })).length > 0;
+    } catch {
+      return false;
+    }
+  },
+};
+
+// POST /dashboard/connections/imap/discover — find a mailbox's server
+// settings from just the address, so the connect form can hide the
+// host/port fields from non-technical merchants. Read-only (nothing is
+// persisted), hence no legal-acceptance gate; authorization is the
+// dashboard session.
+const handleDashboardImapDiscover = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+  io: DiscoveryIo = liveDiscoveryIo,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const email = parseJsonBody(req)["email"];
+  if (typeof email !== "string" || email.trim().length === 0) {
+    return sendJson(res, 400, { error: "missing_email" });
+  }
+  return sendJson(res, 200, await discoverImapSettings(email.trim(), io));
 };
 
 // POST /dashboard/connections/:provider/disconnect — revoke a connector.
@@ -5524,6 +5577,11 @@ export const startServer = async (
     "/dashboard/connections/imap",
     "Connect a generic IMAP/SMTP mailbox (credentials, no OAuth)",
     handleDashboardConnectImap,
+  );
+  dashboardPost(
+    "/dashboard/connections/imap/discover",
+    "Autodiscover IMAP/SMTP settings for a mailbox address",
+    handleDashboardImapDiscover,
   );
   dashboardPost(
     "/dashboard/connections/telegram",
