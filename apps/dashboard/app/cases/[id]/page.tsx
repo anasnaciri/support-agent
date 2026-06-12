@@ -26,6 +26,8 @@ import {
   conversationThreadUnavailableView,
   formatAttachmentSize,
   parseCaseTimelineMode,
+  curatedTimelineEvent,
+  type CuratedTimelineItem,
 } from "./case-timeline";
 import {
   RECOMMENDATION_LABEL,
@@ -144,12 +146,6 @@ const approvalBanner = (sp: {
 };
 
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
-const INBOUND_EMAIL_EVENTS = new Set(["message.received", "customer.replied"]);
-const OUTBOUND_EMAIL_TOOLS = new Set([
-  "conversation.reply",
-  "conversation.ask_customer",
-]);
-
 const toneToVariant = (tone: Banner["tone"]) =>
   tone === "success" ? "success" : tone === "info" ? "info" : "warning";
 
@@ -174,11 +170,6 @@ const detailRecord = (
 const detailString = (details: unknown, key: string): string | null => {
   const value = detailRecord(details)?.[key];
   return typeof value === "string" ? value : null;
-};
-
-const detailBoolean = (details: unknown, key: string): boolean | null => {
-  const value = detailRecord(details)?.[key];
-  return typeof value === "boolean" ? value : null;
 };
 
 /**
@@ -227,13 +218,6 @@ const BodyBlock = ({ value }: { readonly value: unknown }) => {
   );
 };
 
-const actorLabel = (entry: AuditEntry): string => {
-  if (entry.actorType === "customer") return "Customer";
-  if (entry.actorType === "agent") return `Agent ${entry.actorId ?? "unknown"}`;
-  if (entry.actorType === "user") return `Human ${entry.actorId ?? "unknown"}`;
-  return entry.actorId ?? "System";
-};
-
 /**
  * Sum input + output tokens across every `llm.decision` audit row on
  * the case. Each row's `details.usage` is populated by `LLMServiceLive`
@@ -264,13 +248,7 @@ const sumCaseTokens = (
 };
 
 type SimplifiedTimelineItem =
-  | {
-      readonly kind: "email";
-      readonly id: string;
-      readonly title: string;
-      readonly responsible: string;
-      readonly occurredAt: string;
-    }
+  | CuratedTimelineItem
   | {
       readonly kind: "approval";
       readonly id: string;
@@ -283,38 +261,6 @@ type SimplifiedTimelineItem =
       readonly recommendation: RefundRecommendationSummary;
       readonly occurredAt: string;
     };
-
-const simplifiedEmailEvent = (
-  entry: AuditEntry,
-  customerEmail: string | null,
-): SimplifiedTimelineItem | null => {
-  if (entry.action === "event.received") {
-    const eventType = detailString(entry.details, "eventType");
-    if (!eventType || !INBOUND_EMAIL_EVENTS.has(eventType)) return null;
-    return {
-      kind: "email",
-      id: `audit-${entry.id}`,
-      title: "Email received",
-      responsible: customerEmail ? `Customer: ${customerEmail}` : "Customer",
-      occurredAt: entry.occurredAt,
-    };
-  }
-
-  if (entry.action === "tool.invoked") {
-    const tool = detailString(entry.details, "tool");
-    if (!tool || !OUTBOUND_EMAIL_TOOLS.has(tool)) return null;
-    if (detailBoolean(entry.details, "ok") === false) return null;
-    return {
-      kind: "email",
-      id: `audit-${entry.id}`,
-      title: "Email sent",
-      responsible: actorLabel(entry),
-      occurredAt: entry.occurredAt,
-    };
-  }
-
-  return null;
-};
 
 const RefundRecommendationBlock = ({
   recommendation,
@@ -547,8 +493,8 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   );
   const simplifiedTimelineItems: SimplifiedTimelineItem[] = [
     ...entries
-      .map((entry) => simplifiedEmailEvent(entry, customerEmail))
-      .filter((item): item is SimplifiedTimelineItem => item !== null),
+      .map((entry) => curatedTimelineEvent(entry, customerEmail))
+      .filter((item): item is CuratedTimelineItem => item !== null),
     ...recommendationTimelineItems,
     ...allApprovals.map((approval) => ({
       kind: "approval" as const,
@@ -681,16 +627,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             <Button
               asChild
               size="sm"
-              variant={timelineMode === "full" ? "default" : "outline"}
-            >
-              <Link href={timelineHref("full")}>Full</Link>
-            </Button>
-            <Button
-              asChild
-              size="sm"
               variant={timelineMode === "simplified" ? "default" : "outline"}
             >
-              <Link href={timelineHref("simplified")}>Simplified</Link>
+              <Link href={timelineHref("simplified")}>Activity</Link>
             </Button>
             <Button
               asChild
@@ -698,6 +637,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               variant={timelineMode === "email" ? "default" : "outline"}
             >
               <Link href={timelineHref("email")}>Email thread</Link>
+            </Button>
+            <Button
+              asChild
+              size="sm"
+              variant={timelineMode === "full" ? "default" : "outline"}
+            >
+              <Link href={timelineHref("full")}>Full audit</Link>
             </Button>
           </div>
         </div>
@@ -743,6 +689,40 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                             {item.responsible} ·{" "}
                             {formatDateTime(item.occurredAt)}
                           </div>
+                        </CardContent>
+                      ) : item.kind === "note" ? (
+                        <CardContent className="space-y-1.5 p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-medium text-sm">
+                              {item.title}
+                            </div>
+                            <Badge variant="outline">Heads-up to you</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {item.delivered === false
+                              ? "Not delivered — no notification channel connected"
+                              : "Sent to your notification channel"}{" "}
+                            · {formatDateTime(item.occurredAt)}
+                          </div>
+                          {item.message ? (
+                            <p className="text-sm text-muted-foreground">
+                              {item.message}
+                            </p>
+                          ) : null}
+                        </CardContent>
+                      ) : item.kind === "status" ? (
+                        <CardContent className="space-y-1.5 p-4">
+                          <div className="font-medium text-sm">
+                            {item.title}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDateTime(item.occurredAt)}
+                          </div>
+                          {item.description ? (
+                            <p className="text-sm text-muted-foreground">
+                              {item.description}
+                            </p>
+                          ) : null}
                         </CardContent>
                       ) : item.kind === "refundRecommendation" ? (
                         <CardContent className="space-y-3 p-4">
@@ -826,8 +806,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           ) : (
             <Card>
               <CardContent className="p-4 text-sm text-muted-foreground">
-                No sent or received emails, summary, triage notes, or approvals
-                recorded for this case yet.
+                No activity to show yet — customer messages, the agent's
+                findings and answers, and anything that needs you will appear
+                here.
               </CardContent>
             </Card>
           )

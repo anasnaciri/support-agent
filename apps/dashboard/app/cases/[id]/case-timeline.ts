@@ -4,10 +4,15 @@ import type {
 
 export type CaseTimelineMode = "full" | "simplified" | "email";
 
+/**
+ * The curated ("simplified") view is the DEFAULT: merchants see customer
+ * messages, the agent's outward findings/answers, and human touchpoints.
+ * The full audit trail stays one click away behind `?timeline=full`.
+ */
 export const parseCaseTimelineMode = (
   value: string | undefined,
 ): CaseTimelineMode =>
-  value === "simplified" || value === "email" ? value : "full";
+  value === "full" || value === "email" ? value : "simplified";
 
 export const buildCaseTimelineHref = (
   caseId: string,
@@ -18,13 +23,192 @@ export const buildCaseTimelineHref = (
   for (const [key, value] of Object.entries(params)) {
     if (value) query.set(key, value);
   }
-  if (mode === "full") {
+  if (mode === "simplified") {
     query.delete("timeline");
   } else {
     query.set("timeline", mode);
   }
   const search = query.toString();
   return search ? `/cases/${caseId}?${search}` : `/cases/${caseId}`;
+};
+
+// ============================================================
+// Curated timeline events
+// ============================================================
+//
+// Maps raw audit entries onto the merchant-facing timeline. Deliberately
+// allow-listed: anything not matched here (agent handoffs, Shopify /
+// knowledge lookups, case bookkeeping, llm.decision rows, runtime holds)
+// is internal plumbing and stays hidden. Approvals are NOT mapped from
+// audit rows — the page builds richer approval cards from the approval
+// records themselves.
+
+export interface CuratedAuditEntry {
+  readonly id: string;
+  readonly action: string;
+  readonly details: unknown;
+  readonly occurredAt: string;
+  readonly actorType?: string | null;
+  readonly actorId?: string | null;
+}
+
+export type CuratedTimelineItem =
+  | {
+      readonly kind: "email";
+      readonly id: string;
+      readonly title: "Email received" | "Email sent";
+      readonly responsible: string;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly kind: "note";
+      readonly id: string;
+      /** Heads-up title the agent sent the merchant. */
+      readonly title: string;
+      readonly message: string | null;
+      /** Whether the ping reached a connected channel; null on older rows. */
+      readonly delivered: boolean | null;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly kind: "status";
+      readonly id: string;
+      readonly title: string;
+      readonly description: string | null;
+      readonly occurredAt: string;
+    };
+
+const INBOUND_EMAIL_EVENTS = new Set(["message.received", "customer.replied"]);
+const OUTBOUND_EMAIL_TOOLS = new Set([
+  "conversation.reply",
+  "conversation.ask_customer",
+]);
+
+/** Merchant-facing copy for escalation reason codes (mirrors the
+ * runtime's Telegram copy); unknown codes are quoted verbatim — better
+ * an ugly line than a hidden escalation. */
+const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
+  max_turns_exceeded: "The agent hit its work limit before finishing.",
+  approval_expired: "An approval request expired before anyone decided.",
+  approval_input_invalid:
+    "An edited approval no longer matched what the action expects.",
+  approval_denied_by_policy:
+    "Your policy settings blocked the approved action.",
+  approved_tool_failed: "The approved action failed while executing.",
+  "approval rejected": "A draft was rejected, so the case moved to you.",
+  llm_credential_missing: "The AI provider key is missing.",
+  llm_credential_revoked: "The AI provider key was revoked.",
+  workflow_retries_exhausted:
+    "Processing kept failing and was stopped after several retries.",
+  llm_context_too_large: "The conversation grew too large for the AI model.",
+  llm_safety_blocked: "The AI model declined to continue on this content.",
+};
+
+const rec = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+
+const str = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
+
+export const curatedTimelineEvent = (
+  entry: CuratedAuditEntry,
+  customerEmail: string | null,
+): CuratedTimelineItem | null => {
+  const details = rec(entry.details) ?? {};
+
+  if (entry.action === "event.received") {
+    const eventType = str(details["eventType"]);
+    if (!eventType || !INBOUND_EMAIL_EVENTS.has(eventType)) return null;
+    return {
+      kind: "email",
+      id: `audit-${entry.id}`,
+      title: "Email received",
+      responsible: customerEmail ? `Customer: ${customerEmail}` : "Customer",
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  if (entry.action === "tool.invoked") {
+    const tool = str(details["tool"]);
+    if (!tool || details["ok"] === false) return null;
+    if (OUTBOUND_EMAIL_TOOLS.has(tool)) {
+      return {
+        kind: "email",
+        id: `audit-${entry.id}`,
+        title: "Email sent",
+        responsible:
+          entry.actorType === "agent"
+            ? `Agent ${entry.actorId ?? "unknown"}`
+            : (entry.actorId ?? "System"),
+        occurredAt: entry.occurredAt,
+      };
+    }
+    if (tool === "merchant.notify") {
+      const notify = rec(details["notify"]);
+      return {
+        kind: "note",
+        id: `audit-${entry.id}`,
+        title: str(notify?.["title"]) ?? "Heads-up sent to you",
+        message: str(notify?.["message"]),
+        delivered:
+          typeof notify?.["delivered"] === "boolean"
+            ? notify["delivered"]
+            : null,
+        occurredAt: entry.occurredAt,
+      };
+    }
+    return null;
+  }
+
+  if (entry.action === "case.escalated_to_human") {
+    const reason = str(details["reason"]);
+    return {
+      kind: "status",
+      id: `audit-${entry.id}`,
+      title: "Needs you — the agent stopped here",
+      description: reason
+        ? (ESCALATION_REASON_COPY[reason] ?? `Reason: ${reason}`)
+        : null,
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  if (entry.action === "case.taken_over") {
+    return {
+      kind: "status",
+      id: `audit-${entry.id}`,
+      title: "You took over this case",
+      description: null,
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  if (entry.action === "case.resumed") {
+    return {
+      kind: "status",
+      id: `audit-${entry.id}`,
+      title: "Handed back to the agent",
+      description:
+        str(details["trigger"]) === "dashboard_retry"
+          ? "Retrying immediately."
+          : null,
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  if (entry.action === "case.resolved") {
+    return {
+      kind: "status",
+      id: `audit-${entry.id}`,
+      title: "Case resolved",
+      description: null,
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  return null;
 };
 
 const formatUnit = (value: number, unit: string): string => {
