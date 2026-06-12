@@ -67,8 +67,16 @@ export const caseUpdateContext = defineTool({
         patch["productMatch"] = input.productMatch;
       if (input.extra !== undefined) Object.assign(patch, input.extra);
 
+      // The dashboard's category chip and the cases-list search filter read
+      // the `category` column, not the context blob — mirror the
+      // classification there so triage output is visible outside the agent.
       const updated = yield* repo
-        .update(ctx.caseId, { context: patch })
+        .update(ctx.caseId, {
+          context: patch,
+          ...(input.classification !== undefined
+            ? { category: input.classification }
+            : {}),
+        })
         .pipe(
           Effect.mapError(
             (e) =>

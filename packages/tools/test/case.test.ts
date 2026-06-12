@@ -151,6 +151,52 @@ describe("case.update_context tool", () => {
     expect(result.context["priorityHint"]).toBe("p2");
   });
 
+  it("also sets the case `category` column when classification is provided", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* RepoTag;
+          const created = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+          });
+          yield* caseUpdateContext.execute(
+            { classification: "refund_request" },
+            baseCtx(created.id),
+          );
+          return yield* repo.getById(created.id);
+        }),
+        toolEnv,
+      ),
+    );
+    expect(result.category).toBe("refund_request");
+    expect(result.context["classification"]).toBe("refund_request");
+  });
+
+  it("leaves `category` untouched when classification is absent", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* RepoTag;
+          const created = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            category: "where_is_order",
+          });
+          yield* caseUpdateContext.execute(
+            { notes: "follow-up from customer" },
+            baseCtx(created.id),
+          );
+          return yield* repo.getById(created.id);
+        }),
+        toolEnv,
+      ),
+    );
+    expect(result.category).toBe("where_is_order");
+  });
+
   it("returns ToolOutputInvalid when the case does not exist", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.provide(

@@ -14,6 +14,19 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Case category column never written (dashboard showed all "uncategorized"):**
+  `case.update_context` wrote the triage `classification` only into the `context` blob, while the dashboard
+  chip, the contracts, and the cases-list search filter (`ilike(cases.category, …)`) all read the
+  `cases.category` column — whose only writer was the mock seed script (why seeded refund cases looked
+  fine). Fix (TDD, `packages/tools/test/case.test.ts`): the tool now mirrors `classification` into
+  `category` in the same atomic `repo.update` (absent classification leaves the column untouched), and
+  data migration `0021_backfill_case_category` backfills existing rows from `context->>'classification'`
+  (applied + verified locally: 141 rows categorized; 2 remaining NULLs have no classification either).
+  Decision recorded: keep BOTH copies deliberately — the blob is rendered verbatim into agent prompts
+  (`agent-runtime.ts:251`) so specialists see the triage decision; the column serves SQL/UI; the single
+  writer keeps them in lockstep. Consolidating to column-only (runtime would inject `category` into
+  prompts) is possible later but risks LLM-behavior regressions across five specialists for no
+  functional gain.
 - **2026-06-12 — Sign-out safe-cone fix (rail WIP):** The uncommitted expand-on-hover rail + two-step
   sign-out confirm uses a clip-path "safe cone" (`lib/cone.ts` → `--cone-x/--cone-y` on the panel's
   `::before`) to bridge the rail→panel gap. The cone juddered and the popover closed mid-travel. Two root
