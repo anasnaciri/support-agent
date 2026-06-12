@@ -1810,7 +1810,29 @@ export const AgentRuntimeDefault = Layer.effect(
               const outputDetails =
                 tool.name === "refund.recommend" && result._tag === "Right"
                   ? { output: result.right }
-                  : {};
+                  : // Capture the heads-up content (and whether it reached
+                    // the merchant) so the dashboard timeline can show WHAT
+                    // the agent flagged, not just that merchant.notify ran.
+                    tool.name === "merchant.notify" && result._tag === "Right"
+                    ? {
+                        notify: {
+                          ...(typeof (callInput as { title?: unknown }).title ===
+                          "string"
+                            ? { title: (callInput as { title: string }).title }
+                            : {}),
+                          ...(typeof (callInput as { message?: unknown })
+                            .message === "string"
+                            ? {
+                                message: (callInput as { message: string })
+                                  .message,
+                              }
+                            : {}),
+                          delivered:
+                            (result.right as { delivered?: unknown })
+                              .delivered === true,
+                        },
+                      }
+                    : {};
               yield* audit.record({
                 tenantId: current.tenantId,
                 caseId: current.id,

@@ -4678,6 +4678,7 @@ describe("AgentRuntime — merchant notifications", () => {
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
           const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -4685,7 +4686,8 @@ describe("AgentRuntime — merchant notifications", () => {
             subject: "Where is my order?",
           });
           const result = yield* runtime.handleEvent(customerReplied(created.id));
-          return { result, caseId: created.id };
+          const entries = yield* audit.forCase(created.id);
+          return { result, caseId: created.id, entries };
         }),
         notifEnv(script, notifLayer as never),
       ),
@@ -4697,5 +4699,20 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(sent.notification.kind).toBe("agent_note");
     expect(sent.notification.caseId).toBe(out.caseId);
     expect(sent.notification.title).toBe("Unverifiable claim");
+
+    // The audit row carries the heads-up content so the dashboard
+    // timeline can show WHAT the agent flagged, not just that it did.
+    const audited = out.entries.find(
+      (e) =>
+        e.action === "tool.invoked" &&
+        (e.details as { tool?: string }).tool === "merchant.notify",
+    );
+    expect(audited).toBeDefined();
+    const notify = (audited!.details as {
+      notify?: { title?: string; message?: string; delivered?: boolean };
+    }).notify;
+    expect(notify?.title).toBe("Unverifiable claim");
+    expect(notify?.message).toContain("promo code");
+    expect(notify?.delivered).toBe(true);
   });
 });
