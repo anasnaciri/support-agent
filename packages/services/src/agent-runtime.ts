@@ -401,6 +401,42 @@ const deriveTickLockKey = (
   }
 };
 
+/**
+ * Prompt-injection mitigation (refund scope): warn when a proposed
+ * `refund.create` targets an order whose customer email doesn't match the
+ * case's bound customer. A prompt-injected agent could be steered to refund an
+ * unrelated order; the order's customer is authoritative (Shopify data) and
+ * the case's `customerEmail` is stamped by the runtime from the inbound
+ * sender (not the LLM), so a divergence is a strong "this refund may be aimed
+ * at the wrong order" signal for the human approver.
+ *
+ * Returns the risk-flag string to stamp, or null when there's nothing to warn
+ * about: not a refund, the case customer is unknown, the order wasn't looked
+ * up this tick, the looked-up order has no email, or the emails match. Fails
+ * OPEN (null) on every missing input so it never blocks a legitimate refund —
+ * it only adds a warning when it has positive evidence of a mismatch.
+ *
+ * Pure + exported so the decision logic is unit-tested without the runtime.
+ */
+export const refundCustomerMismatchFlag = (
+  input: unknown,
+  caseContext: Record<string, unknown>,
+  seenOrderEmails: ReadonlyMap<string, string | null>,
+): string | null => {
+  const caseEmail = caseContext["customerEmail"];
+  if (typeof caseEmail !== "string" || caseEmail.trim() === "") return null;
+  if (!input || typeof input !== "object") return null;
+  const orderId = (input as Record<string, unknown>)["orderId"];
+  if (typeof orderId !== "string") return null;
+  if (!seenOrderEmails.has(orderId)) return null;
+  const orderEmail = seenOrderEmails.get(orderId);
+  if (typeof orderEmail !== "string" || orderEmail.trim() === "") return null;
+  if (orderEmail.trim().toLowerCase() === caseEmail.trim().toLowerCase()) {
+    return null;
+  }
+  return "refund_customer_mismatch";
+};
+
 const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
   switch (tool.risk) {
     case "read":
@@ -1129,6 +1165,11 @@ export const AgentRuntimeDefault = Layer.effect(
           context: working.context,
         });
         let current = working;
+        // Order id/name → customer email, populated as `shopify.get_order`
+        // results come back this tick. Used to flag a `refund.create` that
+        // targets an order belonging to a different customer than the case
+        // (prompt-injection scope guard — see refundCustomerMismatchFlag).
+        const seenOrderEmails = new Map<string, string | null>();
 
         for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
           const schemas = yield* tools.schemasFor(agent.tools);
@@ -1533,6 +1574,37 @@ export const AgentRuntimeDefault = Layer.effect(
             }
           }
 
+          // Refund scope guard (prompt-injection mitigation): before gating a
+          // refund, check whether it targets an order whose customer differs
+          // from the case's bound customer and, if so, stamp a risk flag onto
+          // the case context. The approval card surfaces riskFlags as chips,
+          // so the human approver is warned the refund may be aimed at an
+          // unrelated order. Best-effort and additive — a write failure or a
+          // fail-open (unknown) result never blocks the refund.
+          if (tool.name === "refund.create") {
+            const mismatchFlag = refundCustomerMismatchFlag(
+              callInput,
+              current.context,
+              seenOrderEmails,
+            );
+            if (mismatchFlag) {
+              const existingFlags = Array.isArray(current.context["riskFlags"])
+                ? (current.context["riskFlags"] as unknown[]).filter(
+                    (f): f is string => typeof f === "string",
+                  )
+                : [];
+              if (!existingFlags.includes(mismatchFlag)) {
+                const patched: Record<string, unknown> = {
+                  ...current.context,
+                  riskFlags: [...existingFlags, mismatchFlag],
+                };
+                current = yield* cases
+                  .update(current.id, { context: patched as never })
+                  .pipe(Effect.catchAll(() => Effect.succeed(current)));
+              }
+            }
+          }
+
           const permission = yield* perms.check({
             tenantId: current.tenantId,
             agent,
@@ -1730,6 +1802,24 @@ export const AgentRuntimeDefault = Layer.effect(
               toolName: tool.name,
               content: exec.right,
             });
+            // Capture the order→customer-email mapping from any get_order
+            // result so a later refund.create can be checked against the
+            // case's bound customer (refund scope guard).
+            if (
+              tool.name === "shopify.get_order" &&
+              exec.right &&
+              typeof exec.right === "object"
+            ) {
+              const o = exec.right as Record<string, unknown>;
+              const email =
+                typeof o["email"] === "string" ? (o["email"] as string) : null;
+              if (typeof o["id"] === "string") {
+                seenOrderEmails.set(o["id"] as string, email);
+              }
+              if (typeof o["name"] === "string") {
+                seenOrderEmails.set(o["name"] as string, email);
+              }
+            }
             // The tool may have mutated the case (e.g. transitioned status).
             current = yield* cases.getById(current.id, current.tenantId);
           } else {

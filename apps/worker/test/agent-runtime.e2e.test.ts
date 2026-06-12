@@ -4062,4 +4062,107 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     const result = await runTick(layer);
     expect(result.type).toBe("Completed");
   });
+
+  it("flags refund_customer_mismatch when the refund order belongs to a different customer than the case", async () => {
+    // Prompt-injection scope guard: the case's bound customer (jane@,
+    // stamped by the runtime from the inbound sender — not the LLM) differs
+    // from the order's customer (buyer@). A refund steered onto an unrelated
+    // order trips the guard, which stamps a risk flag the approval card shows.
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId: refundOrderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "refund.create",
+        input: {
+          orderId: refundOrderId,
+          amount: { amount: "100.00", currencyCode: "USD" },
+          reason: "Customer-requested refund",
+          notifyCustomer: false,
+        },
+      },
+      { type: "final_message", text: "done" },
+    ];
+
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([[refundTenantId, tenantSettings(2500, 20000)]]),
+    });
+    const connectors = ConnectorCredentialStoreTest(connectionsWithWriteOrders);
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([refundReviewAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+        shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceLive.pipe(
+        Layer.provide(Layer.mergeAll(tenants, connectors)),
+      ),
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[refundOrderId, fixtureOrder("100.00")]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: refundTenantId,
+            channel: "email",
+            currentAgentId: refundReviewAgent.id,
+            subject: "Refund please",
+            context: { customerEmail: "jane@example.com" },
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-mismatch" as never,
+              messageId: "m-mismatch",
+              from: { name: null, email: "jane@example.com" },
+              to: [],
+              subject: "Re: Refund please",
+              bodyText: "please refund",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          return { result, fetched };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.context["riskFlags"]).toContain(
+      "refund_customer_mismatch",
+    );
+  });
 });

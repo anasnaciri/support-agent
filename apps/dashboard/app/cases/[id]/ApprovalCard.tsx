@@ -19,6 +19,7 @@ import {
   recommendationVariant,
   type RefundRecommendationSummary,
 } from "./refund-recommendation";
+import { riskFlagLabel } from "./risk-flag-label";
 
 interface Props {
   readonly approval: ApprovalDetail;
@@ -57,11 +58,6 @@ interface Props {
    */
   readonly riskFlags?: ReadonlyArray<string>;
 }
-
-const riskFlagLabel = (flag: string): string =>
-  flag.startsWith("duplicate_photo_seen_in_case_")
-    ? "Duplicate photo seen on another case"
-    : flag;
 
 const PRODUCT_MATCH_LABEL: Record<
   NonNullable<Props["productMatch"]>,
