@@ -631,6 +631,24 @@ const ONLINE_STORE_PAGES_QUERY = `
   }
 `;
 
+// Customer pickup points. `localPickupSettingsV2` is non-null exactly when
+// the location has local pickup enabled — that's the customer-facing
+// signal; everything else (warehouses, 3PLs, dropship origins) is filtered
+// out in the mapper and never leaves the service. Needs `read_locations`.
+const PICKUP_LOCATIONS_QUERY = `
+  query PickupLocations {
+    locations(first: 50, includeInactive: false) {
+      nodes {
+        name
+        localPickupSettingsV2 { instructions }
+        address {
+          address1 address2 city province country zip phone
+        }
+      }
+    }
+  }
+`;
+
 const SEARCH_CUSTOMER_QUERY = `
   query SearchCustomer($q: String!) {
     customers(first: 1, query: $q) {
@@ -923,6 +941,48 @@ export const ShopifyServiceLive = Layer.effect(
                   url: p.url,
                 }),
               ),
+            ),
+          ),
+        ),
+
+      listPickupLocations: (tenantId) =>
+        withCreds(tenantId, (creds) =>
+          runQuery<{
+            locations: {
+              nodes: ReadonlyArray<{
+                name: string;
+                localPickupSettingsV2: { instructions: string | null } | null;
+                address: {
+                  address1: string | null;
+                  address2: string | null;
+                  city: string | null;
+                  province: string | null;
+                  country: string | null;
+                  zip: string | null;
+                  phone: string | null;
+                } | null;
+              }>;
+            };
+          }>(http, creds, tenantId, PICKUP_LOCATIONS_QUERY, {}).pipe(
+            Effect.map((data) =>
+              data.locations.nodes
+                .filter((l) => l.localPickupSettingsV2 !== null)
+                .map((l) => {
+                  const instructions =
+                    l.localPickupSettingsV2?.instructions?.trim() ?? "";
+                  return {
+                    name: l.name,
+                    instructions:
+                      instructions.length > 0 ? instructions : null,
+                    address1: l.address?.address1 ?? null,
+                    address2: l.address?.address2 ?? null,
+                    city: l.address?.city ?? null,
+                    province: l.address?.province ?? null,
+                    country: l.address?.country ?? null,
+                    zip: l.address?.zip ?? null,
+                    phone: l.address?.phone ?? null,
+                  };
+                }),
             ),
           ),
         ),

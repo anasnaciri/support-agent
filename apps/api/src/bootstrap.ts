@@ -79,6 +79,9 @@ export interface ShopifyAppConfig {
  *      - `read_products`    → shopify.get_product (damaged-product photo
  *                             cross-check)
  *      - `write_orders`     → refund.create (and future order-edit tools)
+ *      - `read_locations`   → shopify.list_pickup_locations (general-inquiry
+ *                             pickup answers; the service filters to
+ *                             pickup-enabled locations only)
  *      - `read_legal_policies` → post-connect shop-policy import (seeds the
  *                             knowledge base with the store's shipping +
  *                             refund policy text). Not tied to a tool — the
@@ -101,6 +104,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "write_orders",
   "read_legal_policies",
   "read_online_store_pages",
+  "read_locations",
 ];
 
 export interface GoogleAppConfig {

@@ -112,6 +112,18 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     ) => Effect.Effect<ReadonlyArray<ShopPolicy>, ShopifyError>;
 
     /**
+     * List the store's customer pickup locations — ONLY active locations
+     * with local pickup enabled. The filter is deliberately part of the
+     * service contract, not the caller's job: Shopify's raw `locations`
+     * include private warehouses, 3PLs, and dropship origins, and no
+     * caller of this service may ever see those. Returns an empty array
+     * when the store offers no pickup. Needs the `read_locations` scope.
+     */
+    readonly listPickupLocations: (
+      tenantId: TenantId,
+    ) => Effect.Effect<ReadonlyArray<PickupLocation>, ShopifyError>;
+
+    /**
      * Read the store's Online Store pages (About, Contact, FAQ, blog
      * landing pages, …) with their publication flag. Backs the
      * post-connect knowledge import's page leg — the importer applies a
@@ -256,6 +268,25 @@ export interface ShopPolicy {
 }
 
 /**
+ * One customer pickup point: an active store location with local pickup
+ * enabled. Existence in this type already implies "customers may come
+ * here" — locations without pickup (warehouses, 3PLs) never reach this
+ * shape. `instructions` is the merchant's pickup note ("ring the side
+ * bell"), null when unset.
+ */
+export interface PickupLocation {
+  readonly name: string;
+  readonly instructions: string | null;
+  readonly address1: string | null;
+  readonly address2: string | null;
+  readonly city: string | null;
+  readonly province: string | null;
+  readonly country: string | null;
+  readonly zip: string | null;
+  readonly phone: string | null;
+}
+
+/**
  * One Online Store page as authored in the Shopify admin. `body` is
  * HTML; `handle` is the URL slug (the public page lives at
  * `<primary domain>/pages/<handle>` when `isPublished` is true). Kept
@@ -368,6 +399,11 @@ export interface ShopifyTestFixtures {
     ReadonlyArray<ShopPage>,
     ShopifyError
   >;
+  /**
+   * Fixture for `listPickupLocations`. When unset the default Test impl
+   * returns an empty list (the common "store offers no pickup" case).
+   */
+  readonly pickupLocations?: ReadonlyArray<PickupLocation>;
 }
 
 /**
@@ -415,6 +451,8 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         fixtures.onlineStorePages
           ? fixtures.onlineStorePages()
           : Effect.succeed([]),
+      listPickupLocations: (_tenantId) =>
+        Effect.succeed(fixtures.pickupLocations ?? []),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
       findOrderByName: (_tenantId, name) => {

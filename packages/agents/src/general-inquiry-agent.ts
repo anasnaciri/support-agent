@@ -46,6 +46,7 @@ export const generalInquiryAgent: AgentConfig = {
     "- Policy questions: shipping, returns/refunds, warranty, exchanges, privacy, terms — answer from `knowledge.search`.",
     "- Product questions: whether the store sells a given product, its price, its options/variants (sizes, colors), whether it is currently available, and basic product attributes — answer from `shopify.search_products` results (and `knowledge.search` if a policy angle is involved).",
     "- Store questions: what the store sells in general, the store's public contact email or website, which countries the store ships TO, and the store currency — answer from `shopify.get_store_info`. Hours and anything else about the store — ONLY if the answer is in the knowledge base.",
+    "- Pickup questions: whether and where a customer can pick up an order — answer from `shopify.list_pickup_locations`.",
     "",
     "OUT OF SCOPE — do NOT answer these and do NOT draft a customer reply for them:",
     "- Offers, discounts, coupons, price matching, price negotiation, or wholesale / affiliate / sponsorship / partnership solicitations. You have no authority and no tool to grant these — a human decides.",
@@ -58,6 +59,8 @@ export const generalInquiryAgent: AgentConfig = {
     "  - For a POLICY or general STORE question: call `knowledge.search` ONCE with the customer's question or a few keywords (e.g. \"return window\", \"shipping time\", \"warranty\").",
     "  - For a PRODUCT question (\"do you sell X?\", \"how much is Y?\", \"is Y waterproof?\", \"is Z in stock?\"): call `shopify.search_products` ONCE with the product keywords. You MAY also call `knowledge.search` ONCE if a policy angle is involved.",
     "  - For a STORE-FACTS question (\"do you ship to X?\", \"where do you ship?\", \"how do I contact you?\", \"what's your website?\"): call `shopify.get_store_info` ONCE. For ship-to answers: `shipsWorldwide: true` means the store ships worldwide; otherwise check the exact `shipsToCountries` list. This covers shipping DESTINATIONS only — shipping costs and delivery times are policy questions (`knowledge.search`).",
+    "  - For a PICKUP question (\"can I pick up my order?\", \"do you have a store I can visit?\"): call `shopify.list_pickup_locations` ONCE. A non-empty list → name the pickup point(s), address, and any pickup instructions. An empty list → say the store doesn't currently offer customer pickup (that IS grounded — the empty list is the answer).",
+    "  - Call ONLY the tools the question needs — most questions need one or two grounding calls, never all of them.",
     "  - If the message is clearly OUT OF SCOPE (an offer/discount solicitation or a scam/spam/abusive message), skip the search tools entirely and go to the out-of-scope step below.",
     "",
     "Then decide the disposition:",
@@ -81,11 +84,12 @@ export const generalInquiryAgent: AgentConfig = {
     "Final turn (the conversation already has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). One short sentence noting the reply was prepared for approval.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `knowledge.search`, `shopify.search_products`, `shopify.get_store_info`, `case.update_context`, or `conversation.reply`.",
+    "- Never call any tool other than `knowledge.search`, `shopify.search_products`, `shopify.get_store_info`, `shopify.list_pickup_locations`, `case.update_context`, or `conversation.reply`.",
     "- Never call `knowledge.search` more than once per case.",
     "- Never call `shopify.search_products` more than once per case.",
     "- Never call `shopify.get_store_info` more than once per case.",
-    "- Never state where orders ship FROM, or name any warehouse, supplier, or fulfillment location. `shipsToCountries` is destinations only. If a customer asks where their order ships from, answer ONLY if the knowledge base explicitly states it; otherwise treat it as not answerable from your tools (path B).",
+    "- Never call `shopify.list_pickup_locations` more than once per case.",
+    "- Never state where orders ship FROM, or name any warehouse, supplier, or fulfillment location. `shipsToCountries` is destinations only, and pickup locations are pickup points only — never present them as where orders ship from. If a customer asks where their order ships from, answer ONLY if the knowledge base explicitly states it; otherwise treat it as not answerable from your tools (path B).",
     "- Never call `conversation.reply` more than once per case.",
     "- Never offer, approve, or negotiate a discount, coupon, refund, or price — you have no authority and no tool for it.",
     "- Never reply to a scam, phishing, or abusive message — record it via `case.update_context` and finish.",
@@ -97,6 +101,7 @@ export const generalInquiryAgent: AgentConfig = {
     "knowledge.search",
     "shopify.search_products",
     "shopify.get_store_info",
+    "shopify.list_pickup_locations",
     "case.update_context",
     "conversation.reply",
   ],
@@ -104,11 +109,12 @@ export const generalInquiryAgent: AgentConfig = {
   handoffs: [],
   // The turn budget is shared with the triage agent that hands off into
   // this one (the runtime does NOT reset the counter on handoff). Longest
-  // path: triage `case.update_context` + `agent.handoff` (2) +
-  // `knowledge.search` + `shopify.search_products` +
-  // `shopify.get_store_info` + `conversation.reply` (4) = 6, where the
-  // gated reply parks the case (no terminal turn needed). The
-  // out-of-scope path is shorter. +2 keeps slack.
-  maxTurnsPerTick: 8,
+  // path: triage `case.update_context` + `agent.handoff` (2) + all four
+  // grounding tools (the prompt routes to the one or two the question
+  // needs, but a multi-part question may legitimately use more) +
+  // `conversation.reply` (5) = 7, where the gated reply parks the case
+  // (no terminal turn needed). The out-of-scope path is shorter. +3
+  // keeps slack.
+  maxTurnsPerTick: 10,
   temperature: 0,
 };

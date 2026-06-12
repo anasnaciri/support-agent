@@ -19,11 +19,15 @@ describe("general-inquiry-agent config", () => {
       "knowledge.search",
       "shopify.search_products",
       "shopify.get_store_info",
+      "shopify.list_pickup_locations",
       "case.update_context",
       "conversation.reply",
     ]);
     expect(generalInquiryAgent.handoffs).toEqual([]);
-    expect(generalInquiryAgent.maxTurnsPerTick).toBeGreaterThan(1);
+    // Shared with triage (the runtime doesn't reset the counter on
+    // handoff): 2 triage turns + 4 grounding tools + the gated reply = 7
+    // worst-case. The budget must cover that with slack.
+    expect(generalInquiryAgent.maxTurnsPerTick).toBeGreaterThanOrEqual(10);
     expect(generalInquiryAgent.promptTemplate.length).toBeGreaterThan(50);
   });
 
@@ -60,11 +64,13 @@ describe("general-inquiry-agent config", () => {
     expect(p).toContain("NEVER quantities");
   });
 
-  it("splits shipping-location semantics: ship-to from store info, ship-from never", () => {
+  it("splits shipping-location semantics: ship-to from store info, pickup from pickup locations, ship-from never", () => {
     const p = generalInquiryAgent.promptTemplate;
     // "Where do you ship?" → shipsToCountries / shipsWorldwide.
     expect(p).toContain("shipsToCountries");
     expect(p).toContain("shipsWorldwide");
+    // "Can I pick up?" → the pickup-enabled locations tool.
+    expect(p).toContain("shopify.list_pickup_locations");
     // "Where do orders ship from?" → never from store/location data; raw
     // locations can expose private warehouses and dropship origins.
     expect(p).toContain("Never state where orders ship FROM");

@@ -66,7 +66,12 @@ embedded = false
 # knowledge base with the store's About / Contact / FAQ pages (conservative
 # name match only). Not protected customer data. Same best-effort behavior —
 # installs predating this scope skip the page leg until re-OAuth.
-scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies,read_online_store_pages"
+#
+# read_locations → shopify.list_pickup_locations: customer pickup answers in
+# the general-inquiry agent. The service filters to pickup-ENABLED locations
+# only — private warehouses / 3PLs / dropship origins never surface. Not
+# protected customer data.
+scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies,read_online_store_pages,read_locations"
 
 [auth]
 redirect_urls = [

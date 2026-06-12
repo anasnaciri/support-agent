@@ -409,6 +409,120 @@ describe("ShopifyServiceLive — getOnlineStorePages", () => {
   });
 });
 
+describe("ShopifyServiceLive — listPickupLocations", () => {
+  it("returns only pickup-enabled locations and never raw warehouses", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              locations: {
+                nodes: [
+                  {
+                    name: "Downtown store",
+                    localPickupSettingsV2: {
+                      instructions: "Ring the bell at the side entrance.",
+                    },
+                    address: {
+                      address1: "1 Main St",
+                      address2: null,
+                      city: "Berlin",
+                      province: null,
+                      country: "Germany",
+                      zip: "10115",
+                      phone: "+49 30 1234",
+                    },
+                  },
+                  {
+                    // A fulfillment warehouse: no local-pickup settings.
+                    // Must NEVER surface — this is the privacy boundary.
+                    name: "3PL warehouse",
+                    localPickupSettingsV2: null,
+                    address: {
+                      address1: "Industriestr. 99",
+                      address2: null,
+                      city: "Leipzig",
+                      province: null,
+                      country: "Germany",
+                      zip: "04103",
+                      phone: null,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const locations = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.listPickupLocations(tenantId),
+        ),
+        layer,
+      ),
+    );
+    expect(locations).toEqual([
+      {
+        name: "Downtown store",
+        instructions: "Ring the bell at the side entrance.",
+        address1: "1 Main St",
+        address2: null,
+        city: "Berlin",
+        province: null,
+        country: "Germany",
+        zip: "10115",
+        phone: "+49 30 1234",
+      },
+    ]);
+    expect(captures).toHaveLength(1);
+    const body = JSON.parse(captures[0]!.body) as { query: string };
+    expect(body.query).toContain("query PickupLocations");
+    // Inactive locations are excluded at the query level.
+    expect(body.query).toContain("includeInactive: false");
+  });
+
+  it("returns an empty array when no location offers pickup", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              locations: {
+                nodes: [
+                  {
+                    name: "Warehouse",
+                    localPickupSettingsV2: null,
+                    address: {
+                      address1: null,
+                      address2: null,
+                      city: null,
+                      province: null,
+                      country: null,
+                      zip: null,
+                      phone: null,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+      ]),
+    );
+    const locations = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.listPickupLocations(tenantId),
+        ),
+        layer,
+      ),
+    );
+    expect(locations).toEqual([]);
+  });
+});
+
 describe("ShopifyServiceLive — getShopPolicies", () => {
   it("queries shop policies and maps the response", async () => {
     reset();

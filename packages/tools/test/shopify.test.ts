@@ -22,6 +22,7 @@ import {
   shopifyGetOrder,
   shopifyGetProduct,
   shopifyGetStoreInfo,
+  shopifyListPickupLocations,
   shopifySearchProducts,
   shopifyRefundCreate,
   shopifyRefundRecommend,
@@ -694,6 +695,102 @@ describe("shopify.get_store_info tool", () => {
     ).toBeUndefined();
     expect(
       (shopifyGetStoreInfo as { displayName?: unknown }).displayName,
+    ).toBeUndefined();
+  });
+});
+
+describe("shopify.list_pickup_locations tool", () => {
+  const downtown = {
+    name: "Downtown store",
+    instructions: "Ring the bell.",
+    address1: "1 Main St",
+    address2: null,
+    city: "Berlin",
+    province: null,
+    country: "Germany",
+    zip: "10115",
+    phone: "+49 30 1234",
+  };
+
+  it("returns the store's pickup locations", async () => {
+    const env = ShopifyServiceTest({ pickupLocations: [downtown] });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyListPickupLocations.execute(
+          {} as never,
+          baseCtx("c-pl-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const out = exit.value as Record<string, unknown>;
+    expect(out["locations"]).toEqual([downtown]);
+  });
+
+  it("returns an empty list when the store offers no pickup", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyListPickupLocations.execute(
+          {} as never,
+          baseCtx("c-pl-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect((exit.value as Record<string, unknown>)["locations"]).toEqual([]);
+  });
+
+  it("maps a ShopifyError to ToolOutputInvalid", async () => {
+    const env = Layer.succeed(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (await import("@support-agent/services")).ShopifyService as any,
+      {
+        listPickupLocations: () =>
+          Effect.fail(new ShopifyAuthMissing({ tenantId })),
+      },
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyListPickupLocations.execute(
+          {} as never,
+          baseCtx("c-pl-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("shopify.list_pickup_locations");
+        expect(err.issues).toEqual(["ShopifyAuthMissing"]);
+      }
+    }
+  });
+
+  it("declares read risk, allow permission, read_locations scope, and no tenant-control surface", () => {
+    expect(shopifyListPickupLocations.name).toBe(
+      "shopify.list_pickup_locations",
+    );
+    expect(shopifyListPickupLocations.risk).toBe("read");
+    expect(shopifyListPickupLocations.defaultPermission).toBe("allow");
+    expect(shopifyListPickupLocations.sideEffectClass).toBe("none");
+    expect(shopifyListPickupLocations.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["read_locations"],
+    });
+    expect(
+      (shopifyListPickupLocations as { tenantControl?: unknown })
+        .tenantControl,
+    ).toBeUndefined();
+    expect(
+      (shopifyListPickupLocations as { displayName?: unknown }).displayName,
     ).toBeUndefined();
   });
 });
