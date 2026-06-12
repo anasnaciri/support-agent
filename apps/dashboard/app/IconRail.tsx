@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -7,7 +8,6 @@ import {
   ClipboardCheck,
   Home,
   Inbox,
-  LogOut,
   Settings,
   Sprout,
 } from "lucide-react";
@@ -16,7 +16,7 @@ import type { LucideIcon } from "lucide-react";
 import type { WorkspaceSummary } from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
-import { signOutAction } from "./sign-out-action";
+import { SignOutButton } from "./SignOutButton";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface NavItem {
@@ -31,6 +31,12 @@ const PRIMARY_NAV: ReadonlyArray<NavItem> = [
   { href: "/approvals", label: "Approvals", icon: ClipboardCheck },
   { href: "/audit", label: "Audit", icon: Activity },
 ];
+
+// Label that fades in as the rail expands on hover. `truncate` (+ flex-1)
+// collapses it to zero width when the rail is narrow, so long text never
+// spills past the rail into the content area.
+const RAIL_LABEL =
+  "min-w-0 flex-1 truncate text-sm font-medium opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100";
 
 const isActive = (pathname: string, href: string): boolean => {
   if (href === "/") return pathname === "/";
@@ -52,13 +58,16 @@ const RailLink = ({
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex size-10 items-center justify-center rounded-lg transition-colors",
+        "flex h-10 w-full items-center gap-3 rounded-lg transition-colors",
         active
           ? "bg-white/10 text-sidebar-foreground"
           : "text-sidebar-foreground/55 hover:bg-white/5 hover:text-sidebar-foreground",
       )}
     >
-      <Icon className="size-5" aria-hidden />
+      <span className="flex size-10 shrink-0 items-center justify-center">
+        <Icon className="size-5" aria-hidden />
+      </span>
+      <span className={RAIL_LABEL}>{item.label}</span>
     </Link>
   );
 };
@@ -72,55 +81,69 @@ interface Props {
 
 export function IconRail({ email, workspaces, activeWorkspaceId }: Props) {
   const pathname = usePathname() ?? "/";
+  // Owned here (not in SignOutButton) so the rail can clear the confirmation
+  // when the pointer leaves — it hides together with the collapsing rail.
+  const [signOutOpen, setSignOutOpen] = useState(false);
+
+  const activeWorkspace =
+    workspaces && activeWorkspaceId
+      ? (workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0])
+      : null;
 
   return (
-    <aside className="flex h-screen w-16 shrink-0 flex-col items-center bg-sidebar py-4 text-sidebar-foreground">
-      <Link
-        href="/"
-        title="Support Agent"
-        aria-label="Support Agent home"
-        className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground"
+    // The 64px spacer holds the column in the layout flow; the rail itself is
+    // absolutely positioned so that expanding on hover overlays the content
+    // rather than reflowing the whole app.
+    <div className="relative w-16 shrink-0">
+      <aside
+        onMouseLeave={() => setSignOutOpen(false)}
+        className="group/rail absolute inset-y-0 left-0 z-40 flex w-16 flex-col items-stretch bg-sidebar px-3 py-4 text-sidebar-foreground transition-[width,box-shadow] duration-200 ease-in-out hover:w-60 hover:shadow-[6px_0_28px_-12px_rgba(0,0,0,0.55)]"
       >
-        <Sprout className="size-5" aria-hidden />
-      </Link>
+        <Link
+          href="/"
+          title="Support Agent"
+          aria-label="Support Agent home"
+          className="flex h-10 w-full items-center gap-3 rounded-lg"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Sprout className="size-5" aria-hidden />
+          </span>
+          <span className={cn(RAIL_LABEL, "font-semibold")}>Support Agent</span>
+        </Link>
 
-      {workspaces && workspaces.length > 0 && activeWorkspaceId ? (
-        <div className="mt-3">
-          <WorkspaceSwitcher
-            workspaces={workspaces}
-            activeWorkspaceId={activeWorkspaceId}
+        {workspaces && workspaces.length > 0 && activeWorkspace ? (
+          <div className="mt-3 flex w-full items-center gap-3">
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              activeWorkspaceId={activeWorkspace.id}
+            />
+            <span className={RAIL_LABEL}>{activeWorkspace.name}</span>
+          </div>
+        ) : null}
+
+        <nav className="mt-6 flex flex-1 flex-col gap-1">
+          {PRIMARY_NAV.map((item) => (
+            <RailLink
+              key={item.href}
+              item={item}
+              active={isActive(pathname, item.href)}
+            />
+          ))}
+        </nav>
+
+        <div className="flex flex-col gap-1">
+          <RailLink
+            item={{ href: "/settings", label: "Settings", icon: Settings }}
+            active={isActive(pathname, "/settings")}
+          />
+          <SignOutButton
+            email={email}
+            labelClassName={RAIL_LABEL}
+            open={signOutOpen}
+            onOpenChange={setSignOutOpen}
           />
         </div>
-      ) : null}
-
-      <nav className="mt-6 flex flex-1 flex-col items-center gap-1">
-        {PRIMARY_NAV.map((item) => (
-          <RailLink
-            key={item.href}
-            item={item}
-            active={isActive(pathname, item.href)}
-          />
-        ))}
-      </nav>
-
-      <div className="flex flex-col items-center gap-1">
-        <RailLink
-          item={{ href: "/settings", label: "Settings", icon: Settings }}
-          active={isActive(pathname, "/settings")}
-        />
-        {/* POST via server action, never a GET link (S13) — sign-out mutates
-            state and must not fire from a prefetch or drive-by navigation. */}
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            title={email ? `Sign out — ${email}` : "Sign out"}
-            aria-label="Sign out"
-            className="flex size-10 items-center justify-center rounded-lg text-sidebar-foreground/55 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
-          >
-            <LogOut className="size-5" aria-hidden />
-          </button>
-        </form>
-      </div>
-    </aside>
+      </aside>
+    </div>
   );
 }

@@ -41,12 +41,14 @@ describe("sign-up OAuth handoff", () => {
   it("signs out via a POST server action, never a (prefetchable) GET link", () => {
     // S13 strengthened the old "prefetch={false}" guard: sign-out mutates
     // state (cookie clear + WorkOS session termination), so it's a server
-    // action submitted by a form in the icon rail — there is no /sign-out
-    // GET route left to prefetch or drive-by.
+    // action submitted by a form in the rail's sign-out confirm popover —
+    // there is no /sign-out GET route left to prefetch or drive-by.
     const iconRail = readDashboardFile("app/IconRail.tsx");
+    const signOutButton = readDashboardFile("app/SignOutButton.tsx");
     const action = readDashboardFile("app/sign-out-action.ts");
 
-    expect(iconRail).toContain("form action={signOutAction}");
+    expect(signOutButton).toContain("form action={signOutAction}");
+    expect(signOutButton).not.toContain('href="/sign-out"');
     expect(iconRail).not.toContain('href="/sign-out"');
     expect(action).toContain('"use server"');
     expect(action).toContain("signOut()");

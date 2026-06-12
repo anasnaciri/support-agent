@@ -14,6 +14,25 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Sign-out safe-cone fix (rail WIP):** The uncommitted expand-on-hover rail + two-step
+  sign-out confirm uses a clip-path "safe cone" (`lib/cone.ts` → `--cone-x/--cone-y` on the panel's
+  `::before`) to bridge the rail→panel gap. The cone juddered and the popover closed mid-travel. Two root
+  causes in the heading tracker: (1) **starvation** — the previous-pointer anchor advanced on every
+  `pointermove`, so on 120Hz devices (~1px/event at ordinary speeds) the delta never cleared the 2px jitter
+  floor and the heading stayed stale forever; (2) **thrash** — when a delta did clear the floor the heading
+  snapped 100% to the raw per-event direction (±30–45° noise at 2–4px), swinging the 48px-trailing apex
+  wildly, and a single 2px backward twitch flipped the apex 96px ahead → pointer out of cone → spurious
+  `mouseleave` close. Fix (TDD, `test/cone.test.ts` 15 tests): `pointerDirection` → `advanceHeading` with
+  (a) anchor that only advances when the accumulated move clears `minDelta=3`, (b) distance-weighted
+  blending for aligned moves (`blendDelta=16` re-aims fully), (c) a reversal accumulator — opposed (dot<0)
+  travel holds the heading until `reverseDelta=12`px accumulate, then snaps, so the *intentional*
+  close-on-reversal still fires at any retreat speed but twitches never flip it (a pure LERP can never flip
+  on an antiparallel reversal — caught in design review). Also: clip-path fallback apex `50% 50%` → `0% 50%`
+  (widest wedge between open and first move), and the S13 sign-out POST guard test re-pointed at
+  `SignOutButton.tsx` where the form now lives. Adjacent papercut (not fixed): the 60px cone strip overlaps
+  the rail's right edge, so while the confirm is open the visible wedge tints over rail rows and can eat
+  hover/clicks on the right ~12px of the Settings row until a leftward retreat flips the cone away; shrink
+  `CONE_REACH` or drop the debug-ish `background`/`opacity` tint if it bothers in practice.
 - **2026-06-11 — Workspaces (multi-store per account):** A WorkOS org now owns MANY tenant rows — each row is
   one **workspace** with its own Shopify store, mailboxes, LLM key, cases, knowledge, policies. Architecture:
   workspace = tenant row (no new scoping column anywhere; services/runtime/worker/webhook routing untouched).

@@ -200,4 +200,30 @@
   .live-pulse {
     animation: live-pulse 2s ease-in-out infinite;
   }
+
+  /* Sign-out confirm "safe cone" — a clip-path triangle clipped off the panel
+     as a pseudo-element, bridging the rail trigger and the panel so imperfect
+     diagonal movement keeps the menu open. Apex (--cone-x/--cone-y, set on
+     pointermove) trails the pointer's heading; the base is the panel's near
+     (left) edge. The width/inset below must stay in sync with
+     CONE_REACH/CONE_OVERHANG in SignOutButton.tsx; the heading itself comes
+     from advanceHeading/coneApex in lib/cone.ts. The fallback apex (before the
+     first pointermove) sits on the far-left edge midline — the widest, most
+     permissive wedge — so the bridge already works between open and the first
+     move event. */
+  .signout-cone::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: -16px;
+    bottom: -16px;
+    width: 60px;
+    background: var(--destructive);
+    opacity: 0.16;
+    clip-path: polygon(
+      var(--cone-x, 0%) var(--cone-y, 50%),
+      100% 0,
+      100% 100%
+    );
+  }
 }
