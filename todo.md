@@ -14,6 +14,40 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-12 — Prompt-injection hardening (5 mitigations, TDD):** Shrank how often an injected
+  customer email / poisoned knowledge doc / hostile order field can steer the agent. (1) **Untrusted-content
+  framing** — new pure `agent-core/untrusted.ts` (`UNTRUSTED_OPEN/CLOSE` sentinels, `wrapUntrusted` which
+  strips forged sentinels so the fence can't be closed early, `UNTRUSTED_PREAMBLE`). `buildSystemPrompt`
+  now prefixes the preamble; `buildInitialMessages` fences customer subject+body (and the `case.resumed`
+  context dump) while keeping the trusted `[Thread context:…]` header OUTSIDE the fence; `knowledge.search`
+  fences each document body (the URL-snapshot path is the spiciest). (2) **L8 already done** in the runtime
+  resume path (schema re-decode + policy re-check, audit.md L8 = `[x]`) — added the missing e2e regression
+  (manager edits `approvedInput` into an invalid shape → `human_takeover` / `approval_input_invalid`, no
+  send). (3) **`case.update_context` locked to a fixed schema** — dropped the open `extra` record so an
+  injection can't plant arbitrary keys that re-inject on resume. The ONE genuine `extra` consumer
+  (order-status-agent stamping `extra.liveTrackingStatus` = the `tracking.lookup` result) was migrated
+  to an explicit, narrowly-typed `liveTrackingStatus` named field (tolerant projection of the tracking
+  union; unknown sub-keys stripped at decode) + the agent prompt updated to write `liveTrackingStatus`.
+  Rule going forward: a genuinely-needed-but-unsupported key is a signal to add a NAMED field (with tests
+  + clear render-back rules), never to reopen a generic `extra`. (4) **Refund scope guard** —
+  `refundCustomerMismatchFlag` stamps `refund_customer_mismatch` onto case context (→ ApprovalCard chip)
+  when a refund targets an order whose customer ≠ the case's runtime-stamped `customerEmail`; the
+  order→email map is built from `shopify.get_order` results in the same tick (no extra Shopify call,
+  fails open). (5) **`ask_customer` recipient guard** already present (`assertRecipientsInThread`) — added
+  the explicit off-thread-rejection test (it auto-executes, so higher-risk than reply); new
+  `risk-flag-label.ts` gives the mismatch flag friendly copy. Tests: +5 agent-core, +5 services messages,
+  +2 services prompt, +6 refund-scope helper, +2 case tool, +2 knowledge tool, +2 ask_customer recipient,
+  +1 refund-mismatch e2e, +1 L8 e2e, +3 dashboard label. `pnpm build` + dashboard `next build` green; full
+  vitest **1207 passed / 266 skipped**. NOTE: framing is a mitigation, not a guarantee — the durable
+  defenses remain the tool-permission gates + recipient/scope constraints. Read-scoping of
+  `shopify.get_order`/`get_customer` left store-wide on purpose (reads can't exfiltrate past the reply gate;
+  refund is the money path and now carries the mismatch flag).
+- **2026-06-12 — Structured return-intent capture (small slice):** Applied the "named field, not a generic
+  `extra`" rule to its first real case. Returns still route through `refund-review-agent` as `refund_request`,
+  but the agent now stamps narrow literal `returnReason` + `requestedResolution` fields (RETURN CAPTURE step)
+  instead of prose, PATH A is guarded so a return never auto-refunds, and the dashboard ApprovalCard shows
+  "Return" chips. The full dedicated returns capability (own category + agent + `return.create` over Shopify
+  reverse-fulfillment + refund-on-receipt) is deferred — see the Phase 5 entry. Details + tests in Phase 5.
 - **2026-06-12 — Case category column never written (dashboard showed all "uncategorized"):**
   `case.update_context` wrote the triage `classification` only into the `context` blob, while the dashboard
   chip, the contracts, and the cases-list search filter (`ilike(cases.category, …)`) all read the
@@ -392,6 +426,17 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [x] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
 - [x] No secrets in git (real `.env*` files are gitignored; only local
   app/package/deploy `.env.example` templates are committed)
+- [x] **Prompt-injection framing holds (2026-06-12):** every system prompt is prefixed with
+  `UNTRUSTED_PREAMBLE`, and all attacker-controllable spans reaching the model are wrapped via
+  `wrapUntrusted` — inbound customer subject+body and the `case.resumed` context dump (in
+  `buildInitialMessages`) and `knowledge.search` document bodies. The trusted `[Thread context:…]` header
+  stays OUTSIDE the fence. Don't pass raw customer/tool-result prose into the prompt without fencing it.
+- [x] **`case.update_context` stays a closed schema** — no open `extra` / `Record` field. The context blob
+  is re-injected verbatim on `case.resumed`, so any new derived fact gets a NAMED field, never an escape
+  hatch. (2026-06-12)
+- [x] **Refund scope flag** — `refund.create` proposals are checked against the case's runtime-stamped
+  `customerEmail`; a mismatch stamps `refund_customer_mismatch` (surfaced on the ApprovalCard). Keep the
+  `customerEmail` stamp runtime-controlled (never LLM-writable) or the guard becomes forgeable. (2026-06-12)
 
 ---
 
@@ -454,7 +499,7 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
 - [x] `PermissionService` Tag in `agent-core` + `PermissionServiceDefault` layer. Pure function: `check({ tenantId, agent, tool, payload }) → "allow" | "ask" | "deny"`. Decision order is `agent.permissionOverrides[tool.name] ?? tool.defaultPermission`. Tenant-level policy rules and conditional rules (e.g. amount thresholds) are deferred to Phase 4 — the Tag interface stays stable; the Default layer will swap for a Live layer that also consults `PolicyService`. 6 unit tests.
 - [x] `ApprovalService` Tag + `ApprovalServiceLive` (Drizzle) + `ApprovalServiceTest`. Interface: `create` (always starts in `pending`), `getById`, `approve` (optionally with `approvedInput` for edit-and-approve), `reject` (with `decisionReason`), `listPending(tenantId)`. State transitions use optimistic concurrency: `approve`/`reject` only succeed if the row is `pending`; double-decision returns `ApprovalStateConflict`. Live impl runs the SELECT-FOR-UPDATE + UPDATE in one tx. Errors: `ApprovalNotFound`, `ApprovalStateConflict`, `ApprovalServiceDbError`. 7 unit + 3 integration tests. Expiry sweep (`timer.expired` driven) is deferred — the `expiresAt` column is written on create, but nothing reads it yet.
 - [x] `AgentRuntime.handleEvent` — Phase 1 tick loop from §5 / §18. Supports create/load case for `ticket.created` and case-scoped resume events, resolves agent + tools, calls scripted `LLMService`, audits event/LLM/tool steps, checks `PermissionService` before tool execution, creates approvals for `ask`, executes `allow` tools, handles handoff, final message, and `max_turns_exceeded`. Phase 1 limitations: `email.received` lookup-by-thread and `tracking.changed` lookup-by-order return `Failed`; customer/supplier wait actions return human takeover until those workflows land.
-- [x] Trivial tools: `case.update_status`, `case.update_context`. Both defined via `defineTool` in `packages/tools/src/case/`. They depend on `CaseRepository` (provided by the runtime's Layer). `case.update_status` wraps `transitionStatus` (carrying through `expectedFromStatus` + `reason`); `case.update_context` reads + shallow-merges named hint fields (`classification`, `identifiedOrderId`, `identifiedCustomerId`, `notes`) plus an `extra: Record<string, unknown>` escape hatch. Repository errors are mapped to `ToolOutputInvalid` with `issues: [<TaggedErrorName>]` at the tool boundary so the LLM gets a structured failure. 7 unit tests (transition happy path, optimistic conflict mapped to ToolOutputInvalid, schema decode, context merge, extra-keys merge, case-not-found, ToolRegistry schemasFor integration).
+- [x] Trivial tools: `case.update_status`, `case.update_context`. Both defined via `defineTool` in `packages/tools/src/case/`. They depend on `CaseRepository` (provided by the runtime's Layer). `case.update_status` wraps `transitionStatus` (carrying through `expectedFromStatus` + `reason`); `case.update_context` reads + shallow-merges a closed set of named fields, including the explicitly shaped `liveTrackingStatus` projection. There is no open `extra` escape hatch. Repository errors are mapped to `ToolOutputInvalid` with `issues: [<TaggedErrorName>]` at the tool boundary so the LLM gets a structured failure. Tests cover transition behavior, schema decoding, named context merges, unknown-key stripping, case-not-found, and ToolRegistry schema integration.
 - [x] Trivial agent: `support-triage` config + scripted runtime test classifies context and updates status using only `case.update_context` / `case.update_status`.
 - [x] End-to-end test: scripted synthetic event path in `apps/worker/test/agent-runtime.e2e.test.ts` covers `ticket.created` / `customer.replied` → case → audit entries → `resolved`.
 
@@ -565,22 +610,73 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
 - [x] `damaged-product-agent` hardening — EXIF + perceptual-hash sanity checks on uploaded photos. **BOTH halves LANDED 2026-06-01** (EXIF `bbb51a2`; pHash store `3c8cb82` + compute/runtime/dashboard wiring in the follow-up commit). **pHash as shipped:** pure `dhashFromLuma` (9×8 difference-hash → signed 64-bit BigInt) + `hammingDistance` in `agent-core/image-hash.ts`; `computeImagePHash` in `providers/image-phash.ts` (`jimp@1.6.1` decode→resize→greyscale, **injectable decoder**, **never throws** → null on undecodable). `MessageAttachment.phash?` is a decimal string (bigint isn't JSON-serialisable over pg-boss); `processGmailImageAttachments` stamps it per image. New `image_hashes` table + migration `0010` + `ImageHashStore` (Tag + in-memory Test + Postgres Live); `findSimilar` narrows to the tenant's recent window in SQL then filters/sorts by Hamming in the pure `matchSimilar` (Test + Live identical). Runtime: per inbound photo, `findSimilar({maxDistance:5, sinceDays:90})` excluding the current case → stamp `case.context.riskFlags += duplicate_photo_seen_in_case_<id>`, then `record`. **Store is OPTIONAL in the runtime via `Effect.serviceOption` captured at layer-build time** — present in the worker bootstrap (`ImageHashStoreLive`), absent in most test layers, so no existing test layer needed widening and dedup is skipped when unwired. Dashboard ApprovalCard renders destructive "Risk flags" chips. **Decisions/deviations:** dHash (not DCT-pHash); `jimp` pure-JS decoder (not native `sharp`); Hamming computed app-side over the tenant window (not SQL `bit_count` — revisit with BK-tree/`bit_count` pushdown if volume grows); phash stored as signed bigint (bitwise distance, sign irrelevant). **Pre-existing issue surfaced:** `0009`'s drizzle snapshot was missing from `meta/`, so `db:generate` re-emitted `timers` — hand-trimmed `0010` to `image_hashes` only; `0010_snapshot.json` is a correct full-schema baseline going forward (historical `0009` snapshot gap remains, low priority). **Follow-up RESOLVED 2026-06-01:** `jimp`/`exifr` were eagerly pulled into the dashboard bundle (it transpiles `@support-agent/providers`, whose barrel re-exports `image-phash`/`image-exif`) → build-time "Couldn't load zlib/fs" warnings. Fixed by moving the codec imports inside the decode functions as lazy `await import(...)` so they leave the static module graph — chose this over a subpath-`exports` refactor (smaller, no API change, no risk to the tsc project-reference / Next transpile build). Verified: dashboard `next build` now warning-free; added a real-PNG round-trip test exercising the lazy `import("jimp")` path. Tests across both commits: +6 hash utils, +5 store Test, +1 store Live integration, +3 phash compute, +1 phash upload-stamp, +1 e2e duplicate-flag (plus the EXIF tests below). Original spec retained for reference. EXIF as shipped: `extractImageExif` in `packages/providers/src/image-exif.ts` (pure, `exifr@7.1.3`-backed, **injectable parser** so the mapping is unit-tested without image fixtures, **never throws** — a non-image/malformed input collapses to an empty summary). Maps to a privacy-conscious `ExifSummary` (`agent-core/payloads.ts`: `hasExif`, `cameraMake`, `cameraModel`, `dateTimeOriginal` ISO, `gps {lat,lon}`) — we keep ONLY these, never the full EXIF dump. `MessageAttachment.exif?` carries it; `processGmailImageAttachments` populates it per uploaded image. `summarizePhotoSignals` (`agent-core/photo-signals.ts`) rolls EXIF presence across a message's images into `PhotoSignals {count, withExif, stripped, anyStripped}`. The runtime stamps `case.context.photoSignals` on `message.received` / `customer.replied` with image attachments (best-effort; latest reply wins, mirroring `productMatch`). Dashboard ApprovalCard renders a "Photo EXIF" chip (camera-metadata present → green / stripped → red). `hasExif` is defined as "any camera-identifying field present" (Make/Model/DateTimeOriginal/GPS) — a photo with only e.g. Orientation reads as stripped, which is the intended signal. **Deviation from the original spec:** no dedicated `audit_log` row for EXIF — the `case.context.photoSignals` stamp IS the operator-readable record the dashboard reads, so a separate audit row was avoided as noise; revisit if SOC2 wants it. Tests: +7 extractor, +4 summary, +1 upload-stamping, +1 e2e context-stamp. Suite 543 passing / 5 skipped (with DB). Seed script stamps `photoSignals` on the 5 damaged-product mock cases so the chip is reviewable (the mismatch/fraud case shows stripped). Remaining: (2) **Perceptual hash** — compute a pHash (`sharp` + `image-hash` or a tiny inline implementation) for each uploaded image and persist it in a new `image_hashes` table (`tenant_id`, `phash bigint`, `case_id`, `created_at`, index on `phash`). On every new upload, query for existing rows within a Hamming distance ≤ 5 across the SAME tenant in the last 90 days. A hit stamps `riskFlags: ["duplicate_photo_seen_in_case_<id>"]` onto the case context — catches the "same broken-vase photo across three different orders" scam without any external service. Privacy: pHashes are not reversible to the original image; we keep nothing but the hash, the case id, and the tenant. New ~80 LOC service + migration; the heavy lift is the pHash function (already exists in `sharp`/`image-hash`/`blockhash-core`, pick one). AI-generation-detection as a SaaS (Hive, Sensity) is intentionally NOT in this slice — accuracy degrades fast and the cost-per-call beats the actual fraud rate at our volumes; revisit when we have data on miss rates from #1 + EXIF + pHash combined.
 - [x] Tool: `supplier.add_sheet_row` (Google Sheets connector) — landed 2026-05-25. First non-Shopify, non-Gmail provider integration. `packages/tools/src/supplier/add-sheet-row.ts`. `risk: communicate`, `defaultPermission: ask`, `sideEffectClass: external_message`, `requiredConnectorScopes: { provider: "google_sheets", scopes: ["https://www.googleapis.com/auth/spreadsheets"] }`. Wraps a new `SheetsService` Tag (Test + Live in `@support-agent/services` + `@support-agent/providers`); `SheetsServiceLive` resolves per-tenant tokens from `connector_connections` (provider `google_sheets`), refreshes via the same Google OAuth2 endpoint Gmail uses (`refreshGmailToken` is shared — function name is historical). Hand-rolled HTTP wrapper (`sheets-http.ts`) over a single endpoint — `values.append` with `valueInputOption=USER_ENTERED` + `insertDataOption=INSERT_ROWS` — no `googleapis` package dep. Inputs: `spreadsheetId` + `range` (A1 with sheet name, e.g. `Escalations!A:E`) + `values` (string|number|boolean|null cells, left-to-right). Wired into `ALL_TOOLS`; worker bootstrap mirrors Gmail's gating (Live when `CREDENTIAL_ENCRYPTION_KEY` + Google OAuth env set, in-memory `SheetsServiceTest` otherwise). **NOT yet bound to any agent** — registration is enough; an agent that wants to use this for warehouse escalation can add it to its tool list in a follow-up slice. The OAuth install + callback flow + dashboard `/settings/integrations` card were already scaffolded earlier in the day (see `apps/api/src/google-install.ts:GOOGLE_SHEETS_SCOPES` + the `provider` discriminator in the callback). +16 tests.
 - [x] Tool: `refund.recommend` — landed 2026-05-26. `packages/tools/src/shopify/recommend-refund.ts`. Read-only refund analysis (`risk: read`, `defaultPermission: allow`, `sideEffectClass: none`, no `requiredConnectorScopes` — uses scopes already required by `shopify.get_order` and `shopify.get_customer`). Returns `{ recommendation, amount, reasoning, riskFlags }` where recommendation ∈ `full_refund | partial_refund | deny | investigate`. Pure-logic rules over order state (refunded → deny; partially_refunded → investigate; non-paid → investigate; delivered > 30 days → deny; > tenant denyAbove → investigate; ≤ tenant askAbove → full_refund; mid-zone → full_refund) + customer-history risk flags (`first_order`, `frequent_refunder` if >30% refund rate, `new_customer` if <30d since first order, `high_ltv` if refunded total > $500 — last flag only fires when refund-history currency matches policy currency; never invents an FX rate). New `ShopifyService.getCustomerRefundHistory` Tag method + Live impl (GraphQL over `customer.orders(first:50).refunds`) aggregating ordersCount / refundedOrdersCount / totalRefundedAmount / firstOrderAt; `totalRefundedAmount` is `ShopifyMoney | null` (null when no refunds — never invents USD per [[feedback_no_hardcoded_currency]]). Refund-review PATH B prompt extended: agent calls `refund.recommend` BEFORE drafting `conversation.reply` so the operator approving sees the structured assessment. ApprovalCard.tsx surfaces the recommendation above the editable reply body (badge + amount + reasoning + risk-flag chips). +18 tests: 7 pure-logic (each rule branch + currency-mismatch + risk-flag combinations), 3 tool wire-up, 1 e2e PATH B flow (asserts both `tool.invoked(refund.recommend)` and the gated `conversation.reply` approval pending), plus shoring on neighbouring tests for the registry. Currency-correct end-to-end: every money value flows from order/refund records, no hardcoded `"USD"` anywhere in production paths.
+- [x] **Structured return-intent capture (small slice, landed 2026-06-12).** Returns are still classified as
+      `refund_request` and handled by `refund-review-agent` (no separate category/agent yet), but the agent now
+      records *structured* return intent instead of burying it in prose: new narrow literal fields
+      `returnReason` (`defective` / `wrong_item` / `no_longer_needed` / `arrived_late` / `other`) and
+      `requestedResolution` (`refund` / `replacement` / `exchange` / `store_credit` / `repair`) on
+      `case.update_context` (`packages/tools/src/case/update-context.ts`). Producer: refund-review-agent's
+      RETURN CAPTURE step stamps them when the message is a return, and PATH A is guarded so a return never
+      auto-refunds (`refund.create` stays gated; a return is always the draft-a-reply path). Consumer:
+      dashboard ApprovalCard renders "Return" chips (`apps/dashboard/app/cases/[id]/return-labels.ts` +
+      `page.tsx` wiring); on `case.resumed` the fields ride back into the prompt via the (now-fenced) context
+      dump, so a follow-up turn reads them as a stable fact instead of re-deriving from the thread. Tests:
+      +2 case-tool (round-trip + reject out-of-vocabulary literal), +3 agent config, +3 dashboard labels,
+      +1 worker e2e (return request stamps both fields end-to-end). `pnpm build` + dashboard `next build` green.
+- [ ] **Dedicated returns capability (DEFERRED from the 2026-06-12 small slice).** The structured-capture slice
+      above is intentionally the minimum. A full returns flow is its own feature, scoped here for a later
+      session: (1) split `return_request` out of `refund_request` as a first-class triage category (or a
+      sub-discriminator) so returns route deliberately; (2) a dedicated returns agent (or a clearly-separated
+      returns path in refund-review) that owns the return lifecycle rather than treating it as a refund variant;
+      (3) a `return.create` tool over Shopify's **returnCreate / reverse-fulfillment** APIs (RMA + return
+      shipping label), with its OWN permission gating — it moves money/inventory like `refund.create` and must
+      not auto-run; (4) **refund-on-receipt**: hold the refund until the item is scanned back (a returns webhook
+      → resume), instead of refunding up front. Also reconsider the policy edge noted 2026-06-12: today a
+      delivered+paid order where the customer says "return it for a refund" can legitimately trip PATH A and
+      refund **without** securing the item back — a full returns flow should make "item back first vs keep-it"
+      a per-tenant policy switch. The narrow `returnReason` / `requestedResolution` fields already landed feed
+      straight into this.
 - [x] Tool: `refund.create` — landed 2026-05-21. `packages/tools/src/shopify/refund.ts`. `risk: money`, `defaultPermission: ask`, `sideEffectClass: financial`. Wraps `ShopifyService.refundOrder` (Live impl in `packages/providers/src/shopify-service-live.ts` queries the order's transactions, picks the first SUCCESS SALE/CAPTURE as parent, calls the `refundCreate` mutation with `kind: REFUND`; maps `userErrors` → new `RefundFailed` tag). Conditional permission threshold is per-tenant in `tenants.settings.refundPolicy` — see Phase 4 conditional-rules entry. Refund-review-agent prompt extended with PATH A (issue refund directly) vs PATH B (draft a reply, the existing behavior). The Shopify scope needed is `write_orders` — the existing managed-install path only requests `read_orders`/`read_customers`; merchants who want refund autonomy need a re-OAuth with the wider scope. Tracked separately under Phase 2 / managed-connector scope work.
 - [x] Agent: `general-inquiry-agent` — landed 2026-06-09. `packages/agents/src/general-inquiry-agent.ts`. Subagent reached via `agent.handoff` from `support-triage` for `general_inquiry` (NO order id required — the catch-all/ambiguous route). **Narrow by design: answers ONLY store / product / policy questions, grounded in a tool result; explicitly does NOT answer offers/discounts or scam messages.** Tools: `["knowledge.search", "shopify.search_products", "case.update_context", "conversation.reply"]`; `handoffs: []`; model `google/gemini-3.5-flash`; `maxTurnsPerTick: 8` (shared-with-triage budget). In-scope → grounded `conversation.reply` (defaultPermission `ask` → parks `waiting_for_approval`, human reviews every reply); out-of-scope (discount/offer/wholesale solicitation OR scam/phishing/spam/abuse) → no reply, stamp `case.update_context` reason + finish (case resolves). **Out-of-scope deliberately resolves rather than escalating to `human_takeover`:** the runtime auto-resolves on a final plain-text turn (`agent-runtime.ts:841`, guards only `!== "resolved"`) and no case-repo enforces a transition table, so an agent-set `human_takeover` would be clobbered — the durable non-resolve lever is a gated tool that parks (the ask-first reply), so the agent bias-to-replies on ambiguity (human-gated) and only resolves on clear out-of-scope. Knowledge-title system-prompt header binds automatically (holds `knowledge.search`). **New tool `shopify.search_products`** (`packages/tools/src/shopify/search-products.ts`, `risk:read`/`allow`/`read_products` scope, `SEARCH_LIMIT=5`, no `tenantControl`/`displayName` → internal, hidden from Actions UI) over a new `ShopifyService.searchProducts(tenantId, query, limit)` (Tag + Test fixture + Live `products(query:)` query; `description` plain-text trimmed/capped 600 chars; `first` clamped 1..50). New `ShopifyProductSearchResult` type in `agent-core/shopify.ts`. `support-triage` handoffs + prompt route `general_inquiry` here. Registered in `ALL_AGENTS` + `ALL_TOOLS`. **+14 tests** (4 search tool, 4 live searchProducts, 4 agent config, 2 triage handoff). `pnpm build` green; unit suite **853 passing / 4 skipped**. Not yet exercised live in runtime/browser. Branch stacked on `feat/tenant-knowledge-base`. New memory [[project_general_inquiry_agent_landed]].
-- [ ] **General-inquiry store grounding expansion.** The agent currently has only `knowledge.search` plus a narrow
-      `shopify.search_products` result (`title` / `type` / `vendor` / description), so it cannot ground several
-      common pre-sale questions. Add customer-safe read tools/data in this order: (1) enrich product search with
-      price range, options/variants, customer-facing availability, and storefront URL; (2) add
-      `shopify.get_store_info` for public store facts such as name, primary domain, public contact email, and
-      countries the shop ships to; (3) add `shopify.list_pickup_locations`, restricted to locations with local
-      pickup enabled. Do **not** expose raw Shopify `locations` as "store locations": they can include private
-      warehouses, dropshippers, and fulfillment origins. If exact shipping rates or delivery promises are needed,
-      treat that as a separate address/cart-aware capability; continue using `knowledge.search` for policy and
-      timeframe claims. Scope impact: product enrichment stays on `read_products`; pickup locations require
-      `read_locations`; basic shop info and `shop.shipsToCountries` need no new scope. Optional later scopes:
-      `read_online_store_pages` for importing customer-facing About / Contact / FAQ pages, `read_inventory` only
-      if exposing exact stock quantities, and `read_markets` only for market-specific domains/config. Do not add
-      `read_shipping` for this slice.
+- [x] **General-inquiry store grounding expansion — landed 2026-06-12** (commits `85851f2`, `db81c71`, `26f1b56`,
+      `7a181c6`; one slice per item, TDD throughout). What shipped:
+      (1) **Enriched `shopify.search_products`**: `priceMin`/`priceMax` (MoneyV2, store currency — never
+      defaulted), `options`/`variants` (capped 10; the `Title: Default Title` placeholder collapses to `[]`),
+      customer-facing `availableForSale` booleans (NO inventory counts — `read_inventory` deliberately not
+      added), `onlineStoreUrl` (null when unpublished; the prompt forbids constructing links), and a
+      `status === "ACTIVE"` filter so drafts/archived never reach the agent.
+      (2) **`shopify.get_store_info`** (internal tool, `scopes: []` → still requires an active connection):
+      name, `contactEmail` (NEVER `shop.email`, the private account login — pinned by test), primary domain,
+      currency, `shipsToCountries`; ≥100 codes (rest-of-world zone) compresses to `shipsWorldwide: true` with
+      the list dropped entirely (a truncated list would read as "only these countries").
+      (3) **`shopify.list_pickup_locations`** (`read_locations`): the pickup filter (`localPickupSettingsV2`
+      non-null + active) sits in the SERVICE contract, so raw locations (warehouses/3PLs/dropship origins)
+      can never surface through any caller. Empty list grounds "no pickup offered".
+      (4) **About/Contact/FAQ page import** (`read_online_store_pages`): page leg added to the post-connect
+      KB import job — published pages whose handle OR title normalizes (lowercase alphanumerics) to
+      about/aboutus/contact/contactus/faq/faqs/frequentlyaskedquestions become `url` docs at
+      `<primaryDomain>/pages/<handle>`, sharing the policy import's contentHash dedup + per-leg silent
+      best-effort boundary (page-leg failure never costs the policy leg). Deliberately conservative — decided
+      with the user: under-importing beats pulling a "Wholesale pricing" page into grounding.
+      **Shipping-location split enforced in the prompt** (test-pinned): ship-TO = `shipsToCountries`;
+      pickup = pickup-enabled locations; ship-FROM is NEVER answered from store/location data, only from the
+      knowledge base. `maxTurnsPerTick` 8 → 10 (shared triage budget; 4 grounding tools + gated reply = 7
+      worst-case). Scopes added to `DEFAULT_SHOPIFY_SCOPES` + `shopify.app.toml`:
+      `read_online_store_pages`, `read_locations`.
+  - [ ] **Ops follow-up — scope rollout.** The authorize URL carries no scopes; Shopify reads the app config.
+        SaaS/managed app: redeploy the app version (`shopify app deploy` / Partner Dashboard) so existing
+        merchants get the update-permissions prompt. Pilot custom-distribution apps: update each per-tenant
+        app's scopes in its Dev Dashboard, then the locked store re-OAuths. Until then the page import skips
+        silently and `list_pickup_locations` is denied by the scope precheck (both by design).
+  - [ ] **Not yet exercised live** against a real store (same status as the rest of general-inquiry): enriched
+        search fields, store info, pickup list, page import. Worth folding into the next live demo pass.
+  - [ ] **Known niggle — KB "Resync" on imported pages/policies** refetches the public URL (full storefront
+        HTML incl. nav) while the import writes API-sourced text, so a resync can churn `contentHash` and
+        content quality. Harmless but worth aligning (e.g. resync url-docs created by the importer back
+        through the importer) if merchants start using Resync on them.
+      Deferred from the original plan, still open: exact shipping rates / delivery promises (separate
+      address/cart-aware capability), `read_inventory` (only if exact stock quantities are ever wanted),
+      `read_markets` (market-specific domains/config). `read_shipping` stays out.
 - [ ] Evidence upload (object storage), photo handling
 - [x] `TimerService` Tag + Live; `timer.expired` event — landed 2026-05-27. Abstract Tag/Test layer in `packages/services/src/timer-service.ts`; Drizzle schema + migration + `TimerServiceLive` in `packages/db`; worker `timer-sweep` cron fires due timer rows into `timer.expired` workflow events using the timer id as `eventId` and case singleton key. `conversation.ask_customer` can set `remindAfterHours`, schedules a `follow_up` timer, maps timer failures to `ToolOutputInvalid`, and the runtime parks the case in `waiting_for_customer` after the ask sends. Verified with focused tool tests, `pnpm build`, worker `build:deps`, and full `pnpm test` (441 passed / 58 skipped).
 - [ ] Replay/test mode for agents against historical cases
