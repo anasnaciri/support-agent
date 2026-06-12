@@ -3434,6 +3434,181 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(postApprovalInvoke?.actor.id).toBe("manager-1");
   });
 
+  // Audit L8 regression: a manager can edit `approvedInput` on the dashboard
+  // before approving. That edited JSON is the ONE unvalidated entry into a
+  // tool's execute, so the resume path must re-decode it against the tool's
+  // schema. A schema-invalid edit must escalate to human_takeover and NOT
+  // execute the tool (no customer-facing send).
+  it("rejects a schema-invalid manager-edited approvedInput on resume (L8)", async () => {
+    const convoTest = makeConversationServiceTest({});
+    const mailTest = makePlatformMailServiceTest({});
+
+    const orderId = OrderId("gid://shopify/Order/77123");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7123",
+      email: "buyer-l8@example.com",
+      customerId: CustomerId("gid://shopify/Customer/7123"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "49.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [],
+      fulfillments: [],
+      createdAt: new Date("2026-04-20T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-25T00:00:00.000Z"),
+    };
+
+    const refundScript: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: { classification: "refund_request", identifiedOrderId: orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: { targetAgent: "refund-review-agent", reason: "specialist" },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-l8",
+          to: [{ name: null, email: "buyer-l8@example.com" }],
+          subject: null,
+          bodyText: "draft for L8 test",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "refund-reply-l8-1",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, refundReviewAgent]),
+      ToolRegistryWith([
+        caseUpdateStatus as never,
+        caseUpdateContext as never,
+        agentHandoff as never,
+        shopifyGetOrder as never,
+        knowledgeSearch as never,
+        trackingLookup as never,
+        shopifyGetCustomer as never,
+        shopifyRefundCreate as never,
+        shopifyRefundRecommend as never,
+        conversationReply as never,
+      ]),
+      PermissionServiceDefault,
+      LLMServiceScripted(refundScript),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      convoTest.layer,
+      mailTest.layer,
+      approvalLinkLayer,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const approvalsSvc = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Refund please",
+            threadId: "thread-l8" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+
+          const r1 = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-l8" as never,
+              messageId: "msg-l8",
+              from: { name: null, email: "buyer-l8@example.com" },
+              to: [],
+              subject: "Re: Refund please",
+              bodyText: `refund for ${orderId} please`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          if (r1.type !== "PausedWaitingForApproval") {
+            throw new Error(`expected paused, got ${r1.type}`);
+          }
+
+          // Manager approves but edits the input into a schema-invalid shape
+          // (`to` is not an array, `bodyText` is not a string).
+          yield* approvalsSvc.approve({
+            id: r1.approvalId as never,
+            tenantId: created.tenantId,
+            decidedBy: UserId("manager-evil"),
+            approvedInput: {
+              threadId: "thread-l8",
+              to: "buyer-l8@example.com",
+              subject: null,
+              bodyText: 12345,
+              bodyHtml: null,
+              draftId: "refund-reply-l8-1",
+            },
+          });
+
+          const r2 = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: r1.approvalId,
+            caseId: created.id,
+            managerId: UserId("manager-evil"),
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { r2, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    // The resume refused to execute the malformed input.
+    expect(out.r2.type).toBe("HumanTakeoverRequired");
+    if (out.r2.type === "HumanTakeoverRequired") {
+      expect(out.r2.reason).toBe("approval_input_invalid");
+    }
+    expect(out.fetched.status).toBe("human_takeover");
+    // Critically: nothing went out to the customer.
+    expect(convoTest.handle.sent).toHaveLength(0);
+    // Escalation was recorded with the invalid-input reason.
+    const escalation = out.entries.find(
+      (e) => e.action === "case.escalated_to_human",
+    );
+    expect(escalation).toBeDefined();
+    expect((escalation!.details as Record<string, unknown>)["reason"]).toBe(
+      "approval_input_invalid",
+    );
+  });
+
   // Mirror test for the rejection path: approval.rejected should
   // escalate the case to human_takeover and NOT execute the tool.
   it("escalates to human_takeover on approval.rejected and does NOT execute the gated tool", async () => {
