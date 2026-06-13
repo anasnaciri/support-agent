@@ -20,6 +20,7 @@ import type {
   ToolConnectorScopeRequirement,
   TenantToolControl,
 } from "@support-agent/agent-core";
+import type { RbacPermissionId } from "./rbac-permissions.js";
 
 // ============================================================
 // Pagination (canonical). The dashboard imports these in the cutover slice
@@ -597,3 +598,83 @@ export const isConnectorScopeGranted = (
   }
   return false;
 };
+
+// ============================================================
+// Member RBAC — permission catalog + pure resolution (re-exported so the api
+// and dashboard import everything from the package root).
+// ============================================================
+
+export {
+  RBAC_PERMISSIONS,
+  RBAC_PERMISSION_IDS,
+  isRbacPermissionId,
+} from "./rbac-permissions.js";
+export type {
+  RbacPermissionId,
+  RbacPermissionCategory,
+  RbacPermissionDef,
+} from "./rbac-permissions.js";
+export { effectivePermissions, hasPermission } from "./rbac-resolve.js";
+
+// ============================================================
+// Members & roles — GET/POST /dashboard/members, /roles, /invitations
+// ============================================================
+//
+// A role is a merchant-editable named set of permission ids, scoped to one
+// workspace. A member is a teammate assigned a role in this workspace. New
+// members join via a WorkOS email invitation; until they accept, they appear
+// as a pending invitation.
+
+export interface RoleView {
+  readonly id: string;
+  readonly name: string;
+  /** The all-access owner role: shown read-only (all permissions), undeletable. */
+  readonly isOwner: boolean;
+  /** Granted permission ids (raw, pre-implication). Owner roles report []. */
+  readonly permissionIds: ReadonlyArray<RbacPermissionId>;
+  /** Members currently assigned this role (for the "can't delete in use" guard). */
+  readonly assignedMemberCount: number;
+}
+
+export interface MemberView {
+  /** Stable per-user decision UUID (the api's x-user-id); the assignment key. */
+  readonly userDecisionUuid: string;
+  readonly email: string;
+  readonly roleId: string;
+  readonly roleName: string;
+  readonly isOwner: boolean;
+  readonly createdAt: string;
+}
+
+export type MemberInvitationStatus =
+  | "pending"
+  | "accepted"
+  | "revoked"
+  | "expired";
+
+export interface MemberInvitationView {
+  readonly id: string;
+  readonly email: string;
+  readonly roleId: string;
+  readonly roleName: string;
+  readonly status: MemberInvitationStatus;
+  readonly createdAt: string;
+}
+
+export interface MembersResponse {
+  readonly members: ReadonlyArray<MemberView>;
+  readonly invitations: ReadonlyArray<MemberInvitationView>;
+}
+
+export interface RolesResponse {
+  readonly roles: ReadonlyArray<RoleView>;
+}
+
+/** GET /dashboard/me/permissions — the acting member's own access. */
+export interface MePermissionsResponse {
+  readonly isOwner: boolean;
+  /** Effective (post-implication) permission ids for the active workspace. */
+  readonly permissions: ReadonlyArray<RbacPermissionId>;
+  /** False when the member has no assignment row (workspace in "open" mode). */
+  readonly assigned: boolean;
+}
