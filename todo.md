@@ -14,6 +14,34 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-13 — Shopify connect gated per workspace + truthful connected banner (TDD):** Root-caused the
+  "Second Store" mis-connect: with `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` unset and global
+  `SHOPIFY_APP_CLIENT_ID/SECRET` set in `apps/api/.env.local`, the deployment runs in SaaS mode, so an
+  unprovisioned workspace's Connect fell back to the deployment-wide app (the same custom app the first
+  store uses) and the OAuth completed against the DEFAULT workspace (connector row for `1ba5d40a…`
+  updated 2026-06-12 23:43, 8 min after "Second Store" was created) — then `?connected=shopify` rendered
+  "Shopify connected." purely from the query param while Second Store stayed unconnected. Fixes:
+  (1) `GET /dashboard/shopify-app` gained `available`, computed by the SAME `resolveTenantShopifyApp`
+  the install path runs (never re-derived from the row), so the button mirrors the authoritative gate;
+  (2) `POST /dashboard/connect/shopify` refuses to mint a grant when the workspace has no resolvable app
+  (403 `shopify_provisioning_required` / 500 `shopify_app_not_configured`) — a merchant is never sent
+  into an OAuth flow that could only run on credentials that aren't their workspace's;
+  (3) integrations overview + `[provider]` detail gray the Connect button off `available`, with pilot
+  ("Awaiting setup…") vs unconfigured copy (pure `shopifyConnectState`);
+  (4) the `?connected=` success banner renders only when THIS workspace actually holds an active row
+  (pure `connectedBanner`); otherwise a "didn't end up in this workspace" warning;
+  (5) `/connect/[provider]` route + `api.connectUrl` map mint refusals onto the `?error=shopify:<code>`
+  banner contract (`lib/connect-denial.ts` — lib never imports from app/). Tests: gate integration file
+  4→12 (availability matrix + mint gating incl. gmail-not-blocked), dashboard connect-error 7→20.
+  Verified `pnpm build`, dashboard `tsc --noEmit`, full suite 1646 passed / 5 skipped.
+  **Env (user applies, not done):** local dev is currently SaaS-mode; for pilot behavior set
+  `SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true` AND remove global `SHOPIFY_APP_CLIENT_ID/SECRET`
+  (bootstrap refuses the combo), then provision the first workspace's custom app via apps/admin
+  (client id/secret + shop `support-agent-test.myshopify.com`) so its webhooks keep verifying.
+  **Follow-up (recorded, not started):** in SaaS mode the managed-install re-entry still resolves the
+  tenant by shop when the state cookie is lost, so a connect started in one workspace can complete
+  against the workspace that owns the shop — the truthful banner now surfaces it, but the grant-bound
+  flow could pin the tenant end-to-end instead.
 - **2026-06-12 — Integration cards use supplied logo assets (TDD):** Replaced the inline Gmail,
   Google Sheets, and Outlook SVG components in the dashboard's shared integrations metadata with
   `next/image` components backed by the supplied files under
