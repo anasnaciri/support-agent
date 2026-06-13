@@ -169,6 +169,13 @@
       "when": 1781395200000,
       "tag": "0023_account_openrouter_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781481600000,
+      "tag": "0024_member_rbac",
+      "breakpoints": true
     }
   ]
 }

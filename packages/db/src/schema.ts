@@ -672,3 +672,142 @@ export type AuditLogRow = typeof auditLog.$inferSelect;
 export type AuditLogInsert = typeof auditLog.$inferInsert;
 export type ApprovalRow = typeof approvals.$inferSelect;
 export type ApprovalInsert = typeof approvals.$inferInsert;
+
+// ============================================================
+// Member RBAC — human teammates, roles, and per-workspace assignments.
+//
+// Distinct from the agent's tool-call permissions (those gate the AI). These
+// tables gate which dashboard actions a human MEMBER may take. A role is a
+// merchant-editable named set of permission ids (the ids come from the CODE
+// registry in @support-agent/dashboard-contracts, so they're not FK'd here).
+// Everything is per-workspace and cascade-deleted with the tenant.
+// ============================================================
+
+// One role per workspace = a named set of granted permission ids. `is_owner`
+// marks the seeded all-access role (one per workspace, undeletable); the api
+// short-circuits owners to every permission, so owner roles carry no
+// role_permissions rows.
+export const roles = pgTable(
+  "roles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isOwner: boolean("is_owner").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // No two roles share a name (case-insensitive) within a workspace.
+    uniqueIndex("roles_tenant_name_unique").on(
+      t.tenantId,
+      sql`lower(${t.name})`,
+    ),
+    // Exactly one owner role per workspace.
+    uniqueIndex("roles_tenant_owner_unique")
+      .on(t.tenantId)
+      .where(sql`${t.isOwner}`),
+    index("roles_tenant_idx").on(t.tenantId),
+  ],
+);
+
+// A role's granted permission ids. `permission_id` is a value from the code
+// registry (e.g. 'cases.reply'); deliberately not FK'd — the catalog is code.
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    permissionId: text("permission_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.roleId, t.permissionId] }),
+    index("role_permissions_role_idx").on(t.roleId),
+  ],
+);
+
+// Per-workspace member → role. Keyed on the decision UUID the dashboard sends
+// as `x-user-id` (a one-way hash of the WorkOS user id; the api can't reverse
+// it, so we key on it directly). `email` is for display/audit only. The role
+// FK is ON DELETE RESTRICT so a role still assigned to someone can't be
+// deleted out from under them (the api returns 409 role_in_use).
+export const memberRoleAssignments = pgTable(
+  "member_role_assignments",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userDecisionUuid: uuid("user_decision_uuid").notNull(),
+    email: text("email").notNull(),
+    workosUserId: text("workos_user_id"),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "restrict" }),
+    invitedByUuid: uuid("invited_by_uuid"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.userDecisionUuid] }),
+    index("member_role_assignments_tenant_idx").on(t.tenantId),
+    index("member_role_assignments_role_idx").on(t.roleId),
+  ],
+);
+
+// Pending email invitations. At invite time we have email + workspace + role
+// but not the invitee's WorkOS user id — so the invite is keyed by email and
+// reconciled into an assignment on the invitee's first authenticated load.
+export const memberInvitations = pgTable(
+  "member_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    workosInvitationId: text("workos_invitation_id"),
+    invitedByUuid: uuid("invited_by_uuid"),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "member_invitations_status_check",
+      sql`${t.status} IN ('pending','accepted','revoked','expired')`,
+    ),
+    // At most one OUTSTANDING invite per email per workspace (accepted/revoked
+    // rows don't block re-inviting).
+    uniqueIndex("member_invitations_tenant_email_pending_unique")
+      .on(t.tenantId, sql`lower(${t.email})`)
+      .where(sql`${t.status} = 'pending'`),
+    index("member_invitations_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export type RoleRow = typeof roles.$inferSelect;
+export type RoleInsert = typeof roles.$inferInsert;
+export type RolePermissionRow = typeof rolePermissions.$inferSelect;
+export type RolePermissionInsert = typeof rolePermissions.$inferInsert;
+export type MemberRoleAssignmentRow =
+  typeof memberRoleAssignments.$inferSelect;
+export type MemberRoleAssignmentInsert =
+  typeof memberRoleAssignments.$inferInsert;
+export type MemberInvitationRow = typeof memberInvitations.$inferSelect;
+export type MemberInvitationInsert = typeof memberInvitations.$inferInsert;

@@ -10,6 +10,7 @@ import {
 } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
 import type { LegalAcceptance } from "@support-agent/services";
+import { ensureOwnerRole } from "./member-rbac-store.js";
 
 // Write operations backing the dashboard's HTTP API (Path B). Ported from
 // the dashboard's lib/case-actions.ts so the api owns the mutation (the
@@ -207,6 +208,9 @@ export const createTenantForOrg = async (
       legalAcceptance: input.legalAcceptance,
     },
   });
+  // Seed the all-access Owner role so the creator has a role to assign from
+  // day one (matches the migration backfill for pre-existing workspaces).
+  await ensureOwnerRole(db, id);
   return { tenantId: id, alreadyExisted: false };
 };
 
@@ -235,6 +239,7 @@ export const createWorkspaceForOrg = async (
       legalAcceptance: input.legalAcceptance,
     },
   });
+  await ensureOwnerRole(db, id);
   return { workspaceId: id };
 };
 
