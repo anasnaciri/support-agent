@@ -3,6 +3,10 @@ import { AlertTriangle, Settings2 } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { requirePermission } from "@/lib/require-permission";
+import {
+  connectorHealth,
+  connectorHealthReasonLabel,
+} from "@/lib/connector-health";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -244,6 +248,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               ? "active"
               : "revoked";
           const isActive = tone === "active";
+          // The renewal/poll crons flag a live connection that's stopped
+          // working (signed out, lapsed mailbox subscription, …). Surface it
+          // as a clear "Needs attention" treatment instead of the green
+          // active badge so the merchant knows to reconnect.
+          const health = isActive ? connectorHealth(row?.metadata) : null;
+          const needsAttention = health?.state === "broken";
           const disconnectAction = DISCONNECT_ACTIONS[p];
 
           return (
@@ -254,13 +264,36 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                     <ProviderIcon />
                     {label}
                   </CardTitle>
-                  <Badge variant={integrationStatusVariant(tone)}>{tone}</Badge>
+                  {needsAttention ? (
+                    <Badge variant="destructive">Needs attention</Badge>
+                  ) : (
+                    <Badge variant={integrationStatusVariant(tone)}>
+                      {tone}
+                    </Badge>
+                  )}
                 </div>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="space-y-3 pt-0">
+                {needsAttention ? (
+                  <Alert variant="warning">
+                    <AlertTriangle className="size-4" />
+                    <AlertTitle>Needs attention — reconnect</AlertTitle>
+                    <AlertDescription>
+                      {connectorHealthReasonLabel(health?.reason)}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-2">
                   {isActive ? (
                     <>
+                      {needsAttention &&
+                      apiBaseUrl &&
+                      legalAccepted &&
+                      !(p === "shopify" && shopifyState !== "available") ? (
+                        <Button asChild>
+                          <a href={connectHref(p)}>Reconnect {label}</a>
+                        </Button>
+                      ) : null}
                       <Button variant="outline" asChild>
                         <Link href={`/settings/integrations/${p}`}>
                           <Settings2 className="size-3.5" aria-hidden />

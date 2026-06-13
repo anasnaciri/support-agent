@@ -5,6 +5,10 @@ import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
 import { api } from "@/lib/api-client";
 import { requirePermission } from "@/lib/require-permission";
 import { capabilitiesForProvider } from "@/lib/catalog";
+import {
+  connectorHealth,
+  connectorHealthReasonLabel,
+} from "@/lib/connector-health";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +94,11 @@ export default async function ConnectorManagePage({
     : row.status === "active"
       ? "active"
       : "revoked";
+  // The renewal/poll crons flag a live connection that's stopped working
+  // (signed out, lapsed mailbox subscription, …). When set, we show a "Needs
+  // attention" treatment in place of the green active badge.
+  const health = tone === "active" ? connectorHealth(row?.metadata) : null;
+  const needsAttention = health?.state === "broken";
   const showConnect =
     !!apiBaseUrl && legalAccepted && tone !== "active" && !shopifyUnavailable;
   const disconnectAction =
@@ -134,7 +143,11 @@ export default async function ConnectorManagePage({
           {label}
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Badge variant={integrationStatusVariant(tone)}>{tone}</Badge>
+          {needsAttention ? (
+            <Badge variant="destructive">Needs attention</Badge>
+          ) : (
+            <Badge variant={integrationStatusVariant(tone)}>{tone}</Badge>
+          )}
         </div>
         <p className="mt-3 text-sm text-muted-foreground">{description}</p>
       </div>
@@ -176,6 +189,16 @@ export default async function ConnectorManagePage({
           <CardTitle className="text-base">Connection</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
+          {needsAttention ? (
+            <Alert variant="warning">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Needs attention — reconnect</AlertTitle>
+              <AlertDescription>
+                {connectorHealthReasonLabel(health?.reason)}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {row ? (
             <div className="space-y-1 text-sm">
               {row.shopDomain ? (
@@ -220,6 +243,18 @@ export default async function ConnectorManagePage({
                 <a href={connectHref("shopify")}>
                   Reinstall to update scopes
                 </a>
+              </Button>
+            ) : null}
+
+            {/* Reconnect path: a live connection the crons flagged as broken.
+                Same install gates as Connect — never start an OAuth flow the
+                api would refuse (e.g. an unprovisioned Shopify workspace). */}
+            {needsAttention &&
+            apiBaseUrl &&
+            legalAccepted &&
+            !shopifyUnavailable ? (
+              <Button asChild>
+                <a href={connectHref(provider)}>Reconnect {label}</a>
               </Button>
             ) : null}
 
