@@ -412,10 +412,12 @@ token lifetime in the WorkOS dashboard if the re-auth cadence is too tight.
 Secrets (set with `wrangler secret put`, except `NEXT_PUBLIC_*` which are build
 -time): `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_COOKIE_PASSWORD` (≥32
 chars), `NEXT_PUBLIC_WORKOS_REDIRECT_URI` (= `https://app.<domain>/callback`),
-`DASHBOARD_API_BASE_URL` (the api origin), and `DASHBOARD_API_TOKEN` (must equal
-the api's). Map `app.<domain>` to the Worker, then run `cf:deploy`. The two
-api↔dashboard link points: `DASHBOARD_BASE_URL` (api → dashboard redirects) and
-the api's public origin (dashboard → api fetches).
+and `DASHBOARD_API_BASE_URL` (the api origin). Auth to the api is the forwarded
+WorkOS access token (verified api-side — S14); there is no shared service token,
+but the api's `WORKOS_CLIENT_ID` MUST equal this dashboard's `WORKOS_CLIENT_ID`.
+Map `app.<domain>` to the Worker, then run `cf:deploy`. The two api↔dashboard
+link points: `DASHBOARD_BASE_URL` (api → dashboard redirects) and the api's
+public origin (dashboard → api fetches).
 
 ## Note: image size
 

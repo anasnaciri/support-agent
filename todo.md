@@ -55,9 +55,10 @@ The single source of truth for **what's done**, **what's next**, and **what inva
   **Invariants that must not regress:** open-mode = "zero assignments ⇒ allow" is the lock-out net;
   `refunds.issue` is checked IN ADDITION to `approvals.decide` for `refund.create` approvals;
   permission catalog is code (adding an id = default-deny until a role grants it).
-  **NOT committed** — the working tree arrived with an unrelated in-flight OpenRouter/account-credentials
-  feature entangled in the same files (schema.ts, server.ts, contracts, db index, api-client.ts,
-  `_journal.json`), so a clean RBAC-only commit isn't separable; left for the user.
+  **Committed + on `main`** (corrected 2026-06-13): despite the entanglement worry above, the work
+  landed as five clean per-package commits reachable from `main` — `6fff3ae`
+  feat(dashboard-contracts), `c368523` feat(db), `8431ba4` feat(api), `88519be` feat(dashboard),
+  `d2ce27c` docs(todo). Working tree is clean; nothing RBAC-related is outstanding to commit.
   **Follow-ups (recorded, not started):** removing a member only drops the local assignment (revokes
   access via enforced mode) — full WorkOS org-membership removal needs the membership id we don't track;
   revoking a pending invite revokes the local row only (WorkOS email auto-expires); multi-member
@@ -351,9 +352,8 @@ The single source of truth for **what's done**, **what's next**, and **what inva
   flag — **follow-up: integrations page doesn't read it yet**). (8) Worker builds its layer graph once
   (ManagedRuntime), tool HTTP runs outside the audit tx, `tool.timeout` honored, ciphertext now version-
   prefixed with multi-key decrypt (`decryptWithKeys`) for key rotation.
-  **Deferred:** S14 (forwarded-WorkOS-JWT to replace the shared DASHBOARD_API_TOKEN + x-org-id trust) — top
-  security follow-up, needs a deliberate migration; U15 (middleware→proxy rename) pending the Next 15/16
-  decision. **Deviations recorded:** commits land directly on `main` (matching the operator's current
+  **Deferred:** ~~S14 (forwarded-WorkOS-JWT…)~~ DONE 2026-06-13 — see the Audit-follow-ups section;
+  U15 (middleware→proxy rename) pending the Next 15/16 decision. **Deviations recorded:** commits land directly on `main` (matching the operator's current
   workflow — the feature branch had already been merged); CREDENTIAL_ENCRYPTION_KEY_PREVIOUS env plumbing
   for the new multi-key decrypt is not yet wired into bootstrap (mechanism + tests exist in crypto.ts).
   Verified: full suite 1120 passed (DB-gated integration suites included via ci-local), `pnpm build` green,
@@ -444,12 +444,28 @@ checklist, audit section, `master-plan.md`, or project memories.
 
 Remaining work surfaced by the audit remediation (everything else in `audit.md` is done):
 
-- [ ] **S14 — forwarded-WorkOS-JWT auth for apps/api:** replace the shared `DASHBOARD_API_TOKEN` +
-      self-asserted `x-org-id` trust with the user's WorkOS access token forwarded per request and
-      verified api-side via JWKS. Until then a leaked service token = full cross-tenant compromise.
-      The migration must also cover the self-asserted `x-workspace-id` header (2026-06-11 workspaces) —
-      it shares the same trust model (the api does verify org-owns-workspace, but the org itself is
-      asserted).
+- [x] **S14 — forwarded-WorkOS-JWT auth for apps/api (clean cutover, 2026-06-13).** The shared
+      `DASHBOARD_API_TOKEN` + self-asserted `x-org-id`/`x-user-id` are GONE. The dashboard forwards the
+      merchant's WorkOS access token (`session.accessToken`) as `Authorization: Bearer <jwt>`; the api
+      verifies it (`apps/api/src/dashboard-jwt.ts`, `jose` `createRemoteJWKSet` over WorkOS's
+      client-scoped JWKS — RS256 sig + `exp` + optional `iss`) and reads `org_id`→organizationId,
+      `sub`→user. `authenticateDashboardToken` derives the manager decision UUID from the verified `sub`
+      via the shared `dashboard-user-id.ts` hash (golden-tested = the value the dashboard used to send).
+      Verifier built at boot from `cfg.workos` (new `WORKOS_CLIENT_ID`; `DASHBOARD_API_TOKEN` removed
+      from config + all env templates), decorated on the Fastify instance, read off `req.server` — no
+      handler-signature churn; `authenticateDashboardOrg` is now async. `x-workspace-id` stays a header
+      but is validated against the VERIFIED org (so the workspaces trust gap is closed too); `x-user-email`
+      stays a low-trust header (see follow-up). Onboarding forwards the post-`switchToOrganization`
+      org-scoped token. Tests: +9 verifier, +11 parser, +3 decision-uuid golden; all 12 dashboard
+      integration suites migrated to an injected test verifier + synthetic bearer (helper at
+      `apps/api/test/support/dashboard-auth.ts`). Verified: `pnpm build` + dashboard `tsc`/`next build`
+      green; full suite **1711 passed / 5 skipped** with a live DB.
+      **Follow-up (recorded, NOT done):** the WorkOS access token carries no verified email, so
+      `x-user-email` remains a forwarded header. It can only act within the verified org, but the
+      `/me/session` invite-reconcile keys on it — an authenticated member could reconcile a pending invite
+      addressed to another email *within their own org* and claim its role. Close by resolving the email
+      from the verified `sub` via the WorkOS API (adds `WORKOS_API_KEY` + a lookup), or by adding email as
+      a custom claim on the WorkOS access token. (Strictly narrower than the pre-S14 full-org spoof.)
 - [ ] **Dashboard: render `connectorHealth`** on /settings/integrations — the renewal/poll crons now stamp
       `connectorHealth`/`connectorHealthReason` into connector metadata; the UI should badge broken
       connectors (the operator alert email already fires).
@@ -648,6 +664,13 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [x] **Refund scope flag** — `refund.create` proposals are checked against the case's runtime-stamped
   `customerEmail`; a mismatch stamps `refund_customer_mismatch` (surfaced on the ApprovalCard). Keep the
   `customerEmail` stamp runtime-controlled (never LLM-writable) or the guard becomes forgeable. (2026-06-12)
+- [x] **Dashboard identity is the VERIFIED WorkOS JWT, never a header (S14, 2026-06-13).** Every
+  `/dashboard/*` org + user comes from `authenticateDashboardToken` verifying the forwarded WorkOS access
+  token; `x-org-id` and `x-user-id` are not read at all. Don't reintroduce a header-asserted org/user or a
+  shared service token. The manager decision UUID is derived from the verified `sub` via
+  `dashboard-user-id.ts` — keep that hash byte-identical to the dashboard's copy (golden-tested both sides)
+  or existing role assignments / approval attributions silently re-key. `x-workspace-id` must stay
+  validated against the verified org.
 
 ---
 
