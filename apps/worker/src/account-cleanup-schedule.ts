@@ -23,8 +23,12 @@ export const ACCOUNT_CLEANUP_QUEUE = "account.cleanup";
 interface RegisterOptions {
   readonly boss: PgBoss;
   readonly runtimeLayer: WorkerBootstrap["runtimeLayer"];
-  /** Shared key to decrypt connector-grant tokens for revocation (B1). */
-  readonly encryptionKey: Buffer | null;
+  /**
+   * Credential-decryption key SET (primary first) to decrypt connector-grant
+   * tokens for revocation (B1). The set lets a key rolled between enqueue and
+   * processing still decrypt (audit S15).
+   */
+  readonly encryptionKeys: ReadonlyArray<Buffer> | null;
 }
 
 export const registerAccountCleanup = async (
@@ -76,7 +80,7 @@ export const registerAccountCleanup = async (
         await Effect.runPromise(
           Effect.provide(
             runAccountCleanup(data, {
-              encryptionKey: opts.encryptionKey,
+              encryptionKeys: opts.encryptionKeys,
               confirmTenantDeleted,
             }),
             opts.runtimeLayer,

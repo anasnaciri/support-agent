@@ -54,7 +54,7 @@ interface WorkflowJobData {
 }
 
 const main = async (): Promise<void> => {
-  const { boss, runtimeLayer, credentialEncryptionKey, shutdown } =
+  const { boss, runtimeLayer, credentialEncryptionKeys, shutdown } =
     await buildWorker();
 
   // Build the full layer graph ONCE for the job hot path (audit L12).
@@ -195,7 +195,7 @@ const main = async (): Promise<void> => {
   await registerAccountCleanup({
     boss,
     runtimeLayer,
-    encryptionKey: credentialEncryptionKey,
+    encryptionKeys: credentialEncryptionKeys,
   });
   console.log(
     `[worker] consuming account-cleanup on queue=${ACCOUNT_CLEANUP_QUEUE}`,

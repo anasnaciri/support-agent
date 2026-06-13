@@ -5,6 +5,7 @@ import {
   DecryptError,
   decrypt,
   decryptToString,
+  decryptToStringWithKeys,
   decryptWithKeys,
   encrypt,
   parseKey,
@@ -85,6 +86,27 @@ describe("crypto — encrypt/decrypt", () => {
       expect(() => decryptWithKeys([goodKey, randomBytes(32)], ct)).toThrow(
         DecryptError,
       );
+    });
+
+    it("decryptToStringWithKeys falls back to the previous key (utf-8)", () => {
+      const oldKey = randomBytes(32);
+      const ct = encrypt(oldKey, "rotated-secret");
+      // New primary first, previous as fallback — the rotation order.
+      expect(decryptToStringWithKeys([goodKey, oldKey], ct)).toBe(
+        "rotated-secret",
+      );
+    });
+
+    it("decryptToStringWithKeys decrypts under the primary key alone", () => {
+      const ct = encrypt(goodKey, "primary-secret");
+      expect(decryptToStringWithKeys([goodKey], ct)).toBe("primary-secret");
+    });
+
+    it("decryptToStringWithKeys fails when no key matches", () => {
+      const ct = encrypt(randomBytes(32), "secret");
+      expect(() =>
+        decryptToStringWithKeys([goodKey, randomBytes(32)], ct),
+      ).toThrow(DecryptError);
     });
   });
 });

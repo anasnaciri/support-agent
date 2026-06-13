@@ -47,6 +47,30 @@ export const parseKey = (b64: string): Buffer => {
   return raw;
 };
 
+/**
+ * Build a decryption key SET (audit S15 rotation) from a primary key plus an
+ * optional comma-separated list of previous keys. Returns the keys primary
+ * first — exactly the order `decryptWithKeys` / `decryptToStringWithKeys`
+ * expect. Each element is parsed with {@link parseKey}; empty/whitespace
+ * segments in `previous` are ignored. With no `previous`, the result is a
+ * length-1 set identical to the pre-rotation single-key behaviour.
+ *
+ * Rotation how-to: move the OLD key to `previous` and put the NEW key in
+ * `primary`. Reads work against both; each row re-encrypts to the new key on
+ * its next write.
+ */
+export const parseKeySet = (
+  primary: string,
+  previous?: string | null,
+): ReadonlyArray<Buffer> => {
+  const prev = (previous ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => parseKey(s));
+  return [parseKey(primary), ...prev];
+};
+
 // ============================================================
 // AES-256-GCM encrypt / decrypt
 // ============================================================
@@ -140,3 +164,14 @@ export const decryptWithKeys = (
 
 export const decryptToString = (key: Buffer, buf: Buffer): string =>
   decrypt(key, buf).toString("utf8");
+
+/**
+ * `decryptWithKeys` for utf-8 plaintext — the rotation-aware counterpart of
+ * `decryptToString` (audit S15). Pass the key set primary-first; the first
+ * key that authenticates wins, so old ciphertext keeps reading after a key
+ * roll until the row is re-encrypted under the new primary on next write.
+ */
+export const decryptToStringWithKeys = (
+  keys: ReadonlyArray<Buffer>,
+  buf: Buffer,
+): string => decryptWithKeys(keys, buf).toString("utf8");

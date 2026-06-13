@@ -55,7 +55,7 @@ import {
   TimerServiceLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
-import { parseKey } from "@support-agent/services";
+import { parseKeySet } from "@support-agent/services";
 import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
@@ -117,11 +117,11 @@ export interface WorkerBootstrap {
     never
   >;
   /**
-   * Shared CREDENTIAL_ENCRYPTION_KEY (parsed) for decrypting connector-grant
-   * tokens in the account-cleanup job. `null` in single-tenant dev with no
-   * key configured — grant revocation is then skipped.
+   * Credential-decryption key SET (audit S15), primary first, for decrypting
+   * connector-grant tokens in the account-cleanup job. `null` in single-tenant
+   * dev with no key configured — grant revocation is then skipped.
    */
-  readonly credentialEncryptionKey: Buffer | null;
+  readonly credentialEncryptionKeys: ReadonlyArray<Buffer> | null;
   readonly shutdown: () => Promise<void>;
 }
 
@@ -143,6 +143,22 @@ const requireEnv = (name: string): string => {
   const v = process.env[name];
   if (!v) throw new Error(`${name} is required`);
   return v;
+};
+
+/**
+ * Build the credential-decryption key SET from env (audit S15 rotation), or
+ * `null` when no CREDENTIAL_ENCRYPTION_KEY is set (single-tenant dev). Primary
+ * first: `[CREDENTIAL_ENCRYPTION_KEY, ...CREDENTIAL_ENCRYPTION_KEY_PREVIOUS]`.
+ * Writes encrypt with the primary; reads fall back to the previous keys so a
+ * key roll keeps existing ciphertext readable. Pure (takes env) so it's
+ * unit-testable.
+ */
+export const parseEncryptionKeySet = (
+  env: Record<string, string | undefined>,
+): ReadonlyArray<Buffer> | null => {
+  const primary = env["CREDENTIAL_ENCRYPTION_KEY"];
+  if (!primary) return null;
+  return parseKeySet(primary, env["CREDENTIAL_ENCRYPTION_KEY_PREVIOUS"]);
 };
 
 /** Env vars the worker must have in production — without them account
@@ -217,6 +233,10 @@ export const buildWorker = async (
   // set; otherwise crash here rather than discovering it on the first
   // message.
   const credKeyB64 = process.env["CREDENTIAL_ENCRYPTION_KEY"];
+  // Rotation key SET (audit S15): primary first, optional previous keys
+  // appended. The credential stores encrypt with the primary and decrypt
+  // against the whole set; `null` in single-tenant dev with no key.
+  const encryptionKeys = parseEncryptionKeySet(process.env);
   const hasDevOpenrouter = Boolean(process.env["OPENROUTER_API_KEY"]);
   if (!credKeyB64 && !hasDevOpenrouter) {
     throw new Error(
@@ -282,13 +302,13 @@ export const buildWorker = async (
   // In single-tenant dev we adapt OPENROUTER_API_KEY to a resolver that
   // returns the same credential for every tenant.
   const accountOpenrouterStore = credKeyB64
-    ? AccountOpenRouterCredentialStoreLive(parseKey(credKeyB64))
+    ? AccountOpenRouterCredentialStoreLive(encryptionKeys!)
     : AccountOpenRouterCredentialStoreTest();
   const llmResolver = credKeyB64
     ? LLMCredentialResolverLive.pipe(
         Layer.provide(
           Layer.mergeAll(
-            ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+            ConnectorCredentialStoreLive(encryptionKeys!),
             accountOpenrouterStore,
             dbLayer,
           ),
@@ -319,7 +339,7 @@ export const buildWorker = async (
   // to env-supplied creds for single-tenant dev.
   const credentialStoreLayer = credKeyB64
     ? ShopifyCredentialStoreFromConnector().pipe(
-        Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+        Layer.provide(ConnectorCredentialStoreLive(encryptionKeys!)),
       )
     : ShopifyCredentialStoreFromEnv;
   const shopify = ShopifyServiceLive.pipe(
@@ -362,7 +382,7 @@ export const buildWorker = async (
           Layer.provide(
             Layer.mergeAll(
               TelegramConfigFromEnv,
-              ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+              ConnectorCredentialStoreLive(encryptionKeys!),
             ),
           ),
         )
@@ -466,7 +486,7 @@ export const buildWorker = async (
         ).pipe(
           Layer.provide(
             Layer.mergeAll(
-              ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+              ConnectorCredentialStoreLive(encryptionKeys!),
               CaseRepositoryLive.pipe(Layer.provide(dbLayer)),
             ),
           ),
@@ -485,7 +505,7 @@ export const buildWorker = async (
           clientId: googleClientId,
           clientSecret: googleClientSecret,
         }).pipe(
-          Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+          Layer.provide(ConnectorCredentialStoreLive(encryptionKeys!)),
         )
       : (warnProdFallback(
           "Google Sheets connector",
@@ -522,7 +542,7 @@ export const buildWorker = async (
   // env-supplied token already implicitly carries whatever scopes the
   // merchant granted, and we trust the operator who set the env.
   const connectorStoreForPermissions = credKeyB64
-    ? ConnectorCredentialStoreLive(parseKey(credKeyB64))
+    ? ConnectorCredentialStoreLive(encryptionKeys!)
     : Layer.succeed(
         ConnectorCredentialStore,
         ConnectorCredentialStore.of({
@@ -619,7 +639,7 @@ export const buildWorker = async (
   return {
     boss,
     runtimeLayer,
-    credentialEncryptionKey: credKeyB64 ? parseKey(credKeyB64) : null,
+    credentialEncryptionKeys: encryptionKeys,
     shutdown,
   };
 };

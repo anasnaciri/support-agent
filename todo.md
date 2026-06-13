@@ -359,8 +359,9 @@ The single source of truth for **what's done**, **what's next**, and **what inva
   prefixed with multi-key decrypt (`decryptWithKeys`) for key rotation.
   **Deferred:** ~~S14 (forwarded-WorkOS-JWT…)~~ DONE 2026-06-13 — see the Audit-follow-ups section;
   U15 (middleware→proxy rename) pending the Next 15/16 decision. **Deviations recorded:** commits land directly on `main` (matching the operator's current
-  workflow — the feature branch had already been merged); CREDENTIAL_ENCRYPTION_KEY_PREVIOUS env plumbing
-  for the new multi-key decrypt is not yet wired into bootstrap (mechanism + tests exist in crypto.ts).
+  workflow — the feature branch had already been merged); ~~CREDENTIAL_ENCRYPTION_KEY_PREVIOUS env plumbing
+  for the new multi-key decrypt is not yet wired into bootstrap~~ DONE 2026-06-13 (S15 — see the
+  Audit-follow-ups section: key set wired through api/worker bootstrap + the three credential stores).
   Verified: full suite 1120 passed (DB-gated integration suites included via ci-local), `pnpm build` green,
   both Next apps build. New worker crons registered in index.ts: approval-maintenance, workflow dead-letter.
 - **2026-06-09 — Auto-import shop policies into the knowledge base:** After a tenant connects Shopify, the OAuth
@@ -473,11 +474,30 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
       the header (no key → reconcile no-ops). Regression test: a member (`mallory`) spoofing
       `x-user-email: sam@…` does NOT inherit Sam's pending invite (dashboard-rbac integration). The
       auto-claim Owner email stays a header — it only labels the acting user's own row (cosmetic).
-- [ ] **Dashboard: render `connectorHealth`** on /settings/integrations — the renewal/poll crons now stamp
-      `connectorHealth`/`connectorHealthReason` into connector metadata; the UI should badge broken
-      connectors (the operator alert email already fires).
-- [ ] **Wire `CREDENTIAL_ENCRYPTION_KEY_PREVIOUS`** through api/worker bootstrap to `decryptWithKeys`
-      so key rotation is operational end-to-end (crypto mechanism + tests landed).
+- [x] **Dashboard: render `connectorHealth`** on /settings/integrations (2026-06-13). The data already
+      arrived (`ConnectorConnectionView.metadata` carries `connectorHealth`/`connectorHealthReason`/`At`);
+      new pure `apps/dashboard/lib/connector-health.ts` parses it from `metadata: unknown` (defaults to ok,
+      humanizes the raw reason — no jargon), and the integrations overview + `[provider]` detail badge
+      broken connectors with a "needs attention — reconnect" treatment. 13-test helper. Dashboard-only —
+      no api/db change.
+- [x] **S15 — `CREDENTIAL_ENCRYPTION_KEY_PREVIOUS` wired end-to-end (2026-06-13).** Key rotation is now
+      operational. New `parseKeySet(primary, previous?)` + `decryptToStringWithKeys(keys, buf)` in
+      `packages/services/src/crypto.ts`. The three credential Live stores
+      (`connector-credential-store-live`, `account-openrouter-credential-store-live`,
+      `shopify-app-provisioning-live`) now take a key SET (`Buffer | ReadonlyArray<Buffer>`, primary first):
+      they ENCRYPT with `keys[0]` and READ via `decryptToStringWithKeys`, so ciphertext written under an old
+      key keeps decrypting and each row re-encrypts to the new primary on its next write. Api bootstrap:
+      `loadApiConfig` builds `cfg.encryptionKeys = [CREDENTIAL_ENCRYPTION_KEY, ...CREDENTIAL_ENCRYPTION_KEY_PREVIOUS]`
+      (comma-separated, trimmed); `cfg.encryptionKey` stays the primary (server.ts re-encrypts grant tokens
+      with it). `buildApiLayers` falls back to `[encryptionKey]` when `encryptionKeys` is absent (hand-built
+      test configs). Worker bootstrap: exported pure `parseEncryptionKeySet(env)` helper; threads the set
+      into the connector/account-openrouter stores and the account-cleanup grant decryption
+      (`WorkerBootstrap.credentialEncryptionKeys`, `AccountCleanupOptions.encryptionKeys`). Back-compat
+      invariant holds by construction: a length-1 set == today. Env templates updated (api/worker `.env.example`,
+      `deploy/compose/.env.example`, `deploy/railway/railway.env.example`) with the rotation how-to (and the
+      stale "rotating orphans every credential" comments corrected). Tests: +6 crypto, +3 connector-store
+      rotation integration, +2 api bootstrap, +4 worker key-set unit; all existing store/account-cleanup
+      tests stay green (call sites updated to the set shape).
 - [ ] **U15 — middleware→proxy rename** once the Next 15-vs-16 decision settles (see audit.md U15).
 - [ ] **D1 deploy note:** migration 0018's active-mailbox unique index fails if prod already has two
       ACTIVE rows for one mailbox — check before deploying.

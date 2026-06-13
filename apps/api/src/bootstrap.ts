@@ -8,7 +8,7 @@ import {
   ConnectorCredentialStore,
   ConversationService,
   KnowledgeBaseService,
-  parseKey,
+  parseKeySet,
   ShopifyAppProvisioningStore,
   ShopifyService,
   TenantAgentOverridesService,
@@ -188,7 +188,23 @@ export interface WorkosAuthConfig {
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
+  /**
+   * Primary credential-encryption key (`CREDENTIAL_ENCRYPTION_KEY`). Used to
+   * ENCRYPT every credential write, and to re-encrypt grant tokens the api
+   * hands to the worker. == `encryptionKeys[0]`.
+   */
   readonly encryptionKey: Buffer;
+  /**
+   * Credential-decryption key SET, primary first (audit S15 key rotation).
+   * `[CREDENTIAL_ENCRYPTION_KEY, ...CREDENTIAL_ENCRYPTION_KEY_PREVIOUS]`. The
+   * credential stores read through this set so ciphertext written under an old
+   * key keeps decrypting after a key roll; writes always use the primary, so
+   * rows migrate to the new key on next touch. Length-1 (no previous key) is
+   * identical to the pre-rotation single-key behaviour. Optional: `loadApiConfig`
+   * always populates it, but `buildApiLayers` falls back to `[encryptionKey]`
+   * so a hand-built config (tests) that only sets the primary still works.
+   */
+  readonly encryptionKeys?: ReadonlyArray<Buffer>;
   readonly stateSigningKey: string;
   readonly shopify: ShopifyAppConfig;
   /**
@@ -355,10 +371,18 @@ export const loadApiConfig = (): ApiConfig => {
     shopifyClientId = requireEnv("SHOPIFY_APP_CLIENT_ID");
     shopifyClientSecret = requireEnv("SHOPIFY_APP_CLIENT_SECRET");
   }
+  // Credential key set (audit S15): primary encrypts; the optional
+  // CREDENTIAL_ENCRYPTION_KEY_PREVIOUS list (comma-separated) lets reads fall
+  // back to old keys during a rotation. `encryptionKey` is the primary.
+  const encryptionKeys = parseKeySet(
+    requireEnv("CREDENTIAL_ENCRYPTION_KEY"),
+    process.env["CREDENTIAL_ENCRYPTION_KEY_PREVIOUS"],
+  );
   return {
     port: Number(process.env["API_PORT"] ?? 4000),
     databaseUrl: requireEnv("DATABASE_URL"),
-    encryptionKey: parseKey(requireEnv("CREDENTIAL_ENCRYPTION_KEY")),
+    encryptionKey: encryptionKeys[0]!,
+    encryptionKeys,
     stateSigningKey: requireEnv("STATE_SIGNING_KEY"),
     shopify: {
       clientId: shopifyClientId,
@@ -415,16 +439,23 @@ export const loadApiConfig = (): ApiConfig => {
 
 export const buildApiLayers = (cfg: ApiConfig) => {
   const dbLayer = DbClientLive({ databaseUrl: cfg.databaseUrl });
-  const store = ConnectorCredentialStoreLive(cfg.encryptionKey).pipe(
+  // All three credential stores read through the rotation key SET (audit S15):
+  // they encrypt with the primary (keys[0]) and decrypt against every key, so
+  // old ciphertext keeps reading after a key roll. `encryptionKeys` is derived
+  // from `encryptionKey` in `loadApiConfig`; fall back to the single primary
+  // for any hand-built config that only sets `encryptionKey` (== length-1 set,
+  // identical to pre-rotation behaviour).
+  const encryptionKeys = cfg.encryptionKeys ?? [cfg.encryptionKey];
+  const store = ConnectorCredentialStoreLive(encryptionKeys).pipe(
     Layer.provide(dbLayer),
   );
   const accountOpenrouterStore = AccountOpenRouterCredentialStoreLive(
-    cfg.encryptionKey,
+    encryptionKeys,
   ).pipe(Layer.provide(dbLayer));
   // Pilot custom distribution: per-tenant Shopify app credentials. Shares
-  // the credential encryption key with the connector store.
+  // the credential encryption key set with the connector store.
   const appProvisioning = ShopifyAppProvisioningStoreLive(
-    cfg.encryptionKey,
+    encryptionKeys,
   ).pipe(Layer.provide(dbLayer));
   const caseRepo = CaseRepositoryLive.pipe(Layer.provide(dbLayer));
   const connectorBuilders = [

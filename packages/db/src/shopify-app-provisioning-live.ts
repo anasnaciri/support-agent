@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, FiberRef, Layer } from "effect";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import {
-  decryptToString,
+  decryptToStringWithKeys,
   encrypt,
   ShopifyAppProvisioningStore,
   type PutShopifyAppProvisioningInput,
@@ -34,11 +34,11 @@ const wrap = <A>(
 
 const rowToProvisioning = (
   r: ShopifyAppProvisioningRow,
-  key: Buffer,
+  keys: ReadonlyArray<Buffer>,
 ): ShopifyAppProvisioning => ({
   tenantId: makeTenantId(r.tenantId),
   clientId: r.clientId,
-  clientSecret: decryptToString(key, r.clientSecretEncrypted),
+  clientSecret: decryptToStringWithKeys(keys, r.clientSecretEncrypted),
   shopDomain: r.shopDomain,
   status: r.status as ShopifyAppProvisioningStatus,
   createdAt: r.createdAt,
@@ -49,15 +49,26 @@ const rowToProvisioning = (
  * Live ShopifyAppProvisioningStore backed by Postgres. Encrypts the
  * `client_secret` column with AES-256-GCM on write and decrypts on read.
  *
+ * Key rotation (audit S15): pass a key SET, primary first. Writes (re-)encrypt
+ * with the primary (`keys[0]`); reads try every key, so old ciphertext keeps
+ * decrypting after a key roll and migrates on next write. A single `Buffer` is
+ * accepted for back-compat (== a length-1 set).
+ *
  * Upsert on `put` collapses the per-tenant unique key, rotating the
  * credentials — `shop_domain` survives so re-provisioning doesn't disturb a
  * live install, and a `revoked` status is reactivated to `ready` (A2) while a
  * live `ready`/`connected` status is preserved.
  */
-export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
+export const ShopifyAppProvisioningStoreLive = (
+  encryptionKeys: Buffer | ReadonlyArray<Buffer>,
+) =>
   Layer.effect(
     ShopifyAppProvisioningStore,
     Effect.gen(function* () {
+      const keys = Array.isArray(encryptionKeys)
+        ? encryptionKeys
+        : [encryptionKeys as Buffer];
+      const encryptionKey = keys[0]!;
       const defaultDb = yield* DbClient;
 
       const put = (input: PutShopifyAppProvisioningInput) =>
@@ -108,7 +119,7 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          return rowToProvisioning(row, encryptionKey);
+          return rowToProvisioning(row, keys);
         });
 
       const get = (tenantId: TenantId) =>
@@ -122,7 +133,7 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
               .limit(1),
           );
           const row = rows[0];
-          return row ? rowToProvisioning(row, encryptionKey) : null;
+          return row ? rowToProvisioning(row, keys) : null;
         });
 
       const getByShop = (shopDomain: string) =>
@@ -144,7 +155,7 @@ export const ShopifyAppProvisioningStoreLive = (encryptionKey: Buffer) =>
               .limit(1),
           );
           const row = rows[0];
-          return row ? rowToProvisioning(row, encryptionKey) : null;
+          return row ? rowToProvisioning(row, keys) : null;
         });
 
       const markConnected = (tenantId: TenantId, shopDomain: string) =>

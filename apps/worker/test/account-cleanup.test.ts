@@ -140,7 +140,7 @@ describe("runAccountCleanup", () => {
               }),
             ],
           },
-          { encryptionKey: KEY, fetchImpl },
+          { encryptionKeys: [KEY], fetchImpl },
         ),
         Layer.mergeAll(org.layer, mail.layer),
       ),
@@ -171,7 +171,7 @@ describe("runAccountCleanup", () => {
         Effect.provide(
           runAccountCleanup(
             { ...baseData, connectorGrants: [grant()] },
-            { encryptionKey: KEY, fetchImpl },
+            { encryptionKeys: [KEY], fetchImpl },
           ),
           Layer.mergeAll(org.layer, mail.layer),
         ),
@@ -206,7 +206,7 @@ describe("runAccountCleanup", () => {
         Effect.provide(
           runAccountCleanup(
             { ...baseData, connectorGrants: [grant({ provider: "shopify" })] },
-            { encryptionKey: KEY, fetchImpl },
+            { encryptionKeys: [KEY], fetchImpl },
           ),
           Layer.mergeAll(org.layer, mail.layer),
         ),
@@ -237,7 +237,7 @@ describe("runAccountCleanup", () => {
         Effect.provide(
           runAccountCleanup(
             { ...baseData, connectorGrants: [grant({ provider: "shopify" })] },
-            { encryptionKey: KEY, fetchImpl },
+            { encryptionKeys: [KEY], fetchImpl },
           ),
           Layer.mergeAll(org.layer, mail.layer),
         ),
@@ -259,7 +259,7 @@ describe("runAccountCleanup", () => {
         Effect.provide(
           runAccountCleanup(
             { ...baseData, connectorGrants: [grant()] },
-            { encryptionKey: null, fetchImpl },
+            { encryptionKeys: null, fetchImpl },
           ),
           Layer.mergeAll(org.layer, mail.layer),
         ),
@@ -280,7 +280,7 @@ describe("runAccountCleanup", () => {
 
     await Effect.runPromise(
       Effect.provide(
-        runAccountCleanup(baseData, { encryptionKey: null }),
+        runAccountCleanup(baseData, { encryptionKeys: null }),
         Layer.mergeAll(org.layer, mail.layer),
       ),
     );
@@ -302,7 +302,7 @@ describe("runAccountCleanup", () => {
           runAccountCleanup(
             { ...baseData, connectorGrants: [grant()] },
             {
-              encryptionKey: KEY,
+              encryptionKeys: [KEY],
               fetchImpl,
               // Tenant still present → wipe not committed.
               confirmTenantDeleted: async () => false,
@@ -330,7 +330,7 @@ describe("runAccountCleanup", () => {
         runAccountCleanup(
           { ...baseData, connectorGrants: [grant()] },
           {
-            encryptionKey: KEY,
+            encryptionKeys: [KEY],
             fetchImpl,
             confirmTenantDeleted: async () => true,
           },

@@ -197,6 +197,47 @@ describe("loadApiConfig — HTTPS callback enforcement", () => {
     expect(() => loadApiConfig()).toThrow(/SHOPIFY_APP_CLIENT_ID is required/);
   });
 
+  // Audit S15 — key rotation. CREDENTIAL_ENCRYPTION_KEY is the primary
+  // (encryption) key; CREDENTIAL_ENCRYPTION_KEY_PREVIOUS (optional, comma-
+  // separated) carries old keys that reads still fall back to.
+  it("absent CREDENTIAL_ENCRYPTION_KEY_PREVIOUS → length-1 key set", () => {
+    const primaryB64 = randomBytes(32).toString("base64");
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      CREDENTIAL_ENCRYPTION_KEY_PREVIOUS: "",
+      ...baseEnv({ CREDENTIAL_ENCRYPTION_KEY: primaryB64 }),
+    });
+    const cfg = loadApiConfig();
+    expect(cfg.encryptionKeys).toHaveLength(1);
+    // keys[0] is the primary; same bytes the primary base64 decodes to, and
+    // the standalone encryptionKey field still points at it (back-compat).
+    expect(cfg.encryptionKeys[0]!.toString("base64")).toBe(primaryB64);
+    expect(cfg.encryptionKey.equals(cfg.encryptionKeys[0]!)).toBe(true);
+  });
+
+  it("parses CREDENTIAL_ENCRYPTION_KEY_PREVIOUS into the key set (primary first)", () => {
+    const primaryB64 = randomBytes(32).toString("base64");
+    const prevA = randomBytes(32).toString("base64");
+    const prevB = randomBytes(32).toString("base64");
+    restore = setEnv({
+      NODE_ENV: "production",
+      ALLOW_HTTP_CALLBACK: "",
+      // Comma-separated list, with stray whitespace the parser must trim.
+      CREDENTIAL_ENCRYPTION_KEY_PREVIOUS: `${prevA}, ${prevB}`,
+      ...baseEnv({ CREDENTIAL_ENCRYPTION_KEY: primaryB64 }),
+    });
+    const cfg = loadApiConfig();
+    expect(cfg.encryptionKeys).toHaveLength(3);
+    expect(cfg.encryptionKeys.map((k) => k.toString("base64"))).toEqual([
+      primaryB64,
+      prevA,
+      prevB,
+    ]);
+    // Primary still drives encryption.
+    expect(cfg.encryptionKey.toString("base64")).toBe(primaryB64);
+  });
+
   it("threads optional Gmail Pub/Sub env into Google config", () => {
     restore = setEnv({
       NODE_ENV: "production",

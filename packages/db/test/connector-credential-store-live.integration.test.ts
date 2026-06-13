@@ -263,4 +263,147 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
       list.some((r) => r.shopDomain === "demo-store.myshopify.com"),
     ).toBe(true);
   });
+
+  // Audit S15 — key rotation. A token written under key A must still decrypt
+  // after the operator rolls a new primary key B in (set = [B, A]); and a store
+  // built with ONLY the new key must fail to read the old ciphertext.
+  describe("key rotation (audit S15)", () => {
+    const rotationTenant = randomUUID();
+    const keyA = randomBytes(32);
+    const keyB = randomBytes(32);
+
+    const storeWith = (keys: ReadonlyArray<Buffer>) =>
+      Layer.provide(
+        ConnectorCredentialStoreLive(keys),
+        DbClientLive({ databaseUrl: databaseUrl! }),
+      );
+    const runWith = <A, E>(
+      keys: ReadonlyArray<Buffer>,
+      eff: Effect.Effect<A, E, ConnectorCredentialStore | DbClient>,
+    ) =>
+      Effect.runPromiseExit(
+        Effect.provide(eff, storeWith(keys)).pipe(Effect.scoped),
+      );
+
+    beforeAll(async () => {
+      if (!raw) return;
+      await raw.db
+        .insert(tenants)
+        .values({ id: rotationTenant, name: "connector-test-rotation" });
+    });
+
+    afterAll(async () => {
+      if (!raw) return;
+      await raw.db
+        .delete(connectorConnections)
+        .where(sql`${connectorConnections.tenantId} = ${rotationTenant}`);
+      await raw.db
+        .delete(tenants)
+        .where(sql`${tenants.id} = ${rotationTenant}`);
+    });
+
+    it("reads a token written under key A through the set [B, A]", async () => {
+      // Write under the OLD key A.
+      const wrote = await runWith(
+        [keyA],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          yield* store.put({
+            tenantId: TenantId(rotationTenant),
+            provider: "shopify",
+            shopDomain: "rotate.myshopify.com",
+            accessToken: "shpoa_pre_rotation",
+            scopes: ["read_orders"],
+          });
+          return true;
+        }),
+      );
+      expect(Exit.isSuccess(wrote)).toBe(true);
+
+      // Roll the new key B in as primary, A as previous. Read must succeed.
+      const fetched = await runWith(
+        [keyB, keyA],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.get(
+            TenantId(rotationTenant),
+            "shopify",
+            "rotate.myshopify.com",
+          );
+        }),
+      );
+      expect(Exit.isSuccess(fetched)).toBe(true);
+      if (Exit.isSuccess(fetched)) {
+        expect(fetched.value.accessToken).toBe("shpoa_pre_rotation");
+      }
+    });
+
+    it("re-encrypts to the new key on next write so [B] alone then reads it", async () => {
+      // Touch the row through the set [B, A] — the write re-encrypts under B.
+      const rewrote = await runWith(
+        [keyB, keyA],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          yield* store.patchTokens({
+            tenantId: TenantId(rotationTenant),
+            provider: "shopify",
+            shopDomain: "rotate.myshopify.com",
+            accessToken: "shpoa_post_rotation",
+            tokenExpiresAt: null,
+          });
+          return true;
+        }),
+      );
+      expect(Exit.isSuccess(rewrote)).toBe(true);
+
+      // Key B alone now decrypts the migrated row.
+      const fetched = await runWith(
+        [keyB],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.get(
+            TenantId(rotationTenant),
+            "shopify",
+            "rotate.myshopify.com",
+          );
+        }),
+      );
+      expect(Exit.isSuccess(fetched)).toBe(true);
+      if (Exit.isSuccess(fetched)) {
+        expect(fetched.value.accessToken).toBe("shpoa_post_rotation");
+      }
+    });
+
+    it("fails to read an A-encrypted token with the new key B alone", async () => {
+      // Write a fresh row under A, then attempt a read with only B — no
+      // fallback, so decryption fails (surfaces as a store DB error).
+      await runWith(
+        [keyA],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          yield* store.put({
+            tenantId: TenantId(rotationTenant),
+            provider: "outlook",
+            shopDomain: "only-a@example.com",
+            accessToken: "tok_only_a",
+            scopes: ["Mail.ReadWrite"],
+          });
+          return true;
+        }),
+      );
+
+      const exit = await runWith(
+        [keyB],
+        Effect.gen(function* () {
+          const store = yield* ConnectorCredentialStore;
+          return yield* store.get(
+            TenantId(rotationTenant),
+            "outlook",
+            "only-a@example.com",
+          );
+        }),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+    });
+  });
 });

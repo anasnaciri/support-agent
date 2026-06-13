@@ -14,7 +14,7 @@
 import { Effect } from "effect";
 import { TenantId } from "@support-agent/agent-core";
 import {
-  decryptToString,
+  decryptToStringWithKeys,
   OrgDirectoryService,
   PlatformMailService,
   type OrgDirectoryError,
@@ -58,12 +58,15 @@ export interface AccountCleanupJobData {
 
 export interface AccountCleanupOptions {
   /**
-   * Shared CREDENTIAL_ENCRYPTION_KEY used to decrypt grant tokens. `null`
-   * (single-tenant dev with no key configured) → if the job carries grants,
-   * cleanup FAILS rather than silently leaving live provider grants
-   * (re-audit #2). With no grants, `null` is fine.
+   * Credential-decryption key SET (audit S15), primary first, used to decrypt
+   * grant tokens. The api re-encrypted them with the PRIMARY before the wipe,
+   * but a key roll between enqueue and processing means the previous key may
+   * still be needed — so reads try the whole set. `null` (single-tenant dev
+   * with no key configured) → if the job carries grants, cleanup FAILS rather
+   * than silently leaving live provider grants (re-audit #2). With no grants,
+   * `null` is fine.
    */
-  readonly encryptionKey: Buffer | null;
+  readonly encryptionKeys: ReadonlyArray<Buffer> | null;
   /** Injectable for tests. */
   readonly fetchImpl?: typeof fetch;
   /**
@@ -122,8 +125,8 @@ const revokeConnectorGrants = (
   Effect.flatMap(
     Effect.gen(function* () {
       if (grants.length === 0) return [] as string[];
-      const key = opts.encryptionKey;
-      if (!key) {
+      const keys = opts.encryptionKeys;
+      if (!keys || keys.length === 0) {
         // The job carries grants but the worker can't decrypt them. FAIL
         // (re-audit #2) so pg-boss retries / dead-letters loudly — silently
         // succeeding would leave provider grants live forever.
@@ -131,7 +134,7 @@ const revokeConnectorGrants = (
       }
       return yield* Effect.promise(async () => {
       const dec = (b64: string): string =>
-        decryptToString(key, Buffer.from(b64, "base64"));
+        decryptToStringWithKeys(keys, Buffer.from(b64, "base64"));
       const failures: Array<string> = [];
       for (const g of grants) {
         const label = `${g.provider}/${g.shopDomain}`;
@@ -205,7 +208,7 @@ const assertTenantDeleted = (
  */
 export const runAccountCleanup = (
   data: AccountCleanupJobData,
-  opts: AccountCleanupOptions = { encryptionKey: null },
+  opts: AccountCleanupOptions = { encryptionKeys: null },
 ): Effect.Effect<
   void,
   | OrgDirectoryError

@@ -2,7 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   AccountOpenRouterCredentialStore,
-  decryptToString,
+  decryptToStringWithKeys,
   encrypt,
   type AccountOpenRouterCredential,
   type PutAccountOpenRouterCredentialInput,
@@ -23,10 +23,10 @@ const wrap = <A>(promise: Promise<A>): Effect.Effect<A, ConnectorStoreDbError> =
 
 const present = (
   row: AccountOpenRouterCredentialRow,
-  encryptionKey: Buffer,
+  keys: ReadonlyArray<Buffer>,
 ): AccountOpenRouterCredential => ({
   organizationId: row.organizationId,
-  apiKey: decryptToString(encryptionKey, row.apiKeyEncrypted),
+  apiKey: decryptToStringWithKeys(keys, row.apiKeyEncrypted),
   metadata: (row.metadata ?? {}) as Readonly<Record<string, unknown>>,
   status: row.status as "active" | "revoked",
   installedAt: row.installedAt,
@@ -34,10 +34,25 @@ const present = (
   updatedAt: row.updatedAt,
 });
 
-export const AccountOpenRouterCredentialStoreLive = (encryptionKey: Buffer) =>
+/**
+ * Live AccountOpenRouterCredentialStore backed by Postgres. Encrypts the
+ * account BYOK key with AES-256-GCM on write and decrypts on read.
+ *
+ * Key rotation (audit S15): pass a key SET, primary first. Writes (re-)encrypt
+ * with the primary (`keys[0]`); reads try every key, so a key roll keeps old
+ * ciphertext readable until the row migrates on next write. A single `Buffer`
+ * is accepted for back-compat (== a length-1 set).
+ */
+export const AccountOpenRouterCredentialStoreLive = (
+  encryptionKeys: Buffer | ReadonlyArray<Buffer>,
+) =>
   Layer.effect(
     AccountOpenRouterCredentialStore,
     Effect.gen(function* () {
+      const keys = Array.isArray(encryptionKeys)
+        ? encryptionKeys
+        : [encryptionKeys as Buffer];
+      const encryptionKey = keys[0]!;
       const defaultDb = yield* DbClient;
       const useDb = (): Effect.Effect<DrizzleDb> =>
         FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
@@ -75,7 +90,7 @@ export const AccountOpenRouterCredentialStoreLive = (encryptionKey: Buffer) =>
               })
               .returning(),
           );
-          return present(rows[0]!, encryptionKey);
+          return present(rows[0]!, keys);
         });
 
       const get = (organizationId: string) =>
@@ -88,7 +103,7 @@ export const AccountOpenRouterCredentialStoreLive = (encryptionKey: Buffer) =>
               .where(eq(accountOpenrouterCredentials.organizationId, organizationId))
               .limit(1),
           );
-          return rows[0] ? present(rows[0], encryptionKey) : null;
+          return rows[0] ? present(rows[0], keys) : null;
         });
 
       const revoke = (organizationId: string) =>
@@ -122,7 +137,7 @@ export const AccountOpenRouterCredentialStoreLive = (encryptionKey: Buffer) =>
               .where(eq(accountOpenrouterCredentials.organizationId, organizationId))
               .returning(),
           );
-          return rows[0] ? present(rows[0], encryptionKey) : null;
+          return rows[0] ? present(rows[0], keys) : null;
         });
 
       return AccountOpenRouterCredentialStore.of({

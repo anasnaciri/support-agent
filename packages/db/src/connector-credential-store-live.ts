@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ConnectorCredentialStore,
-  decryptToString,
+  decryptToStringWithKeys,
   encrypt,
   type ConnectorConnection,
   type ConnectorProvider,
@@ -93,14 +93,14 @@ const isLlmUniqueViolation = (error: unknown): boolean => {
 
 const rowToConnection = (
   r: ConnectorConnectionRow,
-  key: Buffer,
+  keys: ReadonlyArray<Buffer>,
 ): ConnectorConnection => ({
   tenantId: makeTenantId(r.tenantId),
   provider: r.provider as ConnectorProvider,
   shopDomain: r.shopDomain,
-  accessToken: decryptToString(key, r.accessTokenEncrypted),
+  accessToken: decryptToStringWithKeys(keys, r.accessTokenEncrypted),
   refreshToken: r.refreshTokenEncrypted
-    ? decryptToString(key, r.refreshTokenEncrypted)
+    ? decryptToStringWithKeys(keys, r.refreshTokenEncrypted)
     : null,
   tokenExpiresAt: r.tokenExpiresAt,
   metadata: (r.metadata ?? {}) as Readonly<Record<string, unknown>>,
@@ -112,17 +112,29 @@ const rowToConnection = (
 
 /**
  * Live ConnectorCredentialStore backed by Postgres. Encrypts the access
- * token column with AES-256-GCM on write and decrypts on read using the
- * key passed in at Layer-build time.
+ * token column with AES-256-GCM on write and decrypts on read.
+ *
+ * Key rotation (audit S15): pass a key SET, primary first. Writes always
+ * (re-)encrypt with the primary (`keys[0]`); reads try every key in order, so
+ * ciphertext written under an old key keeps decrypting after the operator rolls
+ * a new primary in, and rows migrate to the new key on their next write. A
+ * single `Buffer` is accepted for back-compat (== a length-1 set, identical to
+ * pre-rotation behaviour).
  *
  * Upsert semantics on `put`: collapses the (tenant, provider, shopDomain)
  * unique key so re-installing the same store overwrites the previous
  * token + scopes and clears the `revoked_at` flag.
  */
-export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
+export const ConnectorCredentialStoreLive = (
+  encryptionKeys: Buffer | ReadonlyArray<Buffer>,
+) =>
   Layer.effect(
     ConnectorCredentialStore,
     Effect.gen(function* () {
+      const keys = Array.isArray(encryptionKeys)
+        ? encryptionKeys
+        : [encryptionKeys as Buffer];
+      const encryptionKey = keys[0]!;
       const defaultDb = yield* DbClient;
 
       const put = (input: PutConnectorInput) =>
@@ -217,7 +229,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          return rowToConnection(row, encryptionKey);
+          return rowToConnection(row, keys);
         });
 
       const get = (
@@ -281,7 +293,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          return rowToConnection(row, encryptionKey);
+          return rowToConnection(row, keys);
         });
 
       const revoke = (
@@ -321,7 +333,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               .from(connectorConnections)
               .where(eq(connectorConnections.tenantId, tenantId)),
           );
-          return rows.map((r) => rowToConnection(r, encryptionKey));
+          return rows.map((r) => rowToConnection(r, keys));
         });
 
       const patchTokens = (
@@ -368,7 +380,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          return rowToConnection(row, encryptionKey);
+          return rowToConnection(row, keys);
         });
 
       const patchMetadata = (
@@ -425,7 +437,7 @@ export const ConnectorCredentialStoreLive = (encryptionKey: Buffer) =>
               }),
             );
           }
-          return rowToConnection(result.row, encryptionKey);
+          return rowToConnection(result.row, keys);
         });
 
       return ConnectorCredentialStore.of({
