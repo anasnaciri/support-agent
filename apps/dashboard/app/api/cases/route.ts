@@ -19,8 +19,8 @@ export async function GET(req: Request) {
   // Route handlers CAN Set-Cookie, so an expired-mid-session access token is
   // refreshed here (U1) — an open tab's polling keeps the session alive
   // instead of decaying into permanent 401s.
-  const { user, organizationId } = await getSessionOrRefresh();
-  if (!user || !organizationId) {
+  const { user, organizationId, accessToken } = await getSessionOrRefresh();
+  if (!user || !organizationId || !accessToken) {
     return new Response("unauthorized", { status: 401 });
   }
   const params = new URL(req.url).searchParams;
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   let result;
   try {
     result = await api.cases(
-      { organizationId, ...(workspaceId ? { workspaceId } : {}) },
+      { accessToken, ...(workspaceId ? { workspaceId } : {}) },
       page,
       limit,
       q,

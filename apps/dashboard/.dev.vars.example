@@ -8,8 +8,8 @@
 
 # The api's public origin (dashboard → api fetches over HTTPS).
 DASHBOARD_API_BASE_URL=https://api.example.com
-# Shared bearer the api trusts on /dashboard/* (must equal the api's DASHBOARD_API_TOKEN).
-DASHBOARD_API_TOKEN=
+# Auth to /dashboard/* is the forwarded WorkOS access token (verified api-side,
+# S14) — no shared bearer. The api's WORKOS_CLIENT_ID must equal WORKOS_CLIENT_ID.
 
 # WorkOS AuthKit (server-side).
 WORKOS_API_KEY=

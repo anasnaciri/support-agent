@@ -22,15 +22,15 @@ export async function GET(req: Request, { params }: RouteParams) {
   const { id } = await params;
   // Refresh an expired-mid-session token while we can still Set-Cookie (U1)
   // — keeps an open case tab's live-updates poll authenticated.
-  const { user, organizationId } = await getSessionOrRefresh();
-  if (!user || !organizationId) {
+  const { user, organizationId, accessToken } = await getSessionOrRefresh();
+  if (!user || !organizationId || !accessToken) {
     return new Response("unauthorized", { status: 401 });
   }
   const since = new URL(req.url).searchParams.get("since") ?? "0";
   // Pin to the active workspace like the page that opened this poll.
   const workspaceId = (await cookies()).get(WORKSPACE_COOKIE)?.value;
   const result = await api.caseEvents(
-    { organizationId, ...(workspaceId ? { workspaceId } : {}) },
+    { accessToken, ...(workspaceId ? { workspaceId } : {}) },
     id,
     since,
   );

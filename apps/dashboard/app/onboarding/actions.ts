@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getWorkOS, switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { api, requireOrganization } from "@/lib/api-client";
+import { getSession } from "@/lib/session";
 import { resolveOrganizationId } from "@/lib/org-provisioning";
 
 // Self-service onboarding for a signed-in user. A brand-new signup has no
@@ -106,13 +107,19 @@ export const createTenantAction = async (
     return { error: "Could not create your team. Please try again." };
   }
 
+  // Forward the org-scoped access token: after switchToOrganization the session
+  // cookie carries a token whose verified `org_id` is `resolved.organizationId`,
+  // which the api's onboarding handler trusts (S14 — it no longer reads an
+  // asserted x-org-id). Re-read it post-switch rather than reusing the possibly
+  // org-less token requireOrganization saw.
+  const { accessToken } = await getSession();
+  if (!accessToken) {
+    return { error: "Could not create tenant. Please try again." };
+  }
   // Create the tenant for the resolved org (idempotent — a two-tab race
   // resolves to the existing tenant).
   const { status } = await api.onboarding(
-    {
-      organizationId: resolved.organizationId,
-      userDecisionUuid: org.userDecisionUuid,
-    },
+    { accessToken },
     {
       name: parsed.name,
       notificationEmail: parsed.notificationEmail,

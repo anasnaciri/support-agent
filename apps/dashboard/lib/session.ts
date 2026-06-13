@@ -58,9 +58,19 @@ export interface DashboardSession {
   readonly user: UserInfo["user"] | null;
   /** The user's active WorkOS organization id, or null. */
   readonly organizationId: string | null;
+  /**
+   * The raw WorkOS access token (the RS256 JWT). Forwarded to apps/api as the
+   * `Authorization: Bearer` credential (S14): the api verifies it and reads the
+   * org/user from its claims. `null` when logged-out / expired.
+   */
+  readonly accessToken: string | null;
 }
 
-const LOGGED_OUT: DashboardSession = { user: null, organizationId: null };
+const LOGGED_OUT: DashboardSession = {
+  user: null,
+  organizationId: null,
+  accessToken: null,
+};
 
 // AuthKit defaults: cookie `wos-session` unless WORKOS_COOKIE_NAME overrides it.
 const cookieName = (): string =>
@@ -101,7 +111,11 @@ export const getSession = async (): Promise<DashboardSession> => {
   if (isAccessTokenExpired(claims.exp, Date.now())) {
     return LOGGED_OUT;
   }
-  return { user: session.user, organizationId: claims.org_id ?? null };
+  return {
+    user: session.user,
+    organizationId: claims.org_id ?? null,
+    accessToken: session.accessToken,
+  };
 };
 
 export interface SessionState {
@@ -129,7 +143,11 @@ export const getSessionState = async (): Promise<SessionState> => {
   if (disposition !== "active") return { disposition, session: LOGGED_OUT };
   return {
     disposition,
-    session: { user: session.user, organizationId: claims.org_id ?? null },
+    session: {
+      user: session.user,
+      organizationId: claims.org_id ?? null,
+      accessToken: session.accessToken,
+    },
   };
 };
 
@@ -206,7 +224,11 @@ export const refreshSession = async (): Promise<DashboardSession | null> => {
     (await cookies()).set(cookieName(), sealed, cookieWriteOptions());
 
     const claims = await getTokenClaims<AccessToken>(refreshed.accessToken);
-    return { user: refreshed.user, organizationId: claims.org_id ?? null };
+    return {
+      user: refreshed.user,
+      organizationId: claims.org_id ?? null,
+      accessToken: refreshed.accessToken,
+    };
   } catch {
     // Revoked / already-rotated refresh token, network failure, … → the
     // caller treats this as logged-out and forces a real re-auth.

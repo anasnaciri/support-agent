@@ -74,19 +74,21 @@ const apiBase = (): string => {
   return trimSlash(v.trim());
 };
 
-const apiToken = (): string => {
-  const v = process.env["DASHBOARD_API_TOKEN"];
-  if (!v || v.trim().length === 0) {
-    throw new Error("DASHBOARD_API_TOKEN is required (dashboard → api service token)");
-  }
-  return v.trim();
-};
-
 export interface DashboardContext {
   readonly organizationId: string;
   /** WorkOS user id. */
   readonly userId: string;
-  /** Stable manager UUID derived from the WorkOS user id (the api's x-user-id). */
+  /**
+   * The WorkOS access token (RS256 JWT) forwarded to the api as the bearer
+   * credential — the api verifies it and derives org + user from its claims
+   * (S14). No shared service token, no asserted x-org-id/x-user-id.
+   */
+  readonly accessToken: string;
+  /**
+   * Stable manager UUID derived from the WorkOS user id. The api re-derives the
+   * same value from the verified `sub`; kept here only for client-side display
+   * (e.g. matching "you" in the members list), never sent as a header.
+   */
   readonly userDecisionUuid: string;
   /** The signed-in user's email (the api's x-user-email). */
   readonly userEmail: string | null;
@@ -103,8 +105,8 @@ export interface DashboardContext {
 }
 
 interface CallCtx {
-  readonly organizationId: string;
-  readonly userDecisionUuid?: string;
+  /** The verified WorkOS access token forwarded as the bearer credential. */
+  readonly accessToken: string;
   /** The acting user's email — sent as x-user-email for reconcile/auto-claim. */
   readonly userEmail?: string | null;
   /** Pins the api call to one workspace; absent → the org's default. */
@@ -139,10 +141,8 @@ const call = async (
   },
 ): Promise<CallResult> => {
   const headers: Record<string, string> = {
-    authorization: `Bearer ${apiToken()}`,
-    "x-org-id": opts.ctx.organizationId,
+    authorization: `Bearer ${opts.ctx.accessToken}`,
   };
-  if (opts.ctx.userDecisionUuid) headers["x-user-id"] = opts.ctx.userDecisionUuid;
   if (opts.ctx.userEmail) headers["x-user-email"] = opts.ctx.userEmail;
   if (opts.ctx.workspaceId) headers["x-workspace-id"] = opts.ctx.workspaceId;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
@@ -178,17 +178,17 @@ const okBody = async (path: string, ctx: CallCtx): Promise<unknown> => {
 // ---- Tenant resolution / auth gate ----
 
 const fetchTenant = async (
-  organizationId: string,
+  accessToken: string,
 ): Promise<TenantInfo | null> => {
-  const { status, body } = await call("/tenant", { ctx: { organizationId } });
+  const { status, body } = await call("/tenant", { ctx: { accessToken } });
   if (status !== 200) throw new Error(`dashboard api ${status} on /tenant`);
   return (body as { tenant: TenantInfo | null }).tenant;
 };
 
 const fetchWorkspaces = async (
-  organizationId: string,
+  accessToken: string,
 ): Promise<WorkspacesResponse> => {
-  const { status, body } = await call("/workspaces", { ctx: { organizationId } });
+  const { status, body } = await call("/workspaces", { ctx: { accessToken } });
   if (status !== 200) throw new Error(`dashboard api ${status} on /workspaces`);
   return body as WorkspacesResponse;
 };
@@ -227,10 +227,10 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   if (disposition === "refreshable") {
     redirect(buildRefreshRedirect(await currentPathname()));
   }
-  const { user, organizationId } = session;
-  if (!user) redirect(buildSignUpRedirect(await currentPathname()));
+  const { user, organizationId, accessToken } = session;
+  if (!user || !accessToken) redirect(buildSignUpRedirect(await currentPathname()));
   if (!organizationId) redirect(ONBOARDING_PATH);
-  const { workspaces } = await fetchWorkspaces(organizationId);
+  const { workspaces } = await fetchWorkspaces(accessToken);
   // The cookie is advisory — a stale value (deleted workspace) resolves to
   // the default instead of erroring, so a delete/switch race can't strand
   // the user. The cookie itself is rewritten on the next explicit switch.
@@ -242,14 +242,14 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   // active workspace, so pages/nav gate on real permissions (the api still
   // enforces independently — this only drives what the UI shows).
   const me = await fetchMeSession({
-    organizationId,
-    userDecisionUuid,
+    accessToken,
     userEmail,
     workspaceId: active.id,
   });
   return {
     organizationId,
     userId: user.id,
+    accessToken,
     userDecisionUuid,
     userEmail,
     tenantId: active.id,
@@ -281,16 +281,15 @@ export interface ShellWorkspaces {
 export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
   try {
     const { session } = await getSessionState();
-    const { user, organizationId } = session;
-    if (!user || !organizationId) return null;
-    const { workspaces } = await fetchWorkspaces(organizationId);
+    const { user, organizationId, accessToken } = session;
+    if (!user || !organizationId || !accessToken) return null;
+    const { workspaces } = await fetchWorkspaces(accessToken);
     const active = pickActiveWorkspace(workspaces, await workspaceCookie());
     if (!active) return null;
     let permissions: ReadonlyArray<RbacPermissionId> | null = null;
     try {
       const me = await fetchMeSession({
-        organizationId,
-        userDecisionUuid: dashboardUserDecisionUuid(user.id),
+        accessToken,
         userEmail: user.email ?? null,
         workspaceId: active.id,
       });
@@ -307,6 +306,8 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
 export interface OrgContext {
   readonly userId: string;
   readonly userDecisionUuid: string;
+  /** The verified WorkOS access token (may be org-less for a fresh signup). */
+  readonly accessToken: string;
   /**
    * The user's WorkOS org, or null for a fresh self-service signup that
    * isn't in one yet. Onboarding provisions the org when this is null.
@@ -332,15 +333,17 @@ export const requireOrganization = async (): Promise<OrgContext> => {
   if (disposition === "refreshable") {
     redirect(buildRefreshRedirect(await currentPathname()));
   }
-  const { user, organizationId } = session;
+  const { user, organizationId, accessToken } = session;
   // Legal-gated front door (audit B2) — see getDashboardContext.
-  if (!user) redirect(buildSignUpRedirect(await currentPathname()));
-  const tenant = organizationId ? await fetchTenant(organizationId) : null;
+  if (!user || !accessToken) redirect(buildSignUpRedirect(await currentPathname()));
+  const tenant =
+    organizationId && accessToken ? await fetchTenant(accessToken) : null;
   const metadata = user.metadata ?? {};
   const acceptedAt = metadata[LEGAL_ACCEPTED_AT_KEY] ?? null;
   return {
     userId: user.id,
     userDecisionUuid: dashboardUserDecisionUuid(user.id),
+    accessToken,
     organizationId: organizationId ?? null,
     email: user.email ?? null,
     existingTenantId: tenant?.tenantId ?? null,
