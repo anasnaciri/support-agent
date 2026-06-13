@@ -33,6 +33,7 @@ import type {
   WorkspacesResponse,
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
+import { parseMintDenial } from "./connect-denial";
 import { WORKSPACE_COOKIE, pickActiveWorkspace } from "./workspace";
 import { LEGAL_ACCEPTED_AT_KEY, hasAcceptedAtSignup } from "./legal-consent";
 import { ONBOARDING_PATH, buildSignUpRedirect } from "./auth-redirect";
@@ -757,6 +758,7 @@ export const api = {
   ): Promise<
     | { readonly url: string }
     | { readonly alreadyConnected: { readonly mailbox: string | null } }
+    | { readonly denied: string }
   > => {
     const { status, body } = await call(
       `/connect/${encodeURIComponent(provider)}`,
@@ -775,6 +777,11 @@ export const api = {
         },
       };
     }
+    // The api refuses to mint a Shopify grant for a workspace with no app
+    // credentials of its own (pilot not provisioned / revoked / no app
+    // configured). Surfaced as a friendly banner, not a 500 page.
+    const denied = parseMintDenial(status, body);
+    if (denied) return { denied };
     if (status !== 200 || typeof (body as { url?: unknown })?.url !== "string") {
       throw new Error(`dashboard api ${status} on /connect/${provider}`);
     }

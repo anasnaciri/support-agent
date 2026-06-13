@@ -1,8 +1,11 @@
-// Pure parsing for the OAuth-failure banner contract (U6). The apps/api OAuth
+// Pure parsing for the connect outcome banners (U6). The apps/api OAuth
 // callback redirects back to /settings/integrations with
 // `?error=<provider>:<code>` when the merchant cancels consent or the
-// callback fails (e.g. `gmail:access_denied`, `outlook:exchange_failed`).
-// Framework-free so it's unit-testable.
+// callback fails (e.g. `gmail:access_denied`, `outlook:exchange_failed`),
+// and with `?connected=<provider>` on success. Framework-free so it's
+// unit-testable.
+
+import type { ShopifyAppGateView } from "@support-agent/dashboard-contracts";
 
 import { PROVIDER_LABELS } from "./_shared";
 
@@ -40,7 +43,57 @@ export const connectErrorMessage = (code: string): string => {
     case "state_mismatch":
     case "invalid_state":
       return "The connect link had expired or was already used. Start the connection again from this page.";
+    case "not_provisioned":
+    case "revoked":
+      return "This workspace doesn't have its own Shopify app yet. Support is setting it up — you can connect once it's ready.";
+    case "app_not_configured":
+      return "Shopify connections aren't available yet. Please contact support.";
     default:
       return "Something went wrong completing the connection. Nothing was connected — please try again.";
   }
 };
+
+/**
+ * Connect-button state for the Shopify card. `available` is the api's own
+ * install/grant gate (resolved per workspace, fallbacks included or refused
+ * exactly as the install endpoint would) — when it's false the button is
+ * disabled and the other gate fields only pick which explanation renders:
+ * a pilot workspace waiting on operator provisioning vs a deployment that
+ * ships no Shopify app at all.
+ */
+export type ShopifyConnectState =
+  | "available"
+  | "awaiting_provisioning"
+  | "unconfigured";
+
+export const shopifyConnectState = (
+  gate: ShopifyAppGateView,
+): ShopifyConnectState =>
+  gate.available
+    ? "available"
+    : gate.requiresProvisioning
+      ? "awaiting_provisioning"
+      : "unconfigured";
+
+/**
+ * What the `?connected=<provider>` redirect breadcrumb may claim. The success
+ * banner is only rendered when THIS workspace actually holds an active
+ * connection for the provider — a connect that completed against another
+ * workspace (or didn't persist) must surface as a warning, never "connected."
+ */
+export type ConnectedBanner =
+  | { readonly kind: "connected"; readonly label: string }
+  | { readonly kind: "not_landed"; readonly label: string };
+
+export const connectedBanner = (
+  connectedParam: string | undefined,
+  rowStatus: string | undefined,
+): ConnectedBanner | null => {
+  if (!connectedParam) return null;
+  const label = PROVIDER_LABELS[connectedParam];
+  if (!label) return null;
+  return rowStatus === "active"
+    ? { kind: "connected", label }
+    : { kind: "not_landed", label };
+};
+

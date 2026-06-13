@@ -39,6 +39,15 @@ export const GET = async (
     redirect(`/settings/integrations?${qs.toString()}`);
   }
 
+  // The workspace has no app credentials to install with (pilot workspace
+  // not provisioned / revoked, or no app configured at all). The button is
+  // normally disabled in this state — this catches a direct navigation and
+  // lands it on the integrations banner instead of an error page.
+  if ("denied" in result) {
+    const qs = new URLSearchParams({ error: `${provider}:${result.denied}` });
+    redirect(`/settings/integrations?${qs.toString()}`);
+  }
+
   // No `login_hint`: the dashboard login email is the merchant's account, not
   // the mailbox they're connecting. Prefilling it pre-selected (and on
   // Microsoft, locked) the wrong account. The user picks the account on the

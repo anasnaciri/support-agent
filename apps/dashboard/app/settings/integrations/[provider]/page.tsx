@@ -24,6 +24,7 @@ import {
   connectHref,
   isSupportedProvider,
 } from "../_shared";
+import { shopifyConnectState } from "../connect-error";
 import {
   disconnectShopifyAction,
   disconnectGmailAction,
@@ -70,16 +71,16 @@ export default async function ConnectorManagePage({
   ]);
   const legalAccepted = settings.legalAcceptance !== null;
 
-  // Pilot custom distribution: Shopify Connect stays disabled until an
-  // operator has provisioned the tenant's custom app. The api install
-  // endpoint enforces this authoritatively (403 shopify_provisioning_required)
-  // — this is the matching UX gate so the button isn't a dead link. SaaS mode
-  // sets requiresProvisioning false, so it never blocks.
-  const shopifyAwaitingProvisioning =
-    isShopify &&
-    shopifyGate !== null &&
-    shopifyGate.requiresProvisioning &&
-    !shopifyGate.provisioned;
+  // Connect stays disabled while this workspace has no app credentials to
+  // install with. The api enforces this authoritatively at the grant-mint and
+  // install endpoints (403 shopify_provisioning_required) — this is the
+  // matching UX gate so the button isn't a dead link, and so a workspace can
+  // never be sent into an OAuth flow on credentials that aren't its own.
+  const shopifyState =
+    isShopify && shopifyGate !== null
+      ? shopifyConnectState(shopifyGate)
+      : "available";
+  const shopifyUnavailable = shopifyState !== "available";
 
   const row =
     connections.filter((c) => c.provider === provider)[0] ?? null;
@@ -89,10 +90,7 @@ export default async function ConnectorManagePage({
       ? "active"
       : "revoked";
   const showConnect =
-    !!apiBaseUrl &&
-    legalAccepted &&
-    tone !== "active" &&
-    !shopifyAwaitingProvisioning;
+    !!apiBaseUrl && legalAccepted && tone !== "active" && !shopifyUnavailable;
   const disconnectAction =
     provider === "shopify"
       ? disconnectShopifyAction
@@ -228,12 +226,13 @@ export default async function ConnectorManagePage({
               <Button asChild>
                 <a href="/settings/legal">Review legal terms</a>
               </Button>
-            ) : shopifyAwaitingProvisioning && tone !== "active" ? (
+            ) : shopifyUnavailable && tone !== "active" ? (
               <div className="space-y-1.5">
                 <Button disabled>Connect {label}</Button>
                 <p className="text-xs text-muted-foreground">
-                  Awaiting setup — support is provisioning your Shopify app.
-                  You can connect once it&apos;s ready.
+                  {shopifyState === "awaiting_provisioning"
+                    ? "Awaiting setup — support is provisioning your Shopify app for this workspace. You can connect once it's ready."
+                    : "Shopify connections aren't available yet. Please contact support."}
                 </p>
               </div>
             ) : showConnect && apiBaseUrl ? (

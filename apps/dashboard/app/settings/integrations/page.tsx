@@ -18,7 +18,12 @@ import {
   getApiBaseUrl,
   connectHref,
 } from "./_shared";
-import { connectErrorMessage, parseConnectError } from "./connect-error";
+import {
+  connectErrorMessage,
+  connectedBanner,
+  parseConnectError,
+  shopifyConnectState,
+} from "./connect-error";
 import {
   disconnectShopifyAction,
   disconnectGmailAction,
@@ -56,13 +61,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
     : null;
   // Set by the apps/api OAuth callback when it redirects the merchant back
   // here after a successful connect (`?connected=shopify`, `=gmail`, …).
+  // Only trusted as a breadcrumb — the banner below checks this workspace's
+  // actual connections before claiming success.
   const connectedParam = params["connected"];
   const connectedValue = Array.isArray(connectedParam)
     ? connectedParam[0]
     : connectedParam;
-  const connectedLabel = connectedValue
-    ? (PROVIDER_LABELS[connectedValue] ?? null)
-    : null;
   // Set when a connect was refused because a mailbox is already connected
   // for that provider (one mailbox per provider per store).
   const errorParam = params["error"];
@@ -90,16 +94,26 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
     api.shopifyApp(ctx),
   ]);
   const legalAccepted = settings.legalAcceptance !== null;
-  // Pilot custom distribution: Shopify Connect stays disabled until an
-  // operator has provisioned the tenant's custom app. In SaaS mode
-  // `requiresProvisioning` is false, so this never blocks.
-  const shopifyAwaitingProvisioning =
-    shopifyGate.requiresProvisioning && !shopifyGate.provisioned;
+  // Connect stays disabled while this workspace has no app credentials to
+  // install with: a pilot workspace whose custom app isn't provisioned (or
+  // was revoked), or a deployment with no Shopify app configured at all.
+  // `available` mirrors the api's own install gate, so the button can never
+  // start a flow the api would refuse — or one that could only run on
+  // another store's credentials.
+  const shopifyState = shopifyConnectState(shopifyGate);
 
   const byProvider = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
     if (!byProvider.has(r.provider)) byProvider.set(r.provider, r);
   }
+
+  // The success banner must be true for THIS workspace, not just echoed from
+  // the redirect: a connect that completed against a different workspace
+  // used to land here as "connected." while the card still said missing.
+  const connectedOutcome = connectedBanner(
+    connectedValue,
+    connectedValue ? byProvider.get(connectedValue)?.status : undefined,
+  );
 
   return (
     <div className="space-y-6">
@@ -131,9 +145,25 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
         </Alert>
       ) : null}
 
-      {connectedLabel ? (
+      {connectedOutcome?.kind === "connected" ? (
         <Alert variant="success">
-          <AlertDescription>{connectedLabel} connected.</AlertDescription>
+          <AlertDescription>
+            {connectedOutcome.label} connected.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {connectedOutcome?.kind === "not_landed" ? (
+        <Alert variant="warning">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>
+            {connectedOutcome.label} isn&apos;t connected in this workspace
+          </AlertTitle>
+          <AlertDescription>
+            The connection finished, but it didn&apos;t end up in this
+            workspace. If you manage more than one workspace, check whether it
+            landed in another one before trying again.
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -258,12 +288,13 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                     <Button asChild>
                       <Link href="/settings/legal">Review legal terms</Link>
                     </Button>
-                  ) : p === "shopify" && shopifyAwaitingProvisioning ? (
+                  ) : p === "shopify" && shopifyState !== "available" ? (
                     <div className="space-y-1.5">
                       <Button disabled>Connect {label}</Button>
                       <p className="text-xs text-muted-foreground">
-                        Awaiting setup — support is provisioning your Shopify
-                        app. You can connect once it&apos;s ready.
+                        {shopifyState === "awaiting_provisioning"
+                          ? "Awaiting setup — support is provisioning your Shopify app for this workspace. You can connect once it's ready."
+                          : "Shopify connections aren't available yet. Please contact support."}
                       </p>
                     </div>
                   ) : apiBaseUrl ? (
