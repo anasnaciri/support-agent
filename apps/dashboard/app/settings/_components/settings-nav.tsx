@@ -14,12 +14,18 @@ import {
   Plug,
   ShieldCheck,
   Trash2,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import type { RbacPermissionId } from "@support-agent/dashboard-contracts";
+
 import { cn } from "@/lib/utils";
 
-import { SETTINGS_NAV_GROUPS } from "./settings-nav-items";
+import {
+  SETTINGS_NAV_GROUPS,
+  visibleSettingsGroups,
+} from "./settings-nav-items";
 
 const ICONS: Record<string, LucideIcon> = {
   "/settings": LayoutGrid,
@@ -29,18 +35,30 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings/refund-policy": Banknote,
   "/settings/knowledge": Library,
   "/settings/usage": BarChart3,
+  "/settings/members": Users,
   "/settings/notifications": Bell,
   "/settings/integrations": Plug,
   "/settings/legal": FileText,
   "/settings/account": Trash2,
 };
 
-export function SettingsNav() {
+export function SettingsNav({
+  permissions,
+}: {
+  /** Member's effective permissions; null → fail-open (show all items). */
+  readonly permissions: ReadonlyArray<RbacPermissionId> | null;
+}) {
   const pathname = usePathname() ?? "/settings";
+  // null → fail-open: show every item (the api still enforces). Otherwise hide
+  // items the member lacks the permission for.
+  const groups =
+    permissions === null
+      ? SETTINGS_NAV_GROUPS
+      : visibleSettingsGroups(new Set(permissions));
 
   return (
     <nav className="flex flex-col gap-5 px-3 pb-6">
-      {SETTINGS_NAV_GROUPS.map((group, index) => (
+      {groups.map((group, index) => (
         <div key={group.label ?? `group-${index}`} className="space-y-0.5">
           {group.label ? (
             <p className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">

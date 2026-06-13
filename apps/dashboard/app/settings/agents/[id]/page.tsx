@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import {
   findAgent,
   tenantConfigurableActions,
@@ -65,7 +66,7 @@ const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
 export default async function AgentDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.agents");
   const [catalogResp, overrideRows, models, settings] = await Promise.all([
     api.catalog(ctx),
     api.agentOverrides(ctx),

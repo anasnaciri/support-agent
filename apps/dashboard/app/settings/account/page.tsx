@@ -1,6 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 
-import { getDashboardContext } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
@@ -27,7 +27,7 @@ const ERROR_COPY: Record<string, string> = {
 };
 
 export default async function AccountSettingsPage({ searchParams }: PageProps) {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("account.manage");
   const params = (await searchParams) ?? {};
   const errorRaw = Array.isArray(params["error"])
     ? params["error"][0]

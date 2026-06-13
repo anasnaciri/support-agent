@@ -13,9 +13,13 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import type { WorkspaceSummary } from "@support-agent/dashboard-contracts";
+import type {
+  RbacPermissionId,
+  WorkspaceSummary,
+} from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
+import { hasAnySettingsAccess } from "./settings/_components/settings-nav-items";
 import { SignOutButton } from "./SignOutButton";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -23,14 +27,35 @@ interface NavItem {
   readonly href: string;
   readonly label: string;
   readonly icon: LucideIcon;
+  /** Permission needed to see this item; absent → always shown. */
+  readonly requires?: RbacPermissionId;
 }
 
 const PRIMARY_NAV: ReadonlyArray<NavItem> = [
-  { href: "/", label: "Today", icon: Home },
-  { href: "/cases", label: "Cases", icon: Inbox },
-  { href: "/approvals", label: "Approvals", icon: ClipboardCheck },
-  { href: "/audit", label: "Audit", icon: Activity },
+  { href: "/", label: "Today", icon: Home, requires: "cases.view" },
+  { href: "/cases", label: "Cases", icon: Inbox, requires: "cases.view" },
+  {
+    href: "/approvals",
+    label: "Approvals",
+    icon: ClipboardCheck,
+    requires: "approvals.view",
+  },
+  { href: "/audit", label: "Audit", icon: Activity, requires: "audit.view" },
 ];
+
+/**
+ * Filter nav by the member's permissions. `null` permissions → fail-open (show
+ * all): the api + page guards remain the real boundary, so a transient
+ * permissions-load blip never strands a member with an empty rail.
+ */
+const visiblePrimaryNav = (
+  permissions: ReadonlySet<RbacPermissionId> | null,
+): ReadonlyArray<NavItem> =>
+  permissions === null
+    ? PRIMARY_NAV
+    : PRIMARY_NAV.filter(
+        (item) => !item.requires || permissions.has(item.requires),
+      );
 
 // Label that fades in as the rail expands on hover. `truncate` (+ flex-1)
 // collapses it to zero width when the rail is narrow, so long text never
@@ -77,13 +102,26 @@ interface Props {
   /** Workspaces for the switcher; null → signed out / pre-onboarding. */
   readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
   readonly activeWorkspaceId: string | null;
+  /** Member's effective permissions for nav gating; null → fail-open. */
+  readonly permissions: ReadonlyArray<RbacPermissionId> | null;
 }
 
-export function IconRail({ email, workspaces, activeWorkspaceId }: Props) {
+export function IconRail({
+  email,
+  workspaces,
+  activeWorkspaceId,
+  permissions,
+}: Props) {
   const pathname = usePathname() ?? "/";
   // Owned here (not in SignOutButton) so the rail can clear the confirmation
   // when the pointer leaves — it hides together with the collapsing rail.
   const [signOutOpen, setSignOutOpen] = useState(false);
+
+  const permSet = permissions === null ? null : new Set(permissions);
+  const primaryNav = visiblePrimaryNav(permSet);
+  // Show the Settings cog only when the member has a gated settings item (or
+  // we couldn't load permissions → fail-open).
+  const showSettings = permSet === null || hasAnySettingsAccess(permSet);
 
   const activeWorkspace =
     workspaces && activeWorkspaceId
@@ -122,7 +160,7 @@ export function IconRail({ email, workspaces, activeWorkspaceId }: Props) {
         ) : null}
 
         <nav className="mt-6 flex flex-1 flex-col gap-1">
-          {PRIMARY_NAV.map((item) => (
+          {primaryNav.map((item) => (
             <RailLink
               key={item.href}
               item={item}
@@ -132,10 +170,12 @@ export function IconRail({ email, workspaces, activeWorkspaceId }: Props) {
         </nav>
 
         <div className="flex flex-col gap-1">
-          <RailLink
-            item={{ href: "/settings", label: "Settings", icon: Settings }}
-            active={isActive(pathname, "/settings")}
-          />
+          {showSettings ? (
+            <RailLink
+              item={{ href: "/settings", label: "Settings", icon: Settings }}
+              active={isActive(pathname, "/settings")}
+            />
+          ) : null}
           <SignOutButton
             email={email}
             labelClassName={RAIL_LABEL}

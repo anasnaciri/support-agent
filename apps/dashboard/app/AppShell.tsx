@@ -10,7 +10,10 @@ import {
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
-import type { WorkspaceSummary } from "@support-agent/dashboard-contracts";
+import type {
+  RbacPermissionId,
+  WorkspaceSummary,
+} from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
 import {
@@ -38,6 +41,8 @@ interface Props {
   /** Workspaces for the rail's switcher; null → signed out / pre-onboarding. */
   readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
   readonly activeWorkspaceId: string | null;
+  /** Member's effective permissions for nav gating; null → fail-open (show all). */
+  readonly permissions: ReadonlyArray<RbacPermissionId> | null;
   readonly defaultOpen: boolean;
   readonly defaultWidth: number;
   readonly children: ReactNode;
@@ -47,6 +52,7 @@ export function AppShell({
   email,
   workspaces,
   activeWorkspaceId,
+  permissions,
   defaultOpen,
   defaultWidth,
   children,
@@ -64,7 +70,7 @@ export function AppShell({
   // one; case-detail pages get a searchable case switcher. Add more entries
   // here as other sections grow sub-navigation.
   const secondary: SecondarySection | null = pathname.startsWith("/settings")
-    ? { title: "Settings", node: <SettingsNav /> }
+    ? { title: "Settings", node: <SettingsNav permissions={permissions} /> }
     : caseIdFromPathname(pathname)
       ? { title: "Cases", node: <CasesSidebar /> }
       : null;
@@ -130,6 +136,7 @@ export function AppShell({
         email={email}
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
+        permissions={permissions}
       />
 
       {/* pt-3 reveals a sliver of the dark frame so the off-white panel reads

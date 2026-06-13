@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
+import type { RbacPermissionId } from "@support-agent/dashboard-contracts";
 
 import {
   SETTINGS_NAV_GROUPS,
   activeSettingsHref,
+  hasAnySettingsAccess,
+  visibleSettingsGroups,
 } from "../app/settings/_components/settings-nav-items.js";
+
+const perms = (...ids: RbacPermissionId[]): ReadonlySet<RbacPermissionId> =>
+  new Set(ids);
+const hrefs = (
+  groups: ReturnType<typeof visibleSettingsGroups>,
+): string[] => groups.flatMap((g) => g.items.map((i) => i.href));
 
 const ALL_ITEMS = SETTINGS_NAV_GROUPS.flatMap((g) => g.items);
 
@@ -60,5 +69,56 @@ describe("settings nav active matching", () => {
 
   it("returns null for a non-settings path", () => {
     expect(activeSettingsHref("/cases")).toBeNull();
+  });
+});
+
+describe("settings nav permission gating", () => {
+  it("shows a cases-only member just the ungated items (Overview, Legal)", () => {
+    const visible = hrefs(visibleSettingsGroups(perms("cases.view")));
+    expect(visible).toContain("/settings");
+    expect(visible).toContain("/settings/legal");
+    expect(visible).not.toContain("/settings/llm");
+    expect(visible).not.toContain("/settings/members");
+    expect(visible).not.toContain("/settings/account");
+  });
+
+  it("shows the AI provider item only with settings.llm", () => {
+    expect(hrefs(visibleSettingsGroups(perms("settings.llm")))).toContain(
+      "/settings/llm",
+    );
+    expect(hrefs(visibleSettingsGroups(perms("cases.view")))).not.toContain(
+      "/settings/llm",
+    );
+  });
+
+  it("shows Members only with members.manage", () => {
+    expect(hrefs(visibleSettingsGroups(perms("members.manage")))).toContain(
+      "/settings/members",
+    );
+  });
+
+  it("drops a group when all its items are hidden", () => {
+    // cases.view grants nothing in the Connections group → that group vanishes.
+    const groups = visibleSettingsGroups(perms("cases.view"));
+    expect(groups.find((g) => g.label === "Connections")).toBeUndefined();
+  });
+
+  it("hasAnySettingsAccess: false for cases-only, true for any gated perm", () => {
+    expect(hasAnySettingsAccess(perms("cases.view"))).toBe(false);
+    expect(hasAnySettingsAccess(perms("approvals.decide"))).toBe(false);
+    expect(hasAnySettingsAccess(perms("settings.integrations"))).toBe(true);
+    expect(hasAnySettingsAccess(perms("members.manage"))).toBe(true);
+  });
+
+  it("an all-permissions member sees every item", () => {
+    const all = new Set(
+      SETTINGS_NAV_GROUPS.flatMap((g) =>
+        g.items.map((i) => i.requires).filter(Boolean),
+      ) as RbacPermissionId[],
+    );
+    const visible = hrefs(visibleSettingsGroups(all));
+    for (const item of SETTINGS_NAV_GROUPS.flatMap((g) => g.items)) {
+      expect(visible).toContain(item.href);
+    }
   });
 });

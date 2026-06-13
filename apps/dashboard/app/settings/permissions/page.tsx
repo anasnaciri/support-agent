@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import {
   currentToolPermission,
   merchantConfigurableTools,
@@ -19,7 +20,7 @@ import {
 } from "@/components/ui/table";
 
 export default async function PermissionsMatrixPage() {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.agents");
   const [catalog, overrides] = await Promise.all([
     api.catalog(ctx),
     api.agentOverrides(ctx),

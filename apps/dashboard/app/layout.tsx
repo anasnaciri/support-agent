@@ -39,6 +39,7 @@ export default async function RootLayout({
           email={user?.email ?? null}
           workspaces={shellWorkspaces?.workspaces ?? null}
           activeWorkspaceId={shellWorkspaces?.activeWorkspaceId ?? null}
+          permissions={shellWorkspaces?.permissions ?? null}
           defaultOpen={defaultOpen}
           defaultWidth={defaultWidth}
         >

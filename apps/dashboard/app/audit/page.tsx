@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import {
   parsePageNumber,
   resolveDefaultPageSize,
@@ -77,7 +78,7 @@ interface SearchParams {
 }
 
 export default async function AuditLogPage({ searchParams }: SearchParams) {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("audit.view");
   const sp = await searchParams;
   const actionFilter = sp.action ?? "";
   const actorFilter = sp.actor ?? "";

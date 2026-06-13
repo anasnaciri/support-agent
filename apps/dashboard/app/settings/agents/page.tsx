@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
@@ -17,7 +18,7 @@ const modeVariant = (mode: string): "info" | "secondary" =>
   mode === "primary" ? "info" : "secondary";
 
 export default async function AgentsListPage() {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.agents");
   const [catalog, overrideRows] = await Promise.all([
     api.catalog(ctx),
     api.agentOverrides(ctx),

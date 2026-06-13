@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle, Settings2 } from "lucide-react";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,7 @@ interface PageProps {
 }
 
 export default async function IntegrationsPage({ searchParams }: PageProps) {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.integrations");
   const params = (await searchParams) ?? {};
   // Set by every disconnect action (`?disconnected=<provider>`, U5).
   const disconnectedParam = params["disconnected"];

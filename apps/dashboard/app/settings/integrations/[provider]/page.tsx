@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, ClipboardList } from "lucide-react";
 
 import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import { capabilitiesForProvider } from "@/lib/catalog";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
@@ -54,7 +55,7 @@ export default async function ConnectorManagePage({
   const { provider } = await params;
   if (!isSupportedProvider(provider)) notFound();
 
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.integrations");
   const apiBaseUrl = getApiBaseUrl();
 
   const label = PROVIDER_LABELS[provider] ?? provider;

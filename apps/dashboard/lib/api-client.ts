@@ -32,6 +32,11 @@ import type {
   UsageDecisionRow,
   WorkspaceSummary,
   WorkspacesResponse,
+  MePermissionsResponse,
+  MembersResponse,
+  RolesResponse,
+  RbacPermissionDef,
+  RbacPermissionId,
 } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
 import { parseMintDenial } from "./connect-denial";
@@ -83,17 +88,25 @@ export interface DashboardContext {
   readonly userId: string;
   /** Stable manager UUID derived from the WorkOS user id (the api's x-user-id). */
   readonly userDecisionUuid: string;
+  /** The signed-in user's email (the api's x-user-email). */
+  readonly userEmail: string | null;
   /** The ACTIVE workspace (tenant row) — same value as workspaceId. */
   readonly tenantId: string;
   readonly tenantName: string;
   readonly workspaceId: string;
   /** Every workspace the org owns, default first (for the switcher). */
   readonly workspaces: ReadonlyArray<WorkspaceSummary>;
+  /** The member's effective permissions for the ACTIVE workspace (nav gating). */
+  readonly permissions: ReadonlySet<RbacPermissionId>;
+  /** True when the member is an owner (all-access) of the active workspace. */
+  readonly isOwner: boolean;
 }
 
 interface CallCtx {
   readonly organizationId: string;
   readonly userDecisionUuid?: string;
+  /** The acting user's email — sent as x-user-email for reconcile/auto-claim. */
+  readonly userEmail?: string | null;
   /** Pins the api call to one workspace; absent → the org's default. */
   readonly workspaceId?: string;
 }
@@ -130,6 +143,7 @@ const call = async (
     "x-org-id": opts.ctx.organizationId,
   };
   if (opts.ctx.userDecisionUuid) headers["x-user-id"] = opts.ctx.userDecisionUuid;
+  if (opts.ctx.userEmail) headers["x-user-email"] = opts.ctx.userEmail;
   if (opts.ctx.workspaceId) headers["x-workspace-id"] = opts.ctx.workspaceId;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
 
@@ -179,6 +193,14 @@ const fetchWorkspaces = async (
   return body as WorkspacesResponse;
 };
 
+// Reconcile any pending invite for this user + load their effective access for
+// the active workspace. POST because it may write (the invite reconcile).
+const fetchMeSession = async (ctx: CallCtx): Promise<MePermissionsResponse> => {
+  const { status, body } = await call("/me/session", { method: "POST", ctx });
+  if (status !== 200) throw new Error(`dashboard api ${status} on /me/session`);
+  return body as MePermissionsResponse;
+};
+
 /** The workspace:id cookie, or undefined. */
 const workspaceCookie = async (): Promise<string | undefined> => {
   const store = await cookies();
@@ -214,14 +236,28 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   // the user. The cookie itself is rewritten on the next explicit switch.
   const active = pickActiveWorkspace(workspaces, await workspaceCookie());
   if (!active) redirect(ONBOARDING_PATH);
+  const userDecisionUuid = dashboardUserDecisionUuid(user.id);
+  const userEmail = user.email ?? null;
+  // Reconcile any pending invite + load the member's effective access for the
+  // active workspace, so pages/nav gate on real permissions (the api still
+  // enforces independently — this only drives what the UI shows).
+  const me = await fetchMeSession({
+    organizationId,
+    userDecisionUuid,
+    userEmail,
+    workspaceId: active.id,
+  });
   return {
     organizationId,
     userId: user.id,
-    userDecisionUuid: dashboardUserDecisionUuid(user.id),
+    userDecisionUuid,
+    userEmail,
     tenantId: active.id,
     tenantName: active.name,
     workspaceId: active.id,
     workspaces,
+    permissions: new Set(me.permissions),
+    isOwner: me.isOwner,
   };
 };
 
@@ -234,6 +270,12 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
 export interface ShellWorkspaces {
   readonly workspaces: ReadonlyArray<WorkspaceSummary>;
   readonly activeWorkspaceId: string;
+  /**
+   * The member's effective permissions for the active workspace, for nav
+   * gating. `null` → couldn't load (fail-open: the rail shows everything; the
+   * api still enforces and pages redirect-guard).
+   */
+  readonly permissions: ReadonlyArray<RbacPermissionId> | null;
 }
 
 export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
@@ -244,7 +286,19 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
     const { workspaces } = await fetchWorkspaces(organizationId);
     const active = pickActiveWorkspace(workspaces, await workspaceCookie());
     if (!active) return null;
-    return { workspaces, activeWorkspaceId: active.id };
+    let permissions: ReadonlyArray<RbacPermissionId> | null = null;
+    try {
+      const me = await fetchMeSession({
+        organizationId,
+        userDecisionUuid: dashboardUserDecisionUuid(user.id),
+        userEmail: user.email ?? null,
+        workspaceId: active.id,
+      });
+      permissions = me.permissions;
+    } catch {
+      // Fail-open: nav shows everything; the api + page guards still enforce.
+    }
+    return { workspaces, activeWorkspaceId: active.id, permissions };
   } catch {
     return null;
   }
@@ -851,4 +905,80 @@ export const api = {
     });
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },
+
+  // ---- Members & roles (members.manage) ----
+  members: async (ctx: CallCtx): Promise<MembersResponse> =>
+    okBody("/members", ctx) as Promise<MembersResponse>,
+
+  roles: async (ctx: CallCtx): Promise<RolesResponse> =>
+    okBody("/roles", ctx) as Promise<RolesResponse>,
+
+  permissionCatalog: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<RbacPermissionDef>> =>
+    (
+      (await okBody("/permission-catalog", ctx)) as {
+        permissions: ReadonlyArray<RbacPermissionDef>;
+      }
+    ).permissions,
+
+  inviteMember: (
+    ctx: CallCtx,
+    input: {
+      readonly email: string;
+      readonly roleId: string;
+      readonly workosInvitationId?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/members/invite", { method: "POST", body: input, ctx }),
+
+  setMemberRole: (
+    ctx: CallCtx,
+    userDecisionUuid: string,
+    roleId: string,
+  ): Promise<CallResult> =>
+    call(`/members/${encodeURIComponent(userDecisionUuid)}/role`, {
+      method: "POST",
+      body: { roleId },
+      ctx,
+    }),
+
+  removeMember: (ctx: CallCtx, userDecisionUuid: string): Promise<CallResult> =>
+    call(`/members/${encodeURIComponent(userDecisionUuid)}/remove`, {
+      method: "POST",
+      ctx,
+    }),
+
+  revokeInvitation: (ctx: CallCtx, invitationId: string): Promise<CallResult> =>
+    call(`/invitations/${encodeURIComponent(invitationId)}/revoke`, {
+      method: "POST",
+      ctx,
+    }),
+
+  createRole: (ctx: CallCtx, name: string): Promise<CallResult> =>
+    call("/roles", { method: "POST", body: { name }, ctx }),
+
+  renameRole: (ctx: CallCtx, roleId: string, name: string): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/rename`, {
+      method: "POST",
+      body: { name },
+      ctx,
+    }),
+
+  setRolePermissions: (
+    ctx: CallCtx,
+    roleId: string,
+    permissionIds: ReadonlyArray<RbacPermissionId>,
+  ): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/permissions`, {
+      method: "POST",
+      body: { permissionIds },
+      ctx,
+    }),
+
+  deleteRole: (ctx: CallCtx, roleId: string): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
 };
