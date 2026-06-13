@@ -89,9 +89,9 @@ describe("dashboard conversation thread", () => {
     });
   });
 
-  it("strips active content, remote resources, styles, and unsafe links", () => {
+  it("strips active content, remote images, and unsafe links", () => {
     const html = [
-      '<div style="color:red" onclick="steal()">Hello</div>',
+      '<div onclick="steal()">Hello</div>',
       "<script>alert(1)</script>",
       '<img src="https://tracker.example/pixel">',
       '<a href="javascript:alert(1)">bad</a>',
@@ -103,11 +103,58 @@ describe("dashboard conversation thread", () => {
     expect(out).not.toContain("script");
     expect(out).not.toContain("alert(1)");
     expect(out).not.toContain("img");
-    expect(out).not.toContain("style");
     expect(out).not.toContain("onclick");
     expect(out).not.toContain("javascript:");
     expect(out).toContain('<a href="https://example.com/help">safe</a>');
     expect(out).toContain("<table><tr><td>kept</td></tr></table>");
+  });
+
+  it("keeps safe inline styles so email formatting survives", () => {
+    const out = sanitizeEmailHtml(
+      '<p style="color:#0057ff;font-size:18px;text-align:center;font-weight:bold">Hi</p>',
+    );
+    expect(out).toContain("color:#0057ff");
+    expect(out).toContain("font-size:18px");
+    expect(out).toContain("text-align:center");
+    expect(out).toContain("font-weight:bold");
+  });
+
+  it("drops dangerous css declarations (position, remote url, expression)", () => {
+    const out = sanitizeEmailHtml(
+      '<div style="color:red;position:fixed;background:url(https://t.example/p.gif);width:expression(alert(1))">x</div>',
+    );
+    expect(out).toContain("color:red");
+    expect(out).not.toContain("position");
+    expect(out).not.toContain("url(");
+    expect(out).not.toContain("expression");
+  });
+
+  it("keeps a color background shorthand (button fill) but drops background images", () => {
+    expect(
+      sanitizeEmailHtml('<a style="background:#0067b8;color:#fff">Button</a>'),
+    ).toContain("background:#0067b8");
+    const img = sanitizeEmailHtml(
+      '<a style="background:url(https://t.example/p.gif) #0067b8">Button</a>',
+    );
+    expect(img).not.toContain("url(");
+    expect(img).not.toContain("background");
+  });
+
+  it("keeps the table layout attributes email relies on", () => {
+    const out = sanitizeEmailHtml(
+      '<table width="600" bgcolor="#ffffff"><tr><td align="center" colspan="2">x</td></tr></table>',
+    );
+    expect(out).toContain('width="600"');
+    expect(out).toContain('bgcolor="#ffffff"');
+    expect(out).toContain('align="center"');
+    expect(out).toContain('colspan="2"');
+  });
+
+  it("keeps display:none so hidden preheaders stay hidden", () => {
+    const out = sanitizeEmailHtml(
+      '<div style="display:none">Discover helpful tools…</div><p>Real body</p>',
+    );
+    expect(out).toContain("display:none");
   });
 
   it("removes quoted reply history from HTML and plain text", () => {
@@ -126,6 +173,33 @@ describe("dashboard conversation thread", () => {
         "Latest reply\n\n-----Original Message-----\nFrom: Customer\nEarlier message",
       ),
     ).toBe("Latest reply");
+  });
+
+  it("strips invisible preheader spacer characters from the plain-text fallback", () => {
+    const message: ConversationThread["messages"][number] = {
+      id: "m-invis",
+      threadId,
+      direction: "inbound",
+      from: { name: "Azure", email: "azure@microsoft.com" },
+      to: [{ name: null, email: "support@example.com" }],
+      subject: "Welcome to Azure",
+      bodyText:
+        "Discover helpful tools.\n" +
+        "͏ ‌   ͏ ‌   ­\n" +
+        "View as a webpage",
+      bodyHtml: null,
+      sentAt: new Date("2026-06-11T10:30:00.000Z"),
+      attachments: [],
+    };
+    const projected = projectConversationThread({
+      id: threadId,
+      subject: "Welcome to Azure",
+      participants: [],
+      messages: [message],
+    });
+    expect(projected.messages[0]!.bodyText).toBe(
+      "Discover helpful tools.\n\nView as a webpage",
+    );
   });
 
   it("deduplicates repeated provider message ids before display", () => {

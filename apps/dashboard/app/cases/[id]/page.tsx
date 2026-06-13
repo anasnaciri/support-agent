@@ -386,7 +386,7 @@ const EmailThreadTimeline = ({
                 </div>
                 {message.sanitizedBodyHtml ? (
                   <div
-                    className="break-words rounded-md bg-muted/30 p-3 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:p-1 [&_th]:border [&_th]:border-border [&_th]:p-1 [&_ul]:list-disc [&_ul]:pl-5"
+                    className="email-html break-words rounded-md bg-muted/30 p-3 text-sm leading-relaxed"
                     dangerouslySetInnerHTML={{
                       __html: message.sanitizedBodyHtml,
                     }}
