@@ -54,20 +54,34 @@ import {
   agentOverrides,
   approvalDetail,
   approvalsList,
+  assignMemberRole,
   auditList,
   caseContextForTenant,
   caseDetail,
   caseEvents,
   casesList,
   connectionsList,
+  createInvitation,
+  createRole,
   createTenantForOrg,
   createWorkspaceForOrg,
   DbClient,
+  deleteRole,
+  ensureActingOwnerInOpenMode,
   findTenantIdByWorkosOrg,
   findWorkspaceForOrg,
+  getMemberAccess,
   knowledgeDocuments,
+  listMembers,
+  listPendingInvitations,
+  listRoles,
   listWorkspacesByWorkosOrg,
+  reconcileInvitation,
+  removeMember,
+  renameRole,
   renameWorkspaceForOrg,
+  revokeInvitation,
+  setRolePermissions,
   parsePageNumber,
   parsePageSize,
   resumeCase,
@@ -77,7 +91,14 @@ import {
   todaySummary,
   usageRows,
   type DrizzleDb,
+  type MemberAccess,
 } from "@support-agent/db";
+import {
+  RBAC_PERMISSIONS,
+  isRbacPermissionId,
+  type RbacPermissionId,
+} from "@support-agent/dashboard-contracts";
+import { decideAuthz, sessionPermissions } from "./dashboard-authz.js";
 import { fetchModelCatalog } from "@support-agent/providers";
 import {
   isWorkspaceIdShape,
@@ -346,8 +367,14 @@ type DashboardAuthResult =
       readonly ok: true;
       readonly tenantId: string;
       readonly userId: string | undefined;
+      readonly userEmail: string | undefined;
     }
   | { readonly ok: false; readonly status: number; readonly error: string };
+
+// Per-request memo so the centralized RBAC guard (in dashboardGet/dashboardPost)
+// and the handler's own authenticateDashboard call share ONE workspace
+// resolution instead of querying twice.
+const kDashAuth = Symbol("dashboardAuth");
 
 /**
  * Shared auth for `/dashboard/*`: verify the service token, read the asserted
@@ -359,7 +386,7 @@ type DashboardAuthResult =
  * workspace cookie must never bounce a real tenant there), 403 when the org
  * has no workspaces at all.
  */
-const authenticateDashboard = async (
+const resolveDashboardAuth = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -384,7 +411,12 @@ const authenticateDashboard = async (
     if (!workspace) {
       return { ok: false, status: 404, error: "workspace_not_found" };
     }
-    return { ok: true, tenantId: workspace.id, userId: parsed.userId };
+    return {
+      ok: true,
+      tenantId: workspace.id,
+      userId: parsed.userId,
+      userEmail: parsed.userEmail,
+    };
   }
   const tenantId = await runWithDb(layer, (db) =>
     findTenantIdByWorkosOrg(db, parsed.organizationId),
@@ -392,7 +424,57 @@ const authenticateDashboard = async (
   if (!tenantId) {
     return { ok: false, status: 403, error: "no_tenant_for_organization" };
   }
-  return { ok: true, tenantId, userId: parsed.userId };
+  return {
+    ok: true,
+    tenantId,
+    userId: parsed.userId,
+    userEmail: parsed.userEmail,
+  };
+};
+
+const authenticateDashboard = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+): Promise<DashboardAuthResult> => {
+  const store = req as unknown as Record<symbol, DashboardAuthResult | undefined>;
+  const cached = store[kDashAuth];
+  if (cached) return cached;
+  const result = await resolveDashboardAuth(cfg, layer, req);
+  store[kDashAuth] = result;
+  return result;
+};
+
+/**
+ * Centralized human-member RBAC gate. Authenticates, then checks the acting
+ * member holds `permission` for the resolved workspace. Returns true when the
+ * handler should proceed; otherwise it has already sent the error response
+ * (401/403/404/503). Used by dashboardGet/dashboardPost for routes that
+ * declare a required permission.
+ */
+const enforceDashboardPermission = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+  permission: RbacPermissionId,
+): Promise<boolean> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) {
+    sendJson(res, auth.status, { error: auth.error });
+    return false;
+  }
+  // userId may be absent on legacy reads — decideAuthz allows those only while
+  // the workspace is in open mode, and 401s once roles are configured.
+  const access = await runWithDb(layer, (db) =>
+    getMemberAccess(db, auth.tenantId, auth.userId),
+  );
+  const decision = decideAuthz(access, auth.userId, permission);
+  if (!decision.ok) {
+    sendJson(res, decision.status, { error: decision.error });
+    return false;
+  }
+  return true;
 };
 
 type DashboardOrgAuthResult =
@@ -885,6 +967,23 @@ const handleDashboardApprovalAction =
     if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
     if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
     const { id } = req.params as { id: string };
+    // Route guard already enforced approvals.decide. Approving a refund-bearing
+    // action additionally requires refunds.issue (rejecting one does not — it
+    // moves no money). Open mode / owner short-circuit inside decideAuthz.
+    if (action === "approve") {
+      const detail = await runWithDb(layer, (db) =>
+        approvalDetail(db, auth.tenantId, id),
+      );
+      if (detail && detail.tool === "refund.create") {
+        const access = await runWithDb(layer, (db) =>
+          getMemberAccess(db, auth.tenantId, auth.userId!),
+        );
+        const decision = decideAuthz(access, auth.userId, "refunds.issue");
+        if (!decision.ok) {
+          return sendJson(res, decision.status, { error: decision.error });
+        }
+      }
+    }
     const approvedInput = parseJsonBody(req)["approvedInput"];
     const managerId = UserId(auth.userId);
     const result = await Effect.runPromise(
@@ -5088,6 +5187,278 @@ export const redactUrlSecrets = (url: string): string => {
   }
 };
 
+// ============================================================
+// Member RBAC — members, roles, invitations, and the per-load self session.
+// Reads/writes go through the plain db store (member-rbac-store). The route
+// guard enforces members.manage on every endpoint here except /me/session
+// (any member). Member-write handlers auto-claim Owner for the acting user
+// while the workspace is still in open mode, so configuring roles can never
+// lock the admin out.
+// ============================================================
+
+/** Read a string body field (reuses strField's non-empty semantics). */
+const bodyStr = (req: FastifyRequest, key: string): string | undefined =>
+  strField(parseJsonBody(req), key);
+
+// POST /dashboard/me/session — reconcile any pending invite for this user,
+// then return their effective access for the active workspace. The dashboard
+// calls this on every context load.
+const handleDashboardMeSession = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
+  const userId = auth.userId;
+  const email = auth.userEmail;
+  const access = await runWithDb(layer, async (db) => {
+    if (email) {
+      await reconcileInvitation(db, auth.tenantId, {
+        email,
+        userDecisionUuid: userId,
+      });
+    }
+    return getMemberAccess(db, auth.tenantId, userId);
+  });
+  return sendJson(res, 200, sessionPermissions(access));
+};
+
+// Auto-claim helper for member-write handlers — requires the acting email.
+const claimOwnerIfOpen = (
+  layer: ApiLayer,
+  tenantId: string,
+  userId: string,
+  email: string,
+): Promise<void> =>
+  runWithDb(layer, (db) =>
+    ensureActingOwnerInOpenMode(db, tenantId, userId, email),
+  );
+
+// GET /dashboard/permission-catalog — the static permission registry.
+const handleDashboardPermissionCatalog = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  return sendJson(res, 200, { permissions: RBAC_PERMISSIONS });
+};
+
+// GET /dashboard/members — members + pending invitations.
+const handleDashboardMembers = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const result = await runWithDb(layer, async (db) => ({
+    members: await listMembers(db, auth.tenantId),
+    invitations: await listPendingInvitations(db, auth.tenantId),
+  }));
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/roles — roles with their grants + assigned counts.
+const handleDashboardRoles = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const roleRows = await runWithDb(layer, (db) => listRoles(db, auth.tenantId));
+  return sendJson(res, 200, { roles: roleRows });
+};
+
+// POST /dashboard/members/invite — persist a pending invitation. The WorkOS
+// email send happens dashboard-side; the api owns the row.
+const handleDashboardMemberInvite = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId || !auth.userEmail) {
+    return sendJson(res, 400, { error: "missing_user" });
+  }
+  const invitedByUuid = auth.userId;
+  const email = bodyStr(req, "email");
+  const roleId = bodyStr(req, "roleId");
+  if (!email || !roleId) return sendJson(res, 400, { error: "invalid_request" });
+  const workosInvitationId = bodyStr(req, "workosInvitationId");
+  await claimOwnerIfOpen(layer, auth.tenantId, invitedByUuid, auth.userEmail);
+  const result = await runWithDb(layer, (db) =>
+    createInvitation(db, auth.tenantId, {
+      email,
+      roleId,
+      invitedByUuid,
+      ...(workosInvitationId ? { workosInvitationId } : {}),
+    }),
+  );
+  if (!result.ok) {
+    const status = result.reason === "role_not_found" ? 404 : 409;
+    return sendJson(res, status, { error: result.reason });
+  }
+  return sendJson(res, 200, { invitationId: result.invitationId });
+};
+
+// POST /dashboard/members/:uuid/role — change a member's role.
+const handleDashboardMemberRole = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { uuid } = req.params as { uuid: string };
+  const roleId = bodyStr(req, "roleId");
+  if (!roleId) return sendJson(res, 400, { error: "invalid_request" });
+  const result = await runWithDb(layer, (db) =>
+    assignMemberRole(db, auth.tenantId, uuid, roleId),
+  );
+  if (!result.ok) {
+    const status = result.reason === "role_not_found" ? 404 : 404;
+    return sendJson(res, status, { error: result.reason });
+  }
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/members/:uuid/remove — remove a member's assignment.
+const handleDashboardMemberRemove = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { uuid } = req.params as { uuid: string };
+  const result = await runWithDb(layer, (db) =>
+    removeMember(db, auth.tenantId, uuid),
+  );
+  if (!result.ok) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/invitations/:id/revoke — revoke a pending invitation.
+const handleDashboardInvitationRevoke = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    revokeInvitation(db, auth.tenantId, id),
+  );
+  if (!result.ok) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/roles — create a new (empty) role.
+const handleDashboardRoleCreate = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId || !auth.userEmail) {
+    return sendJson(res, 400, { error: "missing_user" });
+  }
+  const name = bodyStr(req, "name");
+  if (!name) return sendJson(res, 400, { error: "invalid_request" });
+  await claimOwnerIfOpen(layer, auth.tenantId, auth.userId, auth.userEmail);
+  const result = await runWithDb(layer, (db) =>
+    createRole(db, auth.tenantId, name),
+  );
+  if (!result.ok) return sendJson(res, 409, { error: result.reason });
+  return sendJson(res, 200, { roleId: result.roleId });
+};
+
+// POST /dashboard/roles/:id/rename
+const handleDashboardRoleRename = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const name = bodyStr(req, "name");
+  if (!name) return sendJson(res, 400, { error: "invalid_request" });
+  const result = await runWithDb(layer, (db) =>
+    renameRole(db, auth.tenantId, id, name),
+  );
+  if (!result.ok) {
+    const status = result.reason === "not_found" ? 404 : 409;
+    return sendJson(res, status, { error: result.reason });
+  }
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/roles/:id/permissions — replace a role's permission grants.
+const handleDashboardRolePermissions = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const raw = parseJsonBody(req)["permissionIds"];
+  const ids = Array.isArray(raw)
+    ? raw.filter((x): x is string => typeof x === "string")
+    : [];
+  if (ids.some((pid) => !isRbacPermissionId(pid))) {
+    return sendJson(res, 400, { error: "invalid_permission" });
+  }
+  const result = await runWithDb(layer, (db) =>
+    setRolePermissions(db, auth.tenantId, id, ids),
+  );
+  if (!result.ok) {
+    const status = result.reason === "not_found" ? 404 : 409;
+    return sendJson(res, status, { error: result.reason });
+  }
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/roles/:id/delete
+const handleDashboardRoleDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    deleteRole(db, auth.tenantId, id),
+  );
+  if (!result.ok) {
+    const status = result.reason === "not_found" ? 404 : 409;
+    return sendJson(res, status, { error: result.reason });
+  }
+  return sendJson(res, 200, { ok: true });
+};
+
 /**
  * Pino logger config. Enabled by default (structured JSON); quieted to
  * `warn` under tests so the DB-gated integration suite isn't drowned in
@@ -5497,6 +5868,9 @@ export const startServer = async (
       req: FastifyRequest,
       res: FastifyReply,
     ) => Promise<FastifyReply>,
+    // When set, the request is RBAC-gated: the acting member must hold this
+    // permission. Omit for pre-tenant / self-service reads any member may make.
+    permission?: RbacPermissionId,
   ): void => {
     app.get(
       path,
@@ -5508,90 +5882,128 @@ export const startServer = async (
         },
       },
       async (req, res) => {
+        if (
+          permission &&
+          !(await enforceDashboardPermission(cfg, layer, req, res, permission))
+        ) {
+          return res;
+        }
         await handler(cfg, layer, req, res);
         return res;
       },
     );
   };
 
-  dashboardGet("/dashboard/today", "Today-view rollup", handleDashboardToday);
-  dashboardGet("/dashboard/cases", "Paginated cases list", handleDashboardCases);
+  dashboardGet(
+    "/dashboard/today",
+    "Today-view rollup",
+    handleDashboardToday,
+    "cases.view",
+  );
+  dashboardGet(
+    "/dashboard/cases",
+    "Paginated cases list",
+    handleDashboardCases,
+    "cases.view",
+  );
   dashboardGet(
     "/dashboard/cases/:id",
     "Case detail with timeline + approvals",
     handleDashboardCaseDetail,
+    "cases.view",
   );
   dashboardGet(
     "/dashboard/cases/:id/conversation-thread",
     "Live customer email thread for a case",
     handleDashboardCaseConversationThread,
+    "cases.view",
   );
   dashboardGet(
     "/dashboard/cases/:id/events",
     "New audit events for a case since ?since=",
     handleDashboardCaseEvents,
+    "cases.view",
   );
   dashboardGet(
     "/dashboard/cases/:id/shopify",
     "Case-detail Shopify customer/order panels",
     handleDashboardCaseShopify,
+    "cases.view",
   );
   dashboardGet(
     "/dashboard/approvals",
     "Paginated approvals list with facets",
     handleDashboardApprovals,
+    "approvals.view",
   );
   dashboardGet(
     "/dashboard/approvals/:id",
     "Approval detail",
     handleDashboardApprovalDetail,
+    "approvals.view",
   );
-  dashboardGet("/dashboard/audit", "Cross-case audit log", handleDashboardAudit);
+  dashboardGet(
+    "/dashboard/audit",
+    "Cross-case audit log",
+    handleDashboardAudit,
+    "audit.view",
+  );
   dashboardGet(
     "/dashboard/shopify-app",
     "Shopify connect gate (pilot provisioning status)",
     handleDashboardShopifyApp,
+    "settings.integrations",
   );
   dashboardGet(
     "/dashboard/connections",
     "Connector connections (integrations)",
     handleDashboardConnections,
+    "settings.integrations",
   );
   dashboardGet(
     "/dashboard/usage",
     "LLM usage rows in a time window",
     handleDashboardUsage,
+    "audit.view",
   );
   dashboardGet(
     "/dashboard/agent-overrides",
     "Per-agent model overrides",
     handleDashboardAgentOverrides,
+    "settings.agents",
   );
   dashboardGet(
     "/dashboard/knowledge",
     "Knowledge-base document summaries",
     handleDashboardKnowledgeList,
+    "knowledge.view",
   );
   dashboardGet(
     "/dashboard/knowledge/:id",
     "One knowledge document (full content)",
     handleDashboardKnowledgeGet,
+    "knowledge.view",
   );
   dashboardGet(
     "/dashboard/catalog",
     "Agent + tool inventory",
     handleDashboardCatalog,
+    "settings.agents",
   );
   dashboardGet(
     "/dashboard/models",
     "Tenant LLM model catalog",
     handleDashboardModels,
+    "settings.agents",
   );
   dashboardGet(
     "/dashboard/llm",
     "Effective workspace/account LLM credential status",
     handleDashboardLlmStatus,
+    "settings.llm",
   );
+  // Pre-tenant / org-scoped reads — reachable by any signed-in org member (no
+  // per-workspace RBAC; they're how the dashboard bootstraps its context).
   dashboardGet(
     "/dashboard/tenant",
     "The org's tenant (or null → onboarding)",
@@ -5602,6 +6014,9 @@ export const startServer = async (
     "The org's workspaces, default first",
     handleDashboardWorkspaces,
   );
+  // Low-sensitivity resolved settings (refund numbers, currency) consumed by
+  // shared UI; the admin pages that EDIT them are redirect-gated and the write
+  // endpoints below are permission-gated.
   dashboardGet(
     "/dashboard/settings",
     "Resolved tenant settings (refund policy + supplier sheet)",
@@ -5624,11 +6039,18 @@ export const startServer = async (
       req: FastifyRequest,
       res: FastifyReply,
     ) => Promise<FastifyReply>,
+    permission?: RbacPermissionId,
   ): void => {
     app.post(
       path,
       { schema: { tags: ["dashboard"], summary } },
       async (req, res) => {
+        if (
+          permission &&
+          !(await enforceDashboardPermission(cfg, layer, req, res, permission))
+        ) {
+          return res;
+        }
         await handler(cfg, layer, req, res);
         return res;
       },
@@ -5639,27 +6061,35 @@ export const startServer = async (
     "/dashboard/approvals/:id/approve",
     "Approve an approval (manager)",
     handleDashboardApprovalAction("approve"),
+    "approvals.decide",
   );
   dashboardPost(
     "/dashboard/approvals/:id/reject",
     "Reject an approval (manager)",
     handleDashboardApprovalAction("reject"),
+    "approvals.decide",
   );
   dashboardPost(
     "/dashboard/cases/:id/takeover",
     "Take over a case (manager)",
     handleDashboardTakeover,
+    "cases.takeover",
   );
   dashboardPost(
     "/dashboard/cases/:id/resume",
     "Hand a taken-over case back to the agent (manager)",
     handleDashboardResume,
+    "cases.resume",
   );
   dashboardPost(
     "/dashboard/cases/:id/retry",
     "Hand a taken-over case back and have the agent retry now (manager)",
     handleDashboardRetry,
+    "cases.retry",
   );
+  // Org-scoped (no resolved workspace) — these use authenticateDashboardOrg and
+  // remain reachable by any org member; workspace/account management is an
+  // org-level concern, hidden cosmetically from non-admins in the dashboard.
   dashboardPost(
     "/dashboard/onboarding",
     "Create a tenant for the org",
@@ -5684,111 +6114,208 @@ export const startServer = async (
     "/dashboard/legal-acceptance",
     "Accept the current data processing notice + DPA",
     handleDashboardLegalAcceptance,
+    "account.manage",
   );
   dashboardPost(
     "/dashboard/agents/:id/model",
     "Set a per-agent model override",
     handleDashboardAgentModelSet,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/agents/:id/model/clear",
     "Clear a per-agent model override",
     handleDashboardAgentModelClear,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/agents/:id/system-prompt",
     "Set a per-agent system prompt (appended to the built-in prompt)",
     handleDashboardAgentSystemPromptSet,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/agents/:id/system-prompt/clear",
     "Clear a per-agent system prompt",
     handleDashboardAgentSystemPromptClear,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/agents/:id/tool-permission",
     "Set a per-agent tool permission (ask first vs auto)",
     handleDashboardAgentToolPermissionSet,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/agents/:id/tool-permission/clear",
     "Clear a per-agent tool permission override",
     handleDashboardAgentToolPermissionClear,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/knowledge",
     "Create a knowledge document (paste or fetch a URL)",
     handleDashboardKnowledgeCreate,
+    "knowledge.manage",
   );
   dashboardPost(
     "/dashboard/knowledge/:id",
     "Update a knowledge document (title / text content)",
     handleDashboardKnowledgeUpdate,
+    "knowledge.manage",
   );
   dashboardPost(
     "/dashboard/knowledge/:id/delete",
     "Delete a knowledge document",
     handleDashboardKnowledgeDelete,
+    "knowledge.manage",
   );
   dashboardPost(
     "/dashboard/knowledge/:id/resync",
     "Re-fetch a URL document's snapshot",
     handleDashboardKnowledgeResync,
+    "knowledge.manage",
   );
   dashboardPost(
     "/dashboard/llm",
     "Connect a BYOK LLM credential",
     handleDashboardLlmConnect,
+    "settings.llm",
   );
   dashboardPost(
     "/dashboard/llm/revoke",
     "Revoke the tenant's LLM credential",
     handleDashboardLlmRevoke,
+    "settings.llm",
   );
   dashboardPost(
     "/dashboard/refund-policy",
     "Set the conditional refund policy",
     handleDashboardRefundPolicy,
+    "settings.refund_policy",
   );
   dashboardPost(
     "/dashboard/supplier-sheet",
     "Set the supplier-escalation sheet",
     handleDashboardSupplierSheet,
+    "settings.integrations",
   );
   dashboardPost(
     "/dashboard/supplier-sheet/clear",
     "Clear the supplier-escalation sheet",
     handleDashboardSupplierSheetClear,
+    "settings.integrations",
   );
   dashboardPost(
     "/dashboard/connect/:provider",
     "Mint a signed install grant + return the provider install URL",
     handleDashboardConnect,
+    "settings.integrations",
   );
   dashboardPost(
     "/dashboard/connections/imap",
     "Connect a generic IMAP/SMTP mailbox (credentials, no OAuth)",
     handleDashboardConnectImap,
+    "settings.integrations",
   );
   dashboardPost(
     "/dashboard/connections/imap/discover",
     "Autodiscover IMAP/SMTP settings for a mailbox address",
     handleDashboardImapDiscover,
+    "settings.integrations",
   );
   dashboardPost(
     "/dashboard/connections/telegram",
     "Mint a Telegram notification-channel linking deep link",
     handleDashboardConnectTelegram,
+    "settings.notifications",
   );
   dashboardPost(
     "/dashboard/connections/:provider/disconnect",
     "Disconnect (revoke) a connector",
     handleDashboardDisconnect,
+    "settings.integrations",
   );
+  // Org-scoped (authenticateDashboardOrg) — deletes the whole account.
   dashboardPost(
     "/dashboard/account/delete",
     "Delete the tenant's own account (irreversible)",
     handleDashboardAccountDelete,
+  );
+
+  // ---- Member RBAC ----
+  // /me/session is reachable by any member (it's how the dashboard loads its
+  // own access); everything else requires members.manage.
+  dashboardPost(
+    "/dashboard/me/session",
+    "Reconcile invites + return the acting member's access",
+    handleDashboardMeSession,
+  );
+  dashboardGet(
+    "/dashboard/permission-catalog",
+    "Static RBAC permission catalog",
+    handleDashboardPermissionCatalog,
+    "members.manage",
+  );
+  dashboardGet(
+    "/dashboard/members",
+    "Workspace members + pending invitations",
+    handleDashboardMembers,
+    "members.manage",
+  );
+  dashboardGet(
+    "/dashboard/roles",
+    "Workspace roles + grants",
+    handleDashboardRoles,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/members/invite",
+    "Invite a member (persist a pending invitation)",
+    handleDashboardMemberInvite,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/members/:uuid/role",
+    "Change a member's role",
+    handleDashboardMemberRole,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/members/:uuid/remove",
+    "Remove a member",
+    handleDashboardMemberRemove,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/invitations/:id/revoke",
+    "Revoke a pending invitation",
+    handleDashboardInvitationRevoke,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/roles",
+    "Create a role",
+    handleDashboardRoleCreate,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/roles/:id/rename",
+    "Rename a role",
+    handleDashboardRoleRename,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/roles/:id/permissions",
+    "Replace a role's permission grants",
+    handleDashboardRolePermissions,
+    "members.manage",
+  );
+  dashboardPost(
+    "/dashboard/roles/:id/delete",
+    "Delete a role",
+    handleDashboardRoleDelete,
+    "members.manage",
   );
 
   // ---- Admin (platform operator) ----

@@ -19,6 +19,12 @@ export type DashboardAuthParse =
        */
       readonly userId: string | undefined;
       /**
+       * The acting user's email (from `x-user-email`), used to display members,
+       * reconcile pending invitations, and stamp the auto-claimed Owner row.
+       * Undefined when the dashboard didn't send it (e.g. pre-tenant calls).
+       */
+      readonly userEmail: string | undefined;
+      /**
        * Workspace (tenant row) the request is pinned to, from
        * `x-workspace-id`. Undefined → the org's default workspace. Shape and
        * ownership are checked after parsing, against the DB.
@@ -71,11 +77,13 @@ export const parseDashboardAuth = (
     return { ok: false, status: 400, message: "missing x-org-id" };
   }
   const userId = headers["x-user-id"];
+  const userEmail = headers["x-user-email"];
   const workspaceId = headers["x-workspace-id"];
   return {
     ok: true,
     organizationId: org,
     userId: userId && userId.length > 0 ? userId : undefined,
+    userEmail: userEmail && userEmail.length > 0 ? userEmail : undefined,
     workspaceId:
       workspaceId && workspaceId.length > 0 ? workspaceId : undefined,
   };
