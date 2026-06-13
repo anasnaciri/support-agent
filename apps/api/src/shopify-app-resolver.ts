@@ -1,8 +1,5 @@
 import { Data, Effect } from "effect";
-import {
-  ShopifyAppProvisioningStore,
-  type ShopifyAppProvisioning,
-} from "@support-agent/services";
+import { ShopifyAppProvisioningStore } from "@support-agent/services";
 import type { ConnectorStoreDbError, TenantId } from "@support-agent/agent-core";
 
 /**
