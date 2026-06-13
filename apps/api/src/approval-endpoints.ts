@@ -208,7 +208,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f6f6;
 const SHELL_FOOT = `</div></body></html>`;
 
 const BUTTON_CSS = `.btn{display:inline-block;border:0;border-radius:8px;padding:10px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
-.btn.ok{background:#065f46;color:#fff}
+.btn.ok{background:#0057ff;color:#fff}
 .btn.bad{background:#991b1b;color:#fff}
 a.dash{display:inline-block;margin-top:16px;font-size:14px;color:#1e40af}`;
 

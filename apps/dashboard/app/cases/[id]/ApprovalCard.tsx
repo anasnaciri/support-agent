@@ -258,7 +258,7 @@ export const ApprovalCard = ({
               />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <SubmitButton variant="success" pendingLabel="Approving…">
+              <SubmitButton variant="default" pendingLabel="Approving…">
                 Approve &amp; send
               </SubmitButton>
               <Button asChild variant="outline">
@@ -280,7 +280,7 @@ export const ApprovalCard = ({
               <input type="hidden" name="approvalId" value={approval.id} />
               <input type="hidden" name="returnTo" value={returnTo} />
               <div className="flex flex-wrap items-center gap-2">
-                <SubmitButton variant="success" pendingLabel="Approving…">
+                <SubmitButton variant="default" pendingLabel="Approving…">
                   Approve
                 </SubmitButton>
                 <Button asChild variant="outline">

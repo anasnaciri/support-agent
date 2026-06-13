@@ -127,7 +127,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
                     rows={8}
                   />
                 </div>
-                <SubmitButton variant="success" pendingLabel="Approving…">
+                <SubmitButton variant="default" pendingLabel="Approving…">
                   Approve
                 </SubmitButton>
                 <p className="text-xs text-muted-foreground">
@@ -138,7 +138,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
             ) : (
               <form action={approveAction}>
                 <input type="hidden" name="approvalId" value={row.id} />
-                <SubmitButton variant="success" pendingLabel="Approving…">
+                <SubmitButton variant="default" pendingLabel="Approving…">
                   Approve
                 </SubmitButton>
               </form>
