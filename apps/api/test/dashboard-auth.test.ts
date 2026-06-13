@@ -31,6 +31,7 @@ describe("authenticateDashboardToken", () => {
       ok: true,
       organizationId: "org_123",
       userId: expectedUserId,
+      workosUserId: "user_abc",
       userEmail: undefined,
       workspaceId: undefined,
     });

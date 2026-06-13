@@ -91,7 +91,6 @@ import {
   todaySummary,
   usageRows,
   type DrizzleDb,
-  type MemberAccess,
 } from "@support-agent/db";
 import {
   RBAC_PERMISSIONS,
@@ -109,6 +108,10 @@ import {
   makeRemoteWorkosVerifier,
   type DashboardTokenVerifier,
 } from "./dashboard-jwt.js";
+import {
+  makeWorkosUserDirectory,
+  type WorkosUserDirectory,
+} from "./workos-directory.js";
 import { retryCaseNow } from "./case-retry.js";
 import {
   TELEGRAM_LINK_TTL_MS,
@@ -371,6 +374,8 @@ type DashboardAuthResult =
       readonly ok: true;
       readonly tenantId: string;
       readonly userId: string | undefined;
+      /** Verified WorkOS user id (`sub`) — for the verified-email lookup. */
+      readonly workosUserId: string | undefined;
       readonly userEmail: string | undefined;
     }
   | { readonly ok: false; readonly status: number; readonly error: string };
@@ -403,8 +408,19 @@ const getDashboardVerifier = (
     dashboardTokenVerifier: DashboardTokenVerifier | null;
   }).dashboardTokenVerifier;
 
+/**
+ * The WorkOS user directory (verified-email lookup), decorated alongside the
+ * verifier. `null` → no `WORKOS_API_KEY`, so invite reconcile degrades to a
+ * no-op rather than ever trusting the `x-user-email` header.
+ */
+const getWorkosDirectory = (
+  req: FastifyRequest,
+): WorkosUserDirectory | null =>
+  (req.server as unknown as {
+    workosUserDirectory: WorkosUserDirectory | null;
+  }).workosUserDirectory;
+
 const resolveDashboardAuth = async (
-  cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
 ): Promise<DashboardAuthResult> => {
@@ -433,6 +449,7 @@ const resolveDashboardAuth = async (
       ok: true,
       tenantId: workspace.id,
       userId: parsed.userId,
+      workosUserId: parsed.workosUserId,
       userEmail: parsed.userEmail,
     };
   }
@@ -446,19 +463,20 @@ const resolveDashboardAuth = async (
     ok: true,
     tenantId,
     userId: parsed.userId,
+    workosUserId: parsed.workosUserId,
     userEmail: parsed.userEmail,
   };
 };
 
 const authenticateDashboard = async (
-  cfg: ApiConfig,
+  _cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
 ): Promise<DashboardAuthResult> => {
   const store = req as unknown as Record<symbol, DashboardAuthResult | undefined>;
   const cached = store[kDashAuth];
   if (cached) return cached;
-  const result = await resolveDashboardAuth(cfg, layer, req);
+  const result = await resolveDashboardAuth(layer, req);
   store[kDashAuth] = result;
   return result;
 };
@@ -5232,12 +5250,25 @@ const handleDashboardMeSession = async (
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
   const userId = auth.userId;
-  const email = auth.userEmail;
+  // Reconcile a pending invite to a VERIFIED email only. The x-user-email header
+  // is untrusted (S14), so an authenticated member can't claim an invite
+  // addressed to someone else by spoofing it. We resolve the email from WorkOS
+  // (keyed on the verified `sub`) — and only when a pending invite actually
+  // exists, so the common no-invite load makes no WorkOS call.
+  const pending = await runWithDb(layer, (db) =>
+    listPendingInvitations(db, auth.tenantId),
+  );
+  const directory = getWorkosDirectory(req);
+  let verifiedEmail: string | null = null;
+  if (pending.length > 0 && auth.workosUserId && directory) {
+    verifiedEmail = await directory.getEmail(auth.workosUserId);
+  }
   const access = await runWithDb(layer, async (db) => {
-    if (email) {
+    if (verifiedEmail) {
       await reconcileInvitation(db, auth.tenantId, {
-        email,
+        email: verifiedEmail,
         userDecisionUuid: userId,
+        ...(auth.workosUserId ? { workosUserId: auth.workosUserId } : {}),
       });
     }
     return getMemberAccess(db, auth.tenantId, userId);
@@ -5514,6 +5545,12 @@ export interface StartServerOptions {
    * real RS256 JWTs.
    */
   readonly dashboardTokenVerifier?: DashboardTokenVerifier;
+  /**
+   * Override the WorkOS user directory (verified-email lookup). Production
+   * builds it from `cfg.workos.apiKey`; tests inject a static map so invite
+   * reconcile can resolve a member's verified email without a WorkOS call.
+   */
+  readonly workosUserDirectory?: WorkosUserDirectory;
 }
 
 export const startServer = async (
@@ -5535,6 +5572,15 @@ export const startServer = async (
         )
       : null);
 
+  // Verified-email lookup for invite reconcile (closes the x-user-email spoof).
+  // `null` when WORKOS_API_KEY is unset → reconcile is a no-op, never falls back
+  // to the header.
+  const workosUserDirectory: WorkosUserDirectory | null =
+    opts.workosUserDirectory ??
+    (cfg.workos?.apiKey
+      ? makeWorkosUserDirectory(cfg.workos.apiKey)
+      : null);
+
   const app: FastifyInstance = Fastify({
     logger: loggerConfig(),
     // Matches the old readRawBody cap. Shopify/Pub/Sub payloads are tiny;
@@ -5542,6 +5588,7 @@ export const startServer = async (
     bodyLimit: 1024 * 1024,
   });
   app.decorate("dashboardTokenVerifier", dashboardTokenVerifier);
+  app.decorate("workosUserDirectory", workosUserDirectory);
 
   // Webhook HMAC is computed over the exact bytes the provider sent, so we
   // keep the raw body as a Buffer instead of letting Fastify JSON-parse it

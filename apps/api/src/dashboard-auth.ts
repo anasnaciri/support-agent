@@ -30,6 +30,12 @@ export type DashboardAuthParse =
        */
       readonly userId: string | undefined;
       /**
+       * The raw verified WorkOS user id (`sub`), before hashing to `userId`.
+       * Used to resolve the user's VERIFIED email from WorkOS for invite
+       * reconcile (so that path never trusts the `x-user-email` header).
+       */
+      readonly workosUserId: string | undefined;
+      /**
        * The acting user's email (from `x-user-email`) — used to display members,
        * reconcile pending invitations, and stamp the auto-claimed Owner row.
        * Low-trust: the access token carries no verified email, so this is a
@@ -105,6 +111,7 @@ export const authenticateDashboardToken = async (
     ok: true,
     organizationId: verified.claims.organizationId,
     userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+    workosUserId: verified.claims.workosUserId,
     userEmail: nonEmpty(headers["x-user-email"]),
     workspaceId: nonEmpty(headers["x-workspace-id"]),
   };

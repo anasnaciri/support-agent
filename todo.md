@@ -14,6 +14,11 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-13 — API unused-symbol cleanup:** Removed behavior-neutral strict-TypeScript
+  diagnostics: unused `Effect`, `MemberAccess`, and `ShopifyAppProvisioning` imports, plus the unused
+  `cfg` parameter from `resolveDashboardAuth`; marked the common auth wrapper's intentionally retained
+  config parameter `_cfg`. Verified with the API strict-unused no-emit check and full `pnpm build`; no
+  architecture or behavior change.
 - **2026-06-13 — Member RBAC: invite teammates + per-workspace roles (TDD, branch `feat/member-rbac`):**
   Merchants can now invite members and grant scoped access — a support agent who handles cases and
   issues refunds but can't touch integrations, AI provider, agents, account, or the audit log. Design
@@ -460,12 +465,14 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
       integration suites migrated to an injected test verifier + synthetic bearer (helper at
       `apps/api/test/support/dashboard-auth.ts`). Verified: `pnpm build` + dashboard `tsc`/`next build`
       green; full suite **1711 passed / 5 skipped** with a live DB.
-      **Follow-up (recorded, NOT done):** the WorkOS access token carries no verified email, so
-      `x-user-email` remains a forwarded header. It can only act within the verified org, but the
-      `/me/session` invite-reconcile keys on it — an authenticated member could reconcile a pending invite
-      addressed to another email *within their own org* and claim its role. Close by resolving the email
-      from the verified `sub` via the WorkOS API (adds `WORKOS_API_KEY` + a lookup), or by adding email as
-      a custom claim on the WorkOS access token. (Strictly narrower than the pre-S14 full-org spoof.)
+      **Follow-up — CLOSED 2026-06-13:** the `/me/session` invite-reconcile no longer trusts the
+      `x-user-email` header. The api resolves the member's VERIFIED email from WorkOS keyed on the verified
+      `sub` (`apps/api/src/workos-directory.ts`, injected like the verifier; `WORKOS_API_KEY` config) and
+      reconciles against that. The WorkOS lookup is gated on a pending invite actually existing (no call on
+      the common load), fails soft (a hiccup → no reconcile, invite stays pending), and never falls back to
+      the header (no key → reconcile no-ops). Regression test: a member (`mallory`) spoofing
+      `x-user-email: sam@…` does NOT inherit Sam's pending invite (dashboard-rbac integration). The
+      auto-claim Owner email stays a header — it only labels the acting user's own row (cosmetic).
 - [ ] **Dashboard: render `connectorHealth`** on /settings/integrations — the renewal/poll crons now stamp
       `connectorHealth`/`connectorHealthReason` into connector metadata; the UI should badge broken
       connectors (the operator alert email already fires).

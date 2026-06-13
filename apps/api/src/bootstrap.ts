@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import {
   AccountOpenRouterCredentialStore,
   ApprovalService,
@@ -176,6 +176,13 @@ export interface WorkosAuthConfig {
    * client-scoped JWKS already binds the token to our app).
    */
   readonly issuer: string | null;
+  /**
+   * WorkOS API key (`WORKOS_API_KEY`). Used ONLY to resolve a user's verified
+   * email (from the verified `sub`) for invite reconcile, so that path never
+   * trusts the `x-user-email` header. `null` → reconcile degrades to a no-op
+   * (the invite stays pending); the header is never used as a fallback.
+   */
+  readonly apiKey: string | null;
 }
 
 export interface ApiConfig {
@@ -368,6 +375,7 @@ export const loadApiConfig = (): ApiConfig => {
             process.env["WORKOS_JWKS_URL"]?.trim() ||
             workosJwksUrl(workosClientId),
           issuer: process.env["WORKOS_JWT_ISSUER"]?.trim() || null,
+          apiKey: process.env["WORKOS_API_KEY"]?.trim() || null,
         }
       : null,
     adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,

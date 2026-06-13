@@ -15,6 +15,7 @@ import {
   dashboardAuthHeaders,
   decisionUuidFor,
 } from "./support/dashboard-auth.js";
+import { makeStaticWorkosUserDirectory } from "../src/workos-directory.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -36,12 +37,26 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
   // and the headers helper encodes the WorkOS id back into the forwarded bearer.
   const adminWorkos = "user_rbac_admin";
   const samWorkos = "user_rbac_sam";
+  const malloryWorkos = "user_rbac_mallory";
   const adminUuid = decisionUuidFor(adminWorkos);
   const samUuid = decisionUuidFor(samWorkos);
+  const malloryUuid = decisionUuidFor(malloryWorkos);
   const workosByUuid: Record<string, string> = {
     [adminUuid]: adminWorkos,
     [samUuid]: samWorkos,
+    [malloryUuid]: malloryWorkos,
   };
+  // The VERIFIED email each WorkOS user resolves to (what the api looks up from
+  // `sub`). Mallory's verified email is her own — she cannot become sam by
+  // spoofing the x-user-email header.
+  const verifiedEmailByWorkos: Record<string, string> = {
+    [adminWorkos]: "admin@acme.com",
+    [samWorkos]: "sam@acme.com",
+    [malloryWorkos]: "mallory@acme.com",
+  };
+  const directory = makeStaticWorkosUserDirectory(
+    (id) => verifiedEmailByWorkos[id] ?? null,
+  );
 
   const cfg = {
     port: 0,
@@ -113,6 +128,7 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     ]);
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+      workosUserDirectory: directory,
     });
     baseUrl = `http://localhost:${handle.port}`;
   });
@@ -212,7 +228,26 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     );
     expect(invite.status).toBe(200);
 
-    // Sam's first load reconciles the invite into an assignment.
+    // SPOOF: Mallory (verified mallory@acme.com) hits /me/session while spoofing
+    // the x-user-email header as sam@acme.com. The api reconciles against her
+    // VERIFIED email, not the header — so she does NOT inherit Sam's invite.
+    const mallorySession = await post(
+      "/dashboard/me/session",
+      {},
+      orgScoped,
+      malloryUuid,
+      "sam@acme.com",
+    );
+    expect(mallorySession.status).toBe(200);
+    const mallory = (await mallorySession.json()) as {
+      assigned: boolean;
+      permissions: string[];
+    };
+    expect(mallory.assigned).toBe(false);
+    expect(mallory.permissions).toEqual([]);
+
+    // Sam's first load reconciles the invite into an assignment. (Still pending
+    // — Mallory's spoof did not consume it.)
     const samSession = await post(
       "/dashboard/me/session",
       {},
