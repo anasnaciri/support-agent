@@ -272,16 +272,19 @@ export interface ConnectorConnectionView {
 }
 
 /**
- * Whether the tenant can start a Shopify connect. In pilot custom
- * distribution (`requiresProvisioning: true`) the "Connect Shopify" button
- * stays disabled until an operator has provisioned the tenant's custom app
- * (`provisioned: true`). In the SaaS default (`requiresProvisioning: false`)
- * Connect is always available and this view is informational.
+ * Whether the tenant can start a Shopify connect. `available` mirrors the
+ * api's authoritative install gate (same resolver the install + grant-mint
+ * endpoints run): false when a pilot workspace has no provisioned custom app
+ * (or it was revoked), and false when a SaaS deployment ships no global app.
+ * The Connect button renders disabled whenever `available` is false —
+ * `requiresProvisioning` / `provisioned` / `status` only pick the
+ * explanation copy.
  */
 export interface ShopifyAppGateView {
   readonly requiresProvisioning: boolean;
   readonly provisioned: boolean;
   readonly status: "ready" | "connected" | "revoked" | null;
+  readonly available: boolean;
 }
 
 // ============================================================

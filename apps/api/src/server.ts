@@ -825,10 +825,16 @@ const handleDashboardShopifyApp = async (
     });
   }
   const row = exit.value;
+  // `available` mirrors the authoritative install/mint gate
+  // (resolveShopifyAppForTenant) instead of re-deriving it from the row, so
+  // the Connect button can never be enabled for a workspace whose install
+  // would be refused — and never enabled by a fallback the gate forbids.
+  const app = await resolveTenantShopifyApp(cfg, layer, auth.tenantId);
   return sendJson(res, 200, {
     requiresProvisioning: cfg.shopifyConnectRequiresProvisioning,
     provisioned: row !== null && row.status !== "revoked",
     status: row?.status ?? null,
+    available: app.kind === "ok",
   });
 };
 
@@ -2634,6 +2640,18 @@ const handleDashboardConnect = async (
   const { provider } = req.params as { provider: string };
   if (!isInstallGrantProvider(provider)) {
     return sendJson(res, 400, { error: "bad_provider" });
+  }
+  // Shopify: refuse to mint a grant for a workspace with no resolvable app
+  // (pilot workspace not provisioned / provisioning revoked / no app
+  // configured at all). The install endpoint re-checks, but gating the mint
+  // means the merchant is never sent into an OAuth flow that can only run on
+  // credentials that don't belong to their workspace.
+  if (provider === "shopify") {
+    const app = await resolveTenantShopifyApp(cfg, layer, auth.tenantId);
+    if (app.kind !== "ok") {
+      sendShopifyAppResolveError(res, app);
+      return res;
+    }
   }
   // One mailbox per provider per store (same invariant as the IMAP connect
   // endpoint): refuse to start the OAuth flow while a mailbox is connected,
