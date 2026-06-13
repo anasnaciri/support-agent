@@ -35,15 +35,14 @@ export const PROVIDER_LABELS: Readonly<Record<string, string>> = {
 
 export const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   shopify:
-    "Powers order, customer, and fulfillment lookups for the agent. Installed via the managed Shopify app.",
+    "Lets your agents look up orders, customers, and fulfillments. Connects through the managed Shopify app.",
   gmail:
-    "Inbound customer threads + outbound replies on this connection. Installed via Google OAuth.",
+    "Receives customer emails and sends replies from this mailbox. Connects with your Google account.",
   google_sheets:
-    "Spreadsheet read/write access for Sheets-backed workflows. Installed via Google OAuth.",
+    "Lets your agents read and add rows in your spreadsheets. Connects with your Google account.",
   outlook:
-    "Inbound customer threads + outbound replies on this connection (Outlook / Microsoft 365). Installed via Microsoft OAuth.",
-  imap:
-    "Any other mailbox — PrivateEmail, Zoho, Fastmail, cPanel, custom domains. Connect with host/port + an app password (no OAuth).",
+    "Receives customer emails and sends replies from this mailbox (Outlook / Microsoft 365). Connects with your Microsoft account.",
+  imap: "Any other mailbox — PrivateEmail, Zoho, Fastmail, cPanel, custom domains. Just the address + an app password; server settings are detected automatically.",
 };
 
 const ShopifyIcon = () => (
