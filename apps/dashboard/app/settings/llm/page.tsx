@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle, KeyRound } from "lucide-react";
 
-import { api, getDashboardContext } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { requirePermission } from "@/lib/require-permission";
 import { formatRelativeTime } from "@/lib/format";
 import { integrationStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
@@ -36,11 +37,6 @@ const PROVIDER_DESCRIPTION: Readonly<Record<LlmProvider, string>> = {
 const isLlmProvider = (p: string): p is LlmProvider =>
   (LLM_PROVIDERS as ReadonlyArray<string>).includes(p);
 
-const maskKey = (key: string): string => {
-  if (key.length <= 8) return "•".repeat(key.length);
-  return `${key.slice(0, 4)}${"•".repeat(Math.max(4, key.length - 8))}${key.slice(-4)}`;
-};
-
 const compatibleModelsFor = (provider: LlmProvider, model: string): boolean => {
   if (provider === "openrouter") return true;
   if (provider === "anthropic")
@@ -56,8 +52,59 @@ interface PageProps {
   >;
 }
 
+const CredentialForm = ({
+  submitLabel,
+}: {
+  readonly submitLabel: string;
+}) => (
+  <form action={connectLlmAction} className="space-y-4">
+    <div className="grid gap-2">
+      <Label htmlFor="provider">Provider</Label>
+      <NativeSelect
+        id="provider"
+        name="provider"
+        defaultValue="openrouter"
+        required
+      >
+        {LLM_PROVIDERS.map((p) => (
+          <option key={p} value={p}>
+            {PROVIDER_LABEL[p]}
+          </option>
+        ))}
+      </NativeSelect>
+    </div>
+    <div className="grid gap-2">
+      <Label htmlFor="apiKey">API key</Label>
+      <Input
+        id="apiKey"
+        name="apiKey"
+        type="password"
+        autoComplete="off"
+        placeholder="sk-or-v1-…"
+        required
+      />
+      <p className="text-xs text-muted-foreground">
+        Stored encrypted and used only to run your support agents.
+      </p>
+    </div>
+    <div className="grid gap-2">
+      <Label htmlFor="baseURL">Base URL (optional)</Label>
+      <Input
+        id="baseURL"
+        name="baseURL"
+        type="url"
+        placeholder="https://openrouter.ai/api/v1"
+      />
+      <p className="text-xs text-muted-foreground">
+        Only needed for self-hosted gateways or proxy endpoints.
+      </p>
+    </div>
+    <SubmitButton pendingLabel="Connecting…">{submitLabel}</SubmitButton>
+  </form>
+);
+
 export default async function LlmSettingsPage({ searchParams }: PageProps) {
-  const ctx = await getDashboardContext();
+  const ctx = await requirePermission("settings.llm");
   const params = (await searchParams) ?? {};
   const connectedBanner =
     (Array.isArray(params["connected"])
@@ -71,17 +118,16 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
     ? params["error"][0]
     : params["error"];
 
-  // We only need the LLM-provider rows. The connections endpoint returns all
-  // of the tenant's connector rows; filter to LLM providers here.
-  const [rows, catalog] = await Promise.all([
-    api.connections(ctx),
+  const [status, catalog] = await Promise.all([
+    api.llmStatus(ctx),
     api.catalog(ctx),
   ]);
   const agents = catalog.agents;
-
-  const llmRows = rows.filter((r) => isLlmProvider(r.provider));
-  const active = llmRows.find((r) => r.status === "active");
-  const activeProvider = active ? (active.provider as LlmProvider) : null;
+  const active = status.effective;
+  const activeProvider =
+    active && isLlmProvider(active.provider)
+      ? (active.provider as LlmProvider)
+      : null;
 
   // Surface model-string compatibility warnings when a direct provider is
   // selected. Agents declaring an unrelated namespace (e.g. `google/...`
@@ -159,8 +205,8 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <KeyRound className="size-4" aria-hidden />
-              {active
-                ? PROVIDER_LABEL[active.provider as LlmProvider]
+              {activeProvider
+                ? PROVIDER_LABEL[activeProvider]
                 : "Not connected"}
             </CardTitle>
             <Badge
@@ -174,83 +220,32 @@ export default async function LlmSettingsPage({ searchParams }: PageProps) {
           {active ? (
             <>
               <div className="space-y-1 text-sm">
-                <div>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                    {/* The decrypted key isn't loaded here — only the row's
-                        metadata is. Render a placeholder mask using the
-                        shopDomain (always "default" for LLM rows) so the
-                        operator sees the row exists without leaking the key. */}
-                    {maskKey(`••••${active.id.slice(0, 4)}••••`)}
-                  </code>
-                </div>
-                {typeof active.metadata === "object" &&
-                active.metadata !== null &&
-                typeof (active.metadata as { baseURL?: unknown }).baseURL ===
-                  "string" ? (
-                  <div className="text-xs text-muted-foreground">
-                    Base URL:{" "}
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                      {String((active.metadata as { baseURL: string }).baseURL)}
-                    </code>
-                  </div>
-                ) : null}
                 <div className="text-xs text-muted-foreground">
-                  {active.installedAt
-                    ? `Installed ${formatRelativeTime(active.installedAt)}`
-                    : "Installed"}
+                  {active.source === "account"
+                    ? "Inherited from your account. It applies to every workspace without its own override."
+                    : status.workspaceOverride?.updatedAt
+                      ? `Workspace override installed ${formatRelativeTime(status.workspaceOverride.updatedAt)}`
+                      : "Workspace override active"}
                 </div>
               </div>
-              <form action={revokeLlmAction}>
-                <SubmitButton variant="outline" pendingLabel="Disconnecting…">
-                  Disconnect
-                </SubmitButton>
-              </form>
+              {active.source === "workspace" ? (
+                <form action={revokeLlmAction}>
+                  <SubmitButton variant="outline" pendingLabel="Disconnecting…">
+                    Disconnect workspace override
+                  </SubmitButton>
+                </form>
+              ) : (
+                <div className="space-y-3 border-t pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Add a workspace key below to override the inherited account
+                    key for this workspace only.
+                  </p>
+                  <CredentialForm submitLabel="Set workspace override" />
+                </div>
+              )}
             </>
           ) : (
-            <form action={connectLlmAction} className="space-y-4">
-              <div className="grid gap-2">
-                <Label htmlFor="provider">Provider</Label>
-                <NativeSelect
-                  id="provider"
-                  name="provider"
-                  defaultValue="openrouter"
-                  required
-                >
-                  {LLM_PROVIDERS.map((p) => (
-                    <option key={p} value={p}>
-                      {PROVIDER_LABEL[p]}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="apiKey">API key</Label>
-                <Input
-                  id="apiKey"
-                  name="apiKey"
-                  type="password"
-                  autoComplete="off"
-                  placeholder="sk-or-v1-…"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Stored encrypted and used only to run your support agents.
-                </p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="baseURL">Base URL (optional)</Label>
-                <Input
-                  id="baseURL"
-                  name="baseURL"
-                  type="url"
-                  placeholder="https://openrouter.ai/api/v1"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Only needed for self-hosted gateways or proxy endpoints.
-                </p>
-              </div>
-              <SubmitButton pendingLabel="Connecting…">Connect</SubmitButton>
-            </form>
+            <CredentialForm submitLabel="Connect" />
           )}
         </CardContent>
       </Card>

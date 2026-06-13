@@ -52,6 +52,30 @@ export async function revokeShopifyAppAction(id: string): Promise<void> {
   redirect(`/tenants/${id}?ok=shopify_revoked`);
 }
 
+export async function setWorkspaceOpenRouterAction(
+  id: string,
+  formData: FormData,
+): Promise<void> {
+  await requireSession();
+  const apiKey = String(formData.get("apiKey") ?? "").trim();
+  if (apiKey.length < 8) redirect(`/tenants/${id}?error=missing_llm_key`);
+  const res = await adminApi.putWorkspaceOpenRouter(id, apiKey);
+  if (res.status === 403) {
+    redirect(`/tenants/${id}?error=legal_acceptance_required`);
+  }
+  if (!res.ok) redirect(`/tenants/${id}?error=llm_save_failed`);
+  revalidatePath(`/tenants/${id}`);
+  redirect(`/tenants/${id}?ok=llm_saved`);
+}
+
+export async function revokeWorkspaceOpenRouterAction(id: string): Promise<void> {
+  await requireSession();
+  const res = await adminApi.revokeWorkspaceOpenRouter(id);
+  if (!res.ok) redirect(`/tenants/${id}?error=llm_revoke_failed`);
+  revalidatePath(`/tenants/${id}`);
+  redirect(`/tenants/${id}?ok=llm_revoked`);
+}
+
 export async function runPcdCheckAction(id: string): Promise<void> {
   await requireSession();
   const verdict = await adminApi.checkShopifyPcd(id);

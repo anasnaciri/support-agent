@@ -6,6 +6,7 @@ export * from "./audit-log-live.js";
 export * from "./approval-service-live.js";
 export * from "./transaction-runner-live.js";
 export * from "./connector-credential-store-live.js";
+export * from "./account-openrouter-credential-store-live.js";
 export * from "./shopify-app-provisioning-live.js";
 export * from "./llm-credential-resolver-live.js";
 export * from "./tenant-agent-overrides-live.js";

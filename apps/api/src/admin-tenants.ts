@@ -8,6 +8,7 @@ import {
   tenants,
 } from "@support-agent/db";
 import {
+  AccountOpenRouterCredentialStore,
   ShopifyAppProvisioningStore,
   type ShopifyAppProvisioningStatus,
 } from "@support-agent/services";
@@ -16,9 +17,27 @@ import {
   type ConnectorStoreDbError,
 } from "@support-agent/agent-core";
 import type {
+  AdminOpenRouterCredentialView,
   AdminTenantDetail,
   AdminTenantSummary,
 } from "@support-agent/dashboard-contracts";
+
+const LLM_PROVIDERS = new Set(["openrouter", "anthropic", "openai"]);
+
+const accountView = (
+  row: {
+    readonly status: "active" | "revoked";
+    readonly installedAt: Date;
+    readonly updatedAt: Date;
+  } | null,
+): AdminOpenRouterCredentialView | null =>
+  row
+    ? {
+        status: row.status,
+        installedAt: row.installedAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      }
+    : null;
 
 /** Tenant list for the operator admin app (one row per tenant). */
 export const listTenantsForAdmin = (): Effect.Effect<
@@ -92,7 +111,7 @@ export const getTenantDetailForAdmin = (
 ): Effect.Effect<
   AdminTenantDetail | null,
   Error | ConnectorStoreDbError,
-  DbClient | ShopifyAppProvisioningStore
+  DbClient | ShopifyAppProvisioningStore | AccountOpenRouterCredentialStore
 > =>
   Effect.gen(function* () {
     const db = yield* DbClient;
@@ -121,6 +140,22 @@ export const getTenantDetailForAdmin = (
       catch: (cause) =>
         new Error(`getTenantDetailForAdmin connections: ${String(cause)}`),
     });
+    const accountStore = yield* AccountOpenRouterCredentialStore;
+    const account = t.workosOrganizationId
+      ? yield* accountStore.get(t.workosOrganizationId)
+      : null;
+    const workspaceLlm =
+      connections.find(
+        (row) => LLM_PROVIDERS.has(row.provider) && row.status === "active",
+      ) ??
+      connections.find((row) => LLM_PROVIDERS.has(row.provider)) ??
+      null;
+    const effectiveSource =
+      workspaceLlm?.status === "active"
+        ? ("workspace" as const)
+        : account?.status === "active"
+          ? ("account" as const)
+          : null;
 
     return {
       tenant: {
@@ -140,5 +175,23 @@ export const getTenantDetailForAdmin = (
           }
         : null,
       connections,
+      llm: {
+        effectiveProvider:
+          workspaceLlm?.status === "active"
+            ? workspaceLlm.provider
+            : account?.status === "active"
+              ? "openrouter"
+              : null,
+        effectiveSource,
+        workspaceOverride: workspaceLlm
+          ? {
+              provider: workspaceLlm.provider,
+              status:
+                workspaceLlm.status === "active" ? "active" : "revoked",
+              updatedAt: workspaceLlm.updatedAt,
+            }
+          : null,
+        accountOpenrouter: accountView(account),
+      },
     };
   });

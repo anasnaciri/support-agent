@@ -1,9 +1,12 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
+  AccountOpenRouterCredentialStore,
+  AccountOpenRouterCredentialStoreTest,
   ConnectorCredentialStore,
   ConnectorCredentialStoreTest,
   makeMerchantNotificationServiceTest,
+  type AccountOpenRouterCredential,
   type ConnectorConnection,
 } from "@support-agent/services";
 import {
@@ -31,6 +34,18 @@ const openrouterRow = (
   scopes: [],
   apiVersion: null,
   installedAt: at,
+  status: "active",
+});
+
+const accountOpenrouterRow = (
+  metadata: Readonly<Record<string, unknown>> = {},
+): AccountOpenRouterCredential => ({
+  organizationId: "org_account",
+  apiKey: "sk-or-account-key",
+  metadata,
+  installedAt: at,
+  revokedAt: null,
+  updatedAt: at,
   status: "active",
 });
 
@@ -81,31 +96,54 @@ describe("checkOpenRouterCredits", () => {
     seed: ReadonlyArray<ConnectorConnection>,
     fetchImpl: typeof fetch,
     notifLayer: Layer.Layer<never, never, never>,
+    accountSeed: ReadonlyArray<AccountOpenRouterCredential> = [],
+    targets:
+      | ReadonlyArray<
+          | {
+              readonly scope: "workspace";
+              readonly tenantId: string;
+              readonly shopDomain: string;
+            }
+          | {
+              readonly scope: "account";
+              readonly organizationId: string;
+              readonly tenantId: string;
+            }
+        >
+      | undefined = undefined,
   ) =>
     Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const results = yield* checkOpenRouterCredits(
-            seed.map((r) => ({
-              tenantId: r.tenantId as string,
-              shopDomain: r.shopDomain,
-            })),
+            targets ??
+              seed.map((r) => ({
+                scope: "workspace" as const,
+                tenantId: r.tenantId as string,
+                shopDomain: r.shopDomain,
+              })),
             { thresholdUsd: 5, fetchImpl },
           );
           const store = yield* ConnectorCredentialStore;
           const rows = yield* Effect.forEach(seed, (r) =>
             store.get(r.tenantId, "openrouter", r.shopDomain),
           );
-          return { results, rows };
+          const accounts = yield* AccountOpenRouterCredentialStore;
+          const accountRows = yield* Effect.forEach(accountSeed, (r) =>
+            accounts.get(r.organizationId),
+          );
+          return { results, rows, accountRows };
         }),
         Layer.mergeAll(
           ConnectorCredentialStoreTest(seed),
+          AccountOpenRouterCredentialStoreTest(accountSeed),
           notifLayer as never,
         ),
       ) as Effect.Effect<never, never, never>,
     ) as Promise<{
       results: ReadonlyArray<{ tenantId: string; outcome: unknown }>;
       rows: ReadonlyArray<ConnectorConnection>;
+      accountRows: ReadonlyArray<AccountOpenRouterCredential | null>;
     }>;
 
   it("notifies once and stamps the alert flag when below threshold", async () => {
@@ -179,5 +217,30 @@ describe("checkOpenRouterCredits", () => {
     expect(out.results[0]?.outcome).toEqual({ failed: "credits_unreadable" });
     expect(handle.sent).toHaveLength(0);
     expect(out.rows[0]?.metadata["llmCreditsAlertActive"]).toBeUndefined();
+  });
+
+  it("checks an inherited account key once and stores alert state on the account", async () => {
+    const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(creditsResponse(10, 7.5));
+    const account = accountOpenrouterRow();
+    const out = await run(
+      [],
+      fetchImpl,
+      notifLayer as never,
+      [account],
+      [
+        {
+          scope: "account",
+          organizationId: account.organizationId,
+          tenantId: "t1",
+        },
+      ],
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(handle.sent).toHaveLength(1);
+    expect(out.results[0]?.outcome).toBe("alerted");
+    expect(out.accountRows[0]?.metadata["llmCreditsAlertActive"]).toBe(true);
   });
 });

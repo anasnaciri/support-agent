@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   ConnectorCredentialStoreLive,
   DbClientLive,
+  accountOpenrouterCredentials,
   connectorConnections,
   makeDbClient,
   tenantAgentOverrides,
@@ -14,6 +15,7 @@ import {
   DATA_PROCESSING_NOTICE_VERSION,
   DPA_VERSION,
   ConnectorCredentialStore,
+  encrypt,
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import { startServer, type ServerHandle } from "../src/server.js";
@@ -160,6 +162,11 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         .where(sql`${tenantAgentOverrides.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
+    await raw.db
+      .delete(accountOpenrouterCredentials)
+      .where(
+        sql`${accountOpenrouterCredentials.organizationId} IN (${orgId}, ${otherOrgId})`,
+      );
     await raw.close();
   });
 
@@ -195,6 +202,23 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.connected).toBe(false);
     expect(body.provider).toBeNull();
     expect(body.entries).toEqual([]);
+  });
+
+  it("GET /dashboard/llm reports an inherited account OpenRouter key", async () => {
+    await raw!.db.insert(accountOpenrouterCredentials).values({
+      organizationId: otherOrgId,
+      apiKeyEncrypted: encrypt(encryptionKey, "sk-or-inherited"),
+    });
+    const res = await get("/dashboard/llm", otherOrgId);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      effective: { provider: "openrouter", source: "account" },
+      workspaceOverride: null,
+      accountDefault: { provider: "openrouter", status: "active" },
+    });
+    await raw!.db
+      .delete(accountOpenrouterCredentials)
+      .where(eq(accountOpenrouterCredentials.organizationId, otherOrgId));
   });
 
   it("GET /dashboard/tenant returns the org's tenant", async () => {

@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import {
+  AccountOpenRouterCredentialStore,
   ApprovalService,
   BlobStorage,
   BlobStorageTest,
@@ -16,6 +17,7 @@ import {
   UrlFetchService,
 } from "@support-agent/services";
 import {
+  AccountOpenRouterCredentialStoreLive,
   ApprovalServiceLive,
   CaseRepositoryLive,
   ConnectorCredentialStoreLive,
@@ -378,6 +380,9 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const store = ConnectorCredentialStoreLive(cfg.encryptionKey).pipe(
     Layer.provide(dbLayer),
   );
+  const accountOpenrouterStore = AccountOpenRouterCredentialStoreLive(
+    cfg.encryptionKey,
+  ).pipe(Layer.provide(dbLayer));
   // Pilot custom distribution: per-tenant Shopify app credentials. Shares
   // the credential encryption key with the connector store.
   const appProvisioning = ShopifyAppProvisioningStoreLive(
@@ -450,6 +455,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const urlFetch = UrlFetchServiceLive;
   return Layer.mergeAll(
     store,
+    accountOpenrouterStore,
     appProvisioning,
     caseRepo,
     conversation,
@@ -467,6 +473,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
 
 export type ApiLayer = Layer.Layer<
   | ConnectorCredentialStore
+  | AccountOpenRouterCredentialStore
   | ConversationService
   | CaseRepository
   | ShopifyAppProvisioningStore

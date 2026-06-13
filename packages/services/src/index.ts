@@ -17,6 +17,7 @@ export * from "./knowledge-base.js";
 export * from "./knowledge-search.js";
 export * from "./url-fetch.js";
 export * from "./connector-credential-store.js";
+export * from "./account-openrouter-credential-store.js";
 export * from "./shopify-app-provisioning.js";
 export * from "./shopify-credentials.js";
 export * from "./shopify-service.js";

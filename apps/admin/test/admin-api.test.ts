@@ -92,6 +92,42 @@ describe("admin-api client", () => {
     expect(init.method).toBe("POST");
   });
 
+  it("accountDetail GETs the account endpoint and maps 404 to null", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonRes(200, { organizationId: "org_1", openrouter: null }),
+    );
+    expect(await adminApi.accountDetail("org_1")).toMatchObject({
+      organizationId: "org_1",
+    });
+    expect(lastCall()[0]).toBe(`${base}/admin/accounts/org_1`);
+
+    fetchMock.mockResolvedValueOnce(jsonRes(404, { error: "not_found" }));
+    expect(await adminApi.accountDetail("missing")).toBeNull();
+  });
+
+  it("writes and revokes account/workspace OpenRouter credentials", async () => {
+    fetchMock.mockResolvedValue(jsonRes(200, { ok: true }));
+    await adminApi.putAccountOpenRouter("org_1", "sk-or-account");
+    expect(lastCall()[0]).toBe(`${base}/admin/accounts/org_1/openrouter`);
+    expect(lastCall()[1].method).toBe("PUT");
+    expect(JSON.parse(String(lastCall()[1].body))).toEqual({
+      apiKey: "sk-or-account",
+    });
+
+    fetchMock.mockClear();
+    await adminApi.revokeAccountOpenRouter("org_1");
+    expect(lastCall()[1].method).toBe("DELETE");
+
+    fetchMock.mockClear();
+    await adminApi.putWorkspaceOpenRouter("t1", "sk-or-workspace");
+    expect(lastCall()[0]).toBe(`${base}/admin/tenants/t1/openrouter`);
+    expect(lastCall()[1].method).toBe("PUT");
+
+    fetchMock.mockClear();
+    await adminApi.revokeWorkspaceOpenRouter("t1");
+    expect(lastCall()[1].method).toBe("DELETE");
+  });
+
   it("checkShopifyPcd POSTs the pcd-check endpoint and returns the verdict", async () => {
     fetchMock.mockResolvedValue(
       jsonRes(200, { ok: true, result: { kind: "summary", verdict: "redacted" } }),

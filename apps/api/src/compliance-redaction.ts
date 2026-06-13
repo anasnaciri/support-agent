@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
   adminAuditLog,
+  accountOpenrouterCredentials,
   DbClient,
   approvals,
   auditLog,
@@ -282,6 +283,22 @@ export const redactShop = (
     const wiped = yield* Effect.tryPromise({
       try: () =>
         db.transaction(async (tx) => {
+          const [tenantBeforeDelete] = await tx
+            .select({ organizationId: tenants.workosOrganizationId })
+            .from(tenants)
+            .where(eq(tenants.id, tenantId))
+            .limit(1);
+          const organizationId = tenantBeforeDelete?.organizationId ?? null;
+          const orgWorkspaceCount = organizationId
+            ? Number(
+                (
+                  await tx
+                    .select({ count: sql<number>`count(*)::int` })
+                    .from(tenants)
+                    .where(eq(tenants.workosOrganizationId, organizationId))
+                )[0]?.count ?? 0,
+              )
+            : 0;
           // 1. approvals (FK to cases AND tenants; nuke by tenant)
           await tx.delete(approvals).where(eq(approvals.tenantId, tenantId));
           // 2. cases (cascades to case_state_transitions)
@@ -300,12 +317,21 @@ export const redactShop = (
             .delete(connectorConnections)
             .where(eq(connectorConnections.tenantId, tenantId))
             .returning({ id: connectorConnections.id });
-          // 5. tenant row itself
+          // 5. The inherited account key belongs to the WorkOS org, not this
+          // workspace. Remove it only when this is the org's final workspace.
+          if (organizationId && orgWorkspaceCount <= 1) {
+            await tx
+              .delete(accountOpenrouterCredentials)
+              .where(
+                eq(accountOpenrouterCredentials.organizationId, organizationId),
+              );
+          }
+          // 6. tenant row itself
           const deletedTenant = await tx
             .delete(tenants)
             .where(eq(tenants.id, tenantId))
             .returning({ id: tenants.id });
-          // 6. surviving admin-audit record (re-audit #2) — last, so it
+          // 7. surviving admin-audit record (re-audit #2) — last, so it
           //    captures the deleted counts and is NOT removed by step 3.
           if (adminAudit) {
             await tx.insert(adminAuditLog).values({

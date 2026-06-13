@@ -8,9 +8,17 @@
 // deploy-level knob (LLM_CREDITS_ALERT_THRESHOLD_USD, default $5).
 
 import { Effect } from "effect";
-import { and, eq } from "drizzle-orm";
-import { DbClient, connectorConnections } from "@support-agent/db";
-import type { ConnectorCredentialStore } from "@support-agent/services";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import {
+  DbClient,
+  accountOpenrouterCredentials,
+  connectorConnections,
+  tenants,
+} from "@support-agent/db";
+import type {
+  AccountOpenRouterCredentialStore,
+  ConnectorCredentialStore,
+} from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
 import {
@@ -42,7 +50,7 @@ export const listOpenRouterTargets: Effect.Effect<
   DbClient
 > = Effect.gen(function* () {
   const db = yield* DbClient;
-  const rows = yield* Effect.tryPromise({
+  const workspaceRows = yield* Effect.tryPromise({
     try: () =>
       db
         .select({
@@ -58,7 +66,52 @@ export const listOpenRouterTargets: Effect.Effect<
         ),
     catch: (cause) => new Error(`llm-credits select: ${String(cause)}`),
   });
-  return rows;
+  const accountRows = yield* Effect.tryPromise({
+    try: () =>
+      db
+        .select({ organizationId: accountOpenrouterCredentials.organizationId })
+        .from(accountOpenrouterCredentials)
+        .where(eq(accountOpenrouterCredentials.status, "active")),
+    catch: (cause) => new Error(`llm-credits account select: ${String(cause)}`),
+  });
+  const organizationIds = accountRows.map((row) => row.organizationId);
+  const accountWorkspaces =
+    organizationIds.length === 0
+      ? []
+      : yield* Effect.tryPromise({
+          try: () =>
+            db
+              .select({
+                organizationId: tenants.workosOrganizationId,
+                tenantId: tenants.id,
+              })
+              .from(tenants)
+              .where(inArray(tenants.workosOrganizationId, organizationIds))
+              .orderBy(asc(tenants.createdAt), asc(tenants.id)),
+          catch: (cause) =>
+            new Error(`llm-credits account workspace select: ${String(cause)}`),
+        });
+  const defaultByOrg = new Map<string, string>();
+  for (const row of accountWorkspaces) {
+    if (row.organizationId && !defaultByOrg.has(row.organizationId)) {
+      defaultByOrg.set(row.organizationId, row.tenantId);
+    }
+  }
+  return [
+    ...workspaceRows.map((row) => ({ scope: "workspace" as const, ...row })),
+    ...accountRows.flatMap((row) => {
+      const tenantId = defaultByOrg.get(row.organizationId);
+      return tenantId
+        ? [
+            {
+              scope: "account" as const,
+              organizationId: row.organizationId,
+              tenantId,
+            },
+          ]
+        : [];
+    }),
+  ];
 });
 
 interface RegisterOptions {

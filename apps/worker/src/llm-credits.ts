@@ -20,6 +20,7 @@
 import { Effect, Option } from "effect";
 import { TenantId } from "@support-agent/agent-core";
 import {
+  AccountOpenRouterCredentialStore,
   ConnectorCredentialStore,
   MerchantNotificationService,
   llmCreditsLowNotification,
@@ -45,10 +46,18 @@ export const decideCreditsAlert = (
   };
 };
 
-export interface LlmCreditsTarget {
-  readonly tenantId: string;
-  readonly shopDomain: string;
-}
+export type LlmCreditsTarget =
+  | {
+      readonly scope: "workspace";
+      readonly tenantId: string;
+      readonly shopDomain: string;
+    }
+  | {
+      readonly scope: "account";
+      readonly organizationId: string;
+      /** Default workspace used to deliver the merchant notification. */
+      readonly tenantId: string;
+    };
 
 export interface LlmCreditsDeps {
   readonly thresholdUsd: number;
@@ -97,10 +106,11 @@ export const checkOpenRouterCredits = (
 ): Effect.Effect<
   ReadonlyArray<LlmCreditsResult>,
   never,
-  ConnectorCredentialStore
+  ConnectorCredentialStore | AccountOpenRouterCredentialStore
 > =>
   Effect.gen(function* () {
     const store = yield* ConnectorCredentialStore;
+    const accountStore = yield* AccountOpenRouterCredentialStore;
     const maybeNotifications = yield* Effect.serviceOption(
       MerchantNotificationService,
     );
@@ -109,19 +119,45 @@ export const checkOpenRouterCredits = (
 
     for (const target of targets) {
       const tenantId = TenantId(target.tenantId);
-      const conn = yield* store
-        .get(tenantId, "openrouter", target.shopDomain)
-        .pipe(Effect.either);
-      if (conn._tag === "Left") {
-        results.push({
-          tenantId: target.tenantId,
-          outcome: { failed: conn.left._tag },
-        });
-        continue;
+      let apiKey: string;
+      let metadata: Readonly<Record<string, unknown>>;
+      if (target.scope === "account") {
+        const loaded = yield* accountStore
+          .get(target.organizationId)
+          .pipe(Effect.either);
+        if (loaded._tag === "Left") {
+          results.push({
+            tenantId: target.tenantId,
+            outcome: { failed: loaded.left._tag },
+          });
+          continue;
+        }
+        if (!loaded.right || loaded.right.status !== "active") {
+          results.push({
+            tenantId: target.tenantId,
+            outcome: { failed: "credential_missing" },
+          });
+          continue;
+        }
+        apiKey = loaded.right.apiKey;
+        metadata = loaded.right.metadata;
+      } else {
+        const loaded = yield* store
+          .get(tenantId, "openrouter", target.shopDomain)
+          .pipe(Effect.either);
+        if (loaded._tag === "Left") {
+          results.push({
+            tenantId: target.tenantId,
+            outcome: { failed: loaded.left._tag },
+          });
+          continue;
+        }
+        apiKey = loaded.right.accessToken;
+        metadata = loaded.right.metadata;
       }
 
       const remaining = yield* Effect.promise(() =>
-        readRemainingUsd(conn.right.accessToken, fetchImpl).catch(() => null),
+        readRemainingUsd(apiKey, fetchImpl).catch(() => null),
       );
       if (remaining === null) {
         results.push({
@@ -132,7 +168,7 @@ export const checkOpenRouterCredits = (
       }
 
       const alreadyAlerted =
-        conn.right.metadata["llmCreditsAlertActive"] === true;
+        metadata["llmCreditsAlertActive"] === true;
       const decision = decideCreditsAlert(
         alreadyAlerted,
         remaining,
@@ -140,14 +176,22 @@ export const checkOpenRouterCredits = (
       );
 
       if (decision.rearm) {
-        yield* store
-          .patchMetadata({
-            tenantId,
-            provider: "openrouter",
-            shopDomain: target.shopDomain,
-            metadata: { llmCreditsAlertActive: false },
-          })
-          .pipe(Effect.ignore);
+        if (target.scope === "account") {
+          yield* accountStore
+            .patchMetadata(target.organizationId, {
+              llmCreditsAlertActive: false,
+            })
+            .pipe(Effect.ignore);
+        } else {
+          yield* store
+            .patchMetadata({
+              tenantId,
+              provider: "openrouter",
+              shopDomain: target.shopDomain,
+              metadata: { llmCreditsAlertActive: false },
+            })
+            .pipe(Effect.ignore);
+        }
         results.push({
           tenantId: target.tenantId,
           outcome: "rearmed",
@@ -192,14 +236,22 @@ export const checkOpenRouterCredits = (
         continue;
       }
 
-      yield* store
-        .patchMetadata({
-          tenantId,
-          provider: "openrouter",
-          shopDomain: target.shopDomain,
-          metadata: { llmCreditsAlertActive: true },
-        })
-        .pipe(Effect.ignore);
+      if (target.scope === "account") {
+        yield* accountStore
+          .patchMetadata(target.organizationId, {
+            llmCreditsAlertActive: true,
+          })
+          .pipe(Effect.ignore);
+      } else {
+        yield* store
+          .patchMetadata({
+            tenantId,
+            provider: "openrouter",
+            shopDomain: target.shopDomain,
+            metadata: { llmCreditsAlertActive: true },
+          })
+          .pipe(Effect.ignore);
+      }
       results.push({
         tenantId: target.tenantId,
         outcome: "alerted",

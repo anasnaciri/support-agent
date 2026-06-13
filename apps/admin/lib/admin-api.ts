@@ -1,4 +1,5 @@
 import type {
+  AdminAccountDetail,
   AdminTenantDetail,
   AdminTenantSummary,
 } from "@support-agent/dashboard-contracts";
@@ -50,6 +51,42 @@ export const adminApi = {
     if (!res.ok) throw new Error(`admin api ${res.status} on /tenants/${id}`);
     return (await res.json()) as AdminTenantDetail;
   },
+
+  accountDetail: async (
+    organizationId: string,
+  ): Promise<AdminAccountDetail | null> => {
+    const res = await request(`/accounts/${tid(organizationId)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`admin api ${res.status} on /accounts/${organizationId}`);
+    }
+    return (await res.json()) as AdminAccountDetail;
+  },
+
+  putAccountOpenRouter: (
+    organizationId: string,
+    apiKey: string,
+  ): Promise<Response> =>
+    request(`/accounts/${tid(organizationId)}/openrouter`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    }),
+
+  revokeAccountOpenRouter: (organizationId: string): Promise<Response> =>
+    request(`/accounts/${tid(organizationId)}/openrouter`, {
+      method: "DELETE",
+    }),
+
+  putWorkspaceOpenRouter: (id: string, apiKey: string): Promise<Response> =>
+    request(`/tenants/${tid(id)}/openrouter`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    }),
+
+  revokeWorkspaceOpenRouter: (id: string): Promise<Response> =>
+    request(`/tenants/${tid(id)}/openrouter`, { method: "DELETE" }),
 
   putShopifyApp: (
     id: string,

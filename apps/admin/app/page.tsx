@@ -52,9 +52,12 @@ export default async function TenantsPage() {
                         className="px-4 py-2 text-xs uppercase tracking-wide text-zinc-500"
                       >
                         {group.organizationId ? (
-                          <span className="font-mono normal-case">
+                          <Link
+                            href={`/accounts/${group.organizationId}`}
+                            className="font-mono normal-case text-zinc-300 hover:text-white hover:underline"
+                          >
                             {group.organizationId}
-                          </span>
+                          </Link>
                         ) : (
                           "No organization"
                         )}{" "}

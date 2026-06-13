@@ -293,6 +293,12 @@ export interface ShopifyAppGateView {
 
 export type ShopifyAppStatus = "ready" | "connected" | "revoked";
 
+export interface AdminOpenRouterCredentialView {
+  readonly status: "active" | "revoked";
+  readonly installedAt: string;
+  readonly updatedAt: string;
+}
+
 /** One row in the admin tenant list. */
 export interface AdminTenantSummary {
   readonly id: string;
@@ -323,6 +329,26 @@ export interface AdminTenantDetail {
     readonly updatedAt: string;
   } | null;
   readonly connections: ReadonlyArray<ConnectorConnectionView>;
+  readonly llm: {
+    readonly effectiveProvider: string | null;
+    readonly effectiveSource: "workspace" | "account" | null;
+    readonly workspaceOverride: {
+      readonly provider: string;
+      readonly status: "active" | "revoked";
+      readonly updatedAt: string | null;
+    } | null;
+    readonly accountOpenrouter: AdminOpenRouterCredentialView | null;
+  };
+}
+
+export interface AdminAccountDetail {
+  readonly organizationId: string;
+  readonly workspaces: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly createdAt: string;
+  }>;
+  readonly openrouter: AdminOpenRouterCredentialView | null;
 }
 
 // ============================================================
@@ -440,6 +466,23 @@ export interface ModelsResponse {
   readonly entries: ReadonlyArray<ModelOption>;
   /** Set when the upstream provider call failed; entries falls back to []. */
   readonly error: string | null;
+}
+
+export interface LlmCredentialStatusResponse {
+  readonly effective: {
+    readonly provider: string;
+    readonly source: "workspace" | "account";
+  } | null;
+  readonly workspaceOverride: {
+    readonly provider: string;
+    readonly status: "active" | "revoked";
+    readonly updatedAt: string | null;
+  } | null;
+  readonly accountDefault: {
+    readonly provider: "openrouter";
+    readonly status: "active" | "revoked";
+    readonly updatedAt: string;
+  } | null;
 }
 
 // ============================================================

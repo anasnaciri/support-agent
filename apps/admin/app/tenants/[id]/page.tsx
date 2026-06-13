@@ -8,6 +8,8 @@ import {
   provisionShopifyAppAction,
   revokeShopifyAppAction,
   runPcdCheckAction,
+  revokeWorkspaceOpenRouterAction,
+  setWorkspaceOpenRouterAction,
   deleteTenantAction,
 } from "./actions";
 
@@ -16,6 +18,8 @@ export const dynamic = "force-dynamic";
 const OK_MESSAGES: Record<string, string> = {
   shopify_saved: "Shopify app credentials saved.",
   shopify_revoked: "Shopify app provisioning revoked.",
+  llm_saved: "Workspace OpenRouter override saved.",
+  llm_revoked: "Workspace LLM override revoked; the account default now applies when available.",
 };
 const ERROR_MESSAGES: Record<string, string> = {
   missing_fields: "Client ID and secret are both required.",
@@ -28,6 +32,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   tenant_not_found: "Tenant not found.",
   name_mismatch: "The typed name didn't match — tenant not deleted.",
   delete_failed: "Deleting the tenant failed.",
+  missing_llm_key: "Paste the full OpenRouter API key.",
+  legal_acceptance_required:
+    "This workspace must accept the current legal notice and DPA before an LLM key can be enabled.",
+  llm_save_failed: "Saving the workspace OpenRouter override failed.",
+  llm_revoke_failed: "Revoking the workspace LLM override failed.",
 };
 
 type Tone = "ok" | "warn" | "err";
@@ -86,6 +95,8 @@ export default async function TenantDetailPage({
   const provision = provisionShopifyAppAction.bind(null, id);
   const revoke = revokeShopifyAppAction.bind(null, id);
   const runPcd = runPcdCheckAction.bind(null, id);
+  const setWorkspaceLlm = setWorkspaceOpenRouterAction.bind(null, id);
+  const revokeWorkspaceLlm = revokeWorkspaceOpenRouterAction.bind(null, id);
   const remove = deleteTenantAction.bind(null, id);
 
   return (
@@ -312,6 +323,80 @@ export default async function TenantDetailPage({
               </table>
             </div>
           )}
+        </section>
+
+        {/* ---- OpenRouter ---- */}
+        <section className="space-y-4 rounded-lg border border-zinc-800 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium">OpenRouter</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Effective source:{" "}
+                <span className="text-zinc-200">
+                  {detail.llm.effectiveSource ?? "none"}
+                </span>
+                {detail.llm.effectiveProvider
+                  ? ` (${detail.llm.effectiveProvider})`
+                  : ""}
+              </p>
+            </div>
+            <StatusBadge
+              status={detail.llm.effectiveSource ? "active" : null}
+            />
+          </div>
+          {tenant.workosOrganizationId ? (
+            <p className="text-sm text-zinc-400">
+              Account default:{" "}
+              <StatusBadge status={detail.llm.accountOpenrouter?.status ?? null} />{" "}
+              <a
+                href={`/accounts/${tenant.workosOrganizationId}`}
+                className="text-zinc-300 hover:text-white hover:underline"
+              >
+                Manage account key
+              </a>
+            </p>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              This workspace has no WorkOS organization, so it cannot inherit an
+              account key.
+            </p>
+          )}
+          <form action={setWorkspaceLlm} className="space-y-3">
+            <label htmlFor="workspaceApiKey" className="block text-sm text-zinc-300">
+              Workspace OpenRouter override
+            </label>
+            <input
+              id="workspaceApiKey"
+              name="apiKey"
+              type="password"
+              required
+              autoComplete="off"
+              placeholder={
+                detail.llm.workspaceOverride
+                  ? "•••••• (re-enter to rotate)"
+                  : "sk-or-v1-…"
+              }
+              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
+            />
+            <SubmitButton
+              pendingLabel="Saving…"
+              className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+            >
+              {detail.llm.workspaceOverride
+                ? "Replace workspace override"
+                : "Set workspace override"}
+            </SubmitButton>
+          </form>
+          {detail.llm.workspaceOverride?.status === "active" ? (
+            <form action={revokeWorkspaceLlm} className="border-t border-zinc-800 pt-3">
+              <SubmitButton
+                pendingLabel="Revoking…"
+                className="text-sm text-red-400 hover:text-red-300"
+              >
+                Revoke workspace override
+              </SubmitButton>
+            </form>
+          ) : null}
         </section>
 
         {/* ---- Danger zone ---- */}

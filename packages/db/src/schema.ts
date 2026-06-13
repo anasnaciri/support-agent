@@ -60,6 +60,46 @@ export const tenants = pgTable(
   ],
 );
 
+/**
+ * One inherited OpenRouter credential per WorkOS organization. Workspaces
+ * (tenant rows) may still carry their own LLM row in connector_connections;
+ * that row overrides this account default.
+ *
+ * There is intentionally no FK: WorkOS organizations are external ids, not
+ * rows in this database. The final-workspace delete path removes this row in
+ * the same transaction as the last tenant row.
+ */
+export const accountOpenrouterCredentials = pgTable(
+  "account_openrouter_credentials",
+  {
+    organizationId: text("organization_id").primaryKey(),
+    apiKeyEncrypted: bytea("api_key_encrypted").notNull(),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    status: text("status").notNull().default("active"),
+    installedAt: timestamp("installed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "account_openrouter_credentials_status_check",
+      sql`${t.status} IN ('active','revoked')`,
+    ),
+    index("account_openrouter_credentials_active_idx")
+      .on(t.organizationId)
+      .where(sql`${t.status} = 'active'`),
+  ],
+);
+
+export type AccountOpenRouterCredentialRow =
+  typeof accountOpenrouterCredentials.$inferSelect;
+export type AccountOpenRouterCredentialInsert =
+  typeof accountOpenrouterCredentials.$inferInsert;
+
 export const cases = pgTable(
   "cases",
   {

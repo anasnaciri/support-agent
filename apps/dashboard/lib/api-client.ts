@@ -20,6 +20,7 @@ import type {
   ConnectorConnectionView,
   KnowledgeDocumentSummaryView,
   KnowledgeDocumentView,
+  LlmCredentialStatusResponse,
   ModelsResponse,
   OnboardingResult,
   Page,
@@ -466,6 +467,9 @@ export const api = {
 
   models: (ctx: CallCtx): Promise<ModelsResponse> =>
     okBody("/models", ctx) as Promise<ModelsResponse>,
+
+  llmStatus: (ctx: CallCtx): Promise<LlmCredentialStatusResponse> =>
+    okBody("/llm", ctx) as Promise<LlmCredentialStatusResponse>,
 
   settings: (ctx: CallCtx): Promise<TenantSettingsView> =>
     okBody("/settings", ctx) as Promise<TenantSettingsView>,

@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { makeDbClient, tenants } from "@support-agent/db";
+import {
+  accountOpenrouterCredentials,
+  makeDbClient,
+  tenants,
+} from "@support-agent/db";
 import {
   DATA_PROCESSING_NOTICE_VERSION,
   DPA_VERSION,
+  encrypt,
 } from "@support-agent/services";
 import { startServer, type ServerHandle } from "../src/server.js";
 import type { ApiConfig } from "../src/bootstrap.js";
@@ -116,6 +121,9 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
     if (!raw) return;
     if (handle) await handle.close();
     for (const org of orgsToClean) {
+      await raw.db
+        .delete(accountOpenrouterCredentials)
+        .where(sql`${accountOpenrouterCredentials.organizationId} = ${org}`);
       await raw.db
         .delete(tenants)
         .where(sql`${tenants.workosOrganizationId} = ${org}`);
@@ -235,6 +243,10 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
     const org = `org_${randomUUID().slice(0, 8)}`;
     const keep = await seedWorkspace(org, "Keep", new Date("2026-01-01"));
     const drop = await seedWorkspace(org, "Drop", new Date("2026-02-01"));
+    await raw.db.insert(accountOpenrouterCredentials).values({
+      organizationId: org,
+      apiKeyEncrypted: encrypt(cfg.encryptionKey, "sk-or-shared"),
+    });
 
     const res = await post(`/dashboard/workspaces/${drop}/delete`, org);
     expect(res.status).toBe(200);
@@ -245,6 +257,11 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
       .from(tenants)
       .where(sql`${tenants.workosOrganizationId} = ${org}`);
     expect(rows.map((r) => r.id)).toEqual([keep]);
+    const accountRows = await raw.db
+      .select()
+      .from(accountOpenrouterCredentials)
+      .where(sql`${accountOpenrouterCredentials.organizationId} = ${org}`);
+    expect(accountRows).toHaveLength(1);
 
     const jobs = await cleanupJobs(drop);
     expect(jobs).toHaveLength(1);
@@ -277,6 +294,10 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
     const extraWs = await seedWorkspace(org, "Extra", new Date("2026-02-01"), {
       email: "extra-owner@example.com",
     });
+    await raw.db.insert(accountOpenrouterCredentials).values({
+      organizationId: org,
+      apiKeyEncrypted: encrypt(cfg.encryptionKey, "sk-or-shared"),
+    });
 
     const res = await post("/dashboard/account/delete", org);
     expect(res.status).toBe(200);
@@ -292,6 +313,11 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
       .from(tenants)
       .where(sql`${tenants.workosOrganizationId} = ${org}`);
     expect(rows).toEqual([]);
+    const accountRows = await raw.db
+      .select()
+      .from(accountOpenrouterCredentials)
+      .where(sql`${accountOpenrouterCredentials.organizationId} = ${org}`);
+    expect(accountRows).toEqual([]);
 
     // The non-default workspace's job must NOT delete the org or email.
     const extraJobs = await cleanupJobs(extraWs);

@@ -102,6 +102,7 @@ import {
 import {
   buildModelsResponse,
   resolveActiveLlmCredential,
+  resolveLlmCredentialStatus,
 } from "./dashboard-llm.js";
 import {
   resolveCustomerForContext,
@@ -139,6 +140,14 @@ import {
   getTenantDetailForAdmin,
   listTenantsForAdmin,
 } from "./admin-tenants.js";
+import {
+  getAdminAccountDetail,
+  putAdminAccountOpenRouter,
+  putAdminWorkspaceOpenRouter,
+  revokeAdminAccountOpenRouter,
+  revokeAdminWorkspaceOpenRouter,
+  type AdminOpenRouterMutationResult,
+} from "./admin-openrouter.js";
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
@@ -1555,6 +1564,152 @@ const handleAdminTenantDetail = async (
   sendJson(res, 200, exit.value);
 };
 
+const adminMutationResponse = (
+  res: FastifyReply,
+  result: AdminOpenRouterMutationResult,
+): void => {
+  if (result.kind === "not_found") {
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+  if (result.kind === "not_configured") {
+    sendJson(res, 404, { error: "not_configured" });
+    return;
+  }
+  if (result.kind === "legal_acceptance_required") {
+    sendJson(res, 403, { error: "legal_acceptance_required" });
+    return;
+  }
+  sendJson(res, 200, { ok: true });
+};
+
+const adminAuthorized = (
+  cfg: ApiConfig,
+  req: FastifyRequest,
+  res: FastifyReply,
+): boolean => {
+  if (!cfg.adminApiToken) {
+    sendJson(res, 503, { error: "admin_api_not_configured" });
+    return false;
+  }
+  const parsed = parseAdminAuth(
+    req.headers as Record<string, string | undefined>,
+    cfg.adminApiToken,
+  );
+  if (!parsed.ok) {
+    sendJson(res, parsed.status, { error: parsed.message });
+    return false;
+  }
+  return true;
+};
+
+const handleAdminAccountDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!adminAuthorized(cfg, req, res)) return;
+  const { organizationId } = req.params as { organizationId: string };
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(getAdminAccountDetail(organizationId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "detail_failed", detail: opaqueCause(exit.cause) });
+    return;
+  }
+  if (!exit.value) {
+    sendJson(res, 404, { error: "account_not_found" });
+    return;
+  }
+  sendJson(res, 200, exit.value);
+};
+
+const handleAdminAccountOpenRouterPut = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!adminAuthorized(cfg, req, res)) return;
+  const { organizationId } = req.params as { organizationId: string };
+  const body = parseJsonBody(req);
+  const apiKey =
+    typeof body["apiKey"] === "string" ? String(body["apiKey"]).trim() : "";
+  if (apiKey.length < 8) {
+    sendJson(res, 400, { error: "missing_key" });
+    return;
+  }
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(putAdminAccountOpenRouter(organizationId, apiKey), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "save_failed", detail: opaqueCause(exit.cause) });
+    return;
+  }
+  adminMutationResponse(res, exit.value);
+};
+
+const handleAdminAccountOpenRouterDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  if (!adminAuthorized(cfg, req, res)) return;
+  const { organizationId } = req.params as { organizationId: string };
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(revokeAdminAccountOpenRouter(organizationId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "revoke_failed", detail: opaqueCause(exit.cause) });
+    return;
+  }
+  adminMutationResponse(res, exit.value);
+};
+
+const handleAdminWorkspaceOpenRouterPut = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const body = parseJsonBody(req);
+  const apiKey = typeof body["apiKey"] === "string" ? body["apiKey"].trim() : "";
+  if (apiKey.length < 8) {
+    sendJson(res, 400, { error: "missing_key" });
+    return;
+  }
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(putAdminWorkspaceOpenRouter(tenantId, apiKey), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "save_failed", detail: opaqueCause(exit.cause) });
+    return;
+  }
+  adminMutationResponse(res, exit.value);
+};
+
+const handleAdminWorkspaceOpenRouterDelete = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const tenantId = adminShopifyAppGuard(cfg, req, res);
+  if (!tenantId) return;
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(revokeAdminWorkspaceOpenRouter(tenantId), layer),
+  );
+  if (exit._tag !== "Success") {
+    sendJson(res, 500, { error: "revoke_failed", detail: opaqueCause(exit.cause) });
+    return;
+  }
+  adminMutationResponse(res, exit.value);
+};
+
 // ---- Dashboard catalog / models / tenant (reads) ----
 
 // GET /dashboard/catalog — static agent + tool inventory (settings pages).
@@ -1589,6 +1744,20 @@ const handleDashboardModels = async (
     ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
   });
   return sendJson(res, 200, buildModelsResponse(cred, catalog));
+};
+
+const handleDashboardLlmStatus = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const status = await Effect.runPromise(
+    Effect.provide(resolveLlmCredentialStatus(auth.tenantId), layer),
+  );
+  return sendJson(res, 200, status);
 };
 
 // GET /dashboard/tenant — the org's tenant (or null → dashboard sends to
@@ -5419,6 +5588,11 @@ export const startServer = async (
     handleDashboardModels,
   );
   dashboardGet(
+    "/dashboard/llm",
+    "Effective workspace/account LLM credential status",
+    handleDashboardLlmStatus,
+  );
+  dashboardGet(
     "/dashboard/tenant",
     "The org's tenant (or null → onboarding)",
     handleDashboardTenant,
@@ -5654,6 +5828,71 @@ export const startServer = async (
     },
     async (req, res) => {
       await handleAdminTenantDetail(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.get(
+    "/admin/accounts/:organizationId",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Account workspaces + inherited OpenRouter status (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminAccountDetail(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.put(
+    "/admin/accounts/:organizationId/openrouter",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Set the inherited account OpenRouter key (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminAccountOpenRouterPut(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.delete(
+    "/admin/accounts/:organizationId/openrouter",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Revoke the inherited account OpenRouter key (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminAccountOpenRouterDelete(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.put(
+    "/admin/tenants/:id/openrouter",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Set a workspace OpenRouter override (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminWorkspaceOpenRouterPut(cfg, layer, req, res);
+      return res;
+    },
+  );
+  app.delete(
+    "/admin/tenants/:id/openrouter",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Revoke a workspace LLM override (operator)",
+      },
+    },
+    async (req, res) => {
+      await handleAdminWorkspaceOpenRouterDelete(cfg, layer, req, res);
       return res;
     },
   );

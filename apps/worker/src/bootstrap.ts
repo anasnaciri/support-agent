@@ -7,6 +7,7 @@ import { ALL_AGENTS } from "@support-agent/agents";
 import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
+  AccountOpenRouterCredentialStoreTest,
   ApprovalLinkConfig,
   BlobStorageTest,
   ConnectorCredentialStore,
@@ -37,6 +38,7 @@ import {
 import { Effect } from "effect";
 import {
   ApprovalServiceLive,
+  AccountOpenRouterCredentialStoreLive,
   AuditLogServiceLive,
   AuditLogServiceLiveRedacted,
   CaseRepositoryLive,
@@ -279,9 +281,18 @@ export const buildWorker = async (
   // ConnectorCredentialStoreLive that Shopify/Gmail OAuth writes to).
   // In single-tenant dev we adapt OPENROUTER_API_KEY to a resolver that
   // returns the same credential for every tenant.
+  const accountOpenrouterStore = credKeyB64
+    ? AccountOpenRouterCredentialStoreLive(parseKey(credKeyB64))
+    : AccountOpenRouterCredentialStoreTest();
   const llmResolver = credKeyB64
     ? LLMCredentialResolverLive.pipe(
-        Layer.provide(ConnectorCredentialStoreLive(parseKey(credKeyB64))),
+        Layer.provide(
+          Layer.mergeAll(
+            ConnectorCredentialStoreLive(parseKey(credKeyB64)),
+            accountOpenrouterStore,
+            dbLayer,
+          ),
+        ),
       )
     : LLMCredentialResolverFromLLMConfig.pipe(
         Layer.provide(LLMConfigFromEnv),
@@ -585,6 +596,7 @@ export const buildWorker = async (
     orgDirectory,
     approvalLinkLayer,
     blob,
+    accountOpenrouterStore,
     // Duplicate-photo fraud guard. DbClient-backed; satisfied by the
     // dbLayer provide below. The runtime picks it up via serviceOption.
     ImageHashStoreLive,
