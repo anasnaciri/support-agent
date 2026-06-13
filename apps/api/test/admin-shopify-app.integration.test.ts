@@ -48,7 +48,7 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: "dash",
+    workos: null,
     adminApiToken: adminToken,
   } as ApiConfig;
 
@@ -334,7 +334,7 @@ describeIfDb("apps/api — admin provisioning shop_domain capture (A4)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: "dash",
+    workos: null,
     adminApiToken: adminToken,
   } as ApiConfig;
 
@@ -469,7 +469,7 @@ describeIfDb("apps/api — admin provisioning requires shop in pilot mode (F1)",
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: "dash",
+    workos: null,
     adminApiToken: adminToken,
     shopifyConnectRequiresProvisioning: true,
   } as ApiConfig;

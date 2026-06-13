@@ -3,6 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { approvals, cases, makeDbClient, tenants } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -11,12 +16,14 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 // Path B slice 7 — dashboard write endpoints (approve / reject / takeover).
 describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
-  const token = "dash-write-token";
   const orgId = `org_${randomUUID().slice(0, 8)}`;
   const otherOrgId = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
   const otherTenantId = randomUUID();
-  const managerId = randomUUID();
+  // The acting user: the api derives the manager decision UUID from the
+  // verified `sub`, so we pick a WorkOS user and compute the id it maps to.
+  const workosUser = `user_${randomUUID()}`;
+  const managerId = decisionUuidFor(workosUser);
 
   const caseApprove = randomUUID();
   const caseReject = randomUUID();
@@ -42,19 +49,18 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
-  const headers = (extra: Record<string, string> = {}) => ({
-    authorization: `Bearer ${token}`,
-    "x-org-id": orgId,
-    "x-user-id": managerId,
-    "content-type": "application/json",
-    ...extra,
-  });
+  const headers = (extra: Record<string, string> = {}) =>
+    dashboardAuthHeaders(
+      orgId,
+      { "content-type": "application/json", ...extra },
+      workosUser,
+    );
   const post = (
     path: string,
     body: unknown = {},
@@ -119,7 +125,9 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkApproval(pCross, caseApprove, tenantId),
       mkApproval(pTakeover, caseTakeover, tenantId),
     ]);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -241,12 +249,11 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
 
   it("resume 404s for a case in another tenant (no mutation)", async () => {
     if (!raw) return;
-    const otherHeaders = {
-      authorization: `Bearer ${token}`,
-      "x-org-id": otherOrgId,
-      "x-user-id": managerId,
-      "content-type": "application/json",
-    };
+    const otherHeaders = dashboardAuthHeaders(
+      otherOrgId,
+      { "content-type": "application/json" },
+      workosUser,
+    );
     const r = await post(
       `/dashboard/cases/${caseResume}/resume`,
       {},
@@ -255,26 +262,27 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(r.status).toBe(404);
   });
 
-  it("400 when x-user-id is missing", async () => {
+  it("401 when the request carries no verified token (write refused)", async () => {
     if (!raw) return;
+    // S14: identity comes only from the verified JWT — an unauthenticated write
+    // can't be attributed to anyone, so it's refused before any mutation.
     const res = await post(
       `/dashboard/approvals/${pCross}/approve`,
       {},
-      { authorization: `Bearer ${token}`, "x-org-id": orgId },
+      { "content-type": "application/json" },
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
     // unchanged
     expect((await approvalRow(pCross))?.status).toBe("pending");
   });
 
   it("404 for an approval / case in another tenant (no mutation)", async () => {
     if (!raw) return;
-    const otherHeaders = {
-      authorization: `Bearer ${token}`,
-      "x-org-id": otherOrgId,
-      "x-user-id": managerId,
-      "content-type": "application/json",
-    };
+    const otherHeaders = dashboardAuthHeaders(
+      otherOrgId,
+      { "content-type": "application/json" },
+      workosUser,
+    );
     const a = await post(`/dashboard/approvals/${pCross}/approve`, {}, otherHeaders);
     expect(a.status).toBe(404);
     expect((await approvalRow(pCross))?.status).toBe("pending");

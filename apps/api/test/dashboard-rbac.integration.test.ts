@@ -10,6 +10,11 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -17,7 +22,6 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 
 describeIfDb("apps/api — member RBAC (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
-  const token = "dash-rbac-token";
 
   // Separate tenant per scenario so auto-claim (which flips a workspace to
   // enforced) doesn't bleed across tests.
@@ -27,8 +31,17 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
   const tenantScoped = randomUUID();
   const tenantIds = [tenantOpen, tenantScoped];
 
-  const adminUuid = randomUUID();
-  const samUuid = randomUUID();
+  // S14: the api derives the member decision UUID from the verified `sub`. Tests
+  // pick a WorkOS user id per actor; the assignment-key UUID is the hash of it,
+  // and the headers helper encodes the WorkOS id back into the forwarded bearer.
+  const adminWorkos = "user_rbac_admin";
+  const samWorkos = "user_rbac_sam";
+  const adminUuid = decisionUuidFor(adminWorkos);
+  const samUuid = decisionUuidFor(samWorkos);
+  const workosByUuid: Record<string, string> = {
+    [adminUuid]: adminWorkos,
+    [samUuid]: samWorkos,
+  };
 
   const cfg = {
     port: 0,
@@ -50,23 +63,28 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     },
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
+  // `userId` is the decision UUID the test reasons about (assignment key); we
+  // reverse it to the WorkOS id the bearer carries so the api re-derives the
+  // same UUID. With no actor, the bearer carries a default (unassigned) user.
   const headers = (
     org: string,
     userId?: string,
     email?: string,
-  ): Record<string, string> => ({
-    authorization: `Bearer ${token}`,
-    "x-org-id": org,
-    "content-type": "application/json",
-    ...(userId ? { "x-user-id": userId } : {}),
-    ...(email ? { "x-user-email": email } : {}),
-  });
+  ): Record<string, string> =>
+    dashboardAuthHeaders(
+      org,
+      {
+        "content-type": "application/json",
+        ...(email ? { "x-user-email": email } : {}),
+      },
+      userId ? (workosByUuid[userId] ?? userId) : "user_unassigned",
+    );
   const get = (
     path: string,
     org: string,
@@ -93,7 +111,9 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
       { id: tenantOpen, name: "RBAC-open", workosOrganizationId: orgOpen },
       { id: tenantScoped, name: "RBAC-scoped", workosOrganizationId: orgScoped },
     ]);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -117,8 +137,8 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     await raw.close();
   });
 
-  it("open mode allows any gated read, even without an actor id", async () => {
-    // No assignments yet → open. A legacy read without x-user-id still works.
+  it("open mode allows any gated read, even for an unassigned actor", async () => {
+    // No assignments yet → open. A read by an actor with no assignment works.
     expect((await get("/dashboard/audit", orgOpen)).status).toBe(200);
     expect(
       (await get("/dashboard/today", orgOpen, adminUuid, "admin@acme.com")).status,
@@ -236,8 +256,12 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
       ).status,
     ).toBe(403);
 
-    // In ENFORCED mode a guarded read without an actor id is 401.
-    expect((await get("/dashboard/today", orgScoped)).status).toBe(401);
+    // In ENFORCED mode an authenticated actor with no assignment is 403.
+    expect((await get("/dashboard/today", orgScoped)).status).toBe(403);
+    // …and a request with no verified token at all is 401.
+    expect(
+      (await fetch(`${baseUrl}/dashboard/today`, { headers: {} })).status,
+    ).toBe(401);
 
     // Role deletion guards: in use → 409.
     expect(

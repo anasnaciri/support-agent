@@ -11,6 +11,10 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -47,7 +51,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
@@ -73,7 +77,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     actorType: string,
   ) => ({ tenantId: owner, caseId, action, actorType, details: {} });
 
-  const auth = { authorization: `Bearer ${token}`, "x-org-id": orgId };
+  const auth = dashboardAuthHeaders(orgId);
   const get = (path: string, headers: Record<string, string> = auth) =>
     fetch(`${baseUrl}${path}`, { headers });
 
@@ -156,7 +160,9 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       agentId: "refund-review-agent",
       model: "anthropic/claude-opus-4-8",
     });
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -257,9 +263,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     if (!raw) return;
     expect(
       (
-        await get(`/dashboard/cases/${caseA}/conversation-thread`, {
-          "x-org-id": orgId,
-        })
+        await get(`/dashboard/cases/${caseA}/conversation-thread`, {})
       ).status,
     ).toBe(401);
   });
@@ -331,7 +335,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     if (!raw) return;
     expect((await get(`/dashboard/approvals/${approvalId}`)).status).toBe(200);
     const other = await fetch(`${baseUrl}/dashboard/approvals/${approvalId}`, {
-      headers: { authorization: `Bearer ${token}`, "x-org-id": otherOrgId },
+      headers: dashboardAuthHeaders(otherOrgId),
     });
     expect(other.status).toBe(404);
   });
@@ -421,7 +425,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
   it("rejects without a token (401)", async () => {
     if (!raw) return;
     const res = await fetch(`${baseUrl}/dashboard/cases`, {
-      headers: { "x-org-id": orgId },
+      headers: {},
     });
     expect(res.status).toBe(401);
   });

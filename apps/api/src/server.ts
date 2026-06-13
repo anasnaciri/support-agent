@@ -101,10 +101,14 @@ import {
 import { decideAuthz, sessionPermissions } from "./dashboard-authz.js";
 import { fetchModelCatalog } from "@support-agent/providers";
 import {
+  authenticateDashboardToken,
   isWorkspaceIdShape,
   parseAdminAuth,
-  parseDashboardAuth,
 } from "./dashboard-auth.js";
+import {
+  makeRemoteWorkosVerifier,
+  type DashboardTokenVerifier,
+} from "./dashboard-jwt.js";
 import { retryCaseNow } from "./case-retry.js";
 import {
   TELEGRAM_LINK_TTL_MS,
@@ -386,17 +390,31 @@ const kDashAuth = Symbol("dashboardAuth");
  * workspace cookie must never bounce a real tenant there), 403 when the org
  * has no workspaces at all.
  */
+/**
+ * The WorkOS access-token verifier is built once at boot and decorated onto the
+ * Fastify instance (see startServer); every `/dashboard/*` request reads it
+ * from `req.server`. `null` → WorkOS isn't configured, so the dashboard API is
+ * not available (503).
+ */
+const getDashboardVerifier = (
+  req: FastifyRequest,
+): DashboardTokenVerifier | null =>
+  (req.server as unknown as {
+    dashboardTokenVerifier: DashboardTokenVerifier | null;
+  }).dashboardTokenVerifier;
+
 const resolveDashboardAuth = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
 ): Promise<DashboardAuthResult> => {
-  if (!cfg.dashboardApiToken) {
+  const verifier = getDashboardVerifier(req);
+  if (!verifier) {
     return { ok: false, status: 503, error: "dashboard_api_not_configured" };
   }
-  const parsed = parseDashboardAuth(
+  const parsed = await authenticateDashboardToken(
     req.headers as Record<string, string | undefined>,
-    cfg.dashboardApiToken,
+    verifier,
   );
   if (!parsed.ok) {
     return { ok: false, status: parsed.status, error: parsed.message };
@@ -491,16 +509,17 @@ type DashboardOrgAuthResult =
  * WorkOS org, but do NOT require a tenant (those endpoints exist precisely for
  * the org-without-a-tenant onboarding case). Pure — no DB lookup.
  */
-const authenticateDashboardOrg = (
-  cfg: ApiConfig,
+const authenticateDashboardOrg = async (
+  _cfg: ApiConfig,
   req: FastifyRequest,
-): DashboardOrgAuthResult => {
-  if (!cfg.dashboardApiToken) {
+): Promise<DashboardOrgAuthResult> => {
+  const verifier = getDashboardVerifier(req);
+  if (!verifier) {
     return { ok: false, status: 503, error: "dashboard_api_not_configured" };
   }
-  const parsed = parseDashboardAuth(
+  const parsed = await authenticateDashboardToken(
     req.headers as Record<string, string | undefined>,
-    cfg.dashboardApiToken,
+    verifier,
   );
   if (!parsed.ok) {
     return { ok: false, status: parsed.status, error: parsed.message };
@@ -1338,7 +1357,7 @@ const handleDashboardAccountDelete = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const workspaces = await runWithDb(layer, (db) =>
     listWorkspacesByWorkosOrg(db, auth.organizationId),
@@ -1818,7 +1837,7 @@ const handleDashboardCatalog = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   return sendJson(res, 200, buildCatalogResponse(ALL_AGENTS, ALL_TOOLS));
 };
@@ -1867,7 +1886,7 @@ const handleDashboardTenant = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const tenant = await runWithDb(layer, (db) =>
     tenantByWorkosOrg(db, auth.organizationId),
@@ -1887,7 +1906,7 @@ const handleDashboardWorkspaces = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const workspaces = await runWithDb(layer, (db) =>
     listWorkspacesByWorkosOrg(db, auth.organizationId),
@@ -1916,7 +1935,7 @@ const handleDashboardWorkspaceCreate = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const body = parseJsonBody(req);
   const name = typeof body["name"] === "string" ? body["name"].trim() : "";
@@ -1974,7 +1993,7 @@ const handleDashboardWorkspaceRename = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const { id } = req.params as { id: string };
   if (!isWorkspaceIdShape(id)) {
@@ -2004,7 +2023,7 @@ const handleDashboardWorkspaceDelete = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const { id } = req.params as { id: string };
   if (!isWorkspaceIdShape(id)) {
@@ -2116,7 +2135,7 @@ const handleDashboardOnboarding = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboardOrg(cfg, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const body = parseJsonBody(req);
   const name = typeof body["name"] === "string" ? body["name"].trim() : "";
@@ -5487,10 +5506,34 @@ const loggerConfig = () => ({
   },
 });
 
+export interface StartServerOptions {
+  /**
+   * Override the WorkOS access-token verifier. Production leaves this unset and
+   * a JWKS-backed verifier is built from `cfg.workos`; integration tests inject
+   * a static verifier so they can drive the resolved org/user without minting
+   * real RS256 JWTs.
+   */
+  readonly dashboardTokenVerifier?: DashboardTokenVerifier;
+}
+
 export const startServer = async (
   cfg: ApiConfig,
+  opts: StartServerOptions = {},
 ): Promise<ServerHandle> => {
   const layer = buildApiLayers(cfg);
+
+  // S14: the dashboard forwards the merchant's WorkOS access token; the api
+  // verifies it against WorkOS's client-scoped JWKS. Built once at boot
+  // (createRemoteJWKSet is lazy) and read off `req.server` by the auth seam.
+  // `null` when WorkOS isn't configured → `/dashboard/*` responds 503.
+  const dashboardTokenVerifier: DashboardTokenVerifier | null =
+    opts.dashboardTokenVerifier ??
+    (cfg.workos
+      ? makeRemoteWorkosVerifier(
+          cfg.workos.jwksUrl,
+          cfg.workos.issuer ? { issuer: cfg.workos.issuer } : {},
+        )
+      : null);
 
   const app: FastifyInstance = Fastify({
     logger: loggerConfig(),
@@ -5498,6 +5541,7 @@ export const startServer = async (
     // anything near the cap is suspect and fails closed with 413.
     bodyLimit: 1024 * 1024,
   });
+  app.decorate("dashboardTokenVerifier", dashboardTokenVerifier);
 
   // Webhook HMAC is computed over the exact bytes the provider sent, so we
   // keep the raw body as a Buffer instead of letting Fastify JSON-parse it

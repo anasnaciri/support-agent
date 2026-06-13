@@ -1,37 +1,49 @@
 import { timingSafeEqual } from "node:crypto";
 
+import { dashboardUserDecisionUuid } from "./dashboard-user-id.js";
+import type {
+  DashboardTokenVerifier,
+  DashboardTokenVerifyFailure,
+} from "./dashboard-jwt.js";
+
 // Auth for the dashboard's HTTP API (Path B). The dashboard (a Cloudflare
-// Worker) authenticates the merchant via WorkOS, then calls apps/api with a
-// shared service token plus the asserted WorkOS organization id. The api
-// trusts the token (only the dashboard holds it) and maps org -> tenant to
-// scope the read. This is the pilot model; a stricter variant that verifies
-// a forwarded WorkOS access-token JWT can replace this parser without
-// touching the endpoints.
+// Worker) authenticates the merchant via WorkOS and forwards that merchant's
+// WorkOS access token (an RS256 JWT). The api VERIFIES the JWT against WorkOS's
+// client-scoped JWKS (see dashboard-jwt.ts) and reads the org + user from the
+// verified claims. Nothing the caller asserts in a header decides identity:
+// `x-org-id` / `x-user-id` are gone, so a leaked credential can no longer be
+// used to act as an arbitrary org/user (audit S14).
+//
+// Still header-carried (NOT identity-bearing): `x-workspace-id` (validated
+// against the verified org's tenants after this parse) and `x-user-email`
+// (low-trust — display + invite reconcile; see the follow-up in todo.md).
 
 export type DashboardAuthParse =
   | {
       readonly ok: true;
       readonly organizationId: string;
       /**
-       * Manager id for write actions (from `x-user-id`). The dashboard sends
-       * the WorkOS-user → decision UUID it already derives; undefined on read
-       * requests, which don't need it.
+       * Manager id for write actions — the decision UUID DERIVED from the
+       * verified `sub` claim (never a caller header). Always present now that
+       * every request carries a verified user; typed optional only so the
+       * existing `DashboardAuthResult` shape + its guards are untouched.
        */
       readonly userId: string | undefined;
       /**
-       * The acting user's email (from `x-user-email`), used to display members,
+       * The acting user's email (from `x-user-email`) — used to display members,
        * reconcile pending invitations, and stamp the auto-claimed Owner row.
-       * Undefined when the dashboard didn't send it (e.g. pre-tenant calls).
+       * Low-trust: the access token carries no verified email, so this is a
+       * forwarded header. It can only ever act within the verified org.
        */
       readonly userEmail: string | undefined;
       /**
-       * Workspace (tenant row) the request is pinned to, from
-       * `x-workspace-id`. Undefined → the org's default workspace. Shape and
-       * ownership are checked after parsing, against the DB.
+       * Workspace (tenant row) the request is pinned to, from `x-workspace-id`.
+       * Undefined → the org's default workspace. Shape + ownership are checked
+       * after parsing, against the DB and the VERIFIED org.
        */
       readonly workspaceId: string | undefined;
     }
-  | { readonly ok: false; readonly status: 401 | 400; readonly message: string };
+  | { readonly ok: false; readonly status: 401; readonly message: string };
 
 /**
  * `tenants.id` is a Postgres `uuid` — comparing it against a non-UUID string
@@ -55,37 +67,46 @@ const constantTimeEqual = (a: string, b: string): boolean => {
   return timingSafeEqual(ab, bb);
 };
 
+const nonEmpty = (v: string | undefined): string | undefined =>
+  v && v.length > 0 ? v : undefined;
+
+const failureMessage = (reason: DashboardTokenVerifyFailure): string => {
+  switch (reason) {
+    case "missing_token":
+      return "missing bearer token";
+    case "expired":
+      return "expired token";
+    case "missing_claims":
+      return "token missing org/user claims";
+    case "invalid_token":
+      return "invalid token";
+  }
+};
+
 /**
- * Validate the dashboard's `Authorization: Bearer <service-token>` and read
- * the asserted `x-org-id`. Pure — tenant resolution happens after, against
- * the DB. Header keys are expected lowercased (as Fastify delivers them).
+ * Verify the dashboard's `Authorization: Bearer <workos-access-token>` and
+ * project it onto the org + user the request acts as. Identity (org, user)
+ * comes ONLY from the cryptographically-verified JWT claims; `x-workspace-id`
+ * and `x-user-email` are read as plain (non-identity) headers. Header keys are
+ * expected lowercased (as Fastify delivers them).
  */
-export const parseDashboardAuth = (
+export const authenticateDashboardToken = async (
   headers: Record<string, string | undefined>,
-  expectedToken: string,
-): DashboardAuthParse => {
+  verifier: DashboardTokenVerifier,
+): Promise<DashboardAuthParse> => {
   const auth = headers["authorization"];
-  if (!auth || !auth.startsWith(BEARER)) {
-    return { ok: false, status: 401, message: "missing bearer token" };
+  const token =
+    auth && auth.startsWith(BEARER) ? auth.slice(BEARER.length) : "";
+  const verified = await verifier.verify(token);
+  if (!verified.ok) {
+    return { ok: false, status: 401, message: failureMessage(verified.reason) };
   }
-  const token = auth.slice(BEARER.length);
-  if (!constantTimeEqual(token, expectedToken)) {
-    return { ok: false, status: 401, message: "invalid token" };
-  }
-  const org = headers["x-org-id"];
-  if (!org) {
-    return { ok: false, status: 400, message: "missing x-org-id" };
-  }
-  const userId = headers["x-user-id"];
-  const userEmail = headers["x-user-email"];
-  const workspaceId = headers["x-workspace-id"];
   return {
     ok: true,
-    organizationId: org,
-    userId: userId && userId.length > 0 ? userId : undefined,
-    userEmail: userEmail && userEmail.length > 0 ? userEmail : undefined,
-    workspaceId:
-      workspaceId && workspaceId.length > 0 ? workspaceId : undefined,
+    organizationId: verified.claims.organizationId,
+    userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+    userEmail: nonEmpty(headers["x-user-email"]),
+    workspaceId: nonEmpty(headers["x-workspace-id"]),
   };
 };
 
@@ -96,6 +117,8 @@ export type AdminAuthParse =
 /**
  * Validate the platform-operator `Authorization: Bearer <admin-token>` for
  * the `/admin/*` routes. No org/tenant scoping — admin acts across tenants.
+ * Admin keeps the shared-token model on purpose (a small operator surface,
+ * not multi-tenant); the WorkOS-JWT migration (S14) is dashboard-only.
  */
 export const parseAdminAuth = (
   headers: Record<string, string | undefined>,

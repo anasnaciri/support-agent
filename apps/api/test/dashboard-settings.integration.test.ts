@@ -19,6 +19,11 @@ import {
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import { signInstallGrant, verifyInstallGrant } from "../src/install-grant.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
@@ -28,7 +33,6 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 // Path B slice 8a — dashboard catalog/models/tenant reads + settings writes.
 describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
-  const token = "dash-settings-token";
   const encryptionKey = randomBytes(32);
 
   const orgId = `org_${randomUUID().slice(0, 8)}`;
@@ -69,18 +73,14 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     },
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
-  const headers = (org: string, extra: Record<string, string> = {}) => ({
-    authorization: `Bearer ${token}`,
-    "x-org-id": org,
-    "content-type": "application/json",
-    ...extra,
-  });
+  const headers = (org: string, extra: Record<string, string> = {}) =>
+    dashboardAuthHeaders(org, { "content-type": "application/json", ...extra });
   const get = (path: string, org = orgId, h?: Record<string, string>) =>
     fetch(`${baseUrl}${path}`, { headers: h ?? headers(org) });
   const post = (
@@ -146,7 +146,9 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         workosOrganizationId: blockedOrgId,
       },
     ]);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -186,7 +188,6 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   it("GET /dashboard/catalog 401s on a bad token", async () => {
     const res = await get("/dashboard/catalog", orgId, {
       authorization: "Bearer wrong",
-      "x-org-id": orgId,
     });
     expect(res.status).toBe(401);
   });
@@ -345,13 +346,16 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
   });
 
   it("POST /dashboard/legal-acceptance records acceptance for an existing tenant", async () => {
+    const legalActor = "user_legal_acceptor";
     const res = await post(
       "/dashboard/legal-acceptance",
       {},
       noLegalOrgId,
-      headers(noLegalOrgId, {
-        "x-user-id": "22222222-2222-2222-2222-222222222222",
-      }),
+      dashboardAuthHeaders(
+        noLegalOrgId,
+        { "content-type": "application/json" },
+        legalActor,
+      ),
     );
     expect(res.status).toBe(200);
     const [row] = await raw!.db
@@ -369,9 +373,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       DATA_PROCESSING_NOTICE_VERSION,
     );
     expect(legal.dpaVersion).toBe(DPA_VERSION);
-    expect(legal.acceptedByUserId).toBe(
-      "22222222-2222-2222-2222-222222222222",
-    );
+    expect(legal.acceptedByUserId).toBe(decisionUuidFor(legalActor));
   });
 
   // ---- Agent model override ----
@@ -960,9 +962,10 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
 
   // ---- Auth edges ----
 
-  it("503 when the dashboard token is not configured", async () => {
-    const noTokenCfg = { ...cfg, dashboardApiToken: "" } as ApiConfig;
-    const h = await startServer(noTokenCfg);
+  it("503 when WorkOS verification is not configured", async () => {
+    // No workos config AND no injected verifier → the dashboard API is off.
+    const noWorkosCfg = { ...cfg, workos: null } as ApiConfig;
+    const h = await startServer(noWorkosCfg);
     try {
       const res = await fetch(
         `http://localhost:${h.port}/dashboard/catalog`,

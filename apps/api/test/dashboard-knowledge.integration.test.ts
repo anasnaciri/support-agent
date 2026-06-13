@@ -7,6 +7,10 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -44,18 +48,14 @@ describeIfDb("apps/api — /dashboard/knowledge endpoints (integration)", () => 
     },
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
-  const headers = (org: string, extra: Record<string, string> = {}) => ({
-    authorization: `Bearer ${token}`,
-    "x-org-id": org,
-    "content-type": "application/json",
-    ...extra,
-  });
+  const headers = (org: string, extra: Record<string, string> = {}) =>
+    dashboardAuthHeaders(org, { "content-type": "application/json", ...extra });
   const get = (path: string, org = orgA, h?: Record<string, string>) =>
     fetch(`${baseUrl}${path}`, { headers: h ?? headers(org) });
   const post = (path: string, body: unknown = {}, org = orgA) =>
@@ -72,7 +72,9 @@ describeIfDb("apps/api — /dashboard/knowledge endpoints (integration)", () => 
       { id: tenantB, name: "KB-B", workosOrganizationId: orgB },
       { id: tenantCap, name: "KB-Cap", workosOrganizationId: orgCap },
     ]);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -235,7 +237,7 @@ describeIfDb("apps/api — /dashboard/knowledge endpoints (integration)", () => 
 
   it("rejects an unauthenticated request (401)", async () => {
     const res = await fetch(`${baseUrl}/dashboard/knowledge`, {
-      headers: { authorization: "Bearer wrong", "x-org-id": orgA },
+      headers: { authorization: "Bearer wrong" },
     });
     expect(res.status).toBe(401);
   });

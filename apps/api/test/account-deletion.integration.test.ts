@@ -14,6 +14,11 @@ import {
 } from "@support-agent/db";
 import { encrypt } from "@support-agent/services";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -29,7 +34,8 @@ describeIfDb("apps/api — account deletion (integration)", () => {
   const orgB = `org_${randomUUID().slice(0, 8)}`;
   const tenantA = randomUUID();
   const tenantB = randomUUID();
-  const managerId = randomUUID();
+  const workosUser = `user_${randomUUID()}`;
+  const managerId = decisionUuidFor(workosUser);
 
   const cfg = {
     port: 0,
@@ -45,7 +51,7 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: dashToken,
+    workos: null,
     adminApiToken: adminToken,
   } as ApiConfig;
 
@@ -55,11 +61,8 @@ describeIfDb("apps/api — account deletion (integration)", () => {
   const post = (path: string, h: Record<string, string>) =>
     fetch(`${baseUrl}${path}`, { method: "POST", headers: h });
 
-  const dashHeaders = (org: string) => ({
-    authorization: `Bearer ${dashToken}`,
-    "x-org-id": org,
-    "x-user-id": managerId,
-  });
+  const dashHeaders = (org: string) =>
+    dashboardAuthHeaders(org, {}, workosUser);
   const adminHeaders = (token: string) => ({
     authorization: `Bearer ${token}`,
   });
@@ -157,7 +160,9 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     if (!raw) return;
     await seedTenant(tenantA, orgA);
     await seedTenant(tenantB, orgB);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 

@@ -66,7 +66,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: null,
+    workos: null,
     adminApiToken: null,
     shopifyConnectRequiresProvisioning: true,
   } as ApiConfig;

@@ -105,6 +105,9 @@ importers:
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
       pg-boss:
         specifier: ^12.18.2
         version: 12.18.2

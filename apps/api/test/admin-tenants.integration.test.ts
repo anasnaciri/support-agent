@@ -43,7 +43,7 @@ describeIfDb("apps/api — admin tenant list + detail (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: "dash",
+    workos: null,
     adminApiToken: adminToken,
     shopifyConnectRequiresProvisioning: true,
   } as ApiConfig;

@@ -11,6 +11,10 @@ import {
   tenants,
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -42,7 +46,7 @@ describeIfDb("apps/api — GET /dashboard/shopify-app (gate)", () => {
       google: null,
       approvalSigningKey: "a",
       dashboardBaseUrl: null,
-      dashboardApiToken: token,
+      workos: null,
       adminApiToken: null,
       shopifyConnectRequiresProvisioning: requiresProvisioning,
     }) as ApiConfig;
@@ -96,13 +100,13 @@ describeIfDb("apps/api — GET /dashboard/shopify-app (gate)", () => {
 
   const get = (url: string, org: string) =>
     fetch(`${url}/dashboard/shopify-app`, {
-      headers: { authorization: `Bearer ${token}`, "x-org-id": org },
+      headers: dashboardAuthHeaders(org),
     });
 
   const mint = (url: string, org: string, provider = "shopify") =>
     fetch(`${url}/dashboard/connect/${provider}`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "x-org-id": org },
+      headers: dashboardAuthHeaders(org),
     });
 
   beforeAll(async () => {
@@ -120,9 +124,9 @@ describeIfDb("apps/api — GET /dashboard/shopify-app (gate)", () => {
       name: "pilot-mint",
       workosOrganizationId: mintOrgId,
     });
-    pilot = await startServer(baseCfg(true));
-    saas = await startServer(baseCfg(false));
-    noApp = await startServer(noAppCfg());
+    pilot = await startServer(baseCfg(true), { dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER });
+    saas = await startServer(baseCfg(false), { dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER });
+    noApp = await startServer(noAppCfg(), { dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER });
     pilotUrl = `http://localhost:${pilot.port}`;
     saasUrl = `http://localhost:${saas.port}`;
     noAppUrl = `http://localhost:${noApp.port}`;

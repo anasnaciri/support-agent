@@ -42,6 +42,7 @@ import {
   ShopifyServiceLive,
   UrlFetchServiceLive,
 } from "@support-agent/providers";
+import { workosJwksUrl } from "./dashboard-jwt.js";
 
 // ============================================================
 // Env validation
@@ -160,6 +161,23 @@ export interface TelegramAppConfig {
   readonly webhookSecret: string;
 }
 
+export interface WorkosAuthConfig {
+  /** WorkOS client id — also scopes the JWKS URL the api verifies against. */
+  readonly clientId: string;
+  /**
+   * JWKS endpoint. Derived from `clientId`
+   * (`https://api.workos.com/sso/jwks/<clientId>`) by default; override with
+   * `WORKOS_JWKS_URL` for a self-hosted/proxied WorkOS or test fixture.
+   */
+  readonly jwksUrl: string;
+  /**
+   * Expected `iss` claim. Enforced when set (`WORKOS_JWT_ISSUER`); `null`
+   * means signature + expiry are checked but the issuer is not pinned (the
+   * client-scoped JWKS already binds the token to our app).
+   */
+  readonly issuer: string | null;
+}
+
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
@@ -204,18 +222,19 @@ export interface ApiConfig {
    */
   readonly dashboardBaseUrl: string | null;
   /**
-   * Shared service token the dashboard (Cloudflare Worker) presents as
-   * `Authorization: Bearer <token>` when calling the `/dashboard/*` read
-   * API (Path B). `null` → those routes respond 503 (not configured).
-   * The dashboard does the WorkOS user auth and asserts its `x-org-id`;
-   * the api trusts this token and maps org → tenant.
+   * WorkOS verification config for the `/dashboard/*` API (Path B, audit S14).
+   * The dashboard forwards the merchant's WorkOS access token as
+   * `Authorization: Bearer <jwt>`; the api verifies it against this JWKS and
+   * reads the org/user from the verified claims (no shared service token, no
+   * trusted `x-org-id`). `null` → those routes respond 503 (not configured).
    */
-  readonly dashboardApiToken: string | null;
+  readonly workos: WorkosAuthConfig | null;
   /**
    * Bearer token guarding the platform-operator admin endpoints
    * (`POST /admin/tenants/:id/delete` — delete *any* tenant's account).
-   * Distinct from `dashboardApiToken`, which is org-scoped. `null` → the
-   * admin routes respond 503 (not configured).
+   * Admin keeps the shared-token model (a small operator surface, not
+   * multi-tenant); the WorkOS-JWT migration (S14) is dashboard-only. `null` →
+   * the admin routes respond 503 (not configured).
    */
   readonly adminApiToken: string | null;
   /**
@@ -307,6 +326,9 @@ export const loadApiConfig = (): ApiConfig => {
   // to it. So the global creds must be absent in pilot mode (fail fast if set),
   // and required in SaaS mode (audit A6). callbackUrl/apiVersion are always
   // required — they're the api's own callback endpoint + Admin API version.
+  // WorkOS access-token verification (audit S14). Configured ⇒ the
+  // `/dashboard/*` API verifies forwarded WorkOS JWTs; unset ⇒ those routes 503.
+  const workosClientId = process.env["WORKOS_CLIENT_ID"]?.trim() || null;
   const requiresProvisioning =
     process.env["SHOPIFY_CONNECT_REQUIRES_PROVISIONING"]?.trim() === "true";
   const rawShopifyClientId = process.env["SHOPIFY_APP_CLIENT_ID"]?.trim() || null;
@@ -339,7 +361,15 @@ export const loadApiConfig = (): ApiConfig => {
     },
     approvalSigningKey: requireEnv("APPROVAL_SIGNING_KEY"),
     dashboardBaseUrl: process.env["DASHBOARD_BASE_URL"]?.trim() || null,
-    dashboardApiToken: process.env["DASHBOARD_API_TOKEN"]?.trim() || null,
+    workos: workosClientId
+      ? {
+          clientId: workosClientId,
+          jwksUrl:
+            process.env["WORKOS_JWKS_URL"]?.trim() ||
+            workosJwksUrl(workosClientId),
+          issuer: process.env["WORKOS_JWT_ISSUER"]?.trim() || null,
+        }
+      : null,
     adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,
     shopifyConnectRequiresProvisioning: requiresProvisioning,
     google: googleConfigured

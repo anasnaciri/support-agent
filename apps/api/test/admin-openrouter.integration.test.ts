@@ -48,7 +48,7 @@ describeIfDb("apps/api — admin OpenRouter credentials (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: "dash",
+    workos: null,
     adminApiToken: adminToken,
   } as ApiConfig;
 

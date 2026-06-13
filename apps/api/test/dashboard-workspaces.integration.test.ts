@@ -3,6 +3,10 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { cases, makeDbClient, tenants } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -36,7 +40,7 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
     google: null,
     approvalSigningKey: "test-approval-key",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
@@ -82,7 +86,9 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
         subject: "second-ws-case",
       },
     ]);
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -98,7 +104,7 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
 
   const listCases = async (headers: Record<string, string>) => {
     const res = await fetch(`${baseUrl}/dashboard/cases`, {
-      headers: { authorization: `Bearer ${token}`, "x-org-id": orgId, ...headers },
+      headers: dashboardAuthHeaders(orgId, headers),
     });
     return res;
   };
@@ -148,10 +154,7 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
   it("keeps the 403 onboarding signal for an org with zero workspaces", async () => {
     if (!raw) return;
     const res = await fetch(`${baseUrl}/dashboard/cases`, {
-      headers: {
-        authorization: `Bearer ${token}`,
-        "x-org-id": "org_with_no_workspaces",
-      },
+      headers: dashboardAuthHeaders("org_with_no_workspaces"),
     });
     expect(res.status).toBe(403);
   });

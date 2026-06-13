@@ -3,6 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { makeDbClient, tenantAgentOverrides, tenants } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -16,7 +21,8 @@ describeIfDb("apps/api — /dashboard agent tool-permission (integration)", () =
   const token = "tool-perm-token";
   const orgId = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
-  const managerId = randomUUID();
+  const workosUser = `user_${randomUUID()}`;
+  const managerId = decisionUuidFor(workosUser);
   const agentId = "refund-review-agent"; // binds conversation.reply + refund.create
 
   const cfg = {
@@ -33,7 +39,7 @@ describeIfDb("apps/api — /dashboard agent tool-permission (integration)", () =
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
@@ -42,12 +48,11 @@ describeIfDb("apps/api — /dashboard agent tool-permission (integration)", () =
   const post = (path: string, body: unknown = {}) =>
     fetch(`${baseUrl}${path}`, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "x-org-id": orgId,
-        "x-user-id": managerId,
-        "content-type": "application/json",
-      },
+      headers: dashboardAuthHeaders(
+        orgId,
+        { "content-type": "application/json" },
+        workosUser,
+      ),
       body: JSON.stringify(body),
     });
 
@@ -69,7 +74,9 @@ describeIfDb("apps/api — /dashboard agent tool-permission (integration)", () =
     await raw.db
       .insert(tenants)
       .values({ id: tenantId, name: "tp", workosOrganizationId: orgId });
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 

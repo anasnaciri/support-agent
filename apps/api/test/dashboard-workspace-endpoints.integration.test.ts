@@ -12,6 +12,11 @@ import {
   encrypt,
 } from "@support-agent/services";
 import { startServer, type ServerHandle } from "../src/server.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+  decisionUuidFor,
+} from "./support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -25,7 +30,8 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const dashToken = "ws-dash-token";
   const adminToken = "ws-admin-token";
-  const managerId = randomUUID();
+  const workosUser = `user_${randomUUID()}`;
+  const managerId = decisionUuidFor(workosUser);
 
   const cfg = {
     port: 0,
@@ -41,7 +47,7 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
     google: null,
     approvalSigningKey: "a",
     dashboardBaseUrl: null,
-    dashboardApiToken: dashToken,
+    workos: null,
     adminApiToken: adminToken,
   } as ApiConfig;
 
@@ -83,12 +89,12 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
     return id;
   };
 
-  const headers = (org: string) => ({
-    authorization: `Bearer ${dashToken}`,
-    "x-org-id": org,
-    "x-user-id": managerId,
-    "content-type": "application/json",
-  });
+  const headers = (org: string) =>
+    dashboardAuthHeaders(
+      org,
+      { "content-type": "application/json" },
+      workosUser,
+    );
 
   const get = (path: string, org: string) =>
     fetch(`${baseUrl}${path}`, { headers: headers(org) });
@@ -113,7 +119,9 @@ describeIfDb("apps/api — workspace endpoints (integration)", () => {
 
   beforeAll(async () => {
     if (!raw) return;
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 

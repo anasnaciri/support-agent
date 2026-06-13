@@ -9,6 +9,10 @@ import {
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../src/server.js";
 import type { ApiConfig } from "../src/bootstrap.js";
+import {
+  TEST_DASHBOARD_VERIFIER,
+  dashboardAuthHeaders,
+} from "./support/dashboard-auth.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -17,7 +21,6 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 // dashboard calls instead of querying Postgres directly (Path B).
 describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
-  const token = "dash-service-token-test";
   const orgId = `org_${randomUUID().slice(0, 8)}`;
   const otherOrgId = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
@@ -37,7 +40,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
     google: null,
     approvalSigningKey: "test-approval-key",
     dashboardBaseUrl: null,
-    dashboardApiToken: token,
+    workos: null,
   } as ApiConfig;
 
   let handle: ServerHandle | null = null;
@@ -94,7 +97,9 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
       expiresAt: new Date(now.getTime() + 86_400_000),
     });
 
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -114,10 +119,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
 
   it("returns tenant-scoped Today data for a valid token + org", async () => {
     if (!raw) return;
-    const res = await get({
-      authorization: `Bearer ${token}`,
-      "x-org-id": orgId,
-    });
+    const res = await get(dashboardAuthHeaders(orgId));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       statusCounts: Record<string, number>;
@@ -139,16 +141,13 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
 
   it("rejects a missing/invalid token with 401", async () => {
     if (!raw) return;
-    const res = await get({ "x-org-id": orgId });
+    const res = await get({});
     expect(res.status).toBe(401);
   });
 
   it("rejects an unknown organization with 403", async () => {
     if (!raw) return;
-    const res = await get({
-      authorization: `Bearer ${token}`,
-      "x-org-id": "org_does_not_exist",
-    });
+    const res = await get(dashboardAuthHeaders("org_does_not_exist"));
     expect(res.status).toBe(403);
   });
 });
