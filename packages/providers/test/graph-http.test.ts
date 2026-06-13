@@ -72,7 +72,20 @@ describe("graphGetConversation", () => {
     expect(thread.subject).toBe("hi");
   });
 
-  it("strips HTML tags into bodyText when content is HTML", async () => {
+  it("requests the HTML body so the dashboard can render formatted email", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.["Prefer"]).toBe('outlook.body-content-type="html"');
+      return okJson({ value: [] });
+    }) as unknown as typeof fetch;
+    await graphGetConversation({ token: "t", conversationId: "c", mailbox, fetchImpl });
+    expect(fetchImpl).toHaveBeenCalled();
+  });
+
+  it("keeps the HTML body and derives clean bodyText (no CSS, decoded entities)", async () => {
+    const content =
+      "<style>.x{color:red}</style><p>Hello&nbsp;<b>there</b></p>" +
+      "<script>alert(1)</script><p>Line&amp;two</p>";
     const fetchImpl = vi.fn(async () =>
       okJson({
         value: [
@@ -80,7 +93,7 @@ describe("graphGetConversation", () => {
             id: "m-1",
             from: { emailAddress: { address: "jane@example.com" } },
             sentDateTime: "2026-06-01T00:00:00Z",
-            body: { contentType: "html", content: "<p>Hello <b>there</b></p>" },
+            body: { contentType: "html", content },
           },
         ],
       }),
@@ -91,8 +104,31 @@ describe("graphGetConversation", () => {
       mailbox,
       fetchImpl,
     });
-    expect(thread.messages[0]!.bodyText).toBe("Hello  there");
-    expect(thread.messages[0]!.bodyHtml).toBe("<p>Hello <b>there</b></p>");
+    expect(thread.messages[0]!.bodyHtml).toBe(content);
+    expect(thread.messages[0]!.bodyText).toBe("Hello there\nLine&two");
+  });
+
+  it("collapses invisible preheader spacer characters out of bodyText", async () => {
+    const content = "<p>Discover helpful tools.͏‌​­ now</p>";
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        value: [
+          {
+            id: "m-1",
+            from: { emailAddress: { address: "jane@example.com" } },
+            sentDateTime: "2026-06-01T00:00:00Z",
+            body: { contentType: "html", content },
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+    const thread = await graphGetConversation({
+      token: "t",
+      conversationId: "c",
+      mailbox,
+      fetchImpl,
+    });
+    expect(thread.messages[0]!.bodyText).toBe("Discover helpful tools. now");
   });
 
   it("excludes reply drafts from the customer conversation thread", async () => {

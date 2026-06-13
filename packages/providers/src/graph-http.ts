@@ -138,11 +138,74 @@ const toParticipant = (r?: RawRecipient): MessageParticipant => ({
   email: r?.emailAddress?.address ?? "",
 });
 
+/** Common named HTML entities seen in email bodies. */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  mdash: "—",
+  ndash: "–",
+  hellip: "…",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  bull: "•",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+};
+
+const decodeEntities = (s: string): string =>
+  s
+    .replace(/&#x([0-9a-fA-F]+);/gu, (_m, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/gu, (_m, dec: string) =>
+      String.fromCodePoint(Number.parseInt(dec, 10)),
+    )
+    .replace(/&([a-zA-Z]+);/gu, (m, name: string) =>
+      Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, name)
+        ? NAMED_ENTITIES[name]!
+        : m,
+    );
+
+// Zero-width / formatting characters marketing mail uses as invisible
+// preheader spacers — they render as stray gaps, so drop them from the text.
+const INVISIBLE_CHARS = /[­͏​-‏⁠﻿᠎]/gu;
+
+/**
+ * Derive readable plain text from an HTML email body, for the agent's view and
+ * the dashboard's plain-text fallback. Drops script/style/head/comments (so CSS
+ * never leaks into the text), turns block boundaries into newlines, strips the
+ * remaining tags, decodes common entities, and removes invisible spacer runs.
+ */
+const htmlToText = (html: string): string =>
+  decodeEntities(
+    html
+      .replace(/<!--[\s\S]*?-->/gu, "")
+      .replace(/<(script|style|head)\b[^>]*>[\s\S]*?<\/\1>/giu, "")
+      .replace(/<br\s*\/?>/giu, "\n")
+      .replace(/<\/(?:p|div|li|tr|h[1-6]|blockquote|table)>/giu, "\n")
+      .replace(/<[^>]+>/gu, ""),
+  )
+    .replace(INVISIBLE_CHARS, "")
+    .replace(/\u00A0/gu, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/gu, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+
 /**
  * Normalise one Graph message into a provider-neutral `ConversationMessage`.
  * `mailbox` is the connected account's address — used to decide direction
- * (Graph messages don't carry one). Body is requested as text via the
- * `Prefer` header, so `bodyHtml` is left null here.
+ * (Graph messages don't carry one). The body is requested as HTML via the
+ * `Prefer` header so the dashboard can render formatted email; `bodyText` is
+ * derived from it for the agent and the plain-text fallback.
  */
 const normaliseMessage = (
   raw: RawGraphMessage,
@@ -161,7 +224,7 @@ const normaliseMessage = (
     from,
     to: (raw.toRecipients ?? []).map(toParticipant),
     subject: raw.subject ?? null,
-    bodyText: isHtml ? content.replace(/<[^>]+>/g, " ").trim() : content,
+    bodyText: isHtml ? htmlToText(content) : content,
     bodyHtml: isHtml ? content : null,
     sentAt: sentAtStr ? new Date(sentAtStr) : new Date(0),
     attachments: [],
@@ -227,7 +290,7 @@ export const graphGetConversation = async (
   const raw = (await graphFetch({
     path,
     token: opts.token,
-    prefer: 'outlook.body-content-type="text"',
+    prefer: 'outlook.body-content-type="html"',
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   })) as RawMessageList;
   return buildThread(raw, opts.conversationId, opts.mailbox);
@@ -304,7 +367,7 @@ export const graphGetMessage = async (
   const raw = (await graphFetch({
     path,
     token: opts.token,
-    prefer: 'outlook.body-content-type="text"',
+    prefer: 'outlook.body-content-type="html"',
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   })) as RawGraphMessage;
   const conversationId = raw.conversationId ?? opts.messageId;
