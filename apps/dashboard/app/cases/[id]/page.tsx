@@ -46,6 +46,8 @@ import {
   parseReturnReason,
   parseRequestedResolution,
 } from "./return-labels";
+import { buildContextRows } from "./case-context";
+import { cn } from "@/lib/utils";
 
 interface Params {
   readonly params: Promise<{
@@ -867,10 +869,64 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
       <div>
         <h2 className="mb-3 text-lg font-semibold">Context</h2>
-        <pre className="overflow-auto rounded-md border bg-card p-3 text-xs">
-          {JSON.stringify(caseRow.context, null, 2)}
-        </pre>
+        <CaseContext context={context} />
       </div>
     </div>
+  );
+}
+
+/**
+ * What the agent has figured out about the case so far — order, customer,
+ * reason, risk flags — as a labeled field list instead of a raw JSON blob.
+ * The row-building lives in `case-context.ts` (pure + unit-tested); this only
+ * paints them.
+ */
+function CaseContext({
+  context,
+}: {
+  readonly context: Readonly<Record<string, unknown>>;
+}) {
+  const rows = buildContextRows(context);
+  if (rows.length === 0) {
+    return (
+      <p className="rounded-md border bg-card p-4 text-sm text-muted-foreground">
+        Nothing recorded yet. As the agent works the case, the facts it gathers
+        — order, customer, reason, risk flags — show up here.
+      </p>
+    );
+  }
+  return (
+    <dl className="divide-y divide-border overflow-hidden rounded-md border bg-card">
+      {rows.map((row) => (
+        <div
+          key={row.key}
+          className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[11rem_1fr] sm:gap-4"
+        >
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {row.label}
+          </dt>
+          <dd className="min-w-0 text-sm text-foreground">
+            {row.badges ? (
+              <div className="flex flex-wrap gap-1.5">
+                {row.badges.map((b, i) => (
+                  <Badge key={`${row.key}-${i}`} variant={b.variant}>
+                    {b.text}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span
+                className={cn(
+                  row.mono && "break-all font-mono text-[13px]",
+                  row.multiline && "whitespace-pre-wrap",
+                )}
+              >
+                {row.text}
+              </span>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
