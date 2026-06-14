@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -9,9 +10,10 @@ import {
   Home,
   Inbox,
   Settings,
-  Sprout,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+import guidezillaLogo from "./guidezilla-logo-dark.svg";
 
 import type {
   RbacPermissionId,
@@ -139,14 +141,29 @@ export function IconRail({
       >
         <Link
           href="/"
-          title="Support Agent"
-          aria-label="Support Agent home"
+          title="Guidezilla"
+          aria-label="Guidezilla home"
           className="flex h-10 w-full items-center gap-3 rounded-lg"
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Sprout className="size-5" aria-hidden />
+          {/* Tile uses the logo's own blue (#0345FC) so the contained
+              landscape art blends seamlessly — white croc on a blue tile,
+              which reads on the always-dark rail in light and dark themes. */}
+          <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[#0345FC]">
+            <Image
+              src={guidezillaLogo}
+              alt=""
+              aria-hidden
+              className="size-10 object-contain"
+            />
           </span>
-          <span className={cn(RAIL_LABEL, "font-semibold")}>Support Agent</span>
+          <span
+            className={cn(
+              RAIL_LABEL,
+              "font-[family-name:var(--font-climate-crisis)] text-lg tracking-wide",
+            )}
+          >
+            Guidezilla
+          </span>
         </Link>
 
         {workspaces && workspaces.length > 0 && activeWorkspace ? (
