@@ -2,9 +2,14 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
+import { badgeIcon } from "./badge-icon";
 
 const badgeVariants = cva(
-  "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  // A leading status icon (when the variant has one) is sized relative to the
+  // label via `[&>svg]:size-[1.15em]` so it scales with the badge — no flex
+  // `gap` (badges interpolate multi-node text like "Risk: high", which a gap
+  // would space apart); the icon's own `me-1` provides the separation.
+  "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 [&>svg]:me-1 [&>svg]:size-[1.15em] [&>svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -43,11 +48,30 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  /**
+   * Leading icon control: omit to use the variant's default status glyph,
+   * pass a node to override it, or pass `false` to hide it (e.g. very tight
+   * spaces where the color alone is enough).
+   */
+  readonly icon?: React.ReactNode | false;
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, icon, children, ...props }: BadgeProps) {
+  const DefaultIcon = badgeIcon(variant);
+  const leading =
+    icon === false
+      ? null
+      : icon !== undefined
+        ? icon
+        : DefaultIcon
+          ? <DefaultIcon aria-hidden="true" />
+          : null;
   return (
-    <span className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span className={cn(badgeVariants({ variant }), className)} {...props}>
+      {leading}
+      {children}
+    </span>
   );
 }
 
