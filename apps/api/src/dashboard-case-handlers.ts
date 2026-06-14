@@ -1,0 +1,579 @@
+import { Effect } from "effect";
+import { type FastifyReply, type FastifyRequest } from "fastify";
+import {
+  applyApprovalDecision,
+  CaseRepository,
+  ConnectorCredentialStore,
+  ConversationService,
+  decisionToEvent,
+  parseThreadId,
+  namespaceThreadId,
+  ShopifyAppProvisioningStore,
+} from "@support-agent/services";
+import { CaseId, TenantId, UserId } from "@support-agent/agent-core";
+import {
+  activeShopifyShopDomain,
+  agentOverrides,
+  approvalDetail,
+  approvalsList,
+  auditList,
+  caseContextForTenant,
+  caseDetail,
+  caseEvents,
+  casesList,
+  connectionsList,
+  DbClient,
+  getMemberAccess,
+  parsePageNumber,
+  parsePageSize,
+  resumeCase,
+  takeOverCase,
+  todaySummary,
+  usageRows,
+} from "@support-agent/db";
+import { decideAuthz } from "./dashboard-authz.js";
+import { retryCaseNow } from "./case-retry.js";
+import {
+  conversationUnavailableReason,
+  projectConversationThread,
+  resolveCaseConversationThread,
+} from "./dashboard-conversation-thread.js";
+import {
+  resolveCustomerForContext,
+  resolveOrderForContext,
+} from "./dashboard-shopify.js";
+import { makePgBossApprovalPublisher } from "./approval-endpoints.js";
+import { acquireApprovalBoss } from "./pgboss.js";
+import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
+import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "./http.js";
+import {
+  runWithDb,
+  authenticateDashboard,
+} from "./dashboard-context.js";
+import { resolveTenantShopifyApp } from "./shopify-handlers.js";
+
+// GET /dashboard/today — Today-view rollup.
+export const handleDashboardToday = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const summary = await runWithDb(layer, (db) =>
+    todaySummary(db, auth.tenantId),
+  );
+  return sendJson(res, 200, summary);
+};
+
+// GET /dashboard/cases?q=&page=&limit= — paginated cases list, optional search.
+export const handleDashboardCases = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    casesList(
+      db,
+      auth.tenantId,
+      { q: strField(q, "q") },
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
+    ),
+  );
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id — case + timeline + approvals.
+export const handleDashboardCaseDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    caseDetail(db, auth.tenantId, id),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id/conversation-thread — live provider thread for the
+// third case-timeline view. The case lookup is tenant-scoped before any
+// provider call, and connector failures degrade to a stable UI result.
+export const handleDashboardCaseConversationThread = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const conversation = yield* ConversationService;
+        const connectorStore = yield* ConnectorCredentialStore;
+        const caseRow = yield* cases
+          .getById(CaseId(id), TenantId(auth.tenantId))
+          .pipe(Effect.catchTag("CaseNotFound", () => Effect.succeed(null)));
+        if (!caseRow) return { kind: "not_found" as const };
+        if (!caseRow.threadId) {
+          return {
+            kind: "result" as const,
+            result: {
+              status: "unavailable" as const,
+              reason: "no_thread" as const,
+            },
+          };
+        }
+        const threadId = caseRow.threadId;
+        const rawThreadId = parseThreadId(threadId)?.raw ?? threadId;
+        const provider =
+          parseThreadId(threadId)?.provider ??
+          (yield* cases.findThreadProvider(TenantId(auth.tenantId), threadId));
+        const connections = yield* connectorStore.listForTenant(
+          TenantId(auth.tenantId),
+        );
+        const threadResult = yield* resolveCaseConversationThread(
+          caseRow.mailbox,
+          provider,
+          connections,
+          (candidateProvider, mailbox) =>
+            conversation.fetchThread(
+              TenantId(auth.tenantId),
+              namespaceThreadId(candidateProvider, rawThreadId),
+              mailbox,
+            ),
+        ).pipe(
+          Effect.match({
+            onFailure: (error) => ({
+              status: "unavailable" as const,
+              reason: conversationUnavailableReason(error),
+            }),
+            onSuccess: (resolution) =>
+              resolution.ok
+                ? {
+                    status: "available" as const,
+                    thread: projectConversationThread(resolution.thread),
+                  }
+                : {
+                    status: "unavailable" as const,
+                    reason: resolution.reason,
+                  },
+          }),
+        );
+        return { kind: "result" as const, result: threadResult };
+      }),
+      layer,
+    ),
+  );
+  if (result.kind === "not_found") {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  return sendJson(res, 200, result.result);
+};
+
+// GET /dashboard/cases/:id/events?since= — audit rows after `since` (poll).
+export const handleDashboardCaseEvents = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const sinceRaw = strField((req.query ?? {}) as Record<string, unknown>, "since");
+  let since = 0n;
+  try {
+    if (sinceRaw) since = BigInt(sinceRaw);
+  } catch {
+    since = 0n;
+  }
+  const result = await runWithDb(layer, (db) =>
+    caseEvents(db, auth.tenantId, id, since),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/approvals?status=&risk=&tool=&agent=&page=&limit=
+// status/risk/tool/agent are repeatable (multi-select); absent status → pending.
+export const handleDashboardApprovals = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    approvalsList(
+      db,
+      auth.tenantId,
+      {
+        status: strList(q, "status"),
+        risk: strList(q, "risk"),
+        tool: strList(q, "tool"),
+        agent: strList(q, "agent"),
+      },
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
+    ),
+  );
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/approvals/:id — full approval.
+export const handleDashboardApprovalDetail = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await runWithDb(layer, (db) =>
+    approvalDetail(db, auth.tenantId, id),
+  );
+  if (!result) return sendJson(res, 404, { error: "not_found" });
+  return sendJson(res, 200, result);
+};
+
+// GET /dashboard/cases/:id/shopify — case-detail Shopify panels (customer +
+// order + active shop domain). Best-effort: Shopify failures yield nulls.
+export const handleDashboardCaseShopify = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        const ctx = yield* Effect.promise(() =>
+          caseContextForTenant(db, auth.tenantId, id),
+        );
+        if (!ctx) return { kind: "not_found" as const };
+        const context = (ctx.context ?? {}) as Record<string, unknown>;
+        const shopDomain = yield* Effect.promise(() =>
+          activeShopifyShopDomain(db, auth.tenantId),
+        );
+        const order = yield* resolveOrderForContext(
+          TenantId(auth.tenantId),
+          context,
+        );
+        const customer = yield* resolveCustomerForContext(
+          TenantId(auth.tenantId),
+          context,
+        );
+        return { kind: "ok" as const, customer, order, shopDomain };
+      }),
+      layer,
+    ),
+  );
+  if (result.kind === "not_found") {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  return sendJson(res, 200, {
+    customer: result.customer,
+    order: result.order,
+    shopDomain: result.shopDomain,
+  });
+};
+
+// GET /dashboard/usage?start=&end= — raw llm.decision rows in a window for
+// the settings/usage page (the dashboard applies pricing + aggregation).
+export const handleDashboardUsage = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const now = Date.now();
+  const parseDate = (raw: string | undefined, fallback: number): Date => {
+    if (!raw) return new Date(fallback);
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? new Date(fallback) : d;
+  };
+  // Default window: trailing ~31 days when the client omits bounds.
+  const start = parseDate(strField(q, "start"), now - 31 * 86_400_000);
+  const end = parseDate(strField(q, "end"), now);
+  const rows = await runWithDb(layer, (db) =>
+    usageRows(db, auth.tenantId, start, end),
+  );
+  return sendJson(res, 200, { rows });
+};
+
+// GET /dashboard/agent-overrides — per-agent model overrides (settings/agents).
+export const handleDashboardAgentOverrides = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const overrides = await runWithDb(layer, (db) =>
+    agentOverrides(db, auth.tenantId),
+  );
+  return sendJson(res, 200, { overrides });
+};
+
+// GET /dashboard/connections — connector connections for the integrations
+// pages + the case-detail Shopify shop-domain deep link.
+export const handleDashboardConnections = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const connections = await runWithDb(layer, (db) =>
+    connectionsList(db, auth.tenantId),
+  );
+  return sendJson(res, 200, { connections });
+};
+
+// GET /dashboard/shopify-app — whether the tenant can start a Shopify
+// connect. In pilot custom distribution the Connect button gates on an
+// operator-provisioned custom app; in SaaS it's always available.
+export const handleDashboardShopifyApp = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        return yield* store.get(TenantId(auth.tenantId));
+      }),
+      layer,
+    ),
+  );
+  if (exit._tag !== "Success") {
+    return sendJson(res, 500, {
+      error: "lookup_failed",
+      detail: opaqueCause(exit.cause),
+    });
+  }
+  const row = exit.value;
+  // `available` mirrors the authoritative install/mint gate
+  // (resolveShopifyAppForTenant) instead of re-deriving it from the row, so
+  // the Connect button can never be enabled for a workspace whose install
+  // would be refused — and never enabled by a fallback the gate forbids.
+  const app = await resolveTenantShopifyApp(cfg, layer, auth.tenantId);
+  return sendJson(res, 200, {
+    requiresProvisioning: cfg.shopifyConnectRequiresProvisioning,
+    provisioned: row !== null && row.status !== "revoked",
+    status: row?.status ?? null,
+    available: app.kind === "ok",
+  });
+};
+
+// GET /dashboard/audit?action=&actor=&page=&limit= — cross-case audit log.
+export const handleDashboardAudit = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const q = (req.query ?? {}) as Record<string, unknown>;
+  const result = await runWithDb(layer, (db) =>
+    auditList(
+      db,
+      auth.tenantId,
+      { action: strField(q, "action"), actor: strField(q, "actor") },
+      parsePageNumber(strField(q, "page")),
+      parsePageSize(strField(q, "limit")),
+    ),
+  );
+  return sendJson(res, 200, result);
+};
+
+// POST /dashboard/approvals/:id/{approve,reject} — manager decision. Reuses
+// the same applyApprovalDecision + decisionToEvent + pg-boss publish as the
+// email-link flow, but tenant-scoped and with the real manager id. Body may
+// carry { approvedInput } for edit-and-approve.
+export const handleDashboardApprovalAction =
+  (action: "approve" | "reject") =>
+  async (
+    cfg: ApiConfig,
+    layer: ApiLayer,
+    req: FastifyRequest,
+    res: FastifyReply,
+  ): Promise<FastifyReply> => {
+    const auth = await authenticateDashboard(cfg, layer, req);
+    if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+    if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+    const { id } = req.params as { id: string };
+    // Route guard already enforced approvals.decide. Approving a refund-bearing
+    // action additionally requires refunds.issue (rejecting one does not — it
+    // moves no money). Open mode / owner short-circuit inside decideAuthz.
+    if (action === "approve") {
+      const detail = await runWithDb(layer, (db) =>
+        approvalDetail(db, auth.tenantId, id),
+      );
+      if (detail && detail.tool === "refund.create") {
+        const access = await runWithDb(layer, (db) =>
+          getMemberAccess(db, auth.tenantId, auth.userId!),
+        );
+        const decision = decideAuthz(access, auth.userId, "refunds.issue");
+        if (!decision.ok) {
+          return sendJson(res, decision.status, { error: decision.error });
+        }
+      }
+    }
+    const approvedInput = parseJsonBody(req)["approvedInput"];
+    const managerId = UserId(auth.userId);
+    const result = await Effect.runPromise(
+      Effect.provide(
+        applyApprovalDecision({
+          approvalId: id,
+          action,
+          managerId,
+          tenantId: TenantId(auth.tenantId),
+          ...(approvedInput !== undefined ? { approvedInput } : {}),
+        }),
+        layer,
+      ),
+    );
+    const event = decisionToEvent(result, action, managerId);
+    if (event) {
+      try {
+        await makePgBossApprovalPublisher(() =>
+          acquireApprovalBoss(cfg.databaseUrl),
+        )(event);
+      } catch (cause) {
+        // Row already decided; the worker just won't pick it up until ops
+        // replays. Don't fail the request over a publish hiccup.
+        // eslint-disable-next-line no-console
+        console.error(
+          "[dashboard approvals] publish failed; row decided without event",
+          { approvalId: id, cause },
+        );
+      }
+    }
+    const status =
+      result.kind === "approval_not_found"
+        ? 404
+        : result.kind === "expired"
+          ? 410
+          : 200;
+    return sendJson(res, status, result);
+  };
+
+// POST /dashboard/cases/:id/takeover — manager takes over a case.
+export const handleDashboardTakeover = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const managerId = auth.userId;
+  const outcome = await runWithDb(layer, (db) =>
+    takeOverCase(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId,
+      reason,
+    }),
+  );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/resume — manager hands a taken-over case back
+// to the agent. The status flips out of `human_takeover` so the runtime's
+// takeover guard stops holding events and the agent resumes on the next
+// inbound message.
+export const handleDashboardResume = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const managerId = auth.userId;
+  const outcome = await runWithDb(layer, (db) =>
+    resumeCase(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId,
+      reason,
+    }),
+  );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/retry — manager hands a taken-over case back
+// AND has the agent try again immediately: the resume flip plus a
+// `case.resumed` workflow event, so the worker ticks now instead of
+// waiting for the customer's next message.
+export const handleDashboardRetry = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const managerId = auth.userId;
+  const outcome = await retryCaseNow({
+    caseId: id,
+    resume: () =>
+      runWithDb(layer, (db) =>
+        resumeCase(db, {
+          caseId: id,
+          tenantId: auth.tenantId,
+          managerId,
+          reason: "manager asked the agent to retry from the dashboard",
+        }),
+      ),
+    publish: makePgBossApprovalPublisher(() =>
+      acquireApprovalBoss(cfg.databaseUrl),
+    ),
+  });
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};

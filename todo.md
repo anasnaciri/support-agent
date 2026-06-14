@@ -14,6 +14,21 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-14 — Modularized `apps/api/src/server.ts` (6661 → 1605 lines):** The api god-file
+  was split into focused sibling modules; `server.ts` is now the composition root (imports +
+  `startServer` route wiring + lifecycle + `ServerHandle`/`redactUrlSecrets`/`loggerConfig`/`main`).
+  Handler bodies moved **verbatim** (behavior-preserving) into: `http.ts` (response/request/body/
+  cookie/HTML helpers), `dashboard-context.ts` (`runWithDb` + dashboard auth + RBAC guard + legal
+  helpers), `pgboss.ts` (the lazy shared pg-boss singleton + `acquireApprovalBoss`/`stopApprovalBoss`
+  + the cleanup/policy-import publishers — extracted to break a would-be import cycle and avoid
+  duplicate boss caches; `server.ts` `close()` now calls `stopApprovalBoss()`), and per-domain
+  `*-handlers.ts`: `dashboard-case`, `account-admin`, `dashboard-settings`, `dashboard-knowledge`,
+  `dashboard-connect`, `shopify`, `mailbox`, `approval`, `member-rbac`. Module dep graph is acyclic
+  (`dashboard-case→shopify`; `settings→account-admin→connect→shopify`). Drafted in parallel via a
+  one-off Workflow, then integrated by hand. Verified: full `pnpm build` green + **all 490 api tests
+  pass (52 files, incl. every DB-gated integration test over HTTP)**. `strList` still re-exported from
+  `server.ts` for `query-params.test.ts`. No behavior or contract change.
+
 - **2026-06-13 — API unused-symbol cleanup:** Removed behavior-neutral strict-TypeScript
   diagnostics: unused `Effect`, `MemberAccess`, and `ShopifyAppProvisioning` imports, plus the unused
   `cfg` parameter from `resolveDashboardAuth`; marked the common auth wrapper's intentionally retained
