@@ -18,7 +18,9 @@ describe("status badge variants", () => {
     it("case status maps colored states to bright variants", () => {
       expect(caseStatusVariant("resolved")).toBe("successBright");
       expect(caseStatusVariant("human_takeover")).toBe("destructiveBright");
-      expect(caseStatusVariant("waiting_for_approval")).toBe("warningBright");
+      // "Needs approval" uses the calmer amber, not the bright yellow: the
+      // vivid hue had too little contrast on the off-white background.
+      expect(caseStatusVariant("waiting_for_approval")).toBe("warning");
       expect(caseStatusVariant("in_progress")).toBe("infoBright");
     });
 

@@ -12,7 +12,9 @@ export const caseStatusVariant = (status: string): Variant => {
     case "human_takeover":
       return "destructiveBright";
     case "waiting_for_approval":
-      return "warningBright";
+      // Calmer amber, not the bright yellow — the vivid hue read low-contrast
+      // on the off-white background.
+      return "warning";
     case "waiting_for_customer":
     case "waiting_for_supplier":
       return "muted";
