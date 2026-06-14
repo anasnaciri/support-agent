@@ -30,7 +30,9 @@ export const caseStatusVariant = (status: string): Variant => {
 export const approvalStatusVariant = (status: string): Variant => {
   switch (status) {
     case "pending":
-      return "warningBright";
+      // Calmer amber, not the bright yellow — low contrast on the off-white
+      // background (mirrors caseStatusVariant's waiting_for_approval).
+      return "warning";
     case "approved":
       return "successBright";
     case "rejected":
@@ -47,7 +49,9 @@ export const riskVariant = (
     case "low":
       return "successBright";
     case "medium":
-      return "warningBright";
+      // Calmer amber, not the bright yellow — low contrast on the off-white
+      // background.
+      return "warning";
     case "high":
     case "critical":
       return "destructiveBright";

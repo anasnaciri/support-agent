@@ -139,7 +139,7 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Approvals</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant="warningBright">{countOf("pending")} pending</Badge>
+          <Badge variant="warning">{countOf("pending")} pending</Badge>
           <Badge variant="successBright">{countOf("approved")} approved</Badge>
           <Badge variant="destructiveBright">
             {countOf("rejected")} rejected

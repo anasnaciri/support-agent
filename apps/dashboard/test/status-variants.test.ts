@@ -29,15 +29,18 @@ describe("status badge variants", () => {
       expect(caseStatusVariant("waiting_for_supplier")).toBe("muted");
     });
 
-    it("approval status maps to bright variants", () => {
-      expect(approvalStatusVariant("pending")).toBe("warningBright");
+    it("approval status maps to bright variants, except pending's amber", () => {
+      // pending uses the calmer amber, not the bright yellow — too little
+      // contrast on the off-white background (matches waiting_for_approval).
+      expect(approvalStatusVariant("pending")).toBe("warning");
       expect(approvalStatusVariant("approved")).toBe("successBright");
       expect(approvalStatusVariant("rejected")).toBe("destructiveBright");
     });
 
-    it("risk maps to bright variants", () => {
+    it("risk maps to bright variants, except medium's amber", () => {
       expect(riskVariant("low")).toBe("successBright");
-      expect(riskVariant("medium")).toBe("warningBright");
+      // same contrast fix as above — bright yellow → amber.
+      expect(riskVariant("medium")).toBe("warning");
       expect(riskVariant("high")).toBe("destructiveBright");
       expect(riskVariant("critical")).toBe("destructiveBright");
     });
