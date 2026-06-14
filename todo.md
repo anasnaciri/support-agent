@@ -14,6 +14,21 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-14 — Rebranded the dashboard to "Guidezilla":** Sidebar (`apps/dashboard/app/IconRail.tsx`)
+  and tab title (`layout.tsx`) now read **Guidezilla** instead of "Support Agent" (the `@support-agent/*`
+  package scope is unchanged — those are workspace import names, not branding). Logo is a blue-croc SVG
+  the user supplied; co-located in the app tree and rendered via `next/image` static import, matching the
+  `_logos/` integration-card convention. Two tonal variants exist: `guidezilla-logo.svg` (blue-on-white)
+  and `guidezilla-logo-dark.svg` (white-on-blue), generated as a gradient-preserving inverse along the
+  white↔blue line (`#FDFEFE`↔`#0345FC`) so anti-aliased edges survive. The always-dark rail uses the
+  **dark** variant on a seamless `#0345FC` tile (per user choice). Favicon: `app/favicon.ico` (64×64),
+  rasterized from the SVG via ImageMagick then encoded to `.ico` by **ffmpeg** (ffmpeg has the ICO muxer
+  but no SVG decoder). The wordmark uses a local display font, **Climate Crisis** (variable TTF in the app
+  tree), loaded with `next/font/local` and exposed as `--font-climate-crisis` so only the brand text
+  switches font; applied in the rail via `font-[family-name:var(--font-climate-crisis)] text-lg`. Dashboard
+  `tsc --noEmit` + `next build` green. Not committed (current branch is `refactor/api-feature-modules`,
+  unrelated).
+
 - **2026-06-14 — Restructured `apps/api/src` into feature modules + thinned `server.ts` (1605 → 139 lines):**
   Took the flat 52-file `apps/api/src/` (every file a sibling) into a layered, feature-first tree.
   Six behavior-preserving commits on branch `refactor/api-feature-modules`, full `ci:local` suite green
