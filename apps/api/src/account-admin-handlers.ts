@@ -16,7 +16,7 @@ import {
   runWithDb,
 } from "./auth/dashboard-context.js";
 import { parseAdminAuth } from "./auth/dashboard-auth.js";
-import { normalizeShopDomain } from "./shopify-install.js";
+import { normalizeShopDomain } from "./features/shopify/install.js";
 import { redactShop } from "./compliance-redaction.js";
 import { revokeConnectorProviderGrants } from "./dashboard-connect-handlers.js";
 import {
@@ -47,7 +47,7 @@ import {
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
-} from "./shopify-policy-import-queue.js";
+} from "./features/shopify/policy-import-queue.js";
 import { accountCleanupPublisher } from "./platform/pgboss.js";
 
 // ---- Account deletion (tenant self-service + admin) ----

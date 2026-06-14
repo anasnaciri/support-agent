@@ -50,7 +50,7 @@ import {
   runWithDb,
   authenticateDashboard,
 } from "./auth/dashboard-context.js";
-import { resolveTenantShopifyApp } from "./shopify-handlers.js";
+import { resolveTenantShopifyApp } from "./features/shopify/handlers.js";
 
 // GET /dashboard/today — Today-view rollup.
 export const handleDashboardToday = async (

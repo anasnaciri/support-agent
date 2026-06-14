@@ -10,7 +10,7 @@ import {
   signState,
   verifyCallbackHmac,
   verifyState,
-} from "../src/shopify-install.js";
+} from "../install.js";
 
 describe("shopify-install — isValidShopDomain", () => {
   it("accepts lowercase myshopify.com subdomains", () => {

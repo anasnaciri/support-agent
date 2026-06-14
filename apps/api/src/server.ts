@@ -145,8 +145,8 @@ import {
   signState,
   verifyCallbackHmac,
   verifyState,
-} from "./shopify-install.js";
-import { exchangeCodeForToken } from "./shopify-callback.js";
+} from "./features/shopify/install.js";
+import { exchangeCodeForToken } from "./features/shopify/callback.js";
 import {
   INSTALL_GRANT_TTL_MS,
   isInstallGrantProvider,
@@ -157,7 +157,7 @@ import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
   type GlobalShopifyApp,
-} from "./shopify-app-resolver.js";
+} from "./features/shopify/app-resolver.js";
 import {
   checkAdminShopifyAppPcd,
   getAdminShopifyApp,
@@ -179,25 +179,25 @@ import {
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
-} from "./post-connect-redirect.js";
+} from "./features/connect/redirect.js";
 import {
   activeMailboxConflict,
   alreadyConnectedRedirect,
   type OAuthMailboxProvider,
-} from "./connect-guard.js";
+} from "./features/connect/guard.js";
 import {
   assertShopifyShopConnectable,
   claimShopifyShopForTenant,
   findTenantByShop,
   ShopifyInstallTenantNotFound,
   ShopifyShopAlreadyConnected,
-} from "./tenant-resolver.js";
+} from "./features/shopify/tenant-resolver.js";
 import {
   parseCustomersDataRequest,
   parseCustomersRedact,
   parseShopRedact,
   parseUninstallPayload,
-} from "./shopify-webhook.js";
+} from "./features/shopify/webhook.js";
 import {
   recordDataRequest,
   redactCustomer,
@@ -213,7 +213,7 @@ import {
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
-} from "./shopify-policy-import-queue.js";
+} from "./features/shopify/policy-import-queue.js";
 import {
   buildGoogleAuthorizeUrl,
   isGoogleOAuthProvider,
@@ -242,7 +242,7 @@ import {
 import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
-} from "./shopify-webhook-registration.js";
+} from "./features/shopify/webhook-registration.js";
 import {
   startGmailWatch,
   revokeConnectorGrant,
@@ -393,7 +393,7 @@ import {
   handleCustomersDataRequest,
   handleCustomersRedact,
   handleShopRedact,
-} from "./shopify-handlers.js";
+} from "./features/shopify/handlers.js";
 import {
   handleGoogleInstall,
   handleGoogleCallback,

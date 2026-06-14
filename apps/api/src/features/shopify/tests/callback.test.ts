@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AccessTokenExchangeError,
   exchangeCodeForToken,
-} from "../src/shopify-callback.js";
+} from "../callback.js";
 
 describe("shopify-callback — exchangeCodeForToken", () => {
   it("posts client_id + client_secret + code to /admin/oauth/access_token and parses the response", async () => {

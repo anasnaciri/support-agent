@@ -20,7 +20,7 @@ import {
   isInstallGrantProvider,
   signInstallGrant,
 } from "./auth/install-grant.js";
-import { activeMailboxConflict } from "./connect-guard.js";
+import { activeMailboxConflict } from "./features/connect/guard.js";
 import {
   revokeConnectorGrant,
   makeImapSmtpOps,
@@ -43,7 +43,7 @@ import {
 import {
   resolveTenantShopifyApp,
   sendShopifyAppResolveError,
-} from "./shopify-handlers.js";
+} from "./features/shopify/handlers.js";
 import {
   sendJson,
   opaqueCause,

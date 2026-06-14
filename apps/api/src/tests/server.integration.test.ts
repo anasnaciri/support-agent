@@ -24,7 +24,7 @@ import {
   canonicalQueryForHmac,
   signState,
   verifyState,
-} from "../shopify-install.js";
+} from "../features/shopify/install.js";
 import {
   signInstallGrant,
   type InstallGrantProvider,

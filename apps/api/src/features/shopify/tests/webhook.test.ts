@@ -4,7 +4,7 @@ import {
   parseCustomersRedact,
   parseShopRedact,
   parseUninstallPayload,
-} from "../src/shopify-webhook.js";
+} from "../webhook.js";
 
 describe("parseUninstallPayload", () => {
   it("extracts id, name, domain from a typical Shopify body", () => {

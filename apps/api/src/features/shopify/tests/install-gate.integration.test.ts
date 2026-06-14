@@ -14,9 +14,9 @@ import {
   makeDbClient,
   tenants,
 } from "@support-agent/db";
-import { startServer, type ServerHandle } from "../src/server.js";
-import { signInstallGrant } from "../src/auth/install-grant.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+import { startServer, type ServerHandle } from "../../../server.js";
+import { signInstallGrant } from "../../../auth/install-grant.js";
+import type { ApiConfig } from "../../../bootstrap.js";
 
 // Dashboard-initiated installs carry a signed grant (key "k" matches pilotCfg).
 const grant = (tid: string): string =>

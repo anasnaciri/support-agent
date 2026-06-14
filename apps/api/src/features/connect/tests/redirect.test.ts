@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
-} from "../src/post-connect-redirect.js";
+} from "../redirect.js";
 
 describe("dashboardConnectRedirect", () => {
   it("returns null when no dashboard origin is configured (fall back to /installed)", () => {

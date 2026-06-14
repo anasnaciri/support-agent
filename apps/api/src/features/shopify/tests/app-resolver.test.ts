@@ -10,7 +10,7 @@ import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
   type GlobalShopifyApp,
-} from "../src/shopify-app-resolver.js";
+} from "../app-resolver.js";
 
 const tenantId = "11111111-1111-1111-1111-111111111111";
 const globalApp: GlobalShopifyApp = {

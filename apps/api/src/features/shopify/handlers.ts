@@ -18,15 +18,15 @@ import {
   signState,
   verifyCallbackHmac,
   verifyState,
-} from "./shopify-install.js";
-import { exchangeCodeForToken } from "./shopify-callback.js";
-import { verifyInstallGrant } from "./auth/install-grant.js";
+} from "./install.js";
+import { exchangeCodeForToken } from "./callback.js";
+import { verifyInstallGrant } from "../../auth/install-grant.js";
 import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
   type GlobalShopifyApp,
-} from "./shopify-app-resolver.js";
-import { dashboardConnectRedirect } from "./post-connect-redirect.js";
+} from "./app-resolver.js";
+import { dashboardConnectRedirect } from "../connect/redirect.js";
 import {
   assertShopifyShopConnectable,
   claimShopifyShopForTenant,
@@ -39,20 +39,20 @@ import {
   parseCustomersRedact,
   parseShopRedact,
   parseUninstallPayload,
-} from "./shopify-webhook.js";
+} from "./webhook.js";
 import {
   recordDataRequest,
   redactCustomer,
   redactShop,
-} from "./compliance-redaction.js";
+} from "../../compliance-redaction.js";
 import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
-} from "./shopify-webhook-registration.js";
+} from "./webhook-registration.js";
 import {
   type ApiConfig,
   type ApiLayer,
-} from "./bootstrap.js";
+} from "../../bootstrap.js";
 import {
   escapeHtml,
   readQuery,
@@ -65,12 +65,12 @@ import {
   SHOPIFY_INSTALL_COOKIE,
   shopifyInstallCookie,
   clearShopifyInstallCookie,
-} from "./platform/http.js";
+} from "../../platform/http.js";
 import {
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./auth/dashboard-context.js";
-import { shopifyPolicyImportPublisher } from "./platform/pgboss.js";
+} from "../../auth/dashboard-context.js";
+import { shopifyPolicyImportPublisher } from "../../platform/pgboss.js";
 
 /** The deployment-wide Shopify app (SaaS path), or null in a pure-pilot
  * deployment that ships no global app (audit A6). */

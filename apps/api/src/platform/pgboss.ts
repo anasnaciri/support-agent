@@ -6,7 +6,7 @@ import {
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
-} from "../shopify-policy-import-queue.js";
+} from "../features/shopify/policy-import-queue.js";
 
 // ============================================================
 // Shared pg-boss singleton + job publishers

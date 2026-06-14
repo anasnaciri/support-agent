@@ -36,16 +36,16 @@ import {
   exchangeCodeForGoogleToken,
   fetchGoogleUserEmail,
 } from "./google-callback.js";
-import { verifyState } from "./shopify-install.js";
+import { verifyState } from "./features/shopify/install.js";
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
-} from "./post-connect-redirect.js";
+} from "./features/connect/redirect.js";
 import {
   activeMailboxConflict,
   alreadyConnectedRedirect,
   type OAuthMailboxProvider,
-} from "./connect-guard.js";
+} from "./features/connect/guard.js";
 import {
   buildMicrosoftAuthorizeUrl,
   signMicrosoftInstallState,

@@ -4,7 +4,7 @@ import type { ConnectorConnection } from "@support-agent/services";
 import {
   activeMailboxConflict,
   alreadyConnectedRedirect,
-} from "../src/connect-guard.js";
+} from "../guard.js";
 
 const tenantId = TenantId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 

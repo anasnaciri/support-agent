@@ -3,7 +3,7 @@ import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
   ShopifyWebhookRegistrationError,
-} from "../src/shopify-webhook-registration.js";
+} from "../webhook-registration.js";
 
 describe("shopify-webhook-registration — appUninstalledWebhookUrl", () => {
   it("derives the uninstall webhook URL from the Shopify callback origin", () => {
