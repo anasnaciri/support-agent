@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_SHOPIFY_SCOPES, loadApiConfig } from "../src/bootstrap.js";
+import { DEFAULT_SHOPIFY_SCOPES, loadApiConfig } from "../bootstrap.js";
 
 describe("DEFAULT_SHOPIFY_SCOPES", () => {
   // Must cover every scope a Shopify-backed tool declares in its

@@ -97,21 +97,21 @@ import {
   isRbacPermissionId,
   type RbacPermissionId,
 } from "@support-agent/dashboard-contracts";
-import { decideAuthz, sessionPermissions } from "./dashboard-authz.js";
+import { decideAuthz, sessionPermissions } from "./auth/dashboard-authz.js";
 import { fetchModelCatalog } from "@support-agent/providers";
 import {
   authenticateDashboardToken,
   isWorkspaceIdShape,
   parseAdminAuth,
-} from "./dashboard-auth.js";
+} from "./auth/dashboard-auth.js";
 import {
   makeRemoteWorkosVerifier,
   type DashboardTokenVerifier,
-} from "./dashboard-jwt.js";
+} from "./auth/dashboard-jwt.js";
 import {
   makeWorkosUserDirectory,
   type WorkosUserDirectory,
-} from "./workos-directory.js";
+} from "./auth/workos-directory.js";
 import { retryCaseNow } from "./case-retry.js";
 import {
   TELEGRAM_LINK_TTL_MS,
@@ -152,7 +152,7 @@ import {
   isInstallGrantProvider,
   signInstallGrant,
   verifyInstallGrant,
-} from "./install-grant.js";
+} from "./auth/install-grant.js";
 import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
@@ -294,7 +294,7 @@ import {
   TAGS,
   tokenQuerySchema,
   webhookAckSchema,
-} from "./schemas.js";
+} from "./platform/schemas.js";
 
 // ============================================================
 // Extracted handler modules
@@ -304,13 +304,13 @@ import {
 // a handler below, and owns process lifecycle. The handler bodies live in the
 // sibling modules imported here (shared request/response/auth/db helpers in
 // ./http.js + ./dashboard-context.js, the lazy pg-boss singleton in ./pgboss.js).
-import { sendJson, sendText, sendHtml, parseJsonBody } from "./http.js";
-export { strList } from "./http.js";
+import { sendJson, sendText, sendHtml, parseJsonBody } from "./platform/http.js";
+export { strList } from "./platform/http.js";
 import {
   enforceDashboardPermission,
   authenticateDashboardOrg,
-} from "./dashboard-context.js";
-import { stopApprovalBoss } from "./pgboss.js";
+} from "./auth/dashboard-context.js";
+import { stopApprovalBoss } from "./platform/pgboss.js";
 import {
   handleDashboardToday,
   handleDashboardCases,

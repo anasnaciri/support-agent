@@ -18,7 +18,7 @@ import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
   decisionUuidFor,
-} from "./support/dashboard-auth.js";
+} from "../src/tests/support/dashboard-auth.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];

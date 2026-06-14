@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   makeStaticWorkosUserDirectory,
   makeWorkosUserDirectory,
-} from "../src/workos-directory.js";
+} from "../workos-directory.js";
 
 // The api resolves a user's VERIFIED email from WorkOS (keyed on the verified
 // `sub`) so invite reconciliation never trusts the spoofable x-user-email

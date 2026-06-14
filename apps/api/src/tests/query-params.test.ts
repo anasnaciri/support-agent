@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { strList } from "../src/server.js";
+import { strList } from "../server.js";
 
 // The multi-select approvals filters ship repeated query keys. Fastify's parser
 // gives a string for one key, a string[] for several, and undefined when

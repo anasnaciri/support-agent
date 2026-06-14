@@ -31,7 +31,7 @@ import {
   todaySummary,
   usageRows,
 } from "@support-agent/db";
-import { decideAuthz } from "./dashboard-authz.js";
+import { decideAuthz } from "./auth/dashboard-authz.js";
 import { retryCaseNow } from "./case-retry.js";
 import {
   conversationUnavailableReason,
@@ -43,13 +43,13 @@ import {
   resolveOrderForContext,
 } from "./dashboard-shopify.js";
 import { makePgBossApprovalPublisher } from "./approval-endpoints.js";
-import { acquireApprovalBoss } from "./pgboss.js";
+import { acquireApprovalBoss } from "./platform/pgboss.js";
 import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "./http.js";
+import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "./platform/http.js";
 import {
   runWithDb,
   authenticateDashboard,
-} from "./dashboard-context.js";
+} from "./auth/dashboard-context.js";
 import { resolveTenantShopifyApp } from "./shopify-handlers.js";
 
 // GET /dashboard/today — Today-view rollup.

@@ -2,11 +2,11 @@ import { PgBoss } from "pg-boss";
 import {
   makePgBossAccountCleanupPublisher,
   type AccountCleanupJobData,
-} from "./account-deletion.js";
+} from "../account-deletion.js";
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
-} from "./shopify-policy-import-queue.js";
+} from "../shopify-policy-import-queue.js";
 
 // ============================================================
 // Shared pg-boss singleton + job publishers

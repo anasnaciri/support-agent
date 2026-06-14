@@ -14,6 +14,9 @@ cloudflare-env.d.ts
 .turbo/
 coverage/
 
+# Local generated capability inventory.
+/CAPABILITIES.md
+
 # Claude Code internal state (per-project)
 .claude/
 

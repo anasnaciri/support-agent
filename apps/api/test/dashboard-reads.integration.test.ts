@@ -12,7 +12,7 @@ import type { ApiConfig } from "../src/bootstrap.js";
 import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
-} from "./support/dashboard-auth.js";
+} from "../src/tests/support/dashboard-auth.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

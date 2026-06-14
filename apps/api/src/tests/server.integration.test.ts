@@ -19,17 +19,17 @@ import {
   tenants,
 } from "@support-agent/db";
 import { Layer } from "effect";
-import { startServer, type ServerHandle } from "../src/server.js";
+import { startServer, type ServerHandle } from "../server.js";
 import {
   canonicalQueryForHmac,
   signState,
   verifyState,
-} from "../src/shopify-install.js";
+} from "../shopify-install.js";
 import {
   signInstallGrant,
   type InstallGrantProvider,
-} from "../src/install-grant.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+} from "../auth/install-grant.js";
+import type { ApiConfig } from "../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

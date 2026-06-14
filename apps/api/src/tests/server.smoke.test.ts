@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { startServer, type ServerHandle } from "../src/server.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+import { startServer, type ServerHandle } from "../server.js";
+import type { ApiConfig } from "../bootstrap.js";
 
 // Smoke coverage that needs no Postgres. `startServer` builds its DB layers
 // lazily (postgres-js only connects on the first query), so the routes that

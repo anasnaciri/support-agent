@@ -8,8 +8,8 @@ import {
 import { TenantId } from "@support-agent/agent-core";
 import { knowledgeDocuments } from "@support-agent/db";
 import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { sendJson, parseJsonBody } from "./http.js";
-import { runWithDb, authenticateDashboard } from "./dashboard-context.js";
+import { sendJson, parseJsonBody } from "./platform/http.js";
+import { runWithDb, authenticateDashboard } from "./auth/dashboard-context.js";
 
 // ============================================================
 // Knowledge base (settings/knowledge) — policy / reference documents the

@@ -42,7 +42,7 @@ import {
   ShopifyServiceLive,
   UrlFetchServiceLive,
 } from "@support-agent/providers";
-import { workosJwksUrl } from "./dashboard-jwt.js";
+import { workosJwksUrl } from "./auth/dashboard-jwt.js";
 
 // ============================================================
 // Env validation

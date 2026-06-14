@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dashboardUserDecisionUuid } from "../src/dashboard-user-id.js";
+import { dashboardUserDecisionUuid } from "../dashboard-user-id.js";
 
 // The decision UUID is the stable one-way mapping from a WorkOS user id to the
 // `uuid` PK used by approvals.decided_by and member_role_assignments.member_id.

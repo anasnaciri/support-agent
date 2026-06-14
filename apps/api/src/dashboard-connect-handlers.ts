@@ -19,7 +19,7 @@ import {
   INSTALL_GRANT_TTL_MS,
   isInstallGrantProvider,
   signInstallGrant,
-} from "./install-grant.js";
+} from "./auth/install-grant.js";
 import { activeMailboxConflict } from "./connect-guard.js";
 import {
   revokeConnectorGrant,
@@ -48,12 +48,12 @@ import {
   sendJson,
   opaqueCause,
   parseJsonBody,
-} from "./http.js";
+} from "./platform/http.js";
 import {
   authenticateDashboard,
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./dashboard-context.js";
+} from "./auth/dashboard-context.js";
 
 const LLM_PROVIDER_SET: ReadonlySet<string> = new Set([
   "openrouter",

@@ -14,8 +14,8 @@ import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
   decisionUuidFor,
-} from "./support/dashboard-auth.js";
-import { makeStaticWorkosUserDirectory } from "../src/workos-directory.js";
+} from "../src/tests/support/dashboard-auth.js";
+import { makeStaticWorkosUserDirectory } from "../src/auth/workos-directory.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];

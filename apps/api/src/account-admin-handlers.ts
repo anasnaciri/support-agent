@@ -10,12 +10,12 @@ import {
   tenantDeletionSnapshot,
 } from "@support-agent/db";
 import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { opaqueCause, parseJsonBody, sendJson } from "./http.js";
+import { opaqueCause, parseJsonBody, sendJson } from "./platform/http.js";
 import {
   authenticateDashboardOrg,
   runWithDb,
-} from "./dashboard-context.js";
-import { parseAdminAuth } from "./dashboard-auth.js";
+} from "./auth/dashboard-context.js";
+import { parseAdminAuth } from "./auth/dashboard-auth.js";
 import { normalizeShopDomain } from "./shopify-install.js";
 import { redactShop } from "./compliance-redaction.js";
 import { revokeConnectorProviderGrants } from "./dashboard-connect-handlers.js";
@@ -48,7 +48,7 @@ import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
 } from "./shopify-policy-import-queue.js";
-import { accountCleanupPublisher } from "./pgboss.js";
+import { accountCleanupPublisher } from "./platform/pgboss.js";
 
 // ---- Account deletion (tenant self-service + admin) ----
 

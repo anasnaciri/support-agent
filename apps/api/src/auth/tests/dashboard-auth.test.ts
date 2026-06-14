@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   authenticateDashboardToken,
   isWorkspaceIdShape,
-} from "../src/dashboard-auth.js";
+} from "../dashboard-auth.js";
 import {
   makeStaticDashboardTokenVerifier,
   type DashboardTokenVerifier,
-} from "../src/dashboard-jwt.js";
-import { dashboardUserDecisionUuid } from "../src/dashboard-user-id.js";
+} from "../dashboard-jwt.js";
+import { dashboardUserDecisionUuid } from "../dashboard-user-id.js";
 
 // S14: the dashboard forwards the merchant's WorkOS access token; the api
 // VERIFIES it and reads org_id / sub from the verified claims. There is no

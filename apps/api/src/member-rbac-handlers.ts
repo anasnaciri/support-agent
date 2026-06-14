@@ -19,14 +19,14 @@ import {
   RBAC_PERMISSIONS,
   isRbacPermissionId,
 } from "@support-agent/dashboard-contracts";
-import { sessionPermissions } from "./dashboard-authz.js";
+import { sessionPermissions } from "./auth/dashboard-authz.js";
 import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { bodyStr, parseJsonBody, sendJson } from "./http.js";
+import { bodyStr, parseJsonBody, sendJson } from "./platform/http.js";
 import {
   authenticateDashboard,
   getWorkosDirectory,
   runWithDb,
-} from "./dashboard-context.js";
+} from "./auth/dashboard-context.js";
 
 // POST /dashboard/me/session — reconcile any pending invite for this user,
 // then return their effective access for the active workspace. The dashboard

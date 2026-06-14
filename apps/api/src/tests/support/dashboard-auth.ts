@@ -1,8 +1,8 @@
 import {
   makeStaticDashboardTokenVerifier,
   type DashboardTokenVerifier,
-} from "../../src/dashboard-jwt.js";
-import { dashboardUserDecisionUuid } from "../../src/dashboard-user-id.js";
+} from "../../auth/dashboard-jwt.js";
+import { dashboardUserDecisionUuid } from "../../auth/dashboard-user-id.js";
 
 // Test support for the S14 dashboard auth (forwarded WorkOS JWT).
 //

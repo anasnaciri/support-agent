@@ -4,7 +4,7 @@ import {
   isInstallGrantProvider,
   signInstallGrant,
   verifyInstallGrant,
-} from "../src/install-grant.js";
+} from "../install-grant.js";
 
 const KEY = "install-grant-key";
 const NOW = 1_000_000;

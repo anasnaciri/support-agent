@@ -19,12 +19,12 @@ import {
   opaqueCause,
   sendRedirect,
   readQuery,
-} from "./http.js";
+} from "./platform/http.js";
 import {
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./dashboard-context.js";
-import { verifyInstallGrant } from "./install-grant.js";
+} from "./auth/dashboard-context.js";
+import { verifyInstallGrant } from "./auth/install-grant.js";
 import {
   buildGoogleAuthorizeUrl,
   isGoogleOAuthProvider,

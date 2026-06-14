@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MemberAccess } from "@support-agent/db";
-import { decideAuthz, sessionPermissions } from "../src/dashboard-authz.js";
+import { decideAuthz, sessionPermissions } from "../dashboard-authz.js";
 
 const access = (over: Partial<MemberAccess>): MemberAccess => ({
   assigned: false,

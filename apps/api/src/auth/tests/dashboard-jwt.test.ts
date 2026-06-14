@@ -12,7 +12,7 @@ import {
   makeStaticDashboardTokenVerifier,
   workosJwksUrl,
   type DashboardTokenVerifier,
-} from "../src/dashboard-jwt.js";
+} from "../dashboard-jwt.js";
 
 // jose v5 doesn't re-export its key type names; derive the private-key type
 // from generateKeyPair so the test tracks jose without naming them.

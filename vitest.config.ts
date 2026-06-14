@@ -5,6 +5,8 @@ export default defineConfig({
     include: [
       "packages/**/test/**/*.test.ts",
       "apps/**/test/**/*.test.ts",
+      // apps/api co-locates its tests next to the code under src/**/tests/.
+      "apps/**/src/**/*.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     passWithNoTests: true,

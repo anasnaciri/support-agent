@@ -20,7 +20,7 @@ import {
   tenantByWorkosOrg,
 } from "@support-agent/db";
 import { fetchModelCatalog } from "@support-agent/providers";
-import { isWorkspaceIdShape } from "./dashboard-auth.js";
+import { isWorkspaceIdShape } from "./auth/dashboard-auth.js";
 import { buildCatalogResponse } from "./dashboard-catalog.js";
 import {
   buildModelsResponse,
@@ -38,8 +38,8 @@ import {
   makeLegalAcceptance,
   runWithDb,
   sendLegalAcceptanceRequired,
-} from "./dashboard-context.js";
-import { sendJson, parseJsonBody } from "./http.js";
+} from "./auth/dashboard-context.js";
+import { sendJson, parseJsonBody } from "./platform/http.js";
 import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
 
 // GET /dashboard/catalog — static agent + tool inventory (settings pages).

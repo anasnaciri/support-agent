@@ -23,8 +23,8 @@ import {
 } from "./dashboard-auth.js";
 import { type DashboardTokenVerifier } from "./dashboard-jwt.js";
 import { type WorkosUserDirectory } from "./workos-directory.js";
-import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { sendJson } from "./http.js";
+import { type ApiConfig, type ApiLayer } from "../bootstrap.js";
+import { sendJson } from "../platform/http.js";
 
 // ============================================================
 // Dashboard read API (Path B) — shared request context

@@ -20,7 +20,7 @@ import {
   verifyState,
 } from "./shopify-install.js";
 import { exchangeCodeForToken } from "./shopify-callback.js";
-import { verifyInstallGrant } from "./install-grant.js";
+import { verifyInstallGrant } from "./auth/install-grant.js";
 import {
   resolveShopifyAppForShop,
   resolveShopifyAppForTenant,
@@ -65,12 +65,12 @@ import {
   SHOPIFY_INSTALL_COOKIE,
   shopifyInstallCookie,
   clearShopifyInstallCookie,
-} from "./http.js";
+} from "./platform/http.js";
 import {
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./dashboard-context.js";
-import { shopifyPolicyImportPublisher } from "./pgboss.js";
+} from "./auth/dashboard-context.js";
+import { shopifyPolicyImportPublisher } from "./platform/pgboss.js";
 
 /** The deployment-wide Shopify app (SaaS path), or null in a pure-pilot
  * deployment that ships no global app (audit A6). */

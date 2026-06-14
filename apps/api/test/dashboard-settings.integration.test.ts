@@ -23,8 +23,8 @@ import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
   decisionUuidFor,
-} from "./support/dashboard-auth.js";
-import { signInstallGrant, verifyInstallGrant } from "../src/install-grant.js";
+} from "../src/tests/support/dashboard-auth.js";
+import { signInstallGrant, verifyInstallGrant } from "../src/auth/install-grant.js";
 import type { ApiConfig } from "../src/bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
