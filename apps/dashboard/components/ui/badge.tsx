@@ -22,7 +22,7 @@ const badgeVariants = cva(
         success:
           "border-success/25 bg-success/10 text-success dark:border-transparent dark:bg-success/25",
         warning:
-          "border-warning/30 bg-warning/10 text-warning dark:border-transparent dark:bg-warning/20",
+          "border-warning/30 bg-warning-surface text-warning dark:border-transparent dark:bg-warning/20",
         info: "border-info/25 bg-info/10 text-info dark:border-transparent dark:bg-info/25",
         muted:
           "border-border bg-muted text-muted-foreground dark:border-transparent",
