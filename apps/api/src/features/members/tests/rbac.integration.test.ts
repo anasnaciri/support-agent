@@ -9,14 +9,14 @@ import {
   roles,
   tenants,
 } from "@support-agent/db";
-import { startServer, type ServerHandle } from "../src/server.js";
+import { startServer, type ServerHandle } from "../../../server.js";
 import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
   decisionUuidFor,
-} from "../src/tests/support/dashboard-auth.js";
-import { makeStaticWorkosUserDirectory } from "../src/auth/workos-directory.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+} from "../../../tests/support/dashboard-auth.js";
+import { makeStaticWorkosUserDirectory } from "../../../auth/workos-directory.js";
+import type { ApiConfig } from "../../../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

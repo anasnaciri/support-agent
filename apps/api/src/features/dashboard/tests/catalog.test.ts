@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ALL_AGENTS } from "@support-agent/agents";
 import { ALL_TOOLS } from "@support-agent/tools";
-import { buildCatalogResponse } from "../src/dashboard-catalog.js";
+import { buildCatalogResponse } from "../catalog.js";
 
 describe("buildCatalogResponse", () => {
   const catalog = buildCatalogResponse(ALL_AGENTS, ALL_TOOLS);

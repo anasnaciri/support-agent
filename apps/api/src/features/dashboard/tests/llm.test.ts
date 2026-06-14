@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildModelsResponse } from "../src/dashboard-llm.js";
+import { buildModelsResponse } from "../llm.js";
 
 describe("buildModelsResponse", () => {
   it("reports disconnected when there is no credential", () => {

@@ -19,8 +19,8 @@ import {
   INSTALL_GRANT_TTL_MS,
   isInstallGrantProvider,
   signInstallGrant,
-} from "./auth/install-grant.js";
-import { activeMailboxConflict } from "./features/connect/guard.js";
+} from "../../auth/install-grant.js";
+import { activeMailboxConflict } from "../connect/guard.js";
 import {
   revokeConnectorGrant,
   makeImapSmtpOps,
@@ -30,30 +30,30 @@ import {
 import {
   parseImapConnectBody,
   imapConnectionMetadata,
-} from "./features/mailbox/imap-connect.js";
-import { discoverImapSettings, type DiscoveryIo } from "./features/mailbox/imap-discovery.js";
+} from "../mailbox/imap-connect.js";
+import { discoverImapSettings, type DiscoveryIo } from "../mailbox/imap-discovery.js";
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
-} from "./telegram-link.js";
+} from "../../telegram-link.js";
 import {
   type ApiConfig,
   type ApiLayer,
-} from "./bootstrap.js";
+} from "../../bootstrap.js";
 import {
   resolveTenantShopifyApp,
   sendShopifyAppResolveError,
-} from "./features/shopify/handlers.js";
+} from "../shopify/handlers.js";
 import {
   sendJson,
   opaqueCause,
   parseJsonBody,
-} from "./platform/http.js";
+} from "../../platform/http.js";
 import {
   authenticateDashboard,
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./auth/dashboard-context.js";
+} from "../../auth/dashboard-context.js";
 
 const LLM_PROVIDER_SET: ReadonlySet<string> = new Set([
   "openrouter",

@@ -7,7 +7,7 @@ import {
   resolveCaseConversationThread,
   sanitizeEmailHtml,
   stripQuotedText,
-} from "../src/dashboard-conversation-thread.js";
+} from "../conversation-thread.js";
 import {
   ConversationAuthFailed,
   ConversationAuthMissing,

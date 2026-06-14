@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DomainEvent } from "@support-agent/agent-core";
 import type { ResumeOutcome } from "@support-agent/db";
-import { retryCaseNow } from "../src/case-retry.js";
+import { retryCaseNow } from "../case-retry.js";
 
 const recorder = () => {
   const events: DomainEvent[] = [];

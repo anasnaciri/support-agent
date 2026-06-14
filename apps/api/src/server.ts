@@ -112,7 +112,7 @@ import {
   makeWorkosUserDirectory,
   type WorkosUserDirectory,
 } from "./auth/workos-directory.js";
-import { retryCaseNow } from "./case-retry.js";
+import { retryCaseNow } from "./features/dashboard/case-retry.js";
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
@@ -121,22 +121,22 @@ import {
   isTelegramWebhookAuthorized,
   processTelegramUpdate,
 } from "./telegram-webhook.js";
-import { buildCatalogResponse } from "./dashboard-catalog.js";
+import { buildCatalogResponse } from "./features/dashboard/catalog.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
   resolveCaseConversationThread,
-} from "./dashboard-conversation-thread.js";
+} from "./features/dashboard/conversation-thread.js";
 import {
   buildModelsResponse,
   resolveActiveLlmCredential,
   resolveLlmCredentialStatus,
-} from "./dashboard-llm.js";
+} from "./features/dashboard/llm.js";
 import {
   resolveCustomerForContext,
   resolveOrderForContext,
   resolveShopCurrencyCode,
-} from "./dashboard-shopify.js";
+} from "./features/dashboard/shopify-panels.js";
 import {
   buildInstallUrl,
   buildManagedInstallUrl,
@@ -329,7 +329,7 @@ import {
   handleDashboardTakeover,
   handleDashboardResume,
   handleDashboardRetry,
-} from "./dashboard-case-handlers.js";
+} from "./features/dashboard/case-handlers.js";
 import {
   handleDashboardAccountDelete,
   handleAdminTenantDelete,
@@ -364,7 +364,7 @@ import {
   handleDashboardAgentSystemPromptClear,
   handleDashboardAgentToolPermissionSet,
   handleDashboardAgentToolPermissionClear,
-} from "./dashboard-settings-handlers.js";
+} from "./features/dashboard/settings-handlers.js";
 import {
   handleDashboardKnowledgeList,
   handleDashboardKnowledgeGet,
@@ -372,7 +372,7 @@ import {
   handleDashboardKnowledgeUpdate,
   handleDashboardKnowledgeDelete,
   handleDashboardKnowledgeResync,
-} from "./dashboard-knowledge-handlers.js";
+} from "./features/dashboard/knowledge-handlers.js";
 import {
   handleDashboardLlmConnect,
   handleDashboardLlmRevoke,
@@ -384,7 +384,7 @@ import {
   handleDashboardImapDiscover,
   handleDashboardDisconnect,
   handleDashboardConnectTelegram,
-} from "./dashboard-connect-handlers.js";
+} from "./features/dashboard/connect-handlers.js";
 import {
   handleShopifyInstall,
   handleShopifyCallback,
@@ -419,7 +419,7 @@ import {
   handleDashboardRoleRename,
   handleDashboardRolePermissions,
   handleDashboardRoleDelete,
-} from "./member-rbac-handlers.js";
+} from "./features/members/rbac-handlers.js";
 
 // ============================================================
 // Server

@@ -20,27 +20,27 @@ import {
   tenantByWorkosOrg,
 } from "@support-agent/db";
 import { fetchModelCatalog } from "@support-agent/providers";
-import { isWorkspaceIdShape } from "./auth/dashboard-auth.js";
-import { buildCatalogResponse } from "./dashboard-catalog.js";
+import { isWorkspaceIdShape } from "../../auth/dashboard-auth.js";
+import { buildCatalogResponse } from "./catalog.js";
 import {
   buildModelsResponse,
   resolveActiveLlmCredential,
   resolveLlmCredentialStatus,
-} from "./dashboard-llm.js";
-import { resolveShopCurrencyCode } from "./dashboard-shopify.js";
+} from "./llm.js";
+import { resolveShopCurrencyCode } from "./shopify-panels.js";
 import {
   deleteResultStatus,
   deleteTenantAccount,
-} from "./account-admin-handlers.js";
+} from "../../account-admin-handlers.js";
 import {
   authenticateDashboard,
   authenticateDashboardOrg,
   makeLegalAcceptance,
   runWithDb,
   sendLegalAcceptanceRequired,
-} from "./auth/dashboard-context.js";
-import { sendJson, parseJsonBody } from "./platform/http.js";
-import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
+} from "../../auth/dashboard-context.js";
+import { sendJson, parseJsonBody } from "../../platform/http.js";
+import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 
 // GET /dashboard/catalog — static agent + tool inventory (settings pages).
 export const handleDashboardCatalog = async (

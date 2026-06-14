@@ -3,7 +3,7 @@ import {
   isNonEmptyString,
   looksLikeGid,
   looksLikeOrderName,
-} from "../src/dashboard-shopify.js";
+} from "../shopify-panels.js";
 
 describe("dashboard-shopify id heuristics", () => {
   it("isNonEmptyString", () => {

@@ -18,7 +18,7 @@ import {
 import { parseAdminAuth } from "./auth/dashboard-auth.js";
 import { normalizeShopDomain } from "./features/shopify/install.js";
 import { redactShop } from "./compliance-redaction.js";
-import { revokeConnectorProviderGrants } from "./dashboard-connect-handlers.js";
+import { revokeConnectorProviderGrants } from "./features/dashboard/connect-handlers.js";
 import {
   checkAdminShopifyAppPcd,
   getAdminShopifyApp,

@@ -18,14 +18,14 @@ import {
   encrypt,
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
-import { startServer, type ServerHandle } from "../src/server.js";
+import { startServer, type ServerHandle } from "../../../server.js";
 import {
   TEST_DASHBOARD_VERIFIER,
   dashboardAuthHeaders,
   decisionUuidFor,
-} from "../src/tests/support/dashboard-auth.js";
-import { signInstallGrant, verifyInstallGrant } from "../src/auth/install-grant.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+} from "../../../tests/support/dashboard-auth.js";
+import { signInstallGrant, verifyInstallGrant } from "../../../auth/install-grant.js";
+import type { ApiConfig } from "../../../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

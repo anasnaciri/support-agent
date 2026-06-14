@@ -31,26 +31,26 @@ import {
   todaySummary,
   usageRows,
 } from "@support-agent/db";
-import { decideAuthz } from "./auth/dashboard-authz.js";
+import { decideAuthz } from "../../auth/dashboard-authz.js";
 import { retryCaseNow } from "./case-retry.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
   resolveCaseConversationThread,
-} from "./dashboard-conversation-thread.js";
+} from "./conversation-thread.js";
 import {
   resolveCustomerForContext,
   resolveOrderForContext,
-} from "./dashboard-shopify.js";
-import { makePgBossApprovalPublisher } from "./approval-endpoints.js";
-import { acquireApprovalBoss } from "./platform/pgboss.js";
-import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "./platform/http.js";
+} from "./shopify-panels.js";
+import { makePgBossApprovalPublisher } from "../../approval-endpoints.js";
+import { acquireApprovalBoss } from "../../platform/pgboss.js";
+import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
+import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "../../platform/http.js";
 import {
   runWithDb,
   authenticateDashboard,
-} from "./auth/dashboard-context.js";
-import { resolveTenantShopifyApp } from "./features/shopify/handlers.js";
+} from "../../auth/dashboard-context.js";
+import { resolveTenantShopifyApp } from "../shopify/handlers.js";
 
 // GET /dashboard/today — Today-view rollup.
 export const handleDashboardToday = async (
