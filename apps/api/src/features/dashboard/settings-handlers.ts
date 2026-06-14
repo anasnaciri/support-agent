@@ -31,7 +31,7 @@ import { resolveShopCurrencyCode } from "./shopify-panels.js";
 import {
   deleteResultStatus,
   deleteTenantAccount,
-} from "../../account-admin-handlers.js";
+} from "../admin/account-handlers.js";
 import {
   authenticateDashboard,
   authenticateDashboardOrg,

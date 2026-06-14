@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { DbClientLive, makeDbClient } from "@support-agent/db";
-import { redactTenantQueueJobs } from "../src/compliance-redaction.js";
+import { redactTenantQueueJobs } from "../compliance-redaction.js";
 
 // Audit D7: tenant PII (full email bodies in `message.received` payloads)
 // survives in pgboss.job / the pg-boss archive after a tenant wipe. The

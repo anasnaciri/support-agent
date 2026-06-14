@@ -3,7 +3,7 @@ import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
   verifyTelegramLinkToken,
-} from "../src/telegram-link.js";
+} from "../link.js";
 
 // The /start deep-link payload is the ONLY authorization on the Telegram
 // linking webhook: whoever presents a valid token binds their chat to

@@ -2,7 +2,7 @@ import { PgBoss } from "pg-boss";
 import {
   makePgBossAccountCleanupPublisher,
   type AccountCleanupJobData,
-} from "../account-deletion.js";
+} from "../features/account/deletion.js";
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,

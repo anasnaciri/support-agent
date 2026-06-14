@@ -20,9 +20,9 @@ import {
   withTransaction,
 } from "@support-agent/db";
 import { eq } from "drizzle-orm";
-import { startServer, type ServerHandle } from "../src/server.js";
-import { checkAdminShopifyAppPcd } from "../src/admin-shopify-app.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+import { startServer, type ServerHandle } from "../../../server.js";
+import { checkAdminShopifyAppPcd } from "../shopify-app.js";
+import type { ApiConfig } from "../../../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

@@ -116,11 +116,11 @@ import { retryCaseNow } from "./features/dashboard/case-retry.js";
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
-} from "./telegram-link.js";
+} from "./features/telegram/link.js";
 import {
   isTelegramWebhookAuthorized,
   processTelegramUpdate,
-} from "./telegram-webhook.js";
+} from "./features/telegram/webhook.js";
 import { buildCatalogResponse } from "./features/dashboard/catalog.js";
 import {
   conversationUnavailableReason,
@@ -163,11 +163,11 @@ import {
   getAdminShopifyApp,
   putAdminShopifyApp,
   revokeAdminShopifyApp,
-} from "./admin-shopify-app.js";
+} from "./features/admin/shopify-app.js";
 import {
   getTenantDetailForAdmin,
   listTenantsForAdmin,
-} from "./admin-tenants.js";
+} from "./features/admin/tenants.js";
 import {
   getAdminAccountDetail,
   putAdminAccountOpenRouter,
@@ -175,7 +175,7 @@ import {
   revokeAdminAccountOpenRouter,
   revokeAdminWorkspaceOpenRouter,
   type AdminOpenRouterMutationResult,
-} from "./admin-openrouter.js";
+} from "./features/admin/openrouter.js";
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
@@ -202,14 +202,14 @@ import {
   recordDataRequest,
   redactCustomer,
   redactShop,
-} from "./compliance-redaction.js";
+} from "./features/account/compliance-redaction.js";
 import {
   buildConnectorGrants,
   makePgBossAccountCleanupPublisher,
   resolveCleanupTargets,
   type AccountCleanupJobData,
   type EncryptedConnectorGrant,
-} from "./account-deletion.js";
+} from "./features/account/deletion.js";
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
@@ -271,7 +271,7 @@ import {
   renderApprovalConfirmPage,
   renderApprovalPage,
   verifyApprovalLink,
-} from "./approval-endpoints.js";
+} from "./features/approvals/endpoints.js";
 import { PgBoss } from "pg-boss";
 import {
   buildApiLayers,
@@ -279,7 +279,7 @@ import {
   type ApiConfig,
   type ApiLayer,
 } from "./bootstrap.js";
-import { renderDataProcessingNoticeHtml } from "./legal.js";
+import { renderDataProcessingNoticeHtml } from "./features/system/legal.js";
 import {
   approvalParamsSchema,
   errorResponseSchema,
@@ -344,7 +344,7 @@ import {
   handleAdminAccountOpenRouterDelete,
   handleAdminWorkspaceOpenRouterPut,
   handleAdminWorkspaceOpenRouterDelete,
-} from "./account-admin-handlers.js";
+} from "./features/admin/account-handlers.js";
 import {
   handleDashboardCatalog,
   handleDashboardModels,
@@ -405,7 +405,7 @@ import {
 import {
   handleApprovalConfirmPage,
   handleApprovalDecision,
-} from "./approval-handlers.js";
+} from "./features/approvals/handlers.js";
 import {
   handleDashboardMeSession,
   handleDashboardPermissionCatalog,

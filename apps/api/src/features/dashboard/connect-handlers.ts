@@ -35,7 +35,7 @@ import { discoverImapSettings, type DiscoveryIo } from "../mailbox/imap-discover
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
-} from "../../telegram-link.js";
+} from "../telegram/link.js";
 import {
   type ApiConfig,
   type ApiLayer,

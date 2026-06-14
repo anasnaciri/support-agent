@@ -8,11 +8,11 @@ import {
 import {
   isTelegramWebhookAuthorized,
   processTelegramUpdate,
-} from "../src/telegram-webhook.js";
+} from "../webhook.js";
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,
-} from "../src/telegram-link.js";
+} from "../link.js";
 
 const key = "test-signing-key";
 const tenantId = "11111111-2222-3333-4444-555555555555";

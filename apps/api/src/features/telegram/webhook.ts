@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { TenantId } from "@support-agent/agent-core";
 import { ConnectorCredentialStore } from "@support-agent/services";
 import { telegramSendMessage } from "@support-agent/providers";
-import { verifyTelegramLinkToken } from "./telegram-link.js";
+import { verifyTelegramLinkToken } from "./link.js";
 
 // ============================================================
 // Telegram bot webhook — chat linking

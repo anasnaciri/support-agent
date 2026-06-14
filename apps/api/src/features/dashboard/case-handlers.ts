@@ -42,7 +42,7 @@ import {
   resolveCustomerForContext,
   resolveOrderForContext,
 } from "./shopify-panels.js";
-import { makePgBossApprovalPublisher } from "../../approval-endpoints.js";
+import { makePgBossApprovalPublisher } from "../approvals/endpoints.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { sendJson, opaqueCause, strField, strList, parseJsonBody } from "../../platform/http.js";

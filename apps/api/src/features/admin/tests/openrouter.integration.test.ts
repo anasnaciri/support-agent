@@ -13,8 +13,8 @@ import {
   makeDbClient,
   tenants,
 } from "@support-agent/db";
-import { startServer, type ServerHandle } from "../src/server.js";
-import type { ApiConfig } from "../src/bootstrap.js";
+import { startServer, type ServerHandle } from "../../../server.js";
+import type { ApiConfig } from "../../../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;

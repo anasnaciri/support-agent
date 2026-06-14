@@ -9,7 +9,7 @@ import {
   renderApprovalPage,
   verifyApprovalLink,
   type BossLike,
-} from "../src/approval-endpoints.js";
+} from "../endpoints.js";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalService,

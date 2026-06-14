@@ -9,26 +9,26 @@ import {
   listWorkspacesByWorkosOrg,
   tenantDeletionSnapshot,
 } from "@support-agent/db";
-import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { opaqueCause, parseJsonBody, sendJson } from "./platform/http.js";
+import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
+import { opaqueCause, parseJsonBody, sendJson } from "../../platform/http.js";
 import {
   authenticateDashboardOrg,
   runWithDb,
-} from "./auth/dashboard-context.js";
-import { parseAdminAuth } from "./auth/dashboard-auth.js";
-import { normalizeShopDomain } from "./features/shopify/install.js";
-import { redactShop } from "./compliance-redaction.js";
-import { revokeConnectorProviderGrants } from "./features/dashboard/connect-handlers.js";
+} from "../../auth/dashboard-context.js";
+import { parseAdminAuth } from "../../auth/dashboard-auth.js";
+import { normalizeShopDomain } from "../shopify/install.js";
+import { redactShop } from "../account/compliance-redaction.js";
+import { revokeConnectorProviderGrants } from "../dashboard/connect-handlers.js";
 import {
   checkAdminShopifyAppPcd,
   getAdminShopifyApp,
   putAdminShopifyApp,
   revokeAdminShopifyApp,
-} from "./admin-shopify-app.js";
+} from "./shopify-app.js";
 import {
   getTenantDetailForAdmin,
   listTenantsForAdmin,
-} from "./admin-tenants.js";
+} from "./tenants.js";
 import {
   getAdminAccountDetail,
   putAdminAccountOpenRouter,
@@ -36,19 +36,19 @@ import {
   revokeAdminAccountOpenRouter,
   revokeAdminWorkspaceOpenRouter,
   type AdminOpenRouterMutationResult,
-} from "./admin-openrouter.js";
+} from "./openrouter.js";
 import {
   buildConnectorGrants,
   makePgBossAccountCleanupPublisher,
   resolveCleanupTargets,
   type AccountCleanupJobData,
   type EncryptedConnectorGrant,
-} from "./account-deletion.js";
+} from "../account/deletion.js";
 import {
   makePgBossShopifyPolicyImportPublisher,
   type ShopifyPolicyImportJobData,
-} from "./features/shopify/policy-import-queue.js";
-import { accountCleanupPublisher } from "./platform/pgboss.js";
+} from "../shopify/policy-import-queue.js";
+import { accountCleanupPublisher } from "../../platform/pgboss.js";
 
 // ---- Account deletion (tenant self-service + admin) ----
 

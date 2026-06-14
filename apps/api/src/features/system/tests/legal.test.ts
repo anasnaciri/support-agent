@@ -5,7 +5,7 @@ import {
   DPA_VERSION,
 } from "@support-agent/services";
 
-import { renderDataProcessingNoticeHtml } from "../src/legal.js";
+import { renderDataProcessingNoticeHtml } from "../legal.js";
 
 describe("renderDataProcessingNoticeHtml", () => {
   const html = renderDataProcessingNoticeHtml();

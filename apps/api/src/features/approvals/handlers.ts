@@ -7,10 +7,10 @@ import {
   renderApprovalConfirmPage,
   renderApprovalPage,
   verifyApprovalLink,
-} from "./approval-endpoints.js";
-import { acquireApprovalBoss } from "./platform/pgboss.js";
-import { type ApiConfig, type ApiLayer } from "./bootstrap.js";
-import { sendHtml, sendJson } from "./platform/http.js";
+} from "./endpoints.js";
+import { acquireApprovalBoss } from "../../platform/pgboss.js";
+import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
+import { sendHtml, sendJson } from "../../platform/http.js";
 
 /**
  * GET /approvals/:id/:action — verification + confirmation page ONLY.

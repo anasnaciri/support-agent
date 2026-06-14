@@ -4,7 +4,7 @@ import {
   makePgBossAccountCleanupPublisher,
   resolveCleanupTargets,
   type ConnectorGrantSource,
-} from "../src/account-deletion.js";
+} from "../deletion.js";
 
 const row = (
   overrides: Partial<ConnectorGrantSource> = {},

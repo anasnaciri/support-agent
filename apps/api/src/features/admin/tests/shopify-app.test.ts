@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OrderPiiPresence } from "@support-agent/services";
-import { summarizeOrderPii } from "../src/admin-shopify-app.js";
+import { summarizeOrderPii } from "../shopify-app.js";
 
 const order = (over: Partial<OrderPiiPresence> = {}): OrderPiiPresence => ({
   orderName: "#1001",

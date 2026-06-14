@@ -44,7 +44,7 @@ import {
   recordDataRequest,
   redactCustomer,
   redactShop,
-} from "../../compliance-redaction.js";
+} from "../account/compliance-redaction.js";
 import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,

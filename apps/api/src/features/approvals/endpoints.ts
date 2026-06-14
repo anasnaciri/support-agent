@@ -13,7 +13,7 @@ import {
   type Approval,
   type DomainEvent,
 } from "@support-agent/agent-core";
-import type { ApiLayer } from "./bootstrap.js";
+import type { ApiLayer } from "../../bootstrap.js";
 
 // ============================================================
 // Token parsing

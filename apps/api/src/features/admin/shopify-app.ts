@@ -23,7 +23,7 @@ import {
 import {
   claimShopifyShopForTenant,
   ShopifyShopAlreadyConnected,
-} from "./features/shopify/tenant-resolver.js";
+} from "../shopify/tenant-resolver.js";
 
 /**
  * Operator-facing view of a tenant's Shopify app provisioning. The
