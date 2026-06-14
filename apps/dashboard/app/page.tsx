@@ -10,6 +10,7 @@ import {
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
+import { toolActionLabel } from "@/lib/labels";
 import {
   Card,
   CardContent,
@@ -137,9 +138,9 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
                   <div className="min-w-0">
                     <Link
                       href={`/approvals/${a.id}`}
-                      className="font-mono text-sm text-primary hover:underline"
+                      className="text-sm font-medium text-primary hover:underline"
                     >
-                      {a.tool}
+                      {toolActionLabel(a.tool)}
                     </Link>
                     <div className="mt-0.5 text-xs text-muted-foreground">
                       {a.agentId} ·{" "}
