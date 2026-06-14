@@ -8,7 +8,7 @@ import { TenantId, type DomainEvent } from "@support-agent/agent-core";
 import {
   backfillUnreadGmailInbox,
   parseGmailPushEnvelope,
-} from "../src/gmail-webhook.js";
+} from "../gmail-webhook.js";
 
 const makeEnvelope = (decodedPayload: Record<string, unknown>): Buffer => {
   const data = Buffer.from(JSON.stringify(decodedPayload), "utf8").toString(

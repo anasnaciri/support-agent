@@ -27,7 +27,7 @@ import {
   toInboundMessage,
 } from "@support-agent/providers";
 import { connectorConnections, DbClient } from "@support-agent/db";
-import type { ApiLayer, GoogleAppConfig } from "./bootstrap.js";
+import type { ApiLayer, GoogleAppConfig } from "../../bootstrap.js";
 
 // ============================================================
 // Pub/Sub envelope parsing

@@ -30,8 +30,8 @@ import {
 import {
   parseImapConnectBody,
   imapConnectionMetadata,
-} from "./imap-connect.js";
-import { discoverImapSettings, type DiscoveryIo } from "./imap-discovery.js";
+} from "./features/mailbox/imap-connect.js";
+import { discoverImapSettings, type DiscoveryIo } from "./features/mailbox/imap-discovery.js";
 import {
   TELEGRAM_LINK_TTL_MS,
   mintTelegramLinkToken,

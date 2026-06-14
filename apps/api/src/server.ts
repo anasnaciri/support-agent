@@ -220,25 +220,25 @@ import {
   signGoogleInstallState,
   verifyGoogleInstallState,
   type GoogleOAuthProvider,
-} from "./google-install.js";
+} from "./features/mailbox/google-install.js";
 import {
   exchangeCodeForGoogleToken,
   fetchGoogleUserEmail,
-} from "./google-callback.js";
+} from "./features/mailbox/google-callback.js";
 import {
   buildMicrosoftAuthorizeUrl,
   signMicrosoftInstallState,
   verifyMicrosoftInstallState,
-} from "./microsoft-install.js";
+} from "./features/mailbox/microsoft-install.js";
 import {
   exchangeCodeForMicrosoftToken,
   fetchMicrosoftUserEmail,
-} from "./microsoft-callback.js";
+} from "./features/mailbox/microsoft-callback.js";
 import {
   handleGraphNotification,
   parseGraphNotifications,
   parseGraphValidationToken,
-} from "./graph-webhook.js";
+} from "./features/mailbox/graph-webhook.js";
 import {
   appUninstalledWebhookUrl,
   registerAppUninstalledWebhook,
@@ -255,14 +255,14 @@ import {
 import {
   parseImapConnectBody,
   imapConnectionMetadata,
-} from "./imap-connect.js";
-import { discoverImapSettings, type DiscoveryIo } from "./imap-discovery.js";
+} from "./features/mailbox/imap-connect.js";
+import { discoverImapSettings, type DiscoveryIo } from "./features/mailbox/imap-discovery.js";
 import {
   backfillUnreadGmailInbox,
   findTenantByGmailMailbox,
   handleGmailPushNotification,
   parseGmailPushEnvelope,
-} from "./gmail-webhook.js";
+} from "./features/mailbox/gmail-webhook.js";
 import {
   decideApproval,
   extractToken,
@@ -401,7 +401,7 @@ import {
   handleMicrosoftCallback,
   handleGmailWebhook,
   handleGraphWebhook,
-} from "./mailbox-handlers.js";
+} from "./features/mailbox/handlers.js";
 import {
   handleApprovalConfirmPage,
   handleApprovalDecision,

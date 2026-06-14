@@ -13,18 +13,18 @@ import {
 import {
   type ApiConfig,
   type ApiLayer,
-} from "./bootstrap.js";
+} from "../../bootstrap.js";
 import {
   sendJson,
   opaqueCause,
   sendRedirect,
   readQuery,
-} from "./platform/http.js";
+} from "../../platform/http.js";
 import {
   tenantHasCurrentLegalAcceptance,
   sendLegalAcceptanceRequired,
-} from "./auth/dashboard-context.js";
-import { verifyInstallGrant } from "./auth/install-grant.js";
+} from "../../auth/dashboard-context.js";
+import { verifyInstallGrant } from "../../auth/install-grant.js";
 import {
   buildGoogleAuthorizeUrl,
   isGoogleOAuthProvider,
@@ -36,16 +36,16 @@ import {
   exchangeCodeForGoogleToken,
   fetchGoogleUserEmail,
 } from "./google-callback.js";
-import { verifyState } from "./features/shopify/install.js";
+import { verifyState } from "../shopify/install.js";
 import {
   dashboardConnectErrorRedirect,
   dashboardConnectRedirect,
-} from "./features/connect/redirect.js";
+} from "../connect/redirect.js";
 import {
   activeMailboxConflict,
   alreadyConnectedRedirect,
   type OAuthMailboxProvider,
-} from "./features/connect/guard.js";
+} from "../connect/guard.js";
 import {
   buildMicrosoftAuthorizeUrl,
   signMicrosoftInstallState,

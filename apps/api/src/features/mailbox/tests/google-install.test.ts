@@ -5,7 +5,7 @@ import {
   buildGoogleAuthorizeUrl,
   signGoogleInstallState,
   verifyGoogleInstallState,
-} from "../src/google-install.js";
+} from "../google-install.js";
 
 describe("buildGoogleAuthorizeUrl", () => {
   it("emits the full Gmail scope set, offline access, and consent prompt by default", () => {

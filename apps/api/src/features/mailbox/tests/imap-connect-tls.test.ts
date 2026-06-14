@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseImapConnectBody } from "../src/imap-connect.js";
+import { parseImapConnectBody } from "../imap-connect.js";
 
 // S7 — TLS is mandatory for the IMAP/SMTP connector: `secure: false` means
 // required STARTTLS, never cleartext. A body that explicitly opts out of TLS

@@ -4,7 +4,7 @@ import {
   buildMicrosoftAuthorizeUrl,
   signMicrosoftInstallState,
   verifyMicrosoftInstallState,
-} from "../src/microsoft-install.js";
+} from "../microsoft-install.js";
 
 describe("buildMicrosoftAuthorizeUrl", () => {
   it("emits the Outlook scope set, code flow, and consent prompt", () => {

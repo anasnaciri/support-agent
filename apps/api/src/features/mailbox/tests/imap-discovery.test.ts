@@ -10,7 +10,7 @@ import {
   presetForMxHost,
   registrableDomain,
   type DiscoveryIo,
-} from "../src/imap-discovery.js";
+} from "../imap-discovery.js";
 
 // ============================================================
 // mailDomainFromEmail

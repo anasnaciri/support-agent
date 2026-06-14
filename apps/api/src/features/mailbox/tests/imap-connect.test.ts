@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   imapConnectionMetadata,
   parseImapConnectBody,
-} from "../src/imap-connect.js";
+} from "../imap-connect.js";
 
 describe("parseImapConnectBody", () => {
   it("builds a config from a complete body, defaulting login user to the mailbox", () => {

@@ -17,7 +17,7 @@ import {
   refreshGraphToken,
   toInboundMessage,
 } from "@support-agent/providers";
-import type { ApiLayer, MicrosoftAppConfig } from "./bootstrap.js";
+import type { ApiLayer, MicrosoftAppConfig } from "../../bootstrap.js";
 
 const PROVIDER = "outlook" as const;
 

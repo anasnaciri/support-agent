@@ -8,8 +8,8 @@ import {
   handleGraphNotification,
   parseGraphNotifications,
   parseGraphValidationToken,
-} from "../src/graph-webhook.js";
-import type { ApiLayer, MicrosoftAppConfig } from "../src/bootstrap.js";
+} from "../graph-webhook.js";
+import type { ApiLayer, MicrosoftAppConfig } from "../../../bootstrap.js";
 
 const tenantId = "11111111-1111-1111-1111-111111111111";
 const mailbox = "support@merchant.com";
