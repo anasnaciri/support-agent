@@ -354,11 +354,11 @@ const EmailThreadTimeline = ({
           </div>
         </CardContent>
       </Card>
-      <ol className="relative space-y-3">
+      <ol className="relative">
         {result.thread.messages.map((message) => (
           <li
             key={message.id}
-            className="relative ml-2 border-l-2 border-border pl-5"
+            className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
           >
             <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
             <Card>
@@ -680,11 +680,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                 </Card>
               ) : null}
 
-              <ol className="relative space-y-3">
+              <ol className="relative">
                 {simplifiedTimelineItems.map((item) => (
                   <li
                     key={item.id}
-                    className="relative ml-2 border-l-2 border-border pl-5"
+                    className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
                   >
                     <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
                     <Card>
@@ -821,11 +821,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             </Card>
           )
         ) : (
-          <ol className="relative space-y-3">
+          <ol className="relative">
             {entries.map((e) => (
               <li
                 key={e.id}
-                className="relative ml-2 border-l-2 border-border pl-5"
+                className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
               >
                 <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
                 <Card>
