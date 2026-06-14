@@ -14,6 +14,33 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-14 — Restructured `apps/api/src` into feature modules + thinned `server.ts` (1605 → 139 lines):**
+  Took the flat 52-file `apps/api/src/` (every file a sibling) into a layered, feature-first tree.
+  Six behavior-preserving commits on branch `refactor/api-feature-modules`, full `ci:local` suite green
+  at every commit (1742 passed / 5 skipped, incl. all DB-gated api integration tests). Final layout:
+  `src/platform/` (http, schemas, pgboss, **logger** + **app** factory + **context**/`RouteContext`),
+  `src/auth/` (dashboard context/auth/authz/jwt/user-id, workos-directory, install-grant, +
+  **dashboard-routes** = the shared RBAC-gated `dashboardGet/Post` factory), and ten `src/features/<x>/`
+  (shopify, mailbox, dashboard, members, admin, approvals, telegram, account, connect, system). `server.ts`
+  + `bootstrap.ts` are the only root files. **Tests co-locate** next to their subject under
+  `src/features/<x>/tests/` (decided with the user — cleaner than barrels: a test next to its code imports
+  `../handlers.js` directly, so the churn that made barrels tempting evaporates); cross-cutting whole-server
+  tests under `src/tests/`. **No barrels.** `server.ts` is now a pure composition root: build app via
+  `platform/app.buildApp`, thread `RouteContext{cfg,layer}`, mount `register<X>Routes(app, ctx)` per feature;
+  each feature's route table lives in `features/<x>/routes.ts` (verbatim paths/schemas/permissions/order).
+  Redundant `shopify-`/`dashboard-` filename prefixes dropped on the way in. Mechanics: a one-off path-aware
+  import codemod (`/tmp/api-codemod.mjs`, not committed) recomputed every relative `.js` specifier from a
+  per-phase move-map (pure path math, not regex); `tsc -b` + vitest were the oracle. **Config:**
+  `apps/api/tsconfig.json` now `exclude`s `src/**/tests/**` (tests stay out of `dist`, matching prior
+  behavior); root `vitest.config.ts` include widened with `apps/**/src/**/*.test.ts`.
+  **Follow-ups (recorded, not started):** (1) `platform/pgboss.ts` imports domain modules
+  (`features/account/deletion`, `features/shopify/policy-import-queue`) for its lazy publishers — split the
+  boss singleton (platform) from the per-feature publishers to restore "platform = no domain knowledge";
+  (2) `features/admin/account-handlers.ts` still mixes the dashboard `handleDashboardAccountDelete` with
+  operator handlers (dashboard/routes imports it cross-feature) — could hoist account-delete to a dashboard
+  handler; (3) `features/shopify/handlers` imports `features/account/compliance-redaction` for the GDPR
+  webhooks (shopify→account) — acceptable but a candidate for a neutral `features/compliance/`.
+
 - **2026-06-14 — Modularized `apps/api/src/server.ts` (6661 → 1605 lines):** The api god-file
   was split into focused sibling modules; `server.ts` is now the composition root (imports +
   `startServer` route wiring + lifecycle + `ServerHandle`/`redactUrlSecrets`/`loggerConfig`/`main`).
