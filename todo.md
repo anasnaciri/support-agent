@@ -14,6 +14,30 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ### Session history (summarized)
 
+- **2026-06-14 — Dashboard UI polish (5 small fixes on `main`, one commit each, TDD where logic changed):**
+  (1) **Today homepage** (`app/page.tsx`) showed raw `conversation.reply` for pending approvals — now
+  routed through the existing `toolActionLabel()` ("Send customer reply") like every other approval
+  surface; dropped `font-mono`. (`7cad79b`)
+  (2) **Low-contrast yellow badges → amber:** the "Need your approval" count tile (homepage) and the
+  `waiting_for_approval` status badge (`lib/status-variants.ts`, shows in case header / cases table /
+  sidebar) moved from the vivid-yellow `warningBright` (`#eab308`, poor contrast on `#f7f7f7`) to the
+  calmer amber `warning` (`#b45309`); updated `status-variants.test.ts`. Sibling yellows still on
+  `warningBright` and left alone: `approvalStatusVariant("pending")`, `riskVariant("medium")`. (`53ee681`)
+  (3) **Badge pill wrapping:** added `whitespace-nowrap` to the `Badge` base class
+  (`components/ui/badge.tsx`) — fixes "Needs approval" wrapping to two lines into a tall oval in narrow
+  columns (affects every badge). (`43c692e`)
+  (4) **Case Context section** (`app/cases/[id]/page.tsx`) replaced the raw `JSON.stringify` `<pre>` dump
+  with a labeled field list. New pure, unit-tested `case-context.ts#buildContextRows` maps the known
+  context keys (the closed `case.update_context` schema + runtime-reserved `customerEmail`/`riskFlags`/
+  `photoSignals`) to friendly rows/chips, reusing `return-labels` + `riskFlagLabel`; unknown keys are
+  humanized (camelCase-aware) as a fallback so nothing is hidden. New `CaseContext` renderer + 11 tests.
+  (`fab3e16`)
+  (5) **Timeline connector line was discontinuous:** the line is a per-`<li>` `border-l-2` but items were
+  spaced with `space-y-3` (margin = outside the border-box → gap at every item). Moved the gap to `pb-3`
+  + `last:pb-0` (padding = inside the border) across all three timelines (email / activity / full audit)
+  so the line is continuous, spacing + height unchanged. (`535033f`)
+  Every commit ran `ci:local` green (full build + 1753 tests).
+
 - **2026-06-14 — Rebranded the dashboard to "Guidezilla":** Sidebar (`apps/dashboard/app/IconRail.tsx`)
   and tab title (`layout.tsx`) now read **Guidezilla** instead of "Support Agent" (the `@support-agent/*`
   package scope is unchanged — those are workspace import names, not branding). Logo is a blue-croc SVG
