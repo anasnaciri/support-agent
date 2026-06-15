@@ -286,6 +286,39 @@ export const buildInitialMessages = (
     }
     return [{ role: "user", content: parts.join("\n\n") }];
   }
+  if (event.type === "supplier.updated") {
+    // The supplier responded on a parked case. Re-enter the agent loop so it
+    // drafts a CUSTOMER-FACING reply. The supplier is a third party, so fence
+    // their note as untrusted and instruct the agent to REWRITE it — never
+    // quote it verbatim or reveal that the update came from a supplier. The
+    // trusted thread header stays OUTSIDE the fence so the agent can still wire
+    // conversation.* tools.
+    const parts: string[] = [];
+    if (caseRow.threadId) {
+      parts.push(`[Thread context: threadId=${caseRow.threadId}]`);
+    }
+    parts.push(
+      "(system event: supplier.updated)",
+      "The supplier responded on this case. Draft a reply to the CUSTOMER that resolves their request, in your own words — do NOT quote the supplier's note verbatim, and never reveal that the update came from a supplier or warehouse.",
+    );
+    if (caseSubject) {
+      parts.push(`Subject: ${caseSubject}`);
+    }
+    const proposed = event.payload.proposedResolution;
+    parts.push(
+      `Supplier update (untrusted — rewrite for the customer):\n${wrapUntrusted(
+        `Note: ${event.payload.note}${
+          proposed ? `\n\nProposed resolution: ${proposed}` : ""
+        }`,
+      )}`,
+    );
+    if (caseRow.threadId) {
+      parts.push(
+        "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then send the customer reply.",
+      );
+    }
+    return [{ role: "user", content: parts.join("\n\n") }];
+  }
   // Other events resume an in-flight case; for Phase 1 we don't have message
   // history, so we just signal what woke the case up.
   return [

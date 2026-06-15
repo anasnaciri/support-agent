@@ -891,6 +891,93 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // supplier.updated consumer: the complement of the guard above — a
+  // supplier update PASSES the park guard, re-enters the agent loop
+  // (so it can draft the customer reply), and resolves the case.
+  // ----------------------------------------------------------------
+  it("re-enters the agent loop on supplier.updated and resolves the case", async () => {
+    const reengageAgent: AgentConfig = {
+      id: AgentId("reengage-agent"),
+      name: "Re-engage",
+      description: "Drafts the customer reply after a supplier update.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Reply to the customer with the supplier's update.",
+      tools: [],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "final_message", text: "Replied to the customer." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([reengageAgent]),
+      ToolRegistryWith([]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: reengageAgent.id,
+            subject: "Where is my order?",
+            threadId: "thread-s" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          yield* repo.transitionStatus(created.id, "waiting_for_supplier", {
+            reason: "test setup",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "supplier.updated",
+            caseId: created.id,
+            payload: {
+              supplierId: "sup-1",
+              note: "Reshipped via DHL; new ETA Friday.",
+              proposedResolution: "reship",
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
+    const actions = out.entries.map((e) => e.action);
+    // The loop ran (not held) — an LLM decision was recorded.
+    expect(actions).toContain("llm.decision");
+    expect(actions).not.toContain("event.held_waiting_for_supplier");
+  });
+
+  // ----------------------------------------------------------------
   // order-status-agent with `tracking.lookup` in the chain. The agent
   // fetches the order, sees a tracking number, calls tracking.lookup
   // (which TrackingServiceTest returns a synthetic "live" status for),
