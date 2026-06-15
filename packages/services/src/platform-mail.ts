@@ -69,6 +69,23 @@ export interface SendConnectorAlertInput {
   readonly reason: string;
 }
 
+export interface SendSupplierEscalationInput {
+  readonly tenantId: TenantId;
+  /** The escalation id — for a stable Resend idempotency key. */
+  readonly escalationId: string;
+  /**
+   * The supplier's email — passed directly (not resolved from the tenant's
+   * notificationEmail like the approval/connector mail), because the recipient
+   * is the external supplier, not the merchant operator.
+   */
+  readonly supplierEmail: string;
+  /** Deep link to the supplier's case in the portal, or null if unconfigured. */
+  readonly portalUrl: string | null;
+  /** The agent's PII-free problem statement (never carries customer data). */
+  readonly problem: string;
+  readonly orderRef: string | null;
+}
+
 export class PlatformMailService extends Context.Tag("PlatformMailService")<
   PlatformMailService,
   {
@@ -87,6 +104,15 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
     readonly sendConnectorAlert: (
       input: SendConnectorAlertInput,
     ) => Effect.Effect<void, PlatformMailError>;
+    /**
+     * Notify a supplier that a case was escalated to them, with a link to the
+     * supplier portal. The durable outbox sweep (worker) calls this; the
+     * escalation row's notified_at ledger drives retry, so a transient failure
+     * here just means the next sweep pass re-sends.
+     */
+    readonly sendSupplierEscalation: (
+      input: SendSupplierEscalationInput,
+    ) => Effect.Effect<void, PlatformMailError>;
   }
 >() {}
 
@@ -103,6 +129,10 @@ export type PlatformMailTestRecord =
   | {
       readonly kind: "connector-alert";
       readonly input: SendConnectorAlertInput;
+    }
+  | {
+      readonly kind: "supplier-escalation";
+      readonly input: SendSupplierEscalationInput;
     };
 
 export interface PlatformMailTestHandle {
@@ -183,6 +213,26 @@ export const makePlatformMailServiceTest = (
               );
             }
             sent.push({ kind: "connector-alert", input });
+            return Effect.succeed(undefined);
+          },
+        ),
+      sendSupplierEscalation: (input) =>
+        Effect.suspend(
+          (): Effect.Effect<void, PlatformMailError> => {
+            if (fixtures.unconfiguredFor?.has(input.tenantId)) {
+              return Effect.fail(
+                new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+              );
+            }
+            if (fixtures.failAll) {
+              return Effect.fail(
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause: "fixture: failAll",
+                }),
+              );
+            }
+            sent.push({ kind: "supplier-escalation", input });
             return Effect.succeed(undefined);
           },
         ),

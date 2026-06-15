@@ -17,6 +17,7 @@ import {
 import {
   PlatformMailServiceLive,
   ResendConfig,
+  renderSupplierEscalationEmail,
 } from "../src/platform-mail-live.js";
 
 const okResponse = (): Response =>
@@ -264,5 +265,38 @@ describe("PlatformMailServiceLive — Resend", () => {
       expect(result.left).toBeInstanceOf(PlatformMailSendFailed);
     }
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("renderSupplierEscalationEmail (copy builder)", () => {
+  it("includes the portal link, the order ref, and the problem — but no customer PII", () => {
+    const { subject, text, html } = renderSupplierEscalationEmail({
+      tenantId,
+      escalationId: "esc-1",
+      supplierEmail: "wh@acme.com",
+      portalUrl: "https://app.example.com/supplier/cases/esc-1",
+      problem: "Order #1001 to Berlin, DE is stuck — please chase or reship",
+      orderRef: "#1001",
+    });
+    expect(subject).toContain("#1001");
+    expect(text).toContain("https://app.example.com/supplier/cases/esc-1");
+    expect(text).toContain("please chase or reship");
+    expect(html).toContain("https://app.example.com/supplier/cases/esc-1");
+    // The input never carries customer data; assert nothing leaked in anyway.
+    expect(text).not.toContain("@example.com");
+    expect(`${subject}${text}${html}`.toLowerCase()).not.toContain("customer email");
+  });
+
+  it("falls back to a generic call-to-action when no portal URL is configured", () => {
+    const { text } = renderSupplierEscalationEmail({
+      tenantId,
+      escalationId: "esc-2",
+      supplierEmail: "wh@acme.com",
+      portalUrl: null,
+      problem: "Stuck order",
+      orderRef: null,
+    });
+    expect(text).toContain("Log in to your supplier portal");
+    expect(text).not.toContain("/supplier/cases/");
   });
 });

@@ -451,3 +451,76 @@ export const recordSupplierUpdate = async (
 
   return { kind: "recorded", caseId: esc.caseId, resumed };
 };
+
+// ---------------------------------------------------------------------------
+// Notification outbox (the worker sweep — §10)
+// ---------------------------------------------------------------------------
+
+export interface UnsentSupplierEscalation {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly supplierEmail: string;
+  readonly problem: string;
+  readonly orderRef: string | null;
+}
+
+/**
+ * Escalations whose supplier email hasn't been sent yet (the durable outbox):
+ * `notified_at IS NULL` and under the retry cap, oldest first. Joined to the
+ * supplier for the recipient address.
+ */
+export const listUnsentSupplierEscalations = async (
+  db: DrizzleDb,
+  limit: number,
+  maxAttempts: number,
+): Promise<ReadonlyArray<UnsentSupplierEscalation>> => {
+  const rows = await db
+    .select({
+      id: caseSupplierEscalations.id,
+      tenantId: caseSupplierEscalations.tenantId,
+      supplierEmail: suppliers.email,
+      problem: caseSupplierEscalations.problem,
+      orderRef: caseSupplierEscalations.orderRef,
+    })
+    .from(caseSupplierEscalations)
+    .innerJoin(suppliers, eq(suppliers.id, caseSupplierEscalations.supplierId))
+    .where(
+      and(
+        sql`${caseSupplierEscalations.notifiedAt} IS NULL`,
+        sql`${caseSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
+      ),
+    )
+    .orderBy(asc(caseSupplierEscalations.createdAt))
+    .limit(limit);
+  return rows;
+};
+
+/** Stamp a successful supplier notification so the sweep stops retrying it. */
+export const markSupplierEscalationNotified = async (
+  db: DrizzleDb,
+  id: string,
+): Promise<void> => {
+  await db
+    .update(caseSupplierEscalations)
+    .set({ notifiedAt: new Date() })
+    .where(eq(caseSupplierEscalations.id, id));
+};
+
+/**
+ * Record a failed send: bump the attempt counter (so the retry cap eventually
+ * trips) and keep the last error for visibility. `notified_at` stays NULL so
+ * the next sweep retries it until the cap.
+ */
+export const recordSupplierNotifyFailure = async (
+  db: DrizzleDb,
+  id: string,
+  error: string,
+): Promise<void> => {
+  await db
+    .update(caseSupplierEscalations)
+    .set({
+      notifyAttempts: sql`${caseSupplierEscalations.notifyAttempts} + 1`,
+      lastNotifyError: error.slice(0, 500),
+    })
+    .where(eq(caseSupplierEscalations.id, id));
+};

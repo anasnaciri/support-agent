@@ -6,6 +6,7 @@ import {
   TenantRepository,
   type SendAccountDeletedInput,
   type SendApprovalLinkInput,
+  type SendSupplierEscalationInput,
 } from "@support-agent/services";
 
 // ============================================================
@@ -126,6 +127,44 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
   return { subject, text, html };
 };
 
+export const renderSupplierEscalationEmail = (
+  input: SendSupplierEscalationInput,
+): {
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+} => {
+  const orderBit = input.orderRef ? ` (order ${input.orderRef})` : "";
+  const subject = `Action needed: a case was escalated to you${orderBit}`;
+  const escape = (s: string): string =>
+    s
+      .replace(/&/gu, "&amp;")
+      .replace(/</gu, "&lt;")
+      .replace(/>/gu, "&gt;");
+  const cta = input.portalUrl
+    ? `Open the case to respond: ${input.portalUrl}`
+    : `Log in to your supplier portal to view and respond to this case.`;
+  const text = [
+    `A support case has been escalated to you${orderBit}.`,
+    ``,
+    `What's needed:`,
+    input.problem,
+    ``,
+    cta,
+  ].join("\n");
+  const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
+  <p>A support case has been escalated to you${escape(orderBit)}.</p>
+  <p><strong>What's needed:</strong></p>
+  <pre style="white-space:pre-wrap;background:#f6f6f6;padding:12px;border-radius:6px">${escape(input.problem)}</pre>
+  ${
+    input.portalUrl
+      ? `<p style="margin-top:24px"><a href="${escape(input.portalUrl)}" style="background:#0345fc;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block">Open the case</a></p>`
+      : `<p style="margin-top:24px">Log in to your supplier portal to view and respond to this case.</p>`
+  }
+</body></html>`;
+  return { subject, text, html };
+};
+
 export const PlatformMailServiceLive = Layer.effect(
   PlatformMailService,
   Effect.gen(function* () {
@@ -183,6 +222,16 @@ export const PlatformMailServiceLive = Layer.effect(
       });
 
     return PlatformMailService.of({
+      // The supplier (external) is addressed directly; no tenant lookup. The
+      // escalation id is a stable Resend idempotency key so a sweep that sends
+      // twice before stamping notified_at doesn't double-mail within 24h.
+      sendSupplierEscalation: (input) =>
+        post(
+          input.tenantId,
+          input.supplierEmail,
+          renderSupplierEscalationEmail(input),
+          `supplier-escalation:${input.escalationId}`,
+        ),
       sendAccountDeleted: (input) =>
         post(
           input.tenantId,
