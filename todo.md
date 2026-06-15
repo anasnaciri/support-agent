@@ -12,6 +12,66 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - **Phase 1 — Runtime spine:** partial
 - **Phase 2+:** not started
 
+---
+
+## ⭐ NEXT TO LAND — Supplier portal (recurring login) that closes the escalation loop
+
+> **This is the priority item. Do not let it slip into a deferred phase below.** Plan it (plan mode + TDD) and build it next. Decided 2026-06-14 with the user.
+
+### The use case
+
+A customer messages support saying their order hasn't arrived even though the shipping-policy window has passed. The agent can't resolve it alone — it needs the **supplier / warehouse** to act (chase the carrier, reship, confirm a delay). Today the agent's only escalation surface is a one-way push into a merchant-owned Google Sheet (`supplier.add_sheet_row`), and **nothing closes the loop back to the customer**. We want:
+
+1. Agent escalates the problem → the case **parks in `waiting_for_supplier`** (a status that exists in the state machine today but has **no producer and no consumer**).
+2. The supplier logs into **their own space in our app**, sees the cases escalated to them, and posts an update / resolution **on that specific case**.
+3. That update **triggers the agent**, which drafts the customer reply via `conversation.reply` — gated by the merchant's existing per-agent permission (**`ask` by default**, `auto` only if the merchant flipped it). The agent adapts the supplier's (possibly internal/blunt) note into a customer-facing reply — it does **not** pass the raw note through.
+
+### Why this shape (and what we explicitly rejected)
+
+We evaluated closing the loop **through the Google Sheet** — agent writes a row, supplier answers in a column, a worker polls the sheet and reports back. **Rejected** because:
+
+- **No server-side query in the Sheets API.** `values.get` takes an A1 *range*, not a `WHERE` — finding a row by order/customer/email means reading a column and scanning it in our code. Workable but clumsy.
+- **No native change push.** Detecting a supplier edit means either polling + snapshot-diffing every tenant's sheet on a cron, or making the merchant install an Apps Script `onEdit` webhook — fragile, expensive, non-deterministic.
+- **Per-merchant arbitrary columns** ("to each merchant their own sheet") means no reliable contract for "the supplier addressed this vs. is still typing."
+
+The **supplier-portal** approach flips *pull → push* and wins on every axis the user cares about:
+
+- **Case-enclosed** — the update arrives already bound to a `caseId`. No row search, no matching.
+- **Deterministic** — the trigger is an explicit "supplier submitted a resolution" event, not a heuristic over edited cells.
+- **Cheap** — no polling job, no per-tenant sheet scans, no snapshot storage, no extra LLM tokens spent finding the right row.
+- It finally gives `waiting_for_supplier` a real **producer** (agent escalates) and **consumer** (supplier responds).
+
+The sheet escalation (`supplier.add_sheet_row`) can **stay as an optional fallback output** for merchants whose warehouse refuses to leave their sheet, but the portal is the canonical closed loop.
+
+### Access model — DECIDED: recurring login (persistent supplier accounts)
+
+The supplier gets a **real logged-in space** (not one-off signed magic links), listing their open escalations across visits. Scope each supplier to a workspace/tenant. Lean on the **member-RBAC infrastructure** already landed (roles, per-workspace assignments, permission catalog) rather than inventing a parallel auth — a supplier is effectively a heavily-constrained external role that can see *only* cases escalated to them and can *only* post supplier updates.
+
+### Build checklist
+
+- [ ] **Data model** (`packages/db`): supplier identity + `supplier ↔ workspace` membership; `case ↔ supplier` assignment; an escalation record `(caseId, supplierId, problem, status, createdAt, resolvedAt)`. New migration (no snapshot — repo stopped at 0021). Decide: reuse `roles`/`member_role_assignments` with a supplier role vs. dedicated supplier tables.
+- [ ] **Escalation = producer** (`packages/tools` + `packages/agents`): a tool the specialist calls to escalate (e.g. `supplier.escalate`) that records the problem on the case + assigns a supplier, and drives the `→ waiting_for_supplier` transition. Wire it into `missing-package-agent` (replacing / alongside the BRANCH-A sheet write). Internal side-effect — agent-side `allow`, but writing/assigning still goes through `PermissionService`.
+- [ ] **Supplier auth** (`apps/api` + WorkOS): recurring login for suppliers, scoped to a workspace. Constrained role over the existing RBAC permission catalog (new permission ids for "view escalated cases" / "post supplier update"). Suppliers must **not** reach merchant dashboard surfaces.
+- [ ] **Supplier space (UI)**: a surface listing cases assigned to the logged-in supplier (filter on `waiting_for_supplier` + assignment), a case view showing **only** the problem the agent reported (minimize customer PII — privacy scope, see open questions), and a form to submit an update/resolution.
+- [ ] **Trigger = consumer** (`apps/api` endpoint): supplier submits update → record the supplier note to case context **+ audit in ONE transaction** (outbox invariant, master-plan §4) → transition the case **off** `waiting_for_supplier` → enqueue an agent run via pg-boss. Model the verify→confirm-POST→resume shape on the existing **manager approval-email** flow (`apps/api/src/features/approvals/{handlers,endpoints}.ts`), but with persistent auth instead of signed links.
+- [ ] **Agent re-engagement** (`packages/agents`): on resume, the agent reads the supplier note from case context and drafts a **customer-facing** reply via `conversation.reply` (honors the merchant's per-agent `ask`/`auto` permission). Prompt must **rewrite** the supplier note for the customer, never leak it verbatim. Mind the shared turn budget across handoff ([[runtime_turn_budget_shared_across_handoff]]).
+- [ ] **State machine** (`packages/agent-core`): confirm/extend `waiting_for_supplier` transitions — guard the producer (`* → waiting_for_supplier`) and consumer (`waiting_for_supplier → in_progress`) edges; transitions stay guarded (master-plan §10). Park guard so a stray inbound event doesn't resolve a case that's waiting on the supplier (mirror [[project_approval_park_guard]] / [[project_human_takeover_guard_resume_landed]]).
+- [ ] **Notify the supplier** when a case is escalated (reuse the platform-mail / Telegram notification surfaces — out of band, not required for v1 but record it).
+
+### Open decisions to settle in plan mode
+
+- **Supplier identity**: WorkOS org-member with a supplier role vs. a separate supplier auth table. (Lean WorkOS to reuse RBAC + invites.)
+- **Privacy scope**: exactly which case fields a supplier sees. Default to the *problem statement + order ref only*, not the full customer thread / PII.
+- **Multi-tenancy of suppliers**: can one supplier login serve multiple workspaces (a warehouse shared by several merchants), or strictly one supplier ↔ one workspace? Affects the data model.
+- **Escalation routing**: how the agent/merchant picks *which* supplier a case goes to (single default supplier per workspace v1; per-product/per-vendor routing later).
+- **`supplier.add_sheet_row`**: keep as optional fallback output, or retire once the portal lands?
+
+### Invariants this must respect
+
+Dependency rule (`agent-core` imports nothing downstream); `PermissionService` consulted before every tool execution; audit-log writes share the transaction with case-state changes; case state machine guards every transition; Effect Service/Layer separation; TDD (failing test first); `pnpm build` green before stopping.
+
+---
+
 ### Session history (summarized)
 
 - **2026-06-14 — Dashboard UI polish (5 small fixes on `main`, one commit each, TDD where logic changed):**
@@ -587,6 +647,14 @@ Remaining work surfaced by the audit remediation (everything else in `audit.md` 
 - [ ] **Enrich `timer.expired` ticks like `case.resumed`:** the retry work (2026-06-11) gave `case.resumed`
       a real re-orientation message (thread id + prior context); follow-up timer ticks still wake the agent
       with a bare `(system event: timer.expired)` and the same blindness — same fix applies.
+- [ ] **Rate-limit keying (S11 structural follow-up):** `@fastify/rate-limit` (`app.ts`) buckets on
+      `req.ip` with no `trustProxy` and no `keyGenerator`, so behind a proxy/edge the direct peer IP is the
+      proxy's and the limit acts as a near-global cap. The server-side dashboard (`api-client.ts` is
+      `server-only`, one egress IP) and provider webhooks (Shopify/Pub-Sub/Graph IP ranges) collapse into
+      shared buckets too. `RATE_LIMIT_MAX` (default 600/min) is now documented in `apps/api/.env.example`;
+      600 is fine for the pilot but too tight for multi-tenant SaaS. Proper fix: set `trustProxy` and add a
+      `keyGenerator` that buckets on real client IP or authenticated identity (org/user from the verified
+      JWT) so brute-force protection is per-actor, not per-deployment. Raising the number is only a stopgap.
 
 ## Workspaces follow-ups (2026-06-11)
 
