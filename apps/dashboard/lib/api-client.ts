@@ -371,6 +371,26 @@ export interface CaseShopifyPanels {
   readonly shopDomain: string | null;
 }
 
+// Supplier portal — the minimal privacy projection the api returns (no customer
+// PII). Mirrors the db's SupplierEscalation{ListItem,Detail} shapes; redefined
+// here because the dashboard (Path B) imports only agent-core + contracts.
+export interface SupplierEscalationListItemView {
+  readonly id: string;
+  readonly caseId: string;
+  readonly problem: string;
+  readonly orderRef: string | null;
+  readonly shipCity: string | null;
+  readonly shipCountry: string | null;
+  readonly trackingNumber: string | null;
+  readonly status: string;
+  readonly createdAt: string;
+}
+export interface SupplierEscalationDetailView
+  extends SupplierEscalationListItemView {
+  readonly note: string | null;
+  readonly proposedResolution: string | null;
+}
+
 // ============================================================
 // Typed endpoint methods. Reads take a Ctx (org); writes take org + decision
 // UUID (DashboardContext satisfies both).
@@ -984,4 +1004,54 @@ export const api = {
       method: "POST",
       ctx,
     }),
+
+  // ---- Supplier portal ----
+  supplierCases: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<SupplierEscalationListItemView>> =>
+    (
+      (await okBody("/supplier/cases", ctx)) as {
+        cases: ReadonlyArray<SupplierEscalationListItemView>;
+      }
+    ).cases,
+
+  supplierCase: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<SupplierEscalationDetailView | null> => {
+    const { status, body } = await call(
+      `/supplier/cases/${encodeURIComponent(id)}`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) {
+      throw new Error(`dashboard api ${status} on /supplier/cases/:id`);
+    }
+    return body as SupplierEscalationDetailView;
+  },
+
+  supplierUpdate: (
+    ctx: CallCtx,
+    id: string,
+    input: {
+      readonly note: string;
+      readonly proposedResolution?: string | null;
+    },
+  ): Promise<CallResult> =>
+    call(`/supplier/cases/${encodeURIComponent(id)}/update`, {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return",
+    }),
+
+  inviteSupplier: (
+    ctx: CallCtx,
+    input: {
+      readonly email: string;
+      readonly name?: string;
+      readonly workosInvitationId?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/supplier/invite", { method: "POST", body: input, ctx }),
 };

@@ -81,6 +81,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         match: prefix("/settings/members"),
         requires: "members.manage",
       },
+      {
+        href: "/settings/suppliers",
+        label: "Suppliers",
+        match: prefix("/settings/suppliers"),
+        requires: "members.manage",
+      },
     ],
   },
   {

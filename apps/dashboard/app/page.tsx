@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
@@ -36,6 +37,14 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const workspaceCreated = sp.workspace_created === "1";
   const workspaceDeleted = sp.workspace_deleted === "1";
   const ctx = await getDashboardContext();
+  // A supplier (constrained external role) has no merchant surface — send them
+  // to their portal instead of a "Today" page whose data they can't read.
+  if (
+    ctx.permissions.has("supplier.cases.view") &&
+    !ctx.permissions.has("cases.view")
+  ) {
+    redirect("/supplier/cases");
+  }
   const summary = await api.today(ctx);
 
   const { pendingApprovals, takeoverCases } = summary;

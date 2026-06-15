@@ -25,6 +25,7 @@ import { IconRail } from "./IconRail";
 import { SettingsNav } from "./settings/_components/settings-nav";
 import { CasesSidebar } from "./cases/_components/CasesSidebar";
 import { caseIdFromPathname } from "./cases/_components/cases-sidebar-data";
+import { signOutAction } from "./sign-out-action";
 
 const SIDEBAR_COOKIE = "sidebar:state";
 const WIDTH_COOKIE = "sidebar:width";
@@ -129,6 +130,38 @@ export function AppShell({
       document.body.style.cursor = prevCursor;
     };
   }, [resizing]);
+
+  // Supplier portal: a constrained external role gets a BARE shell — no merchant
+  // icon rail, secondary sidebar, or workspace switcher. Access is enforced by
+  // the api (decideSupplierAuthz); this only keeps merchant chrome off their UI.
+  // Placed after all hooks above so the rules-of-hooks order is unconditional.
+  if (pathname.startsWith("/supplier")) {
+    return (
+      <div className="flex min-h-screen flex-col bg-background">
+        <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
+          <span className="text-sm font-semibold tracking-tight">
+            Supplier portal
+          </span>
+          <div className="flex items-center gap-3">
+            {email ? (
+              <span className="text-xs text-muted-foreground">{email}</span>
+            ) : null}
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                className="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        </header>
+        <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+          <div className="mx-auto w-full max-w-3xl">{children}</div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-sidebar">
