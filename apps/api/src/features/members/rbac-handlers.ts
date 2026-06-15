@@ -1,6 +1,7 @@
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   assignMemberRole,
+  bindSupplierUser,
   createInvitation,
   createRole,
   deleteRole,
@@ -61,6 +62,9 @@ export const handleDashboardMeSession = async (
         userDecisionUuid: userId,
         ...(auth.workosUserId ? { workosUserId: auth.workosUserId } : {}),
       });
+      // Bind a supplier login to its `suppliers` row on first authenticated
+      // load (idempotent; a no-op when the verified email is not a supplier).
+      await bindSupplierUser(db, auth.tenantId, verifiedEmail, userId);
     }
     return getMemberAccess(db, auth.tenantId, userId);
   });
