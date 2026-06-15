@@ -45,6 +45,7 @@ import {
   ConnectorCredentialStoreLive,
   DbClient,
   DbClientLive,
+  SupplierEscalationServiceLive,
   ImageHashStoreLive,
   ProcessedMessageStoreLive,
   ToolExecutionStoreLive,
@@ -294,6 +295,9 @@ export const buildWorker = async (
     // are provided their own copy via inner Layer.provide; both copies
     // collapse to the same Live impl, so duplicating is harmless.
     TenantRepositoryLive,
+    // Backs the supplier.escalate tool — records the escalation row + resolves
+    // the workspace's supplier so the runtime can park in waiting_for_supplier.
+    SupplierEscalationServiceLive,
   );
 
   // LLM — depends on LLMCredentialResolver. In production each tenant

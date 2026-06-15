@@ -1887,6 +1887,33 @@ export const AgentRuntimeDefault = Layer.effect(
               );
               return { type: "PausedWaitingForCustomer" } as const;
             }
+            if (tool.name === "supplier.escalate") {
+              // Producer for `waiting_for_supplier` (mirror of ask_customer).
+              // The escalation row was written by the tool's service; here we
+              // park the case + audit in one tx, then end the tick. The case
+              // re-engages on `supplier.updated` (the consumer). This branch
+              // only runs when the escalate tool resolved to `allow`
+              // (per-agent) — under the default `ask`, the permission gate
+              // above parks in waiting_for_approval instead.
+              current = yield* tx.run(
+                Effect.gen(function* () {
+                  const updated = yield* cases.transitionStatus(
+                    current.id,
+                    "waiting_for_supplier",
+                    { reason: "supplier.escalate" },
+                  );
+                  yield* audit.record({
+                    tenantId: updated.tenantId,
+                    caseId: updated.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "case.waiting_for_supplier",
+                    details: { tool: tool.name, callId: decision.callId },
+                  });
+                  return updated;
+                }),
+              );
+              return { type: "PausedWaitingForSupplier" } as const;
+            }
             messages.push({
               role: "tool",
               toolCallId: decision.callId,

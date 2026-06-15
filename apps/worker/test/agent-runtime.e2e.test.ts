@@ -35,6 +35,7 @@ import {
   shopifyGetOrder,
   shopifyGetProduct,
   supplierAddSheetRow,
+  supplierEscalate,
   supplierReadSheetColumns,
   trackingLookup,
 } from "@support-agent/tools";
@@ -59,6 +60,7 @@ import {
   PlatformMailServiceTest,
   SheetsServiceTest,
   ShopifyServiceTest,
+  SupplierEscalationServiceTest,
   TenantAgentOverridesServiceTest,
   TrackingServiceTest,
   TenantRepositoryTest,
@@ -666,6 +668,133 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "case.waiting_for_customer",
+    ]);
+  });
+
+  // ----------------------------------------------------------------
+  // supplier.escalate producer: an agent with the tool set to `allow`
+  // hands a stuck order to the supplier; the runtime records the
+  // escalation (via SupplierEscalationService), parks the case in
+  // waiting_for_supplier, and ends the tick (no customer reply).
+  // ----------------------------------------------------------------
+  it("runs supplier.escalate and parks the case in waiting_for_supplier", async () => {
+    const escalatingAgent: AgentConfig = {
+      id: AgentId("escalating-agent"),
+      name: "Escalating",
+      description: "Escalates a stuck order to the supplier.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Escalate the stuck order to the supplier.",
+      tools: ["supplier.escalate"],
+      // `allow` → the runtime parks in waiting_for_supplier rather than
+      // creating an approval (the default `ask` would park in
+      // waiting_for_approval instead).
+      permissionOverrides: { "supplier.escalate": "allow" },
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "esc-0",
+        tool: "supplier.escalate",
+        input: {
+          problem: "Order stuck in transit 12 days past the delivery window",
+          orderRef: "#7001",
+          shipCity: "Berlin",
+          shipCountry: "DE",
+          trackingNumber: "TRK-1",
+        },
+      },
+    ];
+    let captured: Record<string, unknown> | undefined;
+    const supplierLayer = SupplierEscalationServiceTest({
+      escalate: (input) => {
+        captured = input as unknown as Record<string, unknown>;
+        return Effect.succeed({
+          escalationId: "esc-1",
+          supplierId: "sup-1",
+          supplierEmail: "wh@x.com",
+        });
+      },
+    });
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([escalatingAgent]),
+      ToolRegistryWith([supplierEscalate as never]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      supplierLayer,
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: escalatingAgent.id,
+            subject: "Where is my order?",
+            threadId: "thread-e" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-e" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "It's been two weeks and nothing arrived.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    // The tool forwarded the agent's privacy projection to the service.
+    expect(captured).toMatchObject({
+      problem: "Order stuck in transit 12 days past the delivery window",
+      orderRef: "#7001",
+      shipCity: "Berlin",
+      shipCountry: "DE",
+      trackingNumber: "TRK-1",
+    });
+    expect(out.entries.map((e) => e.action)).toEqual([
+      "event.received",
+      "llm.decision",
+      "tool.invoked",
+      "case.waiting_for_supplier",
     ]);
   });
 
