@@ -176,6 +176,13 @@
       "when": 1781481600000,
       "tag": "0024_member_rbac",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781568000000,
+      "tag": "0025_supplier_portal",
+      "breakpoints": true
     }
   ]
 }

@@ -18,3 +18,4 @@ export * from "./image-hash-store-live.js";
 export * from "./dashboard-reads.js";
 export * from "./dashboard-writes.js";
 export * from "./member-rbac-store.js";
+export * from "./supplier-store.js";

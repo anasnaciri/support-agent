@@ -811,3 +811,99 @@ export type MemberRoleAssignmentInsert =
   typeof memberRoleAssignments.$inferInsert;
 export type MemberInvitationRow = typeof memberInvitations.$inferSelect;
 export type MemberInvitationInsert = typeof memberInvitations.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Supplier portal (master-plan §19 / supplier-escalation loop)
+// ---------------------------------------------------------------------------
+
+// A supplier/warehouse entity scoped to one workspace (decision: one supplier ↔
+// one workspace). Created at invite time so an escalation can target it before
+// the supplier ever signs in; `user_decision_uuid` is bound on their first
+// authenticated load (mirrors member_role_assignments). A supplier is a heavily
+// constrained WorkOS member with the "Supplier" RBAC role — these rows just hold
+// the named identity + the case-visibility binding.
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    userDecisionUuid: uuid("user_decision_uuid"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("suppliers_tenant_email_unique").on(
+      t.tenantId,
+      sql`lower(${t.email})`,
+    ),
+    // A WorkOS user maps to at most one supplier (one supplier ↔ one workspace).
+    uniqueIndex("suppliers_user_unique")
+      .on(t.userDecisionUuid)
+      .where(sql`${t.userDecisionUuid} IS NOT NULL`),
+    index("suppliers_tenant_idx").on(t.tenantId),
+  ],
+);
+
+// The per-case escalation record + the MINIMAL privacy projection, denormalised
+// at escalate time so the supplier query never joins back to cases / customer
+// tables: the supplier sees the agent's problem statement, the order ref, the
+// ship-to city/country, and the tracking number — never the customer email,
+// full address, or conversation thread. `note`/`proposed_resolution` hold the
+// supplier's reply. The notification ledger (`notified_at` / `notify_attempts`
+// / `last_notify_error`) is the durable outbox the worker sweep relays.
+export const caseSupplierEscalations = pgTable(
+  "case_supplier_escalations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "restrict" }),
+    problem: text("problem").notNull(),
+    orderRef: text("order_ref"),
+    shipCity: text("ship_city"),
+    shipCountry: text("ship_country"),
+    trackingNumber: text("tracking_number"),
+    status: text("status").notNull().default("open"),
+    note: text("note"),
+    proposedResolution: text("proposed_resolution"),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    notifyAttempts: integer("notify_attempts").notNull().default(0),
+    lastNotifyError: text("last_notify_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "case_supplier_escalations_status_check",
+      sql`${t.status} IN ('open','resolved')`,
+    ),
+    // The supplier's "cases escalated to me" list.
+    index("cse_supplier_status_idx").on(t.supplierId, t.status),
+    index("cse_case_idx").on(t.caseId),
+    index("cse_tenant_idx").on(t.tenantId),
+    // The notification sweep scans unsent rows oldest-first.
+    index("cse_unsent_idx")
+      .on(t.createdAt)
+      .where(sql`${t.notifiedAt} IS NULL`),
+  ],
+);
+
+export type SupplierRow = typeof suppliers.$inferSelect;
+export type SupplierInsert = typeof suppliers.$inferInsert;
+export type CaseSupplierEscalationRow =
+  typeof caseSupplierEscalations.$inferSelect;
+export type CaseSupplierEscalationInsert =
+  typeof caseSupplierEscalations.$inferInsert;
