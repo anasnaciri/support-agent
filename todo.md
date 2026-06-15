@@ -14,9 +14,9 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-## ⭐ NEXT TO LAND — Supplier portal (recurring login) that closes the escalation loop
+## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
-> **This is the priority item. Do not let it slip into a deferred phase below.** Plan it (plan mode + TDD) and build it next. Decided 2026-06-14 with the user.
+> **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
 ### The use case
 
@@ -47,24 +47,37 @@ The sheet escalation (`supplier.add_sheet_row`) can **stay as an optional fallba
 
 The supplier gets a **real logged-in space** (not one-off signed magic links), listing their open escalations across visits. Scope each supplier to a workspace/tenant. Lean on the **member-RBAC infrastructure** already landed (roles, per-workspace assignments, permission catalog) rather than inventing a parallel auth — a supplier is effectively a heavily-constrained external role that can see *only* cases escalated to them and can *only* post supplier updates.
 
-### Build checklist
+### Build checklist — ALL LANDED
 
-- [ ] **Data model** (`packages/db`): supplier identity + `supplier ↔ workspace` membership; `case ↔ supplier` assignment; an escalation record `(caseId, supplierId, problem, status, createdAt, resolvedAt)`. New migration (no snapshot — repo stopped at 0021). Decide: reuse `roles`/`member_role_assignments` with a supplier role vs. dedicated supplier tables.
-- [ ] **Escalation = producer** (`packages/tools` + `packages/agents`): a tool the specialist calls to escalate (e.g. `supplier.escalate`) that records the problem on the case + assigns a supplier, and drives the `→ waiting_for_supplier` transition. Wire it into `missing-package-agent` (replacing / alongside the BRANCH-A sheet write). Internal side-effect — agent-side `allow`, but writing/assigning still goes through `PermissionService`.
-- [ ] **Supplier auth** (`apps/api` + WorkOS): recurring login for suppliers, scoped to a workspace. Constrained role over the existing RBAC permission catalog (new permission ids for "view escalated cases" / "post supplier update"). Suppliers must **not** reach merchant dashboard surfaces.
-- [ ] **Supplier space (UI)**: a surface listing cases assigned to the logged-in supplier (filter on `waiting_for_supplier` + assignment), a case view showing **only** the problem the agent reported (minimize customer PII — privacy scope, see open questions), and a form to submit an update/resolution.
-- [ ] **Trigger = consumer** (`apps/api` endpoint): supplier submits update → record the supplier note to case context **+ audit in ONE transaction** (outbox invariant, master-plan §4) → transition the case **off** `waiting_for_supplier` → enqueue an agent run via pg-boss. Model the verify→confirm-POST→resume shape on the existing **manager approval-email** flow (`apps/api/src/features/approvals/{handlers,endpoints}.ts`), but with persistent auth instead of signed links.
-- [ ] **Agent re-engagement** (`packages/agents`): on resume, the agent reads the supplier note from case context and drafts a **customer-facing** reply via `conversation.reply` (honors the merchant's per-agent `ask`/`auto` permission). Prompt must **rewrite** the supplier note for the customer, never leak it verbatim. Mind the shared turn budget across handoff ([[runtime_turn_budget_shared_across_handoff]]).
-- [ ] **State machine** (`packages/agent-core`): confirm/extend `waiting_for_supplier` transitions — guard the producer (`* → waiting_for_supplier`) and consumer (`waiting_for_supplier → in_progress`) edges; transitions stay guarded (master-plan §10). Park guard so a stray inbound event doesn't resolve a case that's waiting on the supplier (mirror [[project_approval_park_guard]] / [[project_human_takeover_guard_resume_landed]]).
-- [ ] **Notify the supplier** when a case is escalated (reuse the platform-mail / Telegram notification surfaces — out of band, not required for v1 but record it).
+- [x] **Data model** (`packages/db`) — `0025_supplier_portal.sql`: `suppliers` (one ↔ one workspace; `user_decision_uuid` bound at first login) + `case_supplier_escalations` (privacy projection denormalized at escalate time + notification-outbox ledger). Plain `supplier-store.ts` fns + integration test.
+- [x] **Escalation = producer** — `supplier.escalate` tool (`packages/tools`) + `SupplierEscalationService` (Tag in `services`, Live in `db`); per-agent `allow` on `missing-package-agent` BRANCH B; runtime parks the case in `waiting_for_supplier` (mirrors `conversation.ask_customer`). `supplier.add_sheet_row` kept as fallback.
+- [x] **Supplier auth** (`apps/api` + WorkOS) — `supplier.cases.view`/`respond` perms + `decideSupplierAuthz` (no open-mode bypass; explicit assignment required); `supplierGet/Post` factory; `/me/session` binds the supplier login via `bindSupplierUser`.
+- [x] **Supplier space (UI)** — `/supplier/cases` + `/supplier/cases/[id]` (minimal projection + update form); chrome walled via an AppShell supplier-mode branch (see deviation); merchant `/settings/suppliers` invite page.
+- [x] **Trigger = consumer** — `POST /dashboard/supplier/cases/:id/update`: `recordSupplierUpdate` (note + case flip off `waiting_for_supplier` + audit in ONE tx) → publishes `supplier.updated` to pg-boss (flip-then-publish). Integration test over HTTP.
+- [x] **Agent re-engagement** — `buildInitialMessages` `supplier.updated` branch injects the `wrapUntrusted`-fenced note + a rewrite instruction + the customer email from context; `missing-package-agent` SUPPLIER-RESPONDED flow drafts the gated `conversation.reply`.
+- [x] **State machine** — producer/consumer edges + a `waiting_for_supplier` park guard (holds stray events except `supplier.updated`/`manual.takeover`/`case.resumed`). `PausedWaitingForSupplier` already existed in `WorkflowResult` — no agent-core change needed.
+- [x] **Notify the supplier** — **durable outbox sweep** (`apps/worker/supplier-notify-schedule.ts`) relays `PlatformMailService.sendSupplierEscalation` off the `notified_at` ledger (retry + attempt cap), NOT best-effort (see deviation).
 
-### Open decisions to settle in plan mode
+### Resolved decisions (settled in plan mode, 2026-06-14/15)
 
-- **Supplier identity**: WorkOS org-member with a supplier role vs. a separate supplier auth table. (Lean WorkOS to reuse RBAC + invites.)
-- **Privacy scope**: exactly which case fields a supplier sees. Default to the *problem statement + order ref only*, not the full customer thread / PII.
-- **Multi-tenancy of suppliers**: can one supplier login serve multiple workspaces (a warehouse shared by several merchants), or strictly one supplier ↔ one workspace? Affects the data model.
-- **Escalation routing**: how the agent/merchant picks *which* supplier a case goes to (single default supplier per workspace v1; per-product/per-vendor routing later).
-- **`supplier.add_sheet_row`**: keep as optional fallback output, or retire once the portal lands?
+- **Supplier identity**: WorkOS org-member with a constrained Supplier role (reused RBAC + invites).
+- **Privacy scope**: problem + order ref + ship-to (city/country) + tracking; **no** customer email / full address / thread.
+- **Multi-tenancy**: one supplier ↔ one workspace.
+- **Escalation routing**: single default supplier per workspace (`getDefaultSupplier`, oldest); per-vendor routing later.
+- **`supplier.add_sheet_row`**: kept as the legacy/fallback output alongside `supplier.escalate`.
+
+### Deviations from plan (recorded)
+
+- **Notification = durable outbox sweep, not best-effort** (the user chose "durable queued send"): the escalation row is the ledger; a worker cron retries until sent or the attempt cap trips.
+- **Chrome walled via an AppShell `supplier`-mode branch, NOT a `(merchant)/(supplier)` route-group refactor**: the refactor would have broken ~10 co-located test imports under `app/{cases,settings,connect}` for purely cosmetic isolation, and access is enforced by the api (`decideSupplierAuthz`) regardless of route structure.
+
+### Follow-ups (recorded, not built)
+
+- On notify cap-exhaustion, alert the *merchant* ("supplier unreachable") — the SLA-reminder option the user deferred.
+- Live verification (invite a real supplier → post an update → confirm the gated customer reply) — not yet run.
+- A merchant-facing list of current suppliers / pending supplier invitations on `/settings/suppliers` (invite-only for now).
+- Consider hiding the new "Supplier" RBAC category from the merchant role editor (harmless today — owners only).
+- Branch `feat/supplier-portal` is **not yet merged to `main`**.
 
 ### Invariants this must respect
 
@@ -73,6 +86,22 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 ---
 
 ### Session history (summarized)
+
+- **2026-06-15 — Supplier portal landed (branch `feat/supplier-portal`, 10 TDD commits, ci:local
+  green at every commit — full `pnpm build` + 1785 tests; dashboard `typecheck`+`next build` verified
+  separately).** Closes the escalation loop end-to-end: the `missing-package-agent` carrier branch calls
+  the new `supplier.escalate` tool (per-agent `allow`) → runtime parks the case in `waiting_for_supplier`
+  (producer mirrors `conversation.ask_customer`) → a park guard holds stray events → the supplier logs
+  into a walled `/supplier/cases` portal (constrained WorkOS Supplier role; `decideSupplierAuthz` with no
+  open-mode bypass; minimal privacy projection — problem/order/ship-to/tracking, no PII) and posts an
+  update → `POST /dashboard/supplier/cases/:id/update` records it + flips the case off
+  `waiting_for_supplier` + audits in one tx, then publishes `supplier.updated` → `buildInitialMessages`
+  injects the fenced note + a rewrite instruction → the agent drafts the gated `conversation.reply`,
+  rewriting the note (never verbatim). Supplier notification is a **durable outbox sweep** (worker cron
+  off the `notified_at` ledger), not best-effort. Most of the spine (status, event, payloads,
+  `PausedWaitingForSupplier`) pre-existed as types — this wired it up. Full detail + resolved decisions +
+  deviations + follow-ups in the **✅ LANDED — Supplier portal** section above. NOT yet merged to `main`.
+  See [[project_supplier_portal_landed]].
 
 - **2026-06-14 — Dashboard UI polish (5 small fixes on `main`, one commit each, TDD where logic changed):**
   (1) **Today homepage** (`app/page.tsx`) showed raw `conversation.reply` for pending approvals — now
