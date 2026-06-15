@@ -15,6 +15,7 @@ import { conversationReply } from "./conversation/reply.js";
 import { conversationAskCustomer } from "./conversation/ask-customer.js";
 import { supplierAddSheetRow } from "./supplier/add-sheet-row.js";
 import { supplierReadSheetColumns } from "./supplier/read-sheet-columns.js";
+import { supplierEscalate } from "./supplier/escalate.js";
 import { trackingLookup } from "./tracking/lookup.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { merchantNotify } from "./merchant/notify.js";
@@ -35,6 +36,7 @@ export * from "./conversation/reply.js";
 export * from "./conversation/ask-customer.js";
 export * from "./supplier/add-sheet-row.js";
 export * from "./supplier/read-sheet-columns.js";
+export * from "./supplier/escalate.js";
 export * from "./tracking/lookup.js";
 export * from "./knowledge/search.js";
 export * from "./merchant/notify.js";
@@ -72,6 +74,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   shopifyRefundRecommend as AnyTool,
   supplierReadSheetColumns as AnyTool,
   supplierAddSheetRow as AnyTool,
+  supplierEscalate as AnyTool,
   trackingLookup as AnyTool,
   knowledgeSearch as AnyTool,
   merchantNotify as AnyTool,

@@ -5,6 +5,7 @@ import {
   conversationReply,
   conversationAskCustomer,
   supplierAddSheetRow,
+  supplierEscalate,
   shopifyRefundCreate,
 } from "../src/index.js";
 
@@ -39,6 +40,12 @@ describe("tenant-facing tool metadata", () => {
       control: "permission-toggle",
     },
     {
+      tool: supplierEscalate,
+      name: "supplier.escalate",
+      displayName: "Escalate to supplier",
+      control: "permission-toggle",
+    },
+    {
       tool: shopifyRefundCreate,
       name: "refund.create",
       displayName: "Issue a refund",
@@ -55,7 +62,7 @@ describe("tenant-facing tool metadata", () => {
     });
   }
 
-  it("exposes exactly the four curated actions — everything else stays internal", () => {
+  it("exposes exactly the curated actions — everything else stays internal", () => {
     const configurable = ALL_TOOLS.filter((t) => t.tenantControl !== undefined)
       .map((t) => t.name)
       .sort();
@@ -64,6 +71,7 @@ describe("tenant-facing tool metadata", () => {
         "conversation.reply",
         "conversation.ask_customer",
         "supplier.add_sheet_row",
+        "supplier.escalate",
         "refund.create",
       ].sort(),
     );
