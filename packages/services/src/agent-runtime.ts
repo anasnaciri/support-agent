@@ -1166,6 +1166,33 @@ export const AgentRuntimeDefault = Layer.effect(
           return { type: "PausedForHumanTakeover" } as const;
         }
 
+        // 2.96. Hold events while the case is parked on the supplier. A case in
+        // `waiting_for_supplier` belongs to the warehouse until they respond, so
+        // a stray customer reply or follow-up timer must NOT re-enter the agent
+        // loop (the agent would answer the customer while the supplier still
+        // owns the case — mirrors the approval/takeover park guards above). Only
+        // `supplier.updated` (the supplier responded — the loop below drafts the
+        // customer reply) and the human-control events (`manual.takeover` /
+        // `case.resumed`) pass through.
+        if (working.status === "waiting_for_supplier") {
+          const passthrough =
+            event.type === "supplier.updated" ||
+            event.type === "manual.takeover" ||
+            event.type === "case.resumed";
+          if (!passthrough) {
+            yield* tx.run(
+              audit.record({
+                tenantId: working.tenantId,
+                caseId: working.id,
+                actor: { type: "system", id: "runtime" },
+                action: "event.held_waiting_for_supplier",
+                details: { eventType: event.type },
+              }),
+            );
+            return { type: "PausedWaitingForSupplier" } as const;
+          }
+        }
+
         // 3. Run the workflow loop.
         // Load per-tenant overrides once per tick. A handoff later in the
         // same tick reuses this map — overrides don't change mid-tick.

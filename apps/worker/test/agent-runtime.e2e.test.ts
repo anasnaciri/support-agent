@@ -799,6 +799,98 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // supplier park guard: a case in waiting_for_supplier holds stray
+  // events (a customer reply, a timer) so the agent never answers the
+  // customer while the warehouse still owns the case. Only
+  // supplier.updated / manual.takeover / case.resumed pass through.
+  // ----------------------------------------------------------------
+  it("holds a stray customer reply while waiting_for_supplier (agent loop never runs)", async () => {
+    const parkedAgent: AgentConfig = {
+      id: AgentId("parked-agent"),
+      name: "Parked",
+      description: "Parked on the supplier.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "n/a",
+      tools: [],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([parkedAgent]),
+      ToolRegistryWith([]),
+      PermissionServiceDefault,
+      // Empty script — if the guard fails and the loop runs, there's no
+      // decision to serve, so a green run proves the LLM was never consulted.
+      LLMServiceScripted([]),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: parkedAgent.id,
+            subject: "Where is my order?",
+            threadId: "thread-p" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          yield* repo.transitionStatus(created.id, "waiting_for_supplier", {
+            reason: "test setup",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-p" as never,
+              messageId: "msg-2",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Any update??",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).toContain("event.held_waiting_for_supplier");
+    expect(actions).not.toContain("llm.decision");
+  });
+
+  // ----------------------------------------------------------------
   // order-status-agent with `tracking.lookup` in the chain. The agent
   // fetches the order, sees a tracking number, calls tracking.lookup
   // (which TrackingServiceTest returns a synthetic "live" status for),
