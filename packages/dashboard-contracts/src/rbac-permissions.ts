@@ -29,7 +29,13 @@ export type RbacPermissionId =
   | "settings.notifications"
   | "audit.view"
   | "members.manage"
-  | "account.manage";
+  | "account.manage"
+  // Supplier portal — the heavily-constrained external role. A supplier sees
+  // ONLY cases escalated to them and can ONLY post a supplier update. Kept
+  // separate from every merchant `cases.*` permission so a Supplier role grants
+  // no merchant surface (and the api gates supplier endpoints on these alone).
+  | "supplier.cases.view"
+  | "supplier.cases.respond";
 
 export type RbacPermissionCategory =
   | "Cases"
@@ -37,7 +43,8 @@ export type RbacPermissionCategory =
   | "Knowledge"
   | "Settings"
   | "Members"
-  | "Audit";
+  | "Audit"
+  | "Supplier";
 
 export interface RbacPermissionDef {
   readonly id: RbacPermissionId;
@@ -177,6 +184,21 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     label: "Manage members & roles",
     description: "Invite teammates, assign roles, and edit role permissions.",
     category: "Members",
+  },
+  // ---- Supplier ----
+  {
+    id: "supplier.cases.view",
+    label: "View escalated cases",
+    description: "See the cases a merchant has escalated to this supplier.",
+    category: "Supplier",
+  },
+  {
+    id: "supplier.cases.respond",
+    label: "Respond to escalated cases",
+    description:
+      "Post an update or resolution on a case escalated to this supplier.",
+    category: "Supplier",
+    implies: ["supplier.cases.view"],
   },
 ];
 

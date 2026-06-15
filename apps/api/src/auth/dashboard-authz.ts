@@ -49,6 +49,41 @@ export const decideAuthz = (
     : { ok: false, status: 403, error: "forbidden" };
 };
 
+/**
+ * Supplier-endpoint authorization — deliberately STRICTER than decideAuthz. A
+ * supplier is an external party with a heavily-constrained Supplier role, so
+ * supplier endpoints must NOT honor open mode (a real supplier always has an
+ * explicit assignment row) and must require a `supplier.cases.*` permission. A
+ * merchant member who lacks those is denied; an owner may preview.
+ *
+ * - No acting user id → 401.
+ * - Not assigned in this workspace → 403 (the open-mode bypass that decideAuthz
+ *   grants must never reach a supplier endpoint).
+ * - Owner → allow.
+ * - Otherwise the member's effective (implication-expanded) permissions must
+ *   include `required`.
+ */
+export const decideSupplierAuthz = (
+  access: MemberAccess,
+  userDecisionUuid: string | undefined,
+  required: RbacPermissionId,
+): AuthzDecision => {
+  if (!userDecisionUuid) {
+    return { ok: false, status: 401, error: "missing_user" };
+  }
+  if (!access.assigned) {
+    return { ok: false, status: 403, error: "forbidden" };
+  }
+  if (access.isOwner) return { ok: true };
+  const perms = effectivePermissions({
+    isOwner: false,
+    grantedIds: access.grantedIds,
+  });
+  return perms.has(required)
+    ? { ok: true }
+    : { ok: false, status: 403, error: "forbidden" };
+};
+
 export interface SessionPermissions {
   readonly isOwner: boolean;
   readonly permissions: ReadonlyArray<RbacPermissionId>;

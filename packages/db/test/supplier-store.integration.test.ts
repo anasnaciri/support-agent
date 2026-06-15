@@ -7,7 +7,9 @@ import {
   caseStateTransitions,
   cases,
   createSupplier,
+  ensureSupplierRole,
   getDefaultSupplier,
+  listRoles,
   getEscalationForSupplier,
   getSupplierByEmail,
   getSupplierForUser,
@@ -268,5 +270,21 @@ describeIfDb("supplier-store", () => {
       actorUuid: randomUUID(),
     });
     expect(res.kind).toBe("not_found");
+  });
+
+  it("ensureSupplierRole creates a non-owner Supplier role granting the supplier perms (idempotent)", async () => {
+    const tenantId = await seedTenant();
+    const a = await ensureSupplierRole(db, tenantId);
+    const b = await ensureSupplierRole(db, tenantId);
+    expect(a).toBe(b);
+    const supplierRoles = (await listRoles(db, tenantId)).filter(
+      (r) => r.name === "Supplier",
+    );
+    expect(supplierRoles).toHaveLength(1);
+    expect(supplierRoles[0]!.isOwner).toBe(false);
+    expect([...supplierRoles[0]!.permissionIds].sort()).toEqual([
+      "supplier.cases.respond",
+      "supplier.cases.view",
+    ]);
   });
 });

@@ -6,6 +6,8 @@ import {
   caseStateTransitions,
   caseSupplierEscalations,
   cases,
+  rolePermissions,
+  roles,
   suppliers,
 } from "./schema.js";
 
@@ -19,6 +21,64 @@ import {
 // columns on `case_supplier_escalations` — never a join back to `cases` /
 // customer tables. The supplier sees the problem + order ref + ship-to +
 // tracking, never the customer email, full address, or conversation thread.
+
+// ---------------------------------------------------------------------------
+// The constrained Supplier role
+// ---------------------------------------------------------------------------
+
+const SUPPLIER_ROLE_NAME = "Supplier";
+const SUPPLIER_PERMISSION_IDS = [
+  "supplier.cases.view",
+  "supplier.cases.respond",
+] as const;
+
+const supplierRoleId = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<string | null> => {
+  const rows = await db
+    .select({ id: roles.id })
+    .from(roles)
+    .where(
+      and(
+        eq(roles.tenantId, tenantId),
+        sql`lower(${roles.name}) = lower(${SUPPLIER_ROLE_NAME})`,
+      ),
+    )
+    .limit(1);
+  return rows[0]?.id ?? null;
+};
+
+/**
+ * Ensure the workspace has the constrained, non-owner "Supplier" role granting
+ * exactly the supplier.cases.* permissions. Idempotent — called lazily from the
+ * supplier-invite endpoint so any workspace gets the role on first supplier
+ * invite (no migration backfill). Returns the role id.
+ */
+export const ensureSupplierRole = async (
+  db: DrizzleDb,
+  tenantId: string,
+): Promise<string> => {
+  let roleId = await supplierRoleId(db, tenantId);
+  if (!roleId) {
+    const id = randomUUID();
+    await db
+      .insert(roles)
+      .values({ id, tenantId, name: SUPPLIER_ROLE_NAME, isOwner: false })
+      .onConflictDoNothing();
+    roleId = (await supplierRoleId(db, tenantId)) ?? id;
+  }
+  await db
+    .insert(rolePermissions)
+    .values(
+      SUPPLIER_PERMISSION_IDS.map((permissionId) => ({
+        roleId: roleId as string,
+        permissionId,
+      })),
+    )
+    .onConflictDoNothing();
+  return roleId;
+};
 
 // ---------------------------------------------------------------------------
 // Supplier identity
