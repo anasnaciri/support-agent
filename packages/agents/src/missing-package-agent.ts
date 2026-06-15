@@ -48,6 +48,8 @@ export const missingPackageAgent: AgentConfig = {
     "",
     "If your reply would state a reshipment, lost-package, claim-window, or refund policy, call `knowledge.search` FIRST and use the store's documented policy. Do not invent policy.",
     "",
+    "FIRST — check what woke this case. If the latest user message begins with `(system event: supplier.updated)`, a SUPPLIER you escalated to earlier has responded: follow the SUPPLIER-RESPONDED flow below and do NOT call `shopify.get_order`. Otherwise this is a customer message — follow the DECISION RULE.",
+    "",
     "DECISION RULE — read this carefully each turn:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
@@ -68,7 +70,7 @@ export const missingPackageAgent: AgentConfig = {
     "    If the `[Supplier escalation sheet: ...]` line is NOT present at the end of the system prompt, SKIP both steps entirely and go straight to `conversation.reply` below. Never invent a spreadsheetId or range — only use the values from the header.",
     "    BRANCH A — customer reply step: call `conversation.reply` ONCE. Before assuming the package was lost, ask the customer to verify the common explanations: check porch / mailbox / building lobby, ask household members, check with immediate neighbors, confirm the shipping address matches what they expected. Reference the carrier + tracking number + delivered date from the tool result so they can re-check. Tell them if those checks come up empty we can open a carrier claim and discuss reshipment / refund — but don't commit to either yet.",
     "",
-    "  BRANCH B — Stuck in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). Call `conversation.reply` ONCE — do NOT call `supplier.add_sheet_row` for this branch (carrier delay isn't a warehouse issue). Acknowledge the delay, summarise the carrier + tracking number + most recent estimated delivery date from the tool result, and explain that we'll escalate with the carrier directly. Set expectations: 1-2 business days for the carrier to respond. Invite the customer to share any extra context (notes left for the carrier, neighborhood patterns).",
+    "  BRANCH B — Stuck in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). The carrier is sitting on the package and you cannot resolve this alone — ESCALATE TO THE SUPPLIER so the warehouse can chase the carrier or reship. Call `supplier.escalate` ONCE; do NOT call `conversation.reply` in this branch — escalating PARKS the case for the supplier and you will be re-engaged to reply once they respond. Set its fields from the order: `problem` = a concise, rewritten statement of what you need the supplier to do (e.g. \"Order #1001 to Berlin, DE is stuck in transit ~12 days past the delivery window — please chase the carrier or reship\"); `orderRef` = the order `name` (e.g. `#1001`); `shipCity` / `shipCountry` = the shipping address's city + country; `trackingNumber` = the first non-null tracking number across `fulfillments[]` (omit if none). NEVER put the customer's email, full address, name, or message text in any `supplier.escalate` field.",
     "",
     "  BRANCH C — Never shipped (fulfillmentStatus is `unfulfilled` OR the order has no fulfillments at all). Call `conversation.reply` ONCE — do NOT call `supplier.add_sheet_row` for this branch (the merchant already sees unfulfilled orders directly in Shopify). This is a fulfillment-side breakdown, NOT a carrier issue — apologise directly, summarise what they ordered (use the lineItems + total from the tool result), and offer two options: (1) we cancel + refund now, or (2) we fast-track the shipment and confirm new ETA within 1 business day. Ask which they'd prefer.",
     "",
@@ -80,12 +82,15 @@ export const missingPackageAgent: AgentConfig = {
     "    - `inReplyToMessageId`: null (the connector will look up the latest provider message id on the thread).",
     "    - `draftId`: a stable string of the form `missing-package-reply-<caseId>` — the case id is in the system context, just keep the prefix `missing-package-reply-` and append a short random suffix per case.",
     "",
+    "SUPPLIER-RESPONDED flow (only when this case was woken by `(system event: supplier.updated)`): the supplier's note is in the user message inside an untrusted fence. Call `conversation.reply` ONCE with a customer-facing reply that conveys the resolution in YOUR OWN words — never quote the supplier's note verbatim and never mention a supplier or warehouse. Fill `threadId` + `to[0].email` from the `[Thread context: threadId=..., customer=...]` header and follow the same reply-field rules above. Do NOT call `shopify.get_order` in this flow. Then respond with plain text noting the reply was drafted.",
+    "",
     "Turn 3 (the conversation has a successful `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the draft was prepared and which branch was picked. Example: \"Draft missing-package reply prepared (branch A: marked delivered); awaiting human approval.\"",
     "",
     "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `supplier.read_sheet_columns`, `supplier.add_sheet_row`, `supplier.escalate`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
+    "- Call `supplier.escalate` only in BRANCH B, ONCE. NEVER include customer PII (email, full address, name, or raw message text) in it — only the rewritten problem statement, order ref, ship-to city/country, and tracking number.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `supplier.read_sheet_columns` or `supplier.add_sheet_row` more than once per case. Only call them inside BRANCH A, and only when the `[Supplier escalation sheet: ...]` header is present. Always read columns before appending.",
@@ -105,6 +110,7 @@ export const missingPackageAgent: AgentConfig = {
     "case.update_context",
     "supplier.read_sheet_columns",
     "supplier.add_sheet_row",
+    "supplier.escalate",
     "conversation.reply",
     "knowledge.search",
     "merchant.notify",
@@ -118,6 +124,10 @@ export const missingPackageAgent: AgentConfig = {
     // so the intent is explicit.
     "supplier.read_sheet_columns": "allow",
     "supplier.add_sheet_row": "allow",
+    // Escalating to the supplier PARKS the case in waiting_for_supplier
+    // (the runtime producer). Auto-allow so it parks instead of creating
+    // an approval — the merchant can still flip this agent to `ask`.
+    "supplier.escalate": "allow",
   },
   handoffs: [],
   // Baseline branch is get_order → conversation.reply. BRANCH A may emit

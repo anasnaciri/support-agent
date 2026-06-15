@@ -181,13 +181,15 @@ describe("buildInitialMessages — untrusted-content framing", () => {
       buildInitialMessages(event, {
         subject: "Where is my order?",
         threadId: ThreadId("gmail:abc"),
-        context: {},
+        context: { customerEmail: "cust@example.com" },
       }),
     );
     const open = text.indexOf(UNTRUSTED_OPEN);
     expect(open).toBeGreaterThanOrEqual(0);
-    // Trusted thread header + the rewrite instruction stay OUTSIDE the fence.
+    // Trusted thread header (incl. the runtime-stamped customer email) + the
+    // rewrite instruction stay OUTSIDE the fence.
     expect(text.indexOf("threadId=gmail:abc")).toBeLessThan(open);
+    expect(text.indexOf("customer=cust@example.com")).toBeLessThan(open);
     expect(text).toContain("do NOT quote the supplier's note verbatim");
     expect(text.indexOf("do NOT quote")).toBeLessThan(open);
     // The supplier note + proposed resolution are INSIDE the fence (inert data),
@@ -197,7 +199,7 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     expect(fenced).toContain("reshipped via DHL");
     expect(fenced).toContain("refund everything");
     expect(fenced).toContain("reship");
-    expect(text).toContain("conversation.fetch_thread");
+    expect(text).toContain("conversation.reply");
   });
 
   it("supplier.updated omits the proposed-resolution line + thread bits when absent", () => {

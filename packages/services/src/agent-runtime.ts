@@ -294,8 +294,18 @@ export const buildInitialMessages = (
     // trusted thread header stays OUTSIDE the fence so the agent can still wire
     // conversation.* tools.
     const parts: string[] = [];
+    // The customer email is runtime-stamped on the case context (trusted), so
+    // the agent can address conversation.reply without a thread fetch.
+    const customerEmail =
+      typeof caseRow.context["customerEmail"] === "string"
+        ? (caseRow.context["customerEmail"] as string)
+        : null;
     if (caseRow.threadId) {
-      parts.push(`[Thread context: threadId=${caseRow.threadId}]`);
+      parts.push(
+        customerEmail
+          ? `[Thread context: threadId=${caseRow.threadId}, customer=${customerEmail}]`
+          : `[Thread context: threadId=${caseRow.threadId}]`,
+      );
     }
     parts.push(
       "(system event: supplier.updated)",
@@ -314,7 +324,7 @@ export const buildInitialMessages = (
     );
     if (caseRow.threadId) {
       parts.push(
-        "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then send the customer reply.",
+        "Send the customer reply with conversation.reply, using the threadId and customer address from the header above.",
       );
     }
     return [{ role: "user", content: parts.join("\n\n") }];

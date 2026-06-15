@@ -2824,6 +2824,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         // supplierEscalationSheet configured in this test).
         supplierReadSheetColumns as never,
         supplierAddSheetRow as never,
+        supplierEscalate as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(missingPackageScript),
@@ -3054,6 +3055,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         conversationReply as never,
         supplierReadSheetColumns as never,
         supplierAddSheetRow as never,
+        supplierEscalate as never,
       ]),
       PermissionServiceDefault,
       LLMServiceScripted(script),

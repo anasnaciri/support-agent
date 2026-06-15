@@ -20,6 +20,7 @@ describe("missing-package-agent config", () => {
       "case.update_context",
       "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
+      "supplier.escalate",
       "conversation.reply",
       "knowledge.search",
       "merchant.notify",
@@ -36,6 +37,11 @@ describe("missing-package-agent config", () => {
       missingPackageAgent.permissionOverrides["supplier.read_sheet_columns"],
     ).toBe("allow");
     expect(missingPackageAgent.permissionOverrides["supplier.add_sheet_row"]).toBe(
+      "allow",
+    );
+    // Escalating to the supplier parks the case in waiting_for_supplier — it
+    // must be auto-allowed so it parks instead of creating an approval.
+    expect(missingPackageAgent.permissionOverrides["supplier.escalate"]).toBe(
       "allow",
     );
     // BRANCH A reads the sheet's own columns before appending, rather
