@@ -10,6 +10,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { SubmitButton } from "@/components/ui/submit-button";
 
 import { connectImapAction, type ImapConnectState } from "./actions";
+import { passwordGuidanceForFailure } from "./connect-plan";
 
 const OAUTH_LABEL = { google: "Google", outlook: "Microsoft" } as const;
 
@@ -34,13 +35,17 @@ export const ImapConnectForm = () => {
     state?.error === "missing_hosts" ||
     discovered !== undefined;
   const prefill = discovered?.settings;
+  const failureGuidance =
+    state?.error === "imap_connect_failed"
+      ? passwordGuidanceForFailure(discovered ?? null)
+      : null;
 
   return (
     <form action={formAction} className="space-y-5">
       {state?.error === "missing_fields" ? (
         <Alert variant="warning">
           <AlertDescription>
-            Email address and app password are required.
+            Email address and password are required.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -81,35 +86,22 @@ export const ImapConnectForm = () => {
           </AlertDescription>
         </Alert>
       ) : null}
-      {state?.error === "imap_connect_failed" ? (
+      {failureGuidance ? (
         <Alert variant="warning">
           <AlertTitle>Couldn&apos;t sign in</AlertTitle>
           <AlertDescription>
-            {discovered ? (
-              <>
-                We found the server settings
-                {discovered.providerName ? (
-                  <> for <strong>{discovered.providerName}</strong></>
-                ) : null}{" "}
-                but signing in failed — double-check the app password.{" "}
-                {discovered.appPasswordUrl ? (
-                  <a
-                    href={discovered.appPasswordUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-primary hover:underline"
-                  >
-                    Create an app password
-                  </a>
-                ) : null}
-              </>
-            ) : (
-              <>
-                We couldn&apos;t sign in with those details. Check the server
-                settings and app password.
-              </>
-            )}
-            {state.detail ? (
+            {failureGuidance.message}{" "}
+            {failureGuidance.link ? (
+              <a
+                href={failureGuidance.link.href}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                {failureGuidance.link.label}
+              </a>
+            ) : null}
+            {state?.detail ? (
               <span className="mt-1 block text-xs opacity-90">
                 {state.detail}
               </span>
@@ -174,7 +166,7 @@ export const ImapConnectForm = () => {
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="password">App password</Label>
+        <Label htmlFor="password">Password</Label>
         <Input
           id="password"
           name="password"
@@ -184,8 +176,9 @@ export const ImapConnectForm = () => {
           disabled={pending}
         />
         <p className="text-xs text-muted-foreground">
-          An app password from your email provider — usually created under
-          security settings. Not your normal sign-in password.
+          Your mailbox password. Some providers (Fastmail, Zoho, Yahoo,
+          iCloud…) need an app password created in their security settings
+          instead — we&apos;ll tell you if yours does.
         </p>
       </div>
 

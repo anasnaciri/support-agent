@@ -208,6 +208,29 @@ describe("presetForMxHost", () => {
   it("returns null for unknown hosts", () => {
     expect(presetForMxHost("mx1.totally-unknown.example")).toBeNull();
   });
+
+  // Namecheap IMAP/SMTP signs in with the *normal* mailbox password; an
+  // app-specific password is only needed once 2FA is on (and the app-password
+  // picker there has no plain "IMAP" entry). Flag it so the form stops telling
+  // merchants they must create an app password.
+  it("flags Namecheap as normal-password with a 2FA app-password fallback", () => {
+    const preset = presetForMxHost("mx1.privateemail.com");
+    expect(preset?.passwordHint).toBe("app_password_if_2fa");
+    expect(preset?.appPasswordUrl).toContain("namecheap");
+  });
+
+  it("flags Zoho and Fastmail as app-password providers", () => {
+    expect(presetForMxHost("mx.zoho.com")?.passwordHint).toBe("app_password");
+    expect(
+      presetForMxHost("in1-smtp.messagingengine.com")?.passwordHint,
+    ).toBe("app_password");
+  });
+
+  it("flags plain mailbox-password hosts as regular", () => {
+    expect(presetForMxHost("mailstore1.secureserver.net")?.passwordHint).toBe(
+      "regular",
+    );
+  });
 });
 
 describe("registrableDomain", () => {
@@ -278,6 +301,21 @@ describe("discoverImapSettings", () => {
     expect(
       result.kind === "settings" ? result.appPasswordUrl : null,
     ).toContain("zoho");
+    expect(
+      result.kind === "settings" ? result.passwordHint : null,
+    ).toBe("app_password");
+  });
+
+  it("marks ISPDB providers with no known app-password page as regular", async () => {
+    const result = await discoverImapSettings("shop@examplemail.net", {
+      ...NO_IO,
+      fetchText: async (url: string) =>
+        url === ispdbUrl("examplemail.net") ? STARTTLS_LOCALPART_XML : null,
+    });
+    expect(result).toMatchObject({
+      kind: "settings",
+      passwordHint: "regular",
+    });
   });
 
   it("detects Google Workspace custom domains via MX and points at OAuth", async () => {
@@ -343,6 +381,7 @@ describe("discoverImapSettings", () => {
       source: "guess",
       providerName: null,
       appPasswordUrl: null,
+      passwordHint: "regular",
       settings: {
         imapHost: "imap.mystore.com",
         imapPort: 993,

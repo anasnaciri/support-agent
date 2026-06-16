@@ -37,6 +37,17 @@ export interface DiscoveredSettings {
 
 export type OAuthMailProvider = "google" | "outlook";
 
+/**
+ * What kind of password this provider expects for IMAP/SMTP sign-in, so the
+ * form's copy can stop assuming everyone needs an "app password":
+ *  - `regular`             — the normal mailbox password (custom domains, OVH…)
+ *  - `app_password`        — a security-settings app password is required
+ *                            (Fastmail, Zoho, Yahoo, iCloud…)
+ *  - `app_password_if_2fa` — the normal password works; an app password is
+ *                            only needed once two-factor auth is on (Namecheap)
+ */
+export type PasswordHint = "regular" | "app_password" | "app_password_if_2fa";
+
 export type ImapDiscovery =
   | { readonly kind: "oauth"; readonly provider: OAuthMailProvider }
   | {
@@ -44,6 +55,7 @@ export type ImapDiscovery =
       readonly source: "ispdb" | "mx" | "guess";
       readonly providerName: string | null;
       readonly appPasswordUrl: string | null;
+      readonly passwordHint: PasswordHint;
       readonly settings: DiscoveredSettings;
     }
   | { readonly kind: "unknown" };
@@ -126,10 +138,18 @@ const APP_PASSWORD_URLS: Readonly<Record<string, string>> = {
   "aol.com": "https://help.aol.com/articles/Create-and-manage-app-password",
   "apple.com": "https://support.apple.com/102654",
   "icloud.com": "https://support.apple.com/102654",
+  "privateemail.com":
+    "https://www.namecheap.com/support/knowledgebase/article.aspx/10374/2178/how-to-set-up-applicationspecific-password-for-private-email/",
 };
 
 export const appPasswordUrlFor = (providerId: string): string | null =>
   APP_PASSWORD_URLS[providerId.toLowerCase()] ?? null;
+
+// ISPDB and pattern-guess paths don't carry a provider-specific policy, so
+// derive the hint from whether we know an app-password page: known providers
+// (Fastmail, Zoho, …) require one; everything else uses the mailbox password.
+const hintFromAppPasswordUrl = (url: string | null): PasswordHint =>
+  url ? "app_password" : "regular";
 
 // ============================================================
 // ISPDB clientConfig XML parsing
@@ -234,6 +254,7 @@ interface MxPreset {
   readonly providerName: string;
   /** Key into APP_PASSWORD_URLS (when the provider needs app passwords). */
   readonly appPasswordProvider: string | null;
+  readonly passwordHint: PasswordHint;
   readonly imapHost: string;
   readonly smtpHost: string;
   readonly smtpPort?: number;
@@ -243,7 +264,10 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
   {
     suffix: "privateemail.com",
     providerName: "Namecheap Private Email",
-    appPasswordProvider: null,
+    // IMAP/SMTP take the normal mailbox password; the app-password picker has
+    // no "IMAP" entry and is only needed once 2FA is enabled.
+    appPasswordProvider: "privateemail.com",
+    passwordHint: "app_password_if_2fa",
     imapHost: "mail.privateemail.com",
     smtpHost: "mail.privateemail.com",
   },
@@ -251,6 +275,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "zoho.com",
     providerName: "Zoho Mail",
     appPasswordProvider: "zoho.com",
+    passwordHint: "app_password",
     imapHost: "imap.zoho.com",
     smtpHost: "smtp.zoho.com",
   },
@@ -258,6 +283,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "zoho.eu",
     providerName: "Zoho Mail",
     appPasswordProvider: "zoho.com",
+    passwordHint: "app_password",
     imapHost: "imap.zoho.eu",
     smtpHost: "smtp.zoho.eu",
   },
@@ -265,6 +291,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "zoho.in",
     providerName: "Zoho Mail",
     appPasswordProvider: "zoho.com",
+    passwordHint: "app_password",
     imapHost: "imap.zoho.in",
     smtpHost: "smtp.zoho.in",
   },
@@ -272,6 +299,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "messagingengine.com",
     providerName: "Fastmail",
     appPasswordProvider: "fastmail.com",
+    passwordHint: "app_password",
     imapHost: "imap.fastmail.com",
     smtpHost: "smtp.fastmail.com",
   },
@@ -279,13 +307,17 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "secureserver.net",
     providerName: "GoDaddy Email",
     appPasswordProvider: null,
+    passwordHint: "regular",
     imapHost: "imap.secureserver.net",
     smtpHost: "smtpout.secureserver.net",
   },
   {
     suffix: "mx.yandex.net",
     providerName: "Yandex Mail",
+    // Yandex blocks the account password over IMAP — an app password is
+    // mandatory — but we have no stable deep link, so leave the URL null.
     appPasswordProvider: null,
+    passwordHint: "app_password",
     imapHost: "imap.yandex.com",
     smtpHost: "smtp.yandex.com",
   },
@@ -293,6 +325,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "mail.ovh.net",
     providerName: "OVHcloud Mail",
     appPasswordProvider: null,
+    passwordHint: "regular",
     imapHost: "ssl0.ovh.net",
     smtpHost: "ssl0.ovh.net",
   },
@@ -300,6 +333,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "ionos.de",
     providerName: "IONOS",
     appPasswordProvider: null,
+    passwordHint: "regular",
     imapHost: "imap.ionos.de",
     smtpHost: "smtp.ionos.de",
   },
@@ -307,6 +341,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
     suffix: "ionos.com",
     providerName: "IONOS",
     appPasswordProvider: null,
+    passwordHint: "regular",
     imapHost: "imap.ionos.com",
     smtpHost: "smtp.ionos.com",
   },
@@ -315,6 +350,7 @@ const MX_PRESETS: ReadonlyArray<MxPreset> = [
 export interface MxPresetMatch {
   readonly providerName: string;
   readonly appPasswordUrl: string | null;
+  readonly passwordHint: PasswordHint;
   readonly settings: DiscoveredSettings;
 }
 
@@ -327,6 +363,7 @@ export const presetForMxHost = (mxHost: string): MxPresetMatch | null => {
       appPasswordUrl: preset.appPasswordProvider
         ? appPasswordUrlFor(preset.appPasswordProvider)
         : null,
+      passwordHint: preset.passwordHint,
       settings: {
         imapHost: preset.imapHost,
         imapPort: 993,
@@ -371,11 +408,13 @@ const ispdbLookup = async (
   if (!xml) return null;
   const parsed = parseIspdbXml(xml, email);
   if (!parsed) return null;
+  const appPasswordUrl = appPasswordUrlFor(
+    parsed.providerId ?? registrableDomain(parsed.settings.imapHost) ?? "",
+  );
   return {
     providerName: parsed.providerName,
-    appPasswordUrl: appPasswordUrlFor(
-      parsed.providerId ?? registrableDomain(parsed.settings.imapHost) ?? "",
-    ),
+    appPasswordUrl,
+    passwordHint: hintFromAppPasswordUrl(appPasswordUrl),
     settings: parsed.settings,
   };
 };
@@ -442,6 +481,7 @@ export const discoverImapSettings = async (
       source: "guess",
       providerName: null,
       appPasswordUrl: null,
+      passwordHint: "regular",
       settings: {
         imapHost,
         imapPort: 993,

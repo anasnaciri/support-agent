@@ -303,6 +303,22 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   `imap-connect-plan.test.ts` left UNCOMMITTED — they ride with the in-flight IMAP-discovery/logos WIP in
   those same files. Follow-up: approvals "risk: low" badges kept (plain words); `PROVIDER_LABELS.imap`
   ("IMAP / SMTP") kept as the integrations-card name on purpose.
+- **2026-06-16 — IMAP password guidance made provider-aware (TDD):** the connect form stopped
+  telling every merchant they need an "app password" — the bug that confused a Namecheap Private
+  Email setup, where IMAP/SMTP sign in with the *normal* mailbox password and the app-password
+  picker has no IMAP entry (it's only for 2FA). New `PasswordHint`
+  (`regular | app_password | app_password_if_2fa`) on the `settings` variant of `ImapDiscovery`
+  (`apps/api/src/features/mailbox/imap-discovery.ts`): per-MX-preset (Namecheap→`app_password_if_2fa`
+  + new Namecheap app-password KB URL; Zoho/Fastmail/Yandex→`app_password`; GoDaddy/OVH/IONOS→`regular`),
+  ISPDB/guess derive from app-password-URL presence (`hintFromAppPasswordUrl`, guess→`regular`). The
+  discover endpoint already returns the discovery object verbatim, so no handler change. Dashboard:
+  pure `passwordGuidanceForFailure(discovered)` in `connect/imap/connect-plan.ts` maps the hint to
+  accurate failure copy (`regular`→"use your normal mailbox password, not an app password"; `_if_2fa`→
+  "only if you've turned on two-factor"; `app_password`→needs one + "Create an app password" link when
+  a URL exists). Form relabeled **App password → Password** with a neutral helper; page intro + the
+  failure alert now route through the helper. +9 tests (6 discovery, "+" guidance suite of 6 incl.
+  fixture). `pnpm build`, dashboard `tsc --noEmit`, api+dashboard vitest 609 passed. NOT committed yet
+  / branch `feat/supplier-portal`.
 - **2026-06-12 — IMAP connect form simplified to email + app password (TDD):** `/connect/imap` no longer
   shows host/port/security by default — server settings are autodiscovered. New pure
   `apps/api/src/imap-discovery.ts` (29 tests), chain ordered first-hit-wins: (1) OAuth-provider detection —

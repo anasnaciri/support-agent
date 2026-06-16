@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   friendlyConnectDetail,
+  passwordGuidanceForFailure,
   planImapConnect,
+  type DiscoveredPrefill,
   type ImapDiscoveryResponse,
   type ImapFormValues,
 } from "../app/connect/imap/connect-plan";
@@ -30,6 +32,7 @@ const settingsDiscovery: ImapDiscoveryResponse = {
   source: "ispdb",
   providerName: "Zoho Mail",
   appPasswordUrl: "https://accounts.zoho.com/home#security",
+  passwordHint: "app_password",
   settings: {
     imapHost: "imap.zoho.com",
     imapPort: 993,
@@ -203,5 +206,89 @@ describe("friendlyConnectDetail", () => {
     ).toBeNull();
     expect(friendlyConnectDetail(undefined)).toBeNull();
     expect(friendlyConnectDetail("")).toBeNull();
+  });
+});
+
+// After a failed sign-in the form tailors its hint to what the provider
+// actually expects, instead of always telling merchants to make an app
+// password (the bug that confused Namecheap users — their IMAP login is just
+// the normal mailbox password).
+describe("passwordGuidanceForFailure", () => {
+  const prefill = (over: Partial<DiscoveredPrefill> = {}): DiscoveredPrefill => ({
+    kind: "settings",
+    source: "mx",
+    providerName: "Example Mail",
+    appPasswordUrl: null,
+    passwordHint: "regular",
+    settings: {
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp.example.com",
+      smtpPort: 465,
+      smtpSecure: true,
+      username: null,
+    },
+    ...over,
+  });
+
+  it("gives generic guidance with no link when discovery is absent", () => {
+    const g = passwordGuidanceForFailure(null);
+    expect(g.link).toBeNull();
+    expect(g.message).toMatch(/server settings/i);
+  });
+
+  it("tells regular-password providers to use their normal password", () => {
+    const g = passwordGuidanceForFailure(
+      prefill({ providerName: "OVHcloud Mail", passwordHint: "regular" }),
+    );
+    expect(g.message).toMatch(/normal/i);
+    expect(g.message).toMatch(/not an app password/i);
+    expect(g.link).toBeNull();
+  });
+
+  it("points app-password providers at their help page", () => {
+    const g = passwordGuidanceForFailure(
+      prefill({
+        providerName: "Zoho Mail",
+        passwordHint: "app_password",
+        appPasswordUrl: "https://accounts.zoho.com/home#security",
+      }),
+    );
+    expect(g.message).toMatch(/app password/i);
+    expect(g.link).toEqual({
+      href: "https://accounts.zoho.com/home#security",
+      label: "Create an app password",
+    });
+  });
+
+  it("omits the link when an app-password provider has no help url", () => {
+    const g = passwordGuidanceForFailure(
+      prefill({ providerName: "Yandex Mail", passwordHint: "app_password" }),
+    );
+    expect(g.message).toMatch(/app password/i);
+    expect(g.link).toBeNull();
+  });
+
+  it("explains the 2FA-only app-password case (Namecheap)", () => {
+    const g = passwordGuidanceForFailure(
+      prefill({
+        providerName: "Namecheap Private Email",
+        passwordHint: "app_password_if_2fa",
+        appPasswordUrl: "https://www.namecheap.com/support/app-password",
+      }),
+    );
+    expect(g.message).toMatch(/normal/i);
+    expect(g.message).toMatch(/two-factor|2fa/i);
+    expect(g.link?.label).toBe("Create an app password");
+  });
+
+  it("names the provider when known, falling back gracefully otherwise", () => {
+    expect(
+      passwordGuidanceForFailure(prefill({ providerName: "Zoho Mail" })).message,
+    ).toContain("Zoho Mail");
+    expect(
+      passwordGuidanceForFailure(prefill({ providerName: null })).message,
+    ).toMatch(/your provider|your mail provider/i);
   });
 });

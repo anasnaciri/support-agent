@@ -19,6 +19,9 @@ export interface DiscoveredImapSettings {
   readonly username: string | null;
 }
 
+/** Mirror of the api's `PasswordHint` (imap-discovery.ts). */
+export type PasswordHint = "regular" | "app_password" | "app_password_if_2fa";
+
 /** Mirror of the api's `ImapDiscovery` response. */
 export type ImapDiscoveryResponse =
   | { readonly kind: "oauth"; readonly provider: "google" | "outlook" }
@@ -27,6 +30,7 @@ export type ImapDiscoveryResponse =
       readonly source: "ispdb" | "mx" | "guess";
       readonly providerName: string | null;
       readonly appPasswordUrl: string | null;
+      readonly passwordHint: PasswordHint;
       readonly settings: DiscoveredImapSettings;
     }
   | { readonly kind: "unknown" };
@@ -35,6 +39,52 @@ export type DiscoveredPrefill = Extract<
   ImapDiscoveryResponse,
   { kind: "settings" }
 >;
+
+export interface PasswordGuidance {
+  readonly message: string;
+  readonly link: { readonly href: string; readonly label: string } | null;
+}
+
+/**
+ * Copy for the "couldn't sign in" alert, tailored to what the detected
+ * provider actually wants — so we stop telling every merchant to create an
+ * app password. Namecheap & co. sign in with the normal mailbox password;
+ * only Fastmail/Zoho/Yahoo/… genuinely require an app password.
+ */
+export const passwordGuidanceForFailure = (
+  discovered: DiscoveredPrefill | null,
+): PasswordGuidance => {
+  if (!discovered) {
+    return {
+      message:
+        "We couldn't sign in with those details. Check the server settings and password.",
+      link: null,
+    };
+  }
+  const provider = discovered.providerName ?? "your mail provider";
+  const appPasswordLink = discovered.appPasswordUrl
+    ? { href: discovered.appPasswordUrl, label: "Create an app password" }
+    : null;
+
+  switch (discovered.passwordHint) {
+    case "regular":
+      return {
+        message: `We found the settings for ${provider} but sign-in failed. Use your normal mailbox password — not an app password — and double-check it.`,
+        link: null,
+      };
+    case "app_password_if_2fa":
+      return {
+        message: `We found the settings for ${provider} but sign-in failed. Use your normal mailbox password. Only create an app password if you've turned on two-factor authentication.`,
+        link: appPasswordLink,
+      };
+    case "app_password":
+    default:
+      return {
+        message: `We found the settings for ${provider} but sign-in failed. ${provider} needs an app password created in its security settings, not your normal password.`,
+        link: appPasswordLink,
+      };
+  }
+};
 
 /** Raw (string) values as read from the form's FormData. */
 export interface ImapFormValues {
