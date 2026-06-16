@@ -1957,14 +1957,20 @@ export const AgentRuntimeDefault = Layer.effect(
               );
               return { type: "PausedWaitingForCustomer" } as const;
             }
-            if (tool.name === "supplier.escalate") {
-              // Producer for `waiting_for_supplier` (mirror of ask_customer).
-              // The escalation row was written by the tool's service; here we
-              // park the case + audit in one tx, then end the tick. The case
-              // re-engages on `supplier.updated` (the consumer). This branch
-              // only runs when the escalate tool resolved to `allow`
-              // (per-agent) — under the default `ask`, the permission gate
-              // above parks in waiting_for_approval instead.
+            if (
+              tool.name === "supplier.escalate" &&
+              (exec.right as { readonly escalated?: boolean }).escalated === true
+            ) {
+              // Producer for `waiting_for_supplier` (mirror of ask_customer) —
+              // ONLY when a supplier was actually found (`escalated: true`). A
+              // `no_supplier` result falls through to the generic tool-result
+              // push below so the agent reads it and falls back to a direct
+              // reply (it must NOT park a case nobody is working). The escalation
+              // row was written by the tool's service; here we park the case +
+              // audit in one tx, then end the tick. The case re-engages on
+              // `supplier.updated` (the consumer). Runs only when escalate
+              // resolved to `allow` (per-agent) — under the default `ask`, the
+              // permission gate above parks in waiting_for_approval instead.
               current = yield* tx.run(
                 Effect.gen(function* () {
                   const updated = yield* cases.transitionStatus(

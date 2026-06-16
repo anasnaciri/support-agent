@@ -29,6 +29,7 @@ describe("supplier.escalate tool", () => {
       escalate: (input) => {
         captured = input;
         return Effect.succeed({
+          kind: "escalated" as const,
           escalationId: "esc-9",
           supplierId: "sup-9",
           supplierEmail: "wh@x.com",
@@ -53,6 +54,7 @@ describe("supplier.escalate tool", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     if (!Exit.isSuccess(exit)) return;
     const result = exit.value as Record<string, unknown>;
+    expect(result["escalated"]).toBe(true);
     expect(result["escalationId"]).toBe("esc-9");
     expect(result["supplierId"]).toBe("sup-9");
     expect(captured).toMatchObject({
@@ -72,6 +74,7 @@ describe("supplier.escalate tool", () => {
       escalate: (input) => {
         captured = input;
         return Effect.succeed({
+          kind: "escalated" as const,
           escalationId: "e",
           supplierId: "s",
           supplierEmail: "w@x.com",
@@ -93,13 +96,32 @@ describe("supplier.escalate tool", () => {
     expect(captured?.trackingNumber).toBeNull();
   });
 
-  it("maps SupplierNotConfigured to ToolOutputInvalid with the tag in issues", async () => {
-    const env = SupplierEscalationServiceTest({ notConfigured: true });
+  it("returns escalated:false (no error) when the workspace has no supplier — the agent falls back, never retries", async () => {
+    const env = SupplierEscalationServiceTest({ noSupplier: true });
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         supplierEscalate.execute(
           { problem: "P" } as never,
           baseCtx("c-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["escalated"]).toBe(false);
+    expect(result["reason"]).toBe("no_supplier");
+    expect(result["escalationId"]).toBeUndefined();
+  });
+
+  it("maps a transient write failure to ToolOutputInvalid (so the agent retries)", async () => {
+    const env = SupplierEscalationServiceTest({ writeFailed: true });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        supplierEscalate.execute(
+          { problem: "P" } as never,
+          baseCtx("c-4"),
         ) as Effect.Effect<unknown, unknown, never>,
         env,
       ),
@@ -110,7 +132,7 @@ describe("supplier.escalate tool", () => {
       expect(err).toBeInstanceOf(ToolOutputInvalid);
       if (err instanceof ToolOutputInvalid) {
         expect(err.tool).toBe("supplier.escalate");
-        expect(err.issues).toEqual(["SupplierNotConfigured"]);
+        expect(err.issues).toEqual(["SupplierEscalationWriteFailed"]);
       }
     }
   });

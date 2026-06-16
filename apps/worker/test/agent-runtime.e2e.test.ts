@@ -714,6 +714,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       escalate: (input) => {
         captured = input as unknown as Record<string, unknown>;
         return Effect.succeed({
+          kind: "escalated" as const,
           escalationId: "esc-1",
           supplierId: "sup-1",
           supplierEmail: "wh@x.com",
@@ -796,6 +797,104 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "tool.invoked",
       "case.waiting_for_supplier",
     ]);
+  });
+
+  // ----------------------------------------------------------------
+  // No supplier configured: supplier.escalate returns { escalated: false }
+  // (a normal result, not an error) → the runtime does NOT park the case;
+  // the agent reads the result and falls back (here, resolves). Proves the
+  // agent never assumes a supplier exists.
+  // ----------------------------------------------------------------
+  it("does NOT park when no supplier is configured (escalated:false)", async () => {
+    const escalatingAgent: AgentConfig = {
+      id: AgentId("escalating-agent"),
+      name: "Escalating",
+      description: "Escalates a stuck order to the supplier.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Escalate the stuck order; reply if there's no supplier.",
+      tools: ["supplier.escalate"],
+      permissionOverrides: { "supplier.escalate": "allow" },
+      handoffs: [],
+      maxTurnsPerTick: 3,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "esc-0",
+        tool: "supplier.escalate",
+        input: { problem: "Order #7001 stuck in transit", orderRef: "#7001" },
+      },
+      { type: "final_message", text: "No supplier — acknowledged the delay." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([escalatingAgent]),
+      ToolRegistryWith([supplierEscalate as never]),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      SupplierEscalationServiceTest({ noSupplier: true }),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: escalatingAgent.id,
+            subject: "Where is my order?",
+            threadId: "thread-ns" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-ns" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Still nothing.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    // The case is NOT parked on the supplier — the agent kept control.
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.waiting_for_supplier");
+    expect(actions).toContain("tool.invoked"); // the escalate attempt happened
   });
 
   // ----------------------------------------------------------------

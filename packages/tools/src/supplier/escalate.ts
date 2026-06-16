@@ -13,15 +13,20 @@ const Input = Schema.Struct({
   trackingNumber: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
+// `escalated: true` → a supplier was found and the case is now parked for them.
+// `escalated: false` (reason "no_supplier") → the workspace has no supplier
+// configured; the agent should NOT retry and should fall back to a direct reply.
 const Output = Schema.Struct({
-  escalationId: Schema.String,
-  supplierId: Schema.String,
+  escalated: Schema.Boolean,
+  escalationId: Schema.optional(Schema.String),
+  supplierId: Schema.optional(Schema.String),
+  reason: Schema.optional(Schema.String),
 });
 
 export const supplierEscalate = defineTool({
   name: "supplier.escalate",
   description:
-    "Escalate this case to the warehouse / supplier when you cannot resolve it yourself and need them to act (chase the carrier, reship, confirm a delay) — e.g. an order is past its delivery window and stuck in transit. Calling this PARKS the case for the supplier: you are done for this turn and must NOT send a customer reply now. When the supplier responds you will be re-engaged to draft the customer reply. `problem` must be a concise, rewritten statement of what you need the supplier to do — NEVER include the customer's email, full address, or message text. Include `orderRef`, `shipCity`, `shipCountry`, and `trackingNumber` from the order so the warehouse can act. Permission policy: defaultPermission is `ask`; a merchant may set this agent to `auto` to let escalations through without approval.",
+    "Escalate this case to the warehouse / supplier when you cannot resolve it yourself and need them to act (chase the carrier, reship, confirm a delay) — e.g. an order is past its delivery window and stuck in transit. Returns `{ escalated: true }` when a supplier was found — the case is then PARKED for the supplier, so you are done this turn and must NOT send a customer reply (you'll be re-engaged when they respond). Returns `{ escalated: false, reason: \"no_supplier\" }` when the store has no supplier configured — do NOT retry; fall back to replying to the customer yourself. A thrown error is transient — retry once. `problem` must be a concise, rewritten statement of what you need the supplier to do — NEVER include the customer's email, full address, or message text. Include `orderRef`, `shipCity`, `shipCountry`, and `trackingNumber` from the order so the warehouse can act. Permission policy: defaultPermission is `ask`; a merchant may set this agent to `auto` to let escalations through without approval.",
   displayName: "Escalate to supplier",
   displayDescription:
     "The agent hands a case it can't resolve to your warehouse/supplier and waits for their update before replying to the customer.",
@@ -62,6 +67,16 @@ export const supplierEscalate = defineTool({
               }),
           ),
         );
-      return { escalationId: result.escalationId, supplierId: result.supplierId };
+      // "no supplier" is a normal outcome the agent branches on (fall back to a
+      // direct reply); only a genuine write failure surfaces as a tool error
+      // (which the agent retries).
+      if (result.kind === "no_supplier") {
+        return { escalated: false, reason: "no_supplier" };
+      }
+      return {
+        escalated: true,
+        escalationId: result.escalationId,
+        supplierId: result.supplierId,
+      };
     }),
 });

@@ -2,7 +2,6 @@ import { Effect, Layer } from "effect";
 import {
   SupplierEscalationService,
   SupplierEscalationWriteFailed,
-  SupplierNotConfigured,
 } from "@support-agent/services";
 import { DbClient } from "./db-client.js";
 import { getDefaultSupplier, insertEscalation } from "./supplier-store.js";
@@ -10,10 +9,11 @@ import { getDefaultSupplier, insertEscalation } from "./supplier-store.js";
 /**
  * Live `SupplierEscalationService` over Postgres. Resolves the workspace's
  * default supplier and inserts the `case_supplier_escalations` row with the
- * agent-supplied privacy projection. Fails with `SupplierNotConfigured` when the
- * workspace has no supplier (the tool maps that to a structured tool result the
- * agent can recover from). The runtime then parks the case in
- * `waiting_for_supplier` (producer branch in agent-runtime).
+ * agent-supplied privacy projection. Returns `no_supplier` (a normal result,
+ * NOT an error) when the workspace has no supplier, so the agent falls back to a
+ * direct reply instead of retrying; only a genuine DB write failure fails the
+ * Effect (the agent retries that). The runtime parks the case in
+ * `waiting_for_supplier` only on an `escalated` result.
  */
 export const SupplierEscalationServiceLive = Layer.effect(
   SupplierEscalationService,
@@ -27,9 +27,7 @@ export const SupplierEscalationServiceLive = Layer.effect(
             catch: (cause) => new SupplierEscalationWriteFailed({ cause }),
           });
           if (!supplier) {
-            return yield* Effect.fail(
-              new SupplierNotConfigured({ tenantId: input.tenantId }),
-            );
+            return { kind: "no_supplier" as const };
           }
           const { id } = yield* Effect.tryPromise({
             try: () =>
@@ -46,6 +44,7 @@ export const SupplierEscalationServiceLive = Layer.effect(
             catch: (cause) => new SupplierEscalationWriteFailed({ cause }),
           });
           return {
+            kind: "escalated" as const,
             escalationId: id,
             supplierId: supplier.id,
             supplierEmail: supplier.email,
