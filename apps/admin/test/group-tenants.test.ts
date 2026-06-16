@@ -6,10 +6,12 @@ const t = (
   id: string,
   org: string | null,
   createdAt: string,
+  orgName: string | null = null,
 ): AdminTenantSummary => ({
   id,
   name: `T-${id}`,
   workosOrganizationId: org,
+  workosOrganizationName: orgName,
   createdAt,
   shopifyApp: { provisioned: false, status: null },
   connectionCount: 0,
@@ -55,5 +57,21 @@ describe("groupTenantsByOrg", () => {
 
   it("returns no groups for no tenants", () => {
     expect(groupTenantsByOrg([])).toEqual([]);
+  });
+
+  it("carries the org's display name onto the group (for showing it by the id)", () => {
+    const groups = groupTenantsByOrg([
+      t("a", "org_1", "2026-01-01T00:00:00Z", "Acme Inc"),
+      t("b", "org_1", "2026-02-01T00:00:00Z", "Acme Inc"),
+      t("c", null, "2026-03-01T00:00:00Z"),
+    ]);
+    expect(groups[0]).toMatchObject({
+      organizationId: "org_1",
+      organizationName: "Acme Inc",
+    });
+    expect(groups[1]).toMatchObject({
+      organizationId: null,
+      organizationName: null,
+    });
   });
 });

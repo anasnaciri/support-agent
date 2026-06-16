@@ -8,7 +8,9 @@ import {
   type DashboardTokenVerifier,
 } from "./auth/dashboard-jwt.js";
 import {
+  makeWorkosOrganizationDirectory,
   makeWorkosUserDirectory,
+  type WorkosOrganizationDirectory,
   type WorkosUserDirectory,
 } from "./auth/workos-directory.js";
 import { buildApp } from "./platform/app.js";
@@ -56,6 +58,12 @@ export interface StartServerOptions {
    * reconcile can resolve a member's verified email without a WorkOS call.
    */
   readonly workosUserDirectory?: WorkosUserDirectory;
+  /**
+   * Override the WorkOS organization directory (org-name lookup). Production
+   * builds it from `cfg.workos.apiKey`; the admin console uses it to show an
+   * org's display name beside its id. Tests inject a static map.
+   */
+  readonly workosOrganizationDirectory?: WorkosOrganizationDirectory;
 }
 
 export const startServer = async (
@@ -84,7 +92,19 @@ export const startServer = async (
     opts.workosUserDirectory ??
     (cfg.workos?.apiKey ? makeWorkosUserDirectory(cfg.workos.apiKey) : null);
 
-  const app = await buildApp({ dashboardTokenVerifier, workosUserDirectory });
+  // Org-name lookup for the admin console (name beside the org id). Same key,
+  // same soft-fail contract as the user directory; `null` → show just the id.
+  const workosOrganizationDirectory: WorkosOrganizationDirectory | null =
+    opts.workosOrganizationDirectory ??
+    (cfg.workos?.apiKey
+      ? makeWorkosOrganizationDirectory(cfg.workos.apiKey)
+      : null);
+
+  const app = await buildApp({
+    dashboardTokenVerifier,
+    workosUserDirectory,
+    workosOrganizationDirectory,
+  });
 
   const ctx: RouteContext = { cfg, layer };
   registerShopifyRoutes(app, ctx);

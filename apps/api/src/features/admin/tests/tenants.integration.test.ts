@@ -17,6 +17,7 @@ import {
 } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../../../server.js";
 import type { ApiConfig } from "../../../bootstrap.js";
+import { makeStaticWorkosOrganizationDirectory } from "../../../auth/workos-directory.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -86,7 +87,12 @@ describeIfDb("apps/api — admin tenant list + detail (integration)", () => {
       { id: tenantB, name: "Tenant B" },
     ]);
     await seed();
-    handle = await startServer(cfg);
+    handle = await startServer(cfg, {
+      // Resolve the org's display name without a real WorkOS call.
+      workosOrganizationDirectory: makeStaticWorkosOrganizationDirectory((id) =>
+        id === "org_a" ? "Acme Inc" : null,
+      ),
+    });
     baseUrl = `http://localhost:${handle.port}`;
   });
 
@@ -116,12 +122,14 @@ describeIfDb("apps/api — admin tenant list + detail (integration)", () => {
     expect(a).toMatchObject({
       name: "Tenant A",
       workosOrganizationId: "org_a",
+      workosOrganizationName: "Acme Inc",
       shopifyApp: { provisioned: true, status: "ready" },
       connectionCount: 1,
     });
     expect(b).toMatchObject({
       name: "Tenant B",
       workosOrganizationId: null,
+      workosOrganizationName: null,
       shopifyApp: { provisioned: false, status: null },
       connectionCount: 0,
     });
@@ -136,6 +144,7 @@ describeIfDb("apps/api — admin tenant list + detail (integration)", () => {
     expect(text).not.toContain("list-secret-a");
     const body = JSON.parse(text);
     expect(body.tenant.id).toBe(tenantA);
+    expect(body.tenant.workosOrganizationName).toBe("Acme Inc");
     expect(body.shopifyApp).toMatchObject({
       clientId: "list-client-a",
       status: "ready",

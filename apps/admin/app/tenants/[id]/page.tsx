@@ -129,8 +129,19 @@ export default async function TenantDetailPage({
             <dt className="text-zinc-500">Tenant ID</dt>
             <dd className="font-mono text-zinc-300">{tenant.id}</dd>
             <dt className="text-zinc-500">WorkOS org</dt>
-            <dd className="font-mono text-zinc-300">
-              {tenant.workosOrganizationId ?? "—"}
+            <dd className="text-zinc-300">
+              {tenant.workosOrganizationId ? (
+                <>
+                  {tenant.workosOrganizationName ? (
+                    <span className="mr-2">{tenant.workosOrganizationName}</span>
+                  ) : null}
+                  <span className="font-mono text-zinc-500">
+                    {tenant.workosOrganizationId}
+                  </span>
+                </>
+              ) : (
+                "—"
+              )}
             </dd>
             <dt className="text-zinc-500">Shopify domain</dt>
             <dd className="font-mono text-zinc-300">

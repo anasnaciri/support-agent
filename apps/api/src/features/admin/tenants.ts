@@ -95,6 +95,10 @@ export const listTenantsForAdmin = (): Effect.Effect<
         id: t.id,
         name: t.name,
         workosOrganizationId: t.workosOrganizationId,
+        // Resolved from WorkOS by the HTTP handler (the org name lives only in
+        // WorkOS, not in our `tenants` rows); null here is the pre-enrichment
+        // placeholder and the value when WorkOS isn't configured.
+        workosOrganizationName: null,
         createdAt: t.createdAt.toISOString(),
         shopifyApp: {
           provisioned: status !== null && status !== "revoked",
@@ -162,6 +166,9 @@ export const getTenantDetailForAdmin = (
         id: t.id,
         name: t.name,
         workosOrganizationId: t.workosOrganizationId,
+        // Resolved from WorkOS by the HTTP handler; null is the pre-enrichment
+        // placeholder / the value when WorkOS isn't configured.
+        workosOrganizationName: null,
         shopifyDomain: t.shopifyDomain,
         createdAt: t.createdAt.toISOString(),
       },

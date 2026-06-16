@@ -87,6 +87,17 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-16 — Admin console shows the WorkOS org NAME beside the org id (TDD):** the org name lives
+  only in WorkOS, so added `makeWorkosOrganizationDirectory` (`GET /organizations/:id` → `name`,
+  soft-fails to null) mirroring the existing user directory; wired it through `startServer` opts →
+  `buildApp` decoration → `getWorkosOrganizationDirectory(req)`. The admin HTTP handlers enrich their
+  responses after the Effect returns (the DB/Effect layer never learns org names): `/admin/tenants`
+  resolves unique org ids → names, `/admin/tenants/:id` + `/admin/accounts/:id` resolve the single org.
+  New contract fields `AdminTenantSummary.workosOrganizationName`, `AdminTenantDetail.tenant.workosOrganizationName`,
+  `AdminAccountDetail.organizationName` (all `string | null`). UI: tenant-list group header shows
+  `name + mono id`, tenant-detail "WorkOS org" row + account-page heading/crumb show the name. Falls back
+  to the bare id when WorkOS is unconfigured / the lookup fails. `pnpm build` green; directory +
+  group-tenants unit tests + admin tenant/account integration tests green.
 - **2026-06-15 — Supplier portal landed (branch `feat/supplier-portal`, 10 TDD commits, ci:local
   green at every commit — full `pnpm build` + 1785 tests; dashboard `typecheck`+`next build` verified
   separately).** Closes the escalation loop end-to-end: the `missing-package-agent` carrier branch calls

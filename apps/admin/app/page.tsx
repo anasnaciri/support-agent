@@ -54,9 +54,22 @@ export default async function TenantsPage() {
                         {group.organizationId ? (
                           <Link
                             href={`/accounts/${group.organizationId}`}
-                            className="font-mono normal-case text-zinc-300 hover:text-white hover:underline"
+                            className="normal-case text-zinc-300 hover:text-white hover:underline"
                           >
-                            {group.organizationId}
+                            {group.organizationName ? (
+                              <>
+                                <span className="font-medium">
+                                  {group.organizationName}
+                                </span>{" "}
+                                <span className="font-mono text-zinc-500">
+                                  {group.organizationId}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="font-mono">
+                                {group.organizationId}
+                              </span>
+                            )}
                           </Link>
                         ) : (
                           "No organization"

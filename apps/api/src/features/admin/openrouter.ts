@@ -148,6 +148,9 @@ export const getAdminAccountDetail = (
     const credential = yield* store.get(organizationId);
     return {
       organizationId,
+      // Resolved from WorkOS by the HTTP handler; null here is the
+      // pre-enrichment placeholder / the value when WorkOS isn't configured.
+      organizationName: null,
       workspaces: workspaces.map((row) => ({
         id: row.id,
         name: row.name,

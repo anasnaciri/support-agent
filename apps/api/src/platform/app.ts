@@ -10,11 +10,15 @@ import { loggerConfig } from "./logger.js";
 import { sendJson } from "./http.js";
 import { TAGS } from "./schemas.js";
 import type { DashboardTokenVerifier } from "../auth/dashboard-jwt.js";
-import type { WorkosUserDirectory } from "../auth/workos-directory.js";
+import type {
+  WorkosOrganizationDirectory,
+  WorkosUserDirectory,
+} from "../auth/workos-directory.js";
 
 export interface AppDecorations {
   readonly dashboardTokenVerifier: DashboardTokenVerifier | null;
   readonly workosUserDirectory: WorkosUserDirectory | null;
+  readonly workosOrganizationDirectory: WorkosOrganizationDirectory | null;
 }
 
 /**
@@ -36,6 +40,10 @@ export const buildApp = async (
   });
   app.decorate("dashboardTokenVerifier", decorations.dashboardTokenVerifier);
   app.decorate("workosUserDirectory", decorations.workosUserDirectory);
+  app.decorate(
+    "workosOrganizationDirectory",
+    decorations.workosOrganizationDirectory,
+  );
 
   // Webhook HMAC is computed over the exact bytes the provider sent, so we
   // keep the raw body as a Buffer instead of letting Fastify JSON-parse it

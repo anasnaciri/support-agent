@@ -51,3 +51,53 @@ export const makeStaticWorkosUserDirectory = (
     return workosUserId ? resolve(workosUserId) : null;
   },
 });
+
+// Resolve a WorkOS organization's human-readable NAME from its `org_…` id.
+//
+// The org name lives only in WorkOS — our `tenants` rows store just the
+// `workosOrganizationId`. The operator admin console shows the name beside the
+// id, so it looks the name up server-side from the WorkOS organizations API.
+//
+// Like the user directory, lookups fail SOFT: any error / non-2xx returns null,
+// so a WorkOS hiccup means the admin UI shows just the id rather than failing
+// the whole tenant list.
+
+export interface WorkosOrganizationDirectory {
+  /** The org's display name, or null (unknown org / not configured / failed). */
+  getName(workosOrganizationId: string): Promise<string | null>;
+}
+
+export const makeWorkosOrganizationDirectory = (
+  apiKey: string,
+  opts: { readonly baseUrl?: string; readonly fetchImpl?: FetchFn } = {},
+): WorkosOrganizationDirectory => {
+  const base = (opts.baseUrl ?? "https://api.workos.com").replace(/\/+$/u, "");
+  const doFetch = opts.fetchImpl ?? fetch;
+  return {
+    async getName(workosOrganizationId) {
+      if (!workosOrganizationId) return null;
+      try {
+        const res = await doFetch(
+          `${base}/organizations/${encodeURIComponent(workosOrganizationId)}`,
+          { headers: { authorization: `Bearer ${apiKey}` } },
+        );
+        if (!res.ok) return null;
+        const body = (await res.json()) as { name?: unknown };
+        return typeof body.name === "string" && body.name.length > 0
+          ? body.name
+          : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+};
+
+/** Test / injection directory backed by a plain resolver. */
+export const makeStaticWorkosOrganizationDirectory = (
+  resolve: (workosOrganizationId: string) => string | null,
+): WorkosOrganizationDirectory => ({
+  async getName(workosOrganizationId) {
+    return workosOrganizationId ? resolve(workosOrganizationId) : null;
+  },
+});

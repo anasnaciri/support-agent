@@ -13,8 +13,10 @@ import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { opaqueCause, parseJsonBody, sendJson } from "../../platform/http.js";
 import {
   authenticateDashboardOrg,
+  getWorkosOrganizationDirectory,
   runWithDb,
 } from "../../auth/dashboard-context.js";
+import type { WorkosOrganizationDirectory } from "../../auth/workos-directory.js";
 import { parseAdminAuth } from "../../auth/dashboard-auth.js";
 import { normalizeShopDomain } from "../shopify/install.js";
 import { redactShop } from "../account/compliance-redaction.js";
@@ -516,6 +518,26 @@ export const handleAdminShopifyAppPcdCheck = async (
   sendJson(res, 200, { ok: true, result: exit.value });
 };
 
+/**
+ * Resolve a set of WorkOS org ids to their display names via the directory.
+ * Fails soft per-org (the directory returns null on any error), and returns an
+ * empty map when WorkOS isn't configured — callers then fall back to the id.
+ */
+const resolveOrgNames = async (
+  dir: WorkosOrganizationDirectory | null,
+  orgIds: ReadonlyArray<string>,
+): Promise<Map<string, string | null>> => {
+  const names = new Map<string, string | null>();
+  if (!dir) return names;
+  const unique = [...new Set(orgIds)];
+  await Promise.all(
+    unique.map(async (id) => {
+      names.set(id, await dir.getName(id));
+    }),
+  );
+  return names;
+};
+
 // GET /admin/tenants — list every tenant for the operator admin app.
 export const handleAdminTenantsList = async (
   cfg: ApiConfig,
@@ -542,7 +564,21 @@ export const handleAdminTenantsList = async (
     sendJson(res, 500, { error: "list_failed", detail: opaqueCause(exit.cause) });
     return;
   }
-  sendJson(res, 200, { tenants: exit.value });
+  // Resolve org display names from WorkOS (the name lives only there, not in
+  // our tenant rows) and attach them. Soft-fails to the id if WorkOS is down.
+  const names = await resolveOrgNames(
+    getWorkosOrganizationDirectory(req),
+    exit.value
+      .map((t) => t.workosOrganizationId)
+      .filter((id): id is string => id !== null),
+  );
+  const tenants = exit.value.map((t) => ({
+    ...t,
+    workosOrganizationName: t.workosOrganizationId
+      ? (names.get(t.workosOrganizationId) ?? null)
+      : null,
+  }));
+  sendJson(res, 200, { tenants });
 };
 
 // GET /admin/tenants/:id — operator detail for one tenant (no secrets).
@@ -565,7 +601,13 @@ export const handleAdminTenantDetail = async (
     sendJson(res, 404, { error: "tenant_not_found" });
     return;
   }
-  sendJson(res, 200, exit.value);
+  const orgId = exit.value.tenant.workosOrganizationId;
+  const dir = getWorkosOrganizationDirectory(req);
+  const workosOrganizationName = orgId && dir ? await dir.getName(orgId) : null;
+  sendJson(res, 200, {
+    ...exit.value,
+    tenant: { ...exit.value.tenant, workosOrganizationName },
+  });
 };
 
 export const adminMutationResponse = (
@@ -626,7 +668,11 @@ export const handleAdminAccountDetail = async (
     sendJson(res, 404, { error: "account_not_found" });
     return;
   }
-  sendJson(res, 200, exit.value);
+  const dir = getWorkosOrganizationDirectory(req);
+  const organizationName = dir
+    ? await dir.getName(exit.value.organizationId)
+    : null;
+  sendJson(res, 200, { ...exit.value, organizationName });
 };
 
 export const handleAdminAccountOpenRouterPut = async (

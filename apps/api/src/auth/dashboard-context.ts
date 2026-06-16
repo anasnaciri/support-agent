@@ -22,7 +22,10 @@ import {
   isWorkspaceIdShape,
 } from "./dashboard-auth.js";
 import { type DashboardTokenVerifier } from "./dashboard-jwt.js";
-import { type WorkosUserDirectory } from "./workos-directory.js";
+import {
+  type WorkosOrganizationDirectory,
+  type WorkosUserDirectory,
+} from "./workos-directory.js";
 import { type ApiConfig, type ApiLayer } from "../bootstrap.js";
 import { sendJson } from "../platform/http.js";
 
@@ -85,6 +88,18 @@ export const getWorkosDirectory = (
   (req.server as unknown as {
     workosUserDirectory: WorkosUserDirectory | null;
   }).workosUserDirectory;
+
+/**
+ * The WorkOS organization directory (org-name lookup), decorated alongside the
+ * user directory. `null` → no `WORKOS_API_KEY`, so the admin console shows just
+ * the opaque org id rather than a name.
+ */
+export const getWorkosOrganizationDirectory = (
+  req: FastifyRequest,
+): WorkosOrganizationDirectory | null =>
+  (req.server as unknown as {
+    workosOrganizationDirectory: WorkosOrganizationDirectory | null;
+  }).workosOrganizationDirectory;
 
 export const resolveDashboardAuth = async (
   layer: ApiLayer,

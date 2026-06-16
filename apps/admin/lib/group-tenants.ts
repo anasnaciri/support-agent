@@ -3,6 +3,12 @@ import type { AdminTenantSummary } from "@support-agent/dashboard-contracts";
 export interface TenantOrgGroup {
   /** null → tenants with no WorkOS org (headless / Shopify-only). */
   readonly organizationId: string | null;
+  /**
+   * The WorkOS org's display name (resolved by the api). null when there's no
+   * org or the lookup failed — render the id alone in that case. All rows in a
+   * group share one org, so the name is taken from the group's rows.
+   */
+  readonly organizationName: string | null;
   /** Oldest (the dashboard's default workspace) first. */
   readonly tenants: ReadonlyArray<AdminTenantSummary>;
 }
@@ -25,6 +31,11 @@ export const groupTenantsByOrg = (
   }
   const groups = [...byOrg.entries()].map(([organizationId, tenants]) => ({
     organizationId,
+    // Every row in a group shares the org, so any row's resolved name works;
+    // prefer the first non-null in case a stale row came back without one.
+    organizationName:
+      tenants.find((row) => row.workosOrganizationName)
+        ?.workosOrganizationName ?? null,
     tenants: [...tenants].sort((a, b) =>
       a.createdAt === b.createdAt
         ? a.id.localeCompare(b.id)

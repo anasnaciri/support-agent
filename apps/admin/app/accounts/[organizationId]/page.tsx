@@ -34,7 +34,7 @@ export default async function AccountPage({ params, searchParams }: PageProps) {
 
   return (
     <>
-      <Header crumb={organizationId} />
+      <Header crumb={detail.organizationName ?? organizationId} />
       <main className="mx-auto max-w-3xl space-y-8 px-6 py-8">
         {ok ? (
           <p className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
@@ -54,7 +54,9 @@ export default async function AccountPage({ params, searchParams }: PageProps) {
         ) : null}
 
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {detail.organizationName ?? "Account"}
+          </h1>
           <p className="mt-2 font-mono text-sm text-zinc-400">
             {organizationId}
           </p>

@@ -305,6 +305,12 @@ export interface AdminTenantSummary {
   readonly id: string;
   readonly name: string;
   readonly workosOrganizationId: string | null;
+  /**
+   * The WorkOS organization's display name, resolved from WorkOS at request
+   * time. `null` when there's no org, WorkOS isn't configured, or the lookup
+   * failed — the admin UI then shows just the id.
+   */
+  readonly workosOrganizationName: string | null;
   readonly createdAt: string;
   /** Pilot Shopify custom-app provisioning at a glance. */
   readonly shopifyApp: {
@@ -320,6 +326,8 @@ export interface AdminTenantDetail {
     readonly id: string;
     readonly name: string;
     readonly workosOrganizationId: string | null;
+    /** The WorkOS org's display name (resolved from WorkOS); null when absent. */
+    readonly workosOrganizationName: string | null;
     readonly shopifyDomain: string | null;
     readonly createdAt: string;
   };
@@ -344,6 +352,11 @@ export interface AdminTenantDetail {
 
 export interface AdminAccountDetail {
   readonly organizationId: string;
+  /**
+   * The WorkOS organization's display name, resolved from WorkOS at request
+   * time. `null` when WorkOS isn't configured or the lookup failed.
+   */
+  readonly organizationName: string | null;
   readonly workspaces: ReadonlyArray<{
     readonly id: string;
     readonly name: string;
