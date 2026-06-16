@@ -594,6 +594,20 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   grounded and ask-first; clear offers/scams resolve without reply. The new agent has not been exercised live.
 - **2026-06-09 — Local dev:** Dashboard crashes were diagnosed as Next/Turbopack heap exhaustion. Recovery is to
   clear `apps/dashboard/.next`; use `next dev --webpack` to isolate the issue. Node 26 remains an unproven risk.
+- **2026-06-16 — Fly.io backend deploy target (IMAP/SMTP egress):** Railway blocks outbound SMTP
+  (587/465), so the IMAP/SMTP connector's `verify()`/send can't reach mail providers there — proven
+  live: a Namecheap connect failed with a reachability error on Railway while the same mailbox's
+  993/465/587 connect fine from a normal network. Added `deploy/fly/fly.toml` (+ `README.md` runbook)
+  to host `apps/api` + `apps/worker` on Fly, which allows outbound SMTP. ONE Fly app, TWO process
+  groups (`api` = Fastify public HTTPS on `:4000` w/ `/healthz`; `worker` = pg-boss + crons, no port),
+  built from the EXISTING `deploy/railway/Dockerfile`; migrations via `release_command` (so neither
+  group migrates at boot; `DEPLOY_ROLE` is unused — the process command IS the role). `fly config
+  validate` green. Runbook keeps the DB on Railway (public `DATABASE_PUBLIC_URL`) as the fast path,
+  bulk-imports secrets from Railway with the host-specific overrides (DATABASE_URL/PORT) called out,
+  and documents the custom-domain repoint (replacing the cloudflared tunnel on
+  `support-agent-api.nacirianas.com`). Railway stays viable for Gmail/Graph-API tenants (HTTPS, no
+  SMTP egress needed). NOT yet deployed; `deploy/compose/` (Hetzner) remains the documented VPS
+  alternative.
 - **2026-06-08 — Dashboard and deploy:** Deployed the pilot API, worker, and authenticated merchant dashboard;
   added the blue/off-white three-column shell, breadcrumbs, a searchable virtualized case switcher, light-mode
   polish, and append-only tenant-authored agent prompts. `apps/admin` remains intentionally undeployed.

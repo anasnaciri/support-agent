@@ -1,0 +1,84 @@
+# Fly.io deployment for the support-agent backend (apps/api + apps/worker).
+#
+# WHY FLY (not Railway): the IMAP/SMTP connector needs the host to make
+# OUTBOUND connections to mail providers on 587/465 (SMTP submission) + 993
+# (IMAP). Railway blocks outbound SMTP; Fly allows it. Everything below is the
+# same image Railway used — only the host changes.
+#
+# Shape: ONE app, TWO process groups from one image:
+#   - `api`    — the Fastify server (public HTTPS, /healthz check). Listens on
+#                0.0.0.0:4000 (API_HOST/API_PORT defaults in apps/api).
+#   - `worker` — the pg-boss queue consumer + cron (imap-poll, sweeps). No
+#                public port; one machine, always running.
+# Migrations run ONCE per deploy via `release_command` (replacing start.sh's
+# api-role migrate step), so neither process group migrates at boot.
+#
+# Deploy from the REPO ROOT (the Dockerfile does `COPY . .`, so the build
+# context must be the repo, not this folder):
+#   fly deploy -c deploy/fly/fly.toml --dockerfile deploy/railway/Dockerfile
+# See deploy/fly/README.md for the full first-time runbook.
+
+app = "support-agent-backend"        # globally-unique; change if taken
+primary_region = "mad"               # Madrid — closest to you + the EU-West DB
+
+[build]
+  # Reuse the Railway image verbatim. Path is relative to the repo root (the
+  # build context), NOT to this file.
+  dockerfile = "deploy/railway/Dockerfile"
+
+[deploy]
+  # Runs once on a temporary machine with the app image + secrets BEFORE the
+  # new machines roll. This is the api role's old pre-start migrate step.
+  release_command = "sh -c 'cd packages/db && pnpm db:migrate'"
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  # apps/api defaults to 4000 when unset; pinned here to match internal_port.
+  API_PORT = "4000"
+
+# Two process groups, same image. These commands OVERRIDE the Dockerfile CMD
+# (start.sh), so DEPLOY_ROLE is unused on Fly — the role IS the command.
+[processes]
+  api = "node apps/api/dist/server.js"
+  worker = "node apps/worker/dist/index.js"
+
+# Public HTTPS is attached to the `api` process group ONLY. The worker has no
+# service block, so it never accepts inbound traffic.
+[[services]]
+  processes = ["api"]
+  protocol = "tcp"
+  internal_port = 4000
+  # The api receives Shopify/Gmail/Graph webhooks + dashboard calls, so keep it
+  # always-on (no scale-to-zero cold starts that would drop a webhook).
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[services.http_checks]]
+    interval = "15s"
+    grace_period = "20s"
+    timeout = "4s"
+    method = "GET"
+    path = "/healthz"
+
+# One VM spec for both groups. The worker runs the agent loop (LLM calls), so
+# 1GB is the safe floor; tune per-group later with `fly scale memory`.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
