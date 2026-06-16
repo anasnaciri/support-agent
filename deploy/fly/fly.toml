@@ -19,12 +19,14 @@
 # See deploy/fly/README.md for the full first-time runbook.
 
 app = "support-agent-backend"        # globally-unique; change if taken
-primary_region = "mad"               # Madrid — closest to you + the EU-West DB
+primary_region = "cdg"               # Paris — EU-West (mad/Madrid is deprecated on Fly)
 
 [build]
-  # Reuse the Railway image verbatim. Path is relative to the repo root (the
-  # build context), NOT to this file.
-  dockerfile = "deploy/railway/Dockerfile"
+  # Reuse the Railway image verbatim. NOTE: Fly resolves this path relative to
+  # THIS config file's directory (deploy/fly/), not the repo root — hence the
+  # `../`. The build context is still the repo root (run `fly deploy` from
+  # there), so the Dockerfile's `COPY . .` gets the whole monorepo.
+  dockerfile = "../railway/Dockerfile"
 
 [deploy]
   # Runs once on a temporary machine with the app image + secrets BEFORE the

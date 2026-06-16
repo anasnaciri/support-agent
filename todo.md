@@ -606,8 +606,15 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   bulk-imports secrets from Railway with the host-specific overrides (DATABASE_URL/PORT) called out,
   and documents the custom-domain repoint (replacing the cloudflared tunnel on
   `support-agent-api.nacirianas.com`). Railway stays viable for Gmail/Graph-API tenants (HTTPS, no
-  SMTP egress needed). NOT yet deployed; `deploy/compose/` (Hetzner) remains the documented VPS
-  alternative.
+  SMTP egress needed). DEPLOYED LIVE 2026-06-16: `support-agent-backend.fly.dev` in `cdg` (1 api after
+  scale-down + 1 worker + standby), secrets imported from Railway, DB kept on Railway (public proxy URL
+  `…proxy.rlwy.net`), migrate `release_command` green, and SMTP/IMAP egress verified from inside Fly
+  (`587/993/465 OK` — the connections Railway refused). Two `fly.toml` fixes during bring-up:
+  `[build].dockerfile` resolves relative to the CONFIG dir, so it must be `../railway/Dockerfile`; and `mad`
+  is deprecated on Fly → `cdg`. The Fly api authenticates the dashboard correctly because the imported
+  `WORKOS_CLIENT_ID` is the prod (KTJ95) one — the local-api 401 mismatch won't recur. REMAINING (later, per
+  the user): repoint the dashboard `DASHBOARD_API_BASE_URL` + Shopify/Google callback URLs + `APPROVAL_BASE_URL`
+  from Railway to Fly. `deploy/compose/` (Hetzner) remains the documented VPS alternative.
 - **2026-06-08 — Dashboard and deploy:** Deployed the pilot API, worker, and authenticated merchant dashboard;
   added the blue/off-white three-column shell, breadcrumbs, a searchable virtualized case switcher, light-mode
   polish, and append-only tenant-authored agent prompts. `apps/admin` remains intentionally undeployed.
