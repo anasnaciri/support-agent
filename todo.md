@@ -15,6 +15,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 ---
 
 NEXT: add a draft email feature on the cases/:id page: an input where the human can draft and send an email, it will also have rephrase with ai feature, the rephrase model will be configured in the settings, and from a small drop down on top of the text input (make the small dropdown be only the name of the current model plus a chevron down, make it minimalistic)
+Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
@@ -89,6 +90,33 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-17 — Fixed: case-detail page crashed on open (Next error boundary, "error reference")
+  for any case whose Shopify order has a fulfillment (TDD, branch `feat/supplier-portal`, build +
+  312 dashboard tests green; NOT committed).** Symptom: opening a case showed the generic error
+  page with a changing `error.digest` (`3494059476`, then `2546464403`). Diagnosis (against the
+  DEPLOYED stack, per the user): Fly api (`support-agent-backend`, VERSION 4) returned **200 for
+  every** `/dashboard/cases/:id` + `/shopify` request — no backend 5xx — so the throw was a
+  render-time exception in the dashboard's Next server (CF Worker `support-agent-dashboard`) while
+  rendering a *successful* 200. `wrangler tail` was too flaky to capture it, so root-caused
+  statically. **Root cause:** Path B reads orders over JSON, and `JSON.parse` has no Date type, so
+  `ShopifyFulfillment.{updatedAt,estimatedDeliveryAt,deliveredAt}` (typed `Date` in
+  `agent-core/shopify.ts`) are ISO **strings** at runtime. `OrderPanel.tsx` called real Date methods
+  on them directly — `latestFulfillment` did `b.updatedAt.getTime()` (runs whenever
+  `order.fulfillments.length > 0`) and the ETA/Delivered rows did `.toISOString()` — throwing
+  `TypeError: … getTime is not a function` / `… toISOString is not a function`. Two distinct
+  messages → two distinct Next digests (explains the changing reference). Only fires once an order
+  gains a fulfillment, so `71349f04` (no fulfillment) rendered fine while `64ea26d5` (fulfilled)
+  crashed. **Fix:** added `asDate(Date|string): Date` to `lib/format.ts` (and routed
+  `formatRelativeTime` through it); extracted the throwing logic into pure
+  `app/cases/[id]/order-panel-data.ts` (`latestFulfillment` + `fulfillmentDay`) that coerce via
+  `asDate`; `OrderPanel` imports them. Regression test `test/order-panel-data.test.ts` feeds ISO
+  **strings** (RED reproduced the exact two TypeErrors; GREEN after). Swept the rest of the
+  dashboard for the same class — the only other raw-Date-method site (`settings/usage`) already
+  hydrates api strings to `Date` first, so OrderPanel was the lone offender. **New invariant:** any
+  dashboard render that calls a Date method on an api-sourced field must coerce with `asDate` first
+  (Path B delivers `Date`-typed fields as strings). _Follow-up:_ commit (tree is entangled with the
+  uncommitted order-identity-gate + reply-dedup edits — needs `git add` of just the dashboard files).
+
 - **2026-06-17 — PROD OUTAGE root-caused + fixed: inbound email created no cases for tenant
   `477168f6` (Elva Labs, org `org_01KV5SQTA1SDNYZ4XSBA9A46HV`) — the worker's conversation-connector
   crons were silently dying every pass (branch `feat/supplier-portal`, build green; NOT yet deployed).**
@@ -97,9 +125,9 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   prod admin API `GET /admin/tenants/:id` on `support-agent-backend.fly.dev`), but its metadata had **no
   `lastUid` cursor and no `connectorHealth` flag** 18h after install — meaning the `imap.poll` cron never
   completed a single pass. Fly worker logs showed the smoking gun: `[imap-poll] pass crashed … _tag:'Die'
-  … Service not found: ConnectorCredentialStore`, every minute. **Root cause:** the worker `runtimeLayer`
+… Service not found: ConnectorCredentialStore`, every minute. **Root cause:** the worker `runtimeLayer`
   (`apps/worker/src/bootstrap.ts`) never exposed `ConnectorCredentialStore` at the top level — it was only
-  ever `Layer.provide`-d *into* sub-layers (llm resolver, shopify, conversation router, permissions, …),
+  ever `Layer.provide`-d _into_ sub-layers (llm resolver, shopify, conversation router, permissions, …),
   which consumes+hides it. The three conversation-connector crons (`imap-poll`,
   `gmail-watch-renewal`, `graph-subscription-renewal`) all `Effect.provide(…, runtimeLayer)` and require
   `DbClient | ConnectorCredentialStore`; `DbClient` was exposed, `ConnectorCredentialStore` was not → Die
@@ -113,11 +141,15 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   tests pass. Casts were pure type assertions — no runtime behavior change beyond the layer now resolving.
   **New invariant:** the worker's conversation-connector crons must resolve `ConnectorCredentialStore` from
   `runtimeLayer` — never re-introduce an `as Effect<…, never>` cast to silence a missing-layer error.
-  **Follow-ups:** (a) **deploy** — `fly deploy -c deploy/fly/fly.toml --dockerfile deploy/railway/Dockerfile`
-  from repo root ships the working tree; current branch is `feat/supplier-portal`. (b) after deploy, verify
-  the IMAP connection's metadata gains `lastUid` and a customer email creates a case. (c) the silent-skip
-  was invisible for 18h because `reportRenewalResultsHealth` ALSO needs the store and Died too — consider a
-  worker boot-time assertion that `runtimeLayer` resolves every cron's deps. See [[project_worker_connector_cron_layer_fix]].
+  **DEPLOYED + VERIFIED 2026-06-17 (commit `8a11170`):** `fly deploy` rolled both api+worker to VERSION 4
+  at 12:07Z; worker booted clean, scheduled imap-poll, **zero `Service not found` crashes**. Confirmed live
+  on the Railway DB via SSH (`fly ssh console` + a `postgres` one-liner): `imap.poll` now completes every
+  pass (no stuck/active jobs) and **seeded `lastUid=491` at 12:19:13Z** on the `contact@elvalabs.com` row —
+  the poll connected to `mail.privateemail.com` and advanced state. Note the seed path sets the cursor to
+  the CURRENT mailbox top, so only NEW mail (UID > 491) creates cases going forward; pre-existing mail does
+  not (by design). **Remaining follow-up:** (c) the silent-skip was invisible for 18h because
+  `reportRenewalResultsHealth` ALSO needs the store and Died too — consider a worker boot-time assertion that
+  `runtimeLayer` resolves every cron's deps. See [[project_worker_connector_cron_layer_fix]].
 
 - **2026-06-17 — Fixed: a customer reply to a RESOLVED case was silently dropped (TDD, branch
   `feat/supplier-portal`, NOT committed — entangled tree, see below).** Root-caused from a real
@@ -128,7 +160,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   execution-marker is stored **case-scoped and permanent** (`ToolExecutionStore.find(caseId, callId)`);
   the stateless LLM reused the same `draftId` across the two distinct inbound messages, so tick 2's
   reply matched the marker tick 1 wrote (via the approval-resume leg) → `{deduped:true}`, no audit row,
-  no send. The marker only ever needed to guard against a *redelivered* job, not a genuinely new
+  no send. The marker only ever needed to guard against a _redelivered_ job, not a genuinely new
   message. **Fix** (`packages/services/src/agent-runtime.ts`): added a per-delivery scope to the marker
   key — `executionKeyFor(tool,input,fallback,scope?)` prefixes the key, new `deliveryScopeFor(event)`
   yields `msg:<messageId>` for inbound mail / `appr:<approvalId>` for approvals / `timer:<id>` /
@@ -143,12 +175,12 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   (547/667) to seed the new delivery-scoped keys (still assert redelivery dedup). `pnpm build` green;
   services suite 270/270; recovery file 17/17. New invariant: **the C2 execution marker is
   delivery-scoped** — a marker from one delivery must never dedup a side-effecting tool in another.
-  *Residual:* `supplier.updated` / `case.resumed` / `manual.takeover` fall back to `case:<id>` (no
+  _Residual:_ `supplier.updated` / `case.resumed` / `manual.takeover` fall back to `case:<id>` (no
   per-delivery id on the event) — two of the same on one case could still cross-dedup; follow-up.
-  *Entanglement note:* `agent-runtime.ts` in this working tree ALSO carries the uncommitted
+  _Entanglement note:_ `agent-runtime.ts` in this working tree ALSO carries the uncommitted
   order-status identity-gate edits, so the file can't be committed in isolation without `git add -p`
-  (interactive staging is unavailable here) — left uncommitted for the user to stage/split. *Unrelated
-  pre-existing breakage observed:* the order-identity work added `conversation.ask_customer` to
+  (interactive staging is unavailable here) — left uncommitted for the user to stage/split. _Unrelated
+  pre-existing breakage observed:_ the order-identity work added `conversation.ask_customer` to
   `order-status-agent` but did NOT register it in 5 `agent-runtime.e2e.test.ts` order-status/
   merchant.notify tool registries, so those 5 e2e tests fail (`schemasFor` → `Failed`); proven
   independent of this fix by reverting `agent-runtime.ts` to HEAD (they still fail). Needs registering
@@ -475,7 +507,7 @@ e2e audit-details assertions, case-timeline 13 (mode default flip + curation rul
   `MerchantNotificationService` (services Tag + test layer + pure copy builders in
   `merchant-notification.ts`) with Telegram as the first transport — the first realization of the
   master-plan §9 "NotificationService fan-out". (1) **providers:** `TelegramMerchantNotificationLive`
-  (plain-text Bot API sendMessage, deliberately NO parse_mode so customer-derived text can't act as
+  (plain-text Bot API sendMessage, deliberately NO parse*mode so customer-derived text can't act as
   markup; chat binding = `connector_connections` provider `telegram`, chat id in the encrypted token
   column; migration `0022_telegram_provider` widens the CHECK), `MerchantNotificationNoopLive` for
   botless deploys (delivered:false ≡ "not linked"), shared `TelegramConfig(FromEnv)`. (2) **tool:**
@@ -488,10 +520,9 @@ e2e audit-details assertions, case-timeline 13 (mode default flip + curation rul
   agent-driven `human_takeover` park (escalateToHuman, approval-rejected, missing/revoked LLM key,
   dead-letter exhaustion) with merchant-friendly reason copy (`HUMAN_TAKEOVER_REASON_COPY`, unknown
   reasons quoted verbatim); connector-health ok→broken alongside the one-time Resend alert.
-  (4) **worker cron** `llm.credits-check` (`30 */6 * * *`): each active openrouter BYOK key's balance
-  from `GET /api/v1/credits`; ONE `llm_credits_low` ping per below-threshold crossing (default $5,
-  `LLM_CREDITS_ALERT_THRESHOLD_USD`); the once-flag lives in connector metadata, is stamped ONLY after
-  a _delivered_ ping (no channel yet → retried next pass) and re-arms on recovery; anthropic/openai
+  (4) **worker cron** `llm.credits-check` (`30 */6 \* \* _`): each active openrouter BYOK key's balance
+from `GET /api/v1/credits`; ONE `llm_credits_low`ping per below-threshold crossing (default $5,`LLM_CREDITS_ALERT_THRESHOLD_USD`); the once-flag lives in connector metadata, is stamped ONLY after
+  a \_delivered_ ping (no channel yet → retried next pass) and re-arms on recovery; anthropic/openai
   skipped (no balance API). (5) **api:** `POST /dashboard/connections/telegram` mints a 15-min signed
   t.me deep link (fixed-width binary base64url token ≤64 chars — the dot-separated install-grant format
   doesn't fit /start's charset; same authenticated-mint trust rules); bot webhook
@@ -880,8 +911,8 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
       verify. Separately, `put()` should reset status to `ready`/`connected` on
       re-provision so re-entering creds reactivates.
 - [x] **A3 (MEDIUM/HIGH) — Shopify webhook secret routing can become
-      ambiguous.** FIXED 2026-06-06 (commit `bb188d8`, migration 0012): partial unique index on `shop_domain WHERE status <> 'revoked'`; `getByShop` orders non-revoked-then-newest; `markConnected` clears other rows holding the shop; `put` reactivation clears the stale shop_domain. `shopify_app_provisioning.shop_domain` was **not unique**, but
-      webhook resolution selects the _first_ matching row. A shop transferred
+      ambiguous.** FIXED 2026-06-06 (commit `bb188d8`, migration 0012): partial unique index on `shop_domain WHERE status <> 'revoked'`; `getByShop` orders non-revoked-then-newest; `markConnected` clears other rows holding the shop; `put` reactivation clears the stale shop*domain. `shopify_app_provisioning.shop_domain` was **not unique**, but
+      webhook resolution selects the \_first* matching row. A shop transferred
       between tenants can leave multiple provisioning rows for the same shop →
       nondeterministic secret selection.
       Evidence: `packages/db/src/schema.ts:301`,

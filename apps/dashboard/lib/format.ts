@@ -11,13 +11,23 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
+/**
+ * Coerce a value that the domain types as `Date` but the JSON wire delivers
+ * as an ISO string. The dashboard reads through apps/api (Path B) and
+ * `JSON.parse` has no Date type, so any `Date`-typed field is actually a
+ * string at runtime — calling `.getTime()` / `.toISOString()` on it throws.
+ * Render code coerces with this first.
+ */
+export const asDate = (date: Date | string): Date =>
+  typeof date === "string" ? new Date(date) : date;
+
 export const formatRelativeTime = (
   date: Date | string,
   now: Date = new Date(),
 ): string => {
   // The api returns ISO strings; Server Components used to pass Date objects.
   // Accept both so call sites don't each have to wrap in `new Date(...)`.
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = asDate(date);
   const ms = now.getTime() - d.getTime();
   if (ms < 0) return "just now"; // clock skew safety
   if (ms < MIN) return "just now";

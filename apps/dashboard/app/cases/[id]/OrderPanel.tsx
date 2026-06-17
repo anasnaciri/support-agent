@@ -1,12 +1,11 @@
-import type {
-  ShopifyOrder,
-  ShopifyFulfillment,
-} from "@support-agent/agent-core";
+import type { ShopifyOrder } from "@support-agent/agent-core";
 import { ExternalLink, Package } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+
+import { fulfillmentDay, latestFulfillment } from "./order-panel-data";
 
 interface Props {
   readonly order: ShopifyOrder | null;
@@ -51,15 +50,6 @@ const formatAddress = (
     [addr.country, addr.zip].filter(Boolean).join(" "),
   ].filter((s): s is string => typeof s === "string" && s.length > 0);
   return parts.length > 0 ? parts.join("\n") : null;
-};
-
-const latestFulfillment = (
-  fulfillments: ReadonlyArray<ShopifyFulfillment>,
-): ShopifyFulfillment | null => {
-  if (fulfillments.length === 0) return null;
-  return [...fulfillments].sort(
-    (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
-  )[0]!;
 };
 
 const Row = ({
@@ -235,16 +225,12 @@ export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
                 </div>
                 {fulfillment.estimatedDeliveryAt ? (
                   <div className="text-xs text-muted-foreground">
-                    ETA{" "}
-                    {fulfillment.estimatedDeliveryAt
-                      .toISOString()
-                      .slice(0, 10)}
+                    ETA {fulfillmentDay(fulfillment.estimatedDeliveryAt)}
                   </div>
                 ) : null}
                 {fulfillment.deliveredAt ? (
                   <div className="text-xs text-muted-foreground">
-                    Delivered{" "}
-                    {fulfillment.deliveredAt.toISOString().slice(0, 10)}
+                    Delivered {fulfillmentDay(fulfillment.deliveredAt)}
                   </div>
                 ) : null}
               </div>
