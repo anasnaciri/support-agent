@@ -45,30 +45,49 @@ export const REPLY_SEND_TOOLS: ReadonlySet<string> = new Set([
   "conversation.ask_customer",
 ]);
 
-// The transport-level ConversationError tags worth retrying. Recipient/mailbox
-// validation surfaces as ToolOutputInvalid issues like `mailbox_not_bound` or
-// `recipient_not_in_thread:<addr>` — deterministic, NOT retried.
-const RETRIABLE_SEND_TAGS: ReadonlySet<string> = new Set([
-  "ConversationSendFailed",
-  "ConversationProviderUnavailable",
-  "ConversationAuthFailed",
-  "ConversationAuthMissing",
+// Deterministic recipient/mailbox validation rejects from the send tools' own
+// guards (surfaced as ToolOutputInvalid issue keys). A retry can NEVER fix these
+// — the draft itself is addressed wrong — so they are the ONLY conversation-send
+// failures that are NOT treated as a retriable delivery failure.
+const NON_RETRIABLE_REPLY_ISSUES: ReadonlySet<string> = new Set([
+  "mailbox_not_bound",
+  "recipient_not_in_thread",
+  "recipient_is_connected_mailbox",
 ]);
 
+/**
+ * Decide whether a FAILED customer-send tool call is a retriable delivery
+ * failure (→ enqueue the draft into the outbox + flag the case) vs. a
+ * deterministic validation reject the agent/human must handle.
+ *
+ * Default-retry: for `conversation.reply` / `ask_customer`, ANY real error is a
+ * delivery failure worth capturing — a transport tag, an auth error, a timeout,
+ * a bare `Error` from the connector, an unknown shape. We must never silently
+ * lose a drafted reply just because the failure didn't match a fixed tag list
+ * (the original bug: a non-tagged send error fell through to a generic
+ * `approved_tool_failed`, dropping the draft). The ONLY exception is a failure
+ * whose issue keys are ALL recipient/mailbox validation rejects.
+ */
 export const isReplyDeliverySendFailure = (
   toolName: string,
   err: unknown,
 ): boolean => {
   if (!REPLY_SEND_TOOLS.has(toolName)) return false;
+  // A degenerate non-error (null / primitive) carries nothing to retry.
   if (!err || typeof err !== "object") return false;
-  const e = err as { readonly _tag?: unknown; readonly issues?: unknown };
-  if (typeof e._tag === "string" && RETRIABLE_SEND_TAGS.has(e._tag)) return true;
-  if (Array.isArray(e.issues)) {
-    return e.issues.some(
-      (i) => typeof i === "string" && RETRIABLE_SEND_TAGS.has(i),
-    );
+  const rawIssues = (err as { readonly issues?: unknown }).issues;
+  const issueKeys = Array.isArray(rawIssues)
+    ? rawIssues
+        .filter((i): i is string => typeof i === "string")
+        .map((i) => i.split(":")[0] ?? i)
+    : [];
+  if (
+    issueKeys.length > 0 &&
+    issueKeys.every((k) => NON_RETRIABLE_REPLY_ISSUES.has(k))
+  ) {
+    return false;
   }
-  return false;
+  return true;
 };
 
 // ------------------------------------------------------------

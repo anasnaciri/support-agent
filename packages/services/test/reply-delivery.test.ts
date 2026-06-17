@@ -74,6 +74,39 @@ describe("isReplyDeliverySendFailure", () => {
     expect(isReplyDeliverySendFailure("conversation.reply", null)).toBe(false);
     expect(isReplyDeliverySendFailure("conversation.reply", "oops")).toBe(false);
   });
+
+  it("treats a NON-tagged connector error (plain Error) as a delivery failure", () => {
+    // Regression for the prod miss: a send failed with a bare Error (no _tag,
+    // no issues), fell through to approved_tool_failed, and the draft was lost.
+    expect(
+      isReplyDeliverySendFailure(
+        "conversation.reply",
+        new Error("connect ETIMEDOUT smtp"),
+      ),
+    ).toBe(true);
+    expect(
+      isReplyDeliverySendFailure("conversation.ask_customer", {
+        code: "EAUTH",
+        message: "auth failed",
+      }),
+    ).toBe(true);
+    // A wrapper carrying an unknown _tag (not in any fixed list) still retries.
+    expect(
+      isReplyDeliverySendFailure("conversation.reply", {
+        _tag: "ToolOutputInvalid",
+        issues: ["SomethingUnexpected"],
+      }),
+    ).toBe(true);
+  });
+
+  it("retries a MIXED failure (a validation key plus a transport one)", () => {
+    expect(
+      isReplyDeliverySendFailure("conversation.reply", {
+        _tag: "ToolOutputInvalid",
+        issues: ["recipient_not_in_thread:a@b.com", "ConversationSendFailed"],
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("REPLY_DELIVERY_FAILED_FLAG", () => {

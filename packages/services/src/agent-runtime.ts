@@ -521,7 +521,13 @@ export const toolFailureAuditDetail = (
     const s = String(left).trim();
     return s ? { error: s.slice(0, 200) } : {};
   }
-  const e = left as { readonly _tag?: unknown; readonly issues?: unknown };
+  const e = left as {
+    readonly _tag?: unknown;
+    readonly issues?: unknown;
+    readonly code?: unknown;
+    readonly message?: unknown;
+    readonly name?: unknown;
+  };
   if (Array.isArray(e.issues)) {
     const joined = e.issues
       .filter((i): i is string => typeof i === "string")
@@ -531,6 +537,14 @@ export const toolFailureAuditDetail = (
     if (joined) return { error: joined };
   }
   if (typeof e._tag === "string" && e._tag) return { error: e._tag };
+  // Non-tagged failures (a bare Error from the connector, an SMTP error): keep a
+  // readable reason. Prefer a short error CODE (e.g. nodemailer `EAUTH`,
+  // `ETIMEDOUT`) over the free-text message, then the message, then the class.
+  if (typeof e.code === "string" && e.code) return { error: e.code.slice(0, 200) };
+  if (typeof e.message === "string" && e.message) {
+    return { error: e.message.slice(0, 200) };
+  }
+  if (typeof e.name === "string" && e.name) return { error: e.name.slice(0, 200) };
   return {};
 };
 

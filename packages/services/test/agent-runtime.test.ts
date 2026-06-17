@@ -257,6 +257,19 @@ describe("toolFailureAuditDetail", () => {
     ).toEqual({ error: "recipient_not_in_thread" });
   });
 
+  it("captures a non-tagged connector error via code, then message, then name", () => {
+    // Regression: a bare Error used to produce {} (no reason recorded).
+    expect(toolFailureAuditDetail({ code: "ETIMEDOUT", message: "connect timeout" })).toEqual({
+      error: "ETIMEDOUT",
+    });
+    expect(toolFailureAuditDetail(new Error("550 mailbox unavailable"))).toEqual({
+      error: "550 mailbox unavailable",
+    });
+    expect(toolFailureAuditDetail({ name: "WeirdError" })).toEqual({
+      error: "WeirdError",
+    });
+  });
+
   it("returns nothing for an empty/unknown failure", () => {
     expect(toolFailureAuditDetail(null)).toEqual({});
     expect(toolFailureAuditDetail({})).toEqual({});
