@@ -183,6 +183,13 @@
       "when": 1781568000000,
       "tag": "0025_supplier_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781709072857,
+      "tag": "0026_reply_deliveries",
+      "breakpoints": true
     }
   ]
 }

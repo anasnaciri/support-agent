@@ -907,3 +907,71 @@ export type CaseSupplierEscalationRow =
   typeof caseSupplierEscalations.$inferSelect;
 export type CaseSupplierEscalationInsert =
   typeof caseSupplierEscalations.$inferInsert;
+
+// The durable outbox for customer-reply DELIVERY (the SMTP/Gmail/Graph send),
+// distinct from the supplier-notification outbox above. When a
+// `conversation.reply` / `conversation.ask_customer` send FAILS — in the agent
+// loop OR on approval-resume — the runtime persists the exact drafted message
+// here instead of losing it: the case is flagged `reply_delivery_failed` and
+// never resolved, a worker cron re-sends due rows with exponential backoff, and
+// the dashboard "Retry sending email" button requeues one immediately. `draft`
+// holds the verbatim tool input (to/subject/body/threadId/inReplyTo/draftId) so
+// a retry re-sends the SAME email without re-running the LLM. On a successful
+// send the row flips to `sent` and the case auto-resolves; at the attempt cap it
+// flips to `abandoned` and the case parks in `human_takeover`.
+export const replyDeliveries = pgTable(
+  "reply_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
+    /** The send tool to replay: `conversation.reply` | `conversation.ask_customer`. */
+    tool: text("tool").notNull(),
+    /** Connected mailbox that owns the thread (the sender), or null. */
+    mailbox: text("mailbox"),
+    /** Stable per-draft id (from the tool input) — dedupes a re-run of the same failed send. */
+    draftId: text("draft_id").notNull(),
+    /** Verbatim tool input, replayed as-is on retry (no LLM re-run). */
+    draft: jsonb("draft").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(6),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "reply_deliveries_status_check",
+      sql`${t.status} IN ('pending','sent','abandoned')`,
+    ),
+    // The retry sweep scans due pending rows oldest-first.
+    index("reply_deliveries_due_idx")
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'pending'`),
+    // Per-case lookup (dashboard surfacing + manual retry).
+    index("reply_deliveries_case_idx").on(t.caseId),
+    index("reply_deliveries_tenant_idx").on(t.tenantId),
+    // At most one in-flight delivery per draft, so a re-run of the same failed
+    // send bumps the existing row instead of duplicating it.
+    uniqueIndex("reply_deliveries_case_draft_pending_unique")
+      .on(t.caseId, t.draftId)
+      .where(sql`${t.status} = 'pending'`),
+  ],
+);
+
+export type ReplyDeliveryRow = typeof replyDeliveries.$inferSelect;
+export type ReplyDeliveryInsert = typeof replyDeliveries.$inferInsert;
