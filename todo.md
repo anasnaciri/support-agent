@@ -90,6 +90,58 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-17 — Failed customer-reply DELIVERY is now durable + retriable (6 TDD commits on
+  `feat/supplier-portal`, full `ci:local` green at each commit — build + ~1863 tests; dashboard
+  `tsc --noEmit` + `next build` verified separately).** Root cause from a live Fly diagnosis (tenant
+  Elva Labs, IMAP/SMTP `mail.privateemail.com`): a merchant-approved `conversation.reply` could FAIL
+  to send and the case still looked done. Two bugs + the feature the user asked for:
+  - **Bug (silent-delivery, in-loop):** when `conversation.reply` ran auto, a send failure was fed
+    back to the LLM, which then emitted `final_message` → `case.resolved` — the customer never got the
+    reply but the case resolved. **Fixed:** a send failure now parks the case in `human_takeover` and
+    ends the tick (never resolves).
+  - **Approval-resume failure** previously escalated as a bare `approved_tool_failed` with the draft
+    lost. **Fixed:** the approved draft is captured for retry.
+  - **Feature — reply-delivery outbox + retry:** new `reply_deliveries` table (migration `0026`,
+    hand-authored — see snapshot-chain note below) + store (`reply-delivery-store.ts`); a
+    `ReplyDeliveryService` Tag (services) / Live (db); the runtime enqueues the **verbatim draft** on
+    any `conversation.reply`/`ask_customer` send failure (both paths) + stamps a `reply_delivery_failed`
+    risk flag; a worker cron (`reply-delivery-retry-schedule.ts`, every minute) re-sends due rows via
+    the SAME `ConversationService` with exponential backoff (60s base, 30m cap, 6-attempt cap) — **no
+    LLM re-run** — and on success **auto-resolves** the case (`human_takeover`→`in_progress`→`resolved`,
+    clearing the flag); at the cap it `abandon`s and leaves the case in `human_takeover`. A guard skips
+    auto-retry once the case leaves `human_takeover` (a human took it / resolved it) so it never races a
+    manual reply. Manual path: `POST /dashboard/cases/:id/retry-send` (gated `cases.retry`, tenant-scoped)
+    requeues the row due-now; the dashboard shows a primary **"Retry sending email"** button (distinct
+    from "Retry now" = re-run agent) + a result banner + the risk chip. Only **retriable transport**
+    failures (`ConversationSendFailed`/`ProviderUnavailable`/`Auth*`) enqueue — a recipient/mailbox
+    validation reject still surfaces to the agent as before. **New invariant:** a failed customer-reply
+    delivery must NEVER resolve the case — it parks (human_takeover) + persists to the `reply_deliveries`
+    outbox for retry. See [[project_reply_delivery_retry]].
+    _Follow-ups (recorded, not built):_ (a) cancel/skip the pending outbox row when a human hands the
+    case back so a stale draft can't auto-send later (partly covered by the human_takeover guard);
+    (b) make the manual retry trigger an immediate sweep pass (today it waits ≤60s for the cron);
+    (c) persist the `ConversationSendFailed` reason into the failed `tool.invoked` audit details (still
+    only `{ok:false}` — the reason goes to stdout only).
+  - **DRIZZLE SNAPSHOT-CHAIN GAP (cleanup follow-up):** `packages/db/migrations/meta/` is missing the
+    snapshots for `0009` + `0021`–`0025` (those migrations were hand-authored without running
+    `drizzle-kit generate`), so `pnpm db:generate` diffs against the stale `0020` snapshot and emits a
+    POLLUTED migration that re-creates already-existing tables. Migration `0026_reply_deliveries.sql`
+    was therefore hand-authored to contain ONLY the new table; the full, accurate `0026_snapshot.json`
+    WAS kept, which **re-anchors the chain** so the next `generate` is clean. Don't blindly commit a
+    `db:generate` output until the chain is healthy — inspect it.
+
+- **2026-06-17 — Diagnosed (no code change) why the Fly worker "fails to send emails":** the worker
+  sends BOTH platform/Resend mail (approval links, supplier, account-deletion, connector alerts) AND,
+  via the agent runtime, customer replies through the connector. Live Fly findings: outbound SMTP
+  egress to `mail.privateemail.com` 465/587/993 WORKS (Fly isn't blocking it); `PLATFORM_MAIL_ENABLED`
+  is set to **"false"** so the worker runs the no-op `PlatformMailServiceTest` → every approval/system
+  email silently drops; `RESEND_FROM_ADDRESS` is the sandbox `onboarding@resend.dev` (can only mail the
+  Resend account owner); `APPROVAL_BASE_URL` still points at the dead Railway api. Customer replies
+  mostly send fine when approved — the gap was the failed-delivery handling fixed above. To actually
+  send platform mail: `fly secrets set PLATFORM_MAIL_ENABLED=true`, a verified Resend domain in
+  `RESEND_FROM_ADDRESS`, and fix `APPROVAL_BASE_URL`. (Also: two admin-token secrets exist —
+  `ADMIN_API_TOKEN` + a typo'd `ADMINI_API_TOKEN` — clean up.)
+
 - **2026-06-17 — Fixed: case-detail page crashed on open (Next error boundary, "error reference")
   for any case whose Shopify order has a fulfillment (TDD, branch `feat/supplier-portal`, build +
   312 dashboard tests green; NOT committed).** Symptom: opening a case showed the generic error
