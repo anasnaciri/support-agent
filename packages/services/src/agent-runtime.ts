@@ -503,6 +503,38 @@ const refundAuditDetails = (
 };
 
 /**
+ * A concise, length-capped failure label for a FAILED `tool.invoked` audit row.
+ * Without this the audit only records `{ok:false}` — a real delivery failure
+ * (`ConversationSendFailed`, a provider tag, …) leaves no readable trace in prod
+ * (the reason only ever hit stdout). Prefers the `ToolOutputInvalid` issues (the
+ * conversation tools put the underlying `ConversationError` `_tag` there), then a
+ * raw error `_tag`, then a stringified fallback. Each issue is truncated at the
+ * first `:` so a recipient/mailbox suffix (e.g. an email in
+ * `recipient_not_in_thread:<addr>`) can never leak into the audit — we keep the
+ * diagnostic KEY, not the PII value.
+ */
+export const toolFailureAuditDetail = (
+  left: unknown,
+): Record<string, string> => {
+  if (left === null || left === undefined) return {};
+  if (typeof left !== "object") {
+    const s = String(left).trim();
+    return s ? { error: s.slice(0, 200) } : {};
+  }
+  const e = left as { readonly _tag?: unknown; readonly issues?: unknown };
+  if (Array.isArray(e.issues)) {
+    const joined = e.issues
+      .filter((i): i is string => typeof i === "string")
+      .map((i) => i.split(":")[0] ?? i)
+      .join(",")
+      .slice(0, 200);
+    if (joined) return { error: joined };
+  }
+  if (typeof e._tag === "string" && e._tag) return { error: e._tag };
+  return {};
+};
+
+/**
  * Lock key for serializing a tick (audit L2): the case id when the event
  * references (or correlates to) an existing case; the thread key for a
  * first message whose case doesn't exist yet; null for events with no
@@ -1184,6 +1216,9 @@ export const AgentRuntimeDefault = Layer.effect(
                     ok: result._tag === "Right",
                     viaApprovalId: approval.id,
                     ...refundAuditDetails(approval.tool, toolInput),
+                    ...(result._tag === "Left"
+                      ? toolFailureAuditDetail(result.left)
+                      : {}),
                   },
                 });
                 // Marker shares the tx with the audit row (audit C2):
@@ -2259,6 +2294,9 @@ export const AgentRuntimeDefault = Layer.effect(
                   ok: result._tag === "Right",
                   ...refundAuditDetails(tool.name, callInput),
                   ...outputDetails,
+                  ...(result._tag === "Left"
+                    ? toolFailureAuditDetail(result.left)
+                    : {}),
                 },
               });
               // C2 marker — same tx as the audit row; only meaningful

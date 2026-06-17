@@ -10,6 +10,7 @@ import {
   defaultRefundPolicy,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
+  toolFailureAuditDetail,
   type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
@@ -228,5 +229,36 @@ describe("applyOverride — tool permissions", () => {
     );
     expect(next.model).toBe("google/gemini-3.5-flash");
     expect(next.permissionOverrides).toEqual({ "conversation.reply": "allow" });
+  });
+});
+
+describe("toolFailureAuditDetail", () => {
+  it("captures a wrapped transport failure tag from ToolOutputInvalid issues", () => {
+    expect(
+      toolFailureAuditDetail({
+        _tag: "ToolOutputInvalid",
+        issues: ["ConversationSendFailed"],
+      }),
+    ).toEqual({ error: "ConversationSendFailed" });
+  });
+
+  it("captures a raw error _tag when there are no issues", () => {
+    expect(toolFailureAuditDetail({ _tag: "ProviderUnavailable" })).toEqual({
+      error: "ProviderUnavailable",
+    });
+  });
+
+  it("strips a PII suffix (e.g. a recipient email) after the first colon", () => {
+    expect(
+      toolFailureAuditDetail({
+        _tag: "ToolOutputInvalid",
+        issues: ["recipient_not_in_thread:attacker@evil.com"],
+      }),
+    ).toEqual({ error: "recipient_not_in_thread" });
+  });
+
+  it("returns nothing for an empty/unknown failure", () => {
+    expect(toolFailureAuditDetail(null)).toEqual({});
+    expect(toolFailureAuditDetail({})).toEqual({});
   });
 });

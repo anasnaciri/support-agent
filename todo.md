@@ -117,11 +117,12 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
     validation reject still surfaces to the agent as before. **New invariant:** a failed customer-reply
     delivery must NEVER resolve the case — it parks (human_takeover) + persists to the `reply_deliveries`
     outbox for retry. See [[project_reply_delivery_retry]].
-    _Follow-ups (recorded, not built):_ (a) cancel/skip the pending outbox row when a human hands the
-    case back so a stale draft can't auto-send later (partly covered by the human_takeover guard);
-    (b) make the manual retry trigger an immediate sweep pass (today it waits ≤60s for the cron);
-    (c) persist the `ConversationSendFailed` reason into the failed `tool.invoked` audit details (still
-    only `{ok:false}` — the reason goes to stdout only).
+    _Follow-ups:_ (a) cancel/skip the pending outbox row when a human hands the case back so a stale
+    draft can't auto-send later (partly covered by the human_takeover guard) — NOT built;
+    (b) make the manual retry trigger an immediate sweep pass (today it waits ≤60s for the cron) —
+    NOT built; (c) ✅ DONE — the failed `tool.invoked` audit row now carries `error: <tag>` via
+    `toolFailureAuditDetail` (PII-stripped at the first `:`), so a send failure is debuggable from the
+    audit log alone instead of only stdout.
   - **DRIZZLE SNAPSHOT-CHAIN GAP (cleanup follow-up):** `packages/db/migrations/meta/` is missing the
     snapshots for `0009` + `0021`–`0025` (those migrations were hand-authored without running
     `drizzle-kit generate`), so `pnpm db:generate` diffs against the stale `0020` snapshot and emits a

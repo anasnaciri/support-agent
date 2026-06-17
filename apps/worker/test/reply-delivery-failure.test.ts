@@ -209,6 +209,12 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
     expect(out.entries.map((e) => e.action)).toContain(
       "case.escalated_to_human",
     );
+    // The failed tool.invoked row now carries the reason (not just ok:false),
+    // so a send failure is debuggable from the audit log alone.
+    const toolInvoked = out.entries.find(
+      (e) => e.action === "tool.invoked" && e.details["ok"] === false,
+    );
+    expect(toolInvoked?.details["error"]).toBe("ConversationSendFailed");
   });
 
   it("approval-resume: a failed approved reply captures the draft + flags reply_delivery_failed", async () => {
