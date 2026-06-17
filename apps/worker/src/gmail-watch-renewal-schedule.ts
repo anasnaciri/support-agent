@@ -74,11 +74,7 @@ export const registerGmailWatchRenewal = async (
       for (const _job of jobs) {
         const results = await Effect.runPromise(
           Effect.provide(
-            renewActiveGmailWatches(deps) as Effect.Effect<
-              ReadonlyArray<RenewalResult>,
-              unknown,
-              never
-            >,
+            renewActiveGmailWatches(deps),
             opts.runtimeLayer,
           ).pipe(
             Effect.catchAllCause(
@@ -133,7 +129,7 @@ export const registerGmailWatchRenewal = async (
                 );
               }),
             ),
-          ) as Effect.Effect<unknown, never, never>,
+          ),
         );
       }
     },

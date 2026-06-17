@@ -64,11 +64,7 @@ export const registerGraphSubscriptionRenewal = async (
       for (const _job of jobs) {
         const results = await Effect.runPromise(
           Effect.provide(
-            renewActiveGraphSubscriptions(deps) as Effect.Effect<
-              ReadonlyArray<GraphRenewalResult>,
-              unknown,
-              never
-            >,
+            renewActiveGraphSubscriptions(deps),
             opts.runtimeLayer,
           ).pipe(
             Effect.catchAllCause(
@@ -122,7 +118,7 @@ export const registerGraphSubscriptionRenewal = async (
                 );
               }),
             ),
-          ) as Effect.Effect<unknown, never, never>,
+          ),
         );
       }
     },

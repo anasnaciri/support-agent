@@ -54,11 +54,7 @@ export const registerImapPoll = async (
       for (const _job of jobs) {
         const results = await Effect.runPromise(
           Effect.provide(
-            pollActiveImapMailboxes({ publish }) as Effect.Effect<
-              ReadonlyArray<ImapPollResult>,
-              unknown,
-              never
-            >,
+            pollActiveImapMailboxes({ publish }),
             opts.runtimeLayer,
           ).pipe(
             Effect.catchAllCause(
@@ -108,7 +104,7 @@ export const registerImapPoll = async (
                 console.error("[imap-poll] health report crashed:", cause);
               }),
             ),
-          ) as Effect.Effect<unknown, never, never>,
+          ),
         );
       }
     },

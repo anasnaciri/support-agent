@@ -113,6 +113,7 @@ export interface WorkerBootstrap {
     | BlobStorage
     | OrgDirectoryService
     | PlatformMailService
+    | ConnectorCredentialStore
     | DbClient,
     never,
     never
@@ -624,6 +625,14 @@ export const buildWorker = async (
     // Duplicate-photo fraud guard. DbClient-backed; satisfied by the
     // dbLayer provide below. The runtime picks it up via serviceOption.
     ImageHashStoreLive,
+    // Exposed at the top level (not just provided INTO consumers) so the
+    // conversation-connector crons — imap-poll, gmail-watch-renewal,
+    // graph-subscription-renewal — can resolve it directly against
+    // `runtimeLayer`. Without this they Die with "Service not found:
+    // ConnectorCredentialStore" on every pass (silently, until the
+    // `as Effect<…, never>` casts that hid the missing requirement were
+    // removed). DbClient-backed; satisfied by the dbLayer provide below.
+    connectorStoreForPermissions,
   );
 
   // Satisfy env's DbClient dependency.

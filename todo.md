@@ -14,6 +14,8 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+NEXT: add a draft email feature on the cases/:id page: an input where the human can draft and send an email, it will also have rephrase with ai feature, the rephrase model will be configured in the settings, and from a small drop down on top of the text input (make the small dropdown be only the name of the current model plus a chevron down, make it minimalistic)
+
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
@@ -30,11 +32,11 @@ A customer messages support saying their order hasn't arrived even though the sh
 
 We evaluated closing the loop **through the Google Sheet** — agent writes a row, supplier answers in a column, a worker polls the sheet and reports back. **Rejected** because:
 
-- **No server-side query in the Sheets API.** `values.get` takes an A1 *range*, not a `WHERE` — finding a row by order/customer/email means reading a column and scanning it in our code. Workable but clumsy.
+- **No server-side query in the Sheets API.** `values.get` takes an A1 _range_, not a `WHERE` — finding a row by order/customer/email means reading a column and scanning it in our code. Workable but clumsy.
 - **No native change push.** Detecting a supplier edit means either polling + snapshot-diffing every tenant's sheet on a cron, or making the merchant install an Apps Script `onEdit` webhook — fragile, expensive, non-deterministic.
 - **Per-merchant arbitrary columns** ("to each merchant their own sheet") means no reliable contract for "the supplier addressed this vs. is still typing."
 
-The **supplier-portal** approach flips *pull → push* and wins on every axis the user cares about:
+The **supplier-portal** approach flips _pull → push_ and wins on every axis the user cares about:
 
 - **Case-enclosed** — the update arrives already bound to a `caseId`. No row search, no matching.
 - **Deterministic** — the trigger is an explicit "supplier submitted a resolution" event, not a heuristic over edited cells.
@@ -45,7 +47,7 @@ The sheet escalation (`supplier.add_sheet_row`) can **stay as an optional fallba
 
 ### Access model — DECIDED: recurring login (persistent supplier accounts)
 
-The supplier gets a **real logged-in space** (not one-off signed magic links), listing their open escalations across visits. Scope each supplier to a workspace/tenant. Lean on the **member-RBAC infrastructure** already landed (roles, per-workspace assignments, permission catalog) rather than inventing a parallel auth — a supplier is effectively a heavily-constrained external role that can see *only* cases escalated to them and can *only* post supplier updates.
+The supplier gets a **real logged-in space** (not one-off signed magic links), listing their open escalations across visits. Scope each supplier to a workspace/tenant. Lean on the **member-RBAC infrastructure** already landed (roles, per-workspace assignments, permission catalog) rather than inventing a parallel auth — a supplier is effectively a heavily-constrained external role that can see _only_ cases escalated to them and can _only_ post supplier updates.
 
 ### Build checklist — ALL LANDED
 
@@ -73,7 +75,7 @@ The supplier gets a **real logged-in space** (not one-off signed magic links), l
 
 ### Follow-ups (recorded, not built)
 
-- On notify cap-exhaustion, alert the *merchant* ("supplier unreachable") — the SLA-reminder option the user deferred.
+- On notify cap-exhaustion, alert the _merchant_ ("supplier unreachable") — the SLA-reminder option the user deferred.
 - Live verification (invite a real supplier → post an update → confirm the gated customer reply) — not yet run.
 - A merchant-facing list of current suppliers / pending supplier invitations on `/settings/suppliers` (invite-only for now).
 - Consider hiding the new "Supplier" RBAC category from the merchant role editor (harmless today — owners only).
@@ -87,6 +89,71 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-17 — PROD OUTAGE root-caused + fixed: inbound email created no cases for tenant
+  `477168f6` (Elva Labs, org `org_01KV5SQTA1SDNYZ4XSBA9A46HV`) — the worker's conversation-connector
+  crons were silently dying every pass (branch `feat/supplier-portal`, build green; NOT yet deployed).**
+  Symptom: "cases aren't loading nor created on new messages." Diagnosis path: the live IMAP connection
+  (`contact@elvalabs.com` on `mail.privateemail.com`) is **active** in the Railway DB (verified via the
+  prod admin API `GET /admin/tenants/:id` on `support-agent-backend.fly.dev`), but its metadata had **no
+  `lastUid` cursor and no `connectorHealth` flag** 18h after install — meaning the `imap.poll` cron never
+  completed a single pass. Fly worker logs showed the smoking gun: `[imap-poll] pass crashed … _tag:'Die'
+  … Service not found: ConnectorCredentialStore`, every minute. **Root cause:** the worker `runtimeLayer`
+  (`apps/worker/src/bootstrap.ts`) never exposed `ConnectorCredentialStore` at the top level — it was only
+  ever `Layer.provide`-d *into* sub-layers (llm resolver, shopify, conversation router, permissions, …),
+  which consumes+hides it. The three conversation-connector crons (`imap-poll`,
+  `gmail-watch-renewal`, `graph-subscription-renewal`) all `Effect.provide(…, runtimeLayer)` and require
+  `DbClient | ConnectorCredentialStore`; `DbClient` was exposed, `ConnectorCredentialStore` was not → Die
+  on every pass → no `message.received` published → no cases. The bug compiled because each cron cast its
+  effect `as Effect.Effect<…, never>`, erasing the unmet requirement. **Fix (TDD, compile-time guard):**
+  (1) removed the six `as …never` casts (3 crons × main-pass + health-report) so `tsc -b` now enforces the
+  layer contract — confirmed RED (`Type 'ConnectorCredentialStore' is not assignable to type 'never'`);
+  (2) added `ConnectorCredentialStore` to the `WorkerBootstrap.runtimeLayer` type union and merged
+  `connectorStoreForPermissions` (= `ConnectorCredentialStoreLive(keys)` in prod, dev stub otherwise) into
+  the `env` layer so it's exposed via `envWithDb` → GREEN. `pnpm build` green; 28 worker cron/bootstrap
+  tests pass. Casts were pure type assertions — no runtime behavior change beyond the layer now resolving.
+  **New invariant:** the worker's conversation-connector crons must resolve `ConnectorCredentialStore` from
+  `runtimeLayer` — never re-introduce an `as Effect<…, never>` cast to silence a missing-layer error.
+  **Follow-ups:** (a) **deploy** — `fly deploy -c deploy/fly/fly.toml --dockerfile deploy/railway/Dockerfile`
+  from repo root ships the working tree; current branch is `feat/supplier-portal`. (b) after deploy, verify
+  the IMAP connection's metadata gains `lastUid` and a customer email creates a case. (c) the silent-skip
+  was invisible for 18h because `reportRenewalResultsHealth` ALSO needs the store and Died too — consider a
+  worker boot-time assertion that `runtimeLayer` resolves every cron's deps. See [[project_worker_connector_cron_layer_fix]].
+
+- **2026-06-17 — Fixed: a customer reply to a RESOLVED case was silently dropped (TDD, branch
+  `feat/supplier-portal`, NOT committed — entangled tree, see below).** Root-caused from a real
+  production audit trail (Gmail tenant, case `71349f04`): the case resolved after a gated order-status
+  reply; the customer replied again; the agent re-ran, re-drafted `conversation.reply`, but the reply
+  was swallowed by the **C2 in-loop idempotency dedup** and the agent gave up with a bare
+  `final_message`. Cause: `conversation.reply`'s idempotency key is `input.draftId`, and the
+  execution-marker is stored **case-scoped and permanent** (`ToolExecutionStore.find(caseId, callId)`);
+  the stateless LLM reused the same `draftId` across the two distinct inbound messages, so tick 2's
+  reply matched the marker tick 1 wrote (via the approval-resume leg) → `{deduped:true}`, no audit row,
+  no send. The marker only ever needed to guard against a *redelivered* job, not a genuinely new
+  message. **Fix** (`packages/services/src/agent-runtime.ts`): added a per-delivery scope to the marker
+  key — `executionKeyFor(tool,input,fallback,scope?)` prefixes the key, new `deliveryScopeFor(event)`
+  yields `msg:<messageId>` for inbound mail / `appr:<approvalId>` for approvals / `timer:<id>` /
+  `case:<id>`. Scoped at BOTH legs: in-loop (`deliveryScopeFor(event)`) and approval-resume
+  (`appr:<approval.id>`). Redelivery still dedups (same discriminator); a new message no longer does.
+  **Secondary** (recommended, included): an explicit reopen — `message.received`/`customer.replied` on
+  a `resolved` case now transitions `resolved → in_progress` with a `case.reopened` audit before the
+  loop, so the reopen is visible and the `final_message` short-circuit (status===resolved) can't swallow
+  a genuine re-engagement. **Tests**: 2 new regression tests in
+  `apps/worker/test/agent-runtime-recovery.test.ts` (cross-delivery no-dedup → tool re-runs on the 2nd
+  message; `case.reopened` audit on reply-to-resolved); updated the 2 existing C2 redelivery tests
+  (547/667) to seed the new delivery-scoped keys (still assert redelivery dedup). `pnpm build` green;
+  services suite 270/270; recovery file 17/17. New invariant: **the C2 execution marker is
+  delivery-scoped** — a marker from one delivery must never dedup a side-effecting tool in another.
+  *Residual:* `supplier.updated` / `case.resumed` / `manual.takeover` fall back to `case:<id>` (no
+  per-delivery id on the event) — two of the same on one case could still cross-dedup; follow-up.
+  *Entanglement note:* `agent-runtime.ts` in this working tree ALSO carries the uncommitted
+  order-status identity-gate edits, so the file can't be committed in isolation without `git add -p`
+  (interactive staging is unavailable here) — left uncommitted for the user to stage/split. *Unrelated
+  pre-existing breakage observed:* the order-identity work added `conversation.ask_customer` to
+  `order-status-agent` but did NOT register it in 5 `agent-runtime.e2e.test.ts` order-status/
+  merchant.notify tool registries, so those 5 e2e tests fail (`schemasFor` → `Failed`); proven
+  independent of this fix by reverting `agent-runtime.ts` to HEAD (they still fail). Needs registering
+  `conversationAskCustomer` in those envs as part of completing the order-identity gate.
+
 - **2026-06-16 — Admin console shows the WorkOS org NAME beside the org id (TDD):** the org name lives
   only in WorkOS, so added `makeWorkosOrganizationDirectory` (`GET /organizations/:id` → `name`,
   soft-fails to null) mirroring the existing user directory; wired it through `startServer` opts →
@@ -98,6 +165,22 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   `name + mono id`, tenant-detail "WorkOS org" row + account-page heading/crumb show the name. Falls back
   to the bare id when WorkOS is unconfigured / the lookup fails. `pnpm build` green; directory +
   group-tenants unit tests + admin tenant/account integration tests green.
+- **2026-06-16 — Order-status identity gate (branch `feat/supplier-portal`, TDD, build + 707
+  affected-package unit tests green; NOT committed).** Closes a cross-customer order-data leak in the
+  `where_is_order` flow: a requester writing in from a different email than the order was placed under could
+  previously get the order's status (and in `conversation.reply`-auto mode, automatically). Now: a
+  `shopify.get_order` whose `email` ≠ the case's runtime-stamped `customerEmail` stamps
+  `order_customer_mismatch` + persists `pendingOrderEmail`; the agent (order-status specialist, now holding
+  `conversation.ask_customer`) runs a self-serve challenge — asks the customer to confirm the order's email
+  — and the runtime (NOT the model) sets `identityVerified` when their reply states it
+  (`replyProvesOrderIdentity`). Until verified, `shouldForceReplyApproval` forces `conversation.reply` to
+  human approval even under tenant-auto, and the dashboard shows an `order_customer_mismatch` risk chip. The
+  legit second-email customer is auto-served after confirming; an attacker can't produce the email so the
+  reply stays gated. New pure helpers (`orderCustomerMismatchFlag` / `replyProvesOrderIdentity` /
+  `shouldForceReplyApproval`) + `buildInitialMessages` resume directive, all unit-tested. Mirrors the
+  refund-scope guard for read-disclosure. See [[project_order_status_identity_gate]]. Follow-up: generalize
+  beyond `where_is_order` (any get_order mismatch + reply), and consider a possession-factor (code-to-order-
+  email) upgrade over the current knowledge-factor check.
 - **2026-06-15 — Supplier portal landed (branch `feat/supplier-portal`, 10 TDD commits, ci:local
   green at every commit — full `pnpm build` + 1785 tests; dashboard `typecheck`+`next build` verified
   separately).** Closes the escalation loop end-to-end: the `missing-package-agent` carrier branch calls
@@ -134,9 +217,9 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   (`fab3e16`)
   (5) **Timeline connector line was discontinuous:** the line is a per-`<li>` `border-l-2` but items were
   spaced with `space-y-3` (margin = outside the border-box → gap at every item). Moved the gap to `pb-3`
-  + `last:pb-0` (padding = inside the border) across all three timelines (email / activity / full audit)
-  so the line is continuous, spacing + height unchanged. (`535033f`)
-  Every commit ran `ci:local` green (full build + 1753 tests).
+  - `last:pb-0` (padding = inside the border) across all three timelines (email / activity / full audit)
+    so the line is continuous, spacing + height unchanged. (`535033f`)
+    Every commit ran `ci:local` green (full build + 1753 tests).
 
 - **2026-06-14 — Rebranded the dashboard to "Guidezilla":** Sidebar (`apps/dashboard/app/IconRail.tsx`)
   and tab title (`layout.tsx`) now read **Guidezilla** instead of "Support Agent" (the `@support-agent/*`
@@ -161,24 +244,24 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   `src/auth/` (dashboard context/auth/authz/jwt/user-id, workos-directory, install-grant, +
   **dashboard-routes** = the shared RBAC-gated `dashboardGet/Post` factory), and ten `src/features/<x>/`
   (shopify, mailbox, dashboard, members, admin, approvals, telegram, account, connect, system). `server.ts`
-  + `bootstrap.ts` are the only root files. **Tests co-locate** next to their subject under
-  `src/features/<x>/tests/` (decided with the user — cleaner than barrels: a test next to its code imports
-  `../handlers.js` directly, so the churn that made barrels tempting evaporates); cross-cutting whole-server
-  tests under `src/tests/`. **No barrels.** `server.ts` is now a pure composition root: build app via
-  `platform/app.buildApp`, thread `RouteContext{cfg,layer}`, mount `register<X>Routes(app, ctx)` per feature;
-  each feature's route table lives in `features/<x>/routes.ts` (verbatim paths/schemas/permissions/order).
-  Redundant `shopify-`/`dashboard-` filename prefixes dropped on the way in. Mechanics: a one-off path-aware
-  import codemod (`/tmp/api-codemod.mjs`, not committed) recomputed every relative `.js` specifier from a
-  per-phase move-map (pure path math, not regex); `tsc -b` + vitest were the oracle. **Config:**
-  `apps/api/tsconfig.json` now `exclude`s `src/**/tests/**` (tests stay out of `dist`, matching prior
-  behavior); root `vitest.config.ts` include widened with `apps/**/src/**/*.test.ts`.
-  **Follow-ups (recorded, not started):** (1) `platform/pgboss.ts` imports domain modules
-  (`features/account/deletion`, `features/shopify/policy-import-queue`) for its lazy publishers — split the
-  boss singleton (platform) from the per-feature publishers to restore "platform = no domain knowledge";
-  (2) `features/admin/account-handlers.ts` still mixes the dashboard `handleDashboardAccountDelete` with
-  operator handlers (dashboard/routes imports it cross-feature) — could hoist account-delete to a dashboard
-  handler; (3) `features/shopify/handlers` imports `features/account/compliance-redaction` for the GDPR
-  webhooks (shopify→account) — acceptable but a candidate for a neutral `features/compliance/`.
+  - `bootstrap.ts` are the only root files. **Tests co-locate** next to their subject under
+    `src/features/<x>/tests/` (decided with the user — cleaner than barrels: a test next to its code imports
+    `../handlers.js` directly, so the churn that made barrels tempting evaporates); cross-cutting whole-server
+    tests under `src/tests/`. **No barrels.** `server.ts` is now a pure composition root: build app via
+    `platform/app.buildApp`, thread `RouteContext{cfg,layer}`, mount `register<X>Routes(app, ctx)` per feature;
+    each feature's route table lives in `features/<x>/routes.ts` (verbatim paths/schemas/permissions/order).
+    Redundant `shopify-`/`dashboard-` filename prefixes dropped on the way in. Mechanics: a one-off path-aware
+    import codemod (`/tmp/api-codemod.mjs`, not committed) recomputed every relative `.js` specifier from a
+    per-phase move-map (pure path math, not regex); `tsc -b` + vitest were the oracle. **Config:**
+    `apps/api/tsconfig.json` now `exclude`s `src/**/tests/**` (tests stay out of `dist`, matching prior
+    behavior); root `vitest.config.ts` include widened with `apps/**/src/**/*.test.ts`.
+    **Follow-ups (recorded, not started):** (1) `platform/pgboss.ts` imports domain modules
+    (`features/account/deletion`, `features/shopify/policy-import-queue`) for its lazy publishers — split the
+    boss singleton (platform) from the per-feature publishers to restore "platform = no domain knowledge";
+    (2) `features/admin/account-handlers.ts` still mixes the dashboard `handleDashboardAccountDelete` with
+    operator handlers (dashboard/routes imports it cross-feature) — could hoist account-delete to a dashboard
+    handler; (3) `features/shopify/handlers` imports `features/account/compliance-redaction` for the GDPR
+    webhooks (shopify→account) — acceptable but a candidate for a neutral `features/compliance/`.
 
 - **2026-06-14 — Modularized `apps/api/src/server.ts` (6661 → 1605 lines):** The api god-file
   was split into focused sibling modules; `server.ts` is now the composition root (imports +
@@ -186,14 +269,14 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   Handler bodies moved **verbatim** (behavior-preserving) into: `http.ts` (response/request/body/
   cookie/HTML helpers), `dashboard-context.ts` (`runWithDb` + dashboard auth + RBAC guard + legal
   helpers), `pgboss.ts` (the lazy shared pg-boss singleton + `acquireApprovalBoss`/`stopApprovalBoss`
-  + the cleanup/policy-import publishers — extracted to break a would-be import cycle and avoid
-  duplicate boss caches; `server.ts` `close()` now calls `stopApprovalBoss()`), and per-domain
-  `*-handlers.ts`: `dashboard-case`, `account-admin`, `dashboard-settings`, `dashboard-knowledge`,
-  `dashboard-connect`, `shopify`, `mailbox`, `approval`, `member-rbac`. Module dep graph is acyclic
-  (`dashboard-case→shopify`; `settings→account-admin→connect→shopify`). Drafted in parallel via a
-  one-off Workflow, then integrated by hand. Verified: full `pnpm build` green + **all 490 api tests
-  pass (52 files, incl. every DB-gated integration test over HTTP)**. `strList` still re-exported from
-  `server.ts` for `query-params.test.ts`. No behavior or contract change.
+  - the cleanup/policy-import publishers — extracted to break a would-be import cycle and avoid
+    duplicate boss caches; `server.ts` `close()` now calls `stopApprovalBoss()`), and per-domain
+    `*-handlers.ts`: `dashboard-case`, `account-admin`, `dashboard-settings`, `dashboard-knowledge`,
+    `dashboard-connect`, `shopify`, `mailbox`, `approval`, `member-rbac`. Module dep graph is acyclic
+    (`dashboard-case→shopify`; `settings→account-admin→connect→shopify`). Drafted in parallel via a
+    one-off Workflow, then integrated by hand. Verified: full `pnpm build` green + **all 490 api tests
+    pass (52 files, incl. every DB-gated integration test over HTTP)**. `strList` still re-exported from
+    `server.ts` for `query-params.test.ts`. No behavior or contract change.
 
 - **2026-06-13 — API unused-symbol cleanup:** Removed behavior-neutral strict-TypeScript
   diagnostics: unused `Effect`, `MemberAccess`, and `ShopifyAppProvisioning` imports, plus the unused
@@ -248,7 +331,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   **Follow-ups (recorded, not started):** removing a member only drops the local assignment (revokes
   access via enforced mode) — full WorkOS org-membership removal needs the membership id we don't track;
   revoking a pending invite revokes the local row only (WorkOS email auto-expires); multi-member
-  *existing* orgs rely on each member's first-load (single-operator is the common case) — a one-shot
+  _existing_ orgs rely on each member's first-load (single-operator is the common case) — a one-shot
   enumerate-all-WorkOS-members → Owner backfill would harden it; refund-approval e2e not integration-
   tested (covered by the `decideAuthz` unit + the manual flow).
 - **2026-06-13 — Shopify connect gated per workspace + truthful connected banner (TDD):** Root-caused the
@@ -316,20 +399,20 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   ("IMAP / SMTP") kept as the integrations-card name on purpose.
 - **2026-06-16 — IMAP password guidance made provider-aware (TDD):** the connect form stopped
   telling every merchant they need an "app password" — the bug that confused a Namecheap Private
-  Email setup, where IMAP/SMTP sign in with the *normal* mailbox password and the app-password
+  Email setup, where IMAP/SMTP sign in with the _normal_ mailbox password and the app-password
   picker has no IMAP entry (it's only for 2FA). New `PasswordHint`
   (`regular | app_password | app_password_if_2fa`) on the `settings` variant of `ImapDiscovery`
   (`apps/api/src/features/mailbox/imap-discovery.ts`): per-MX-preset (Namecheap→`app_password_if_2fa`
-  + new Namecheap app-password KB URL; Zoho/Fastmail/Yandex→`app_password`; GoDaddy/OVH/IONOS→`regular`),
-  ISPDB/guess derive from app-password-URL presence (`hintFromAppPasswordUrl`, guess→`regular`). The
-  discover endpoint already returns the discovery object verbatim, so no handler change. Dashboard:
-  pure `passwordGuidanceForFailure(discovered)` in `connect/imap/connect-plan.ts` maps the hint to
-  accurate failure copy (`regular`→"use your normal mailbox password, not an app password"; `_if_2fa`→
-  "only if you've turned on two-factor"; `app_password`→needs one + "Create an app password" link when
-  a URL exists). Form relabeled **App password → Password** with a neutral helper; page intro + the
-  failure alert now route through the helper. +9 tests (6 discovery, "+" guidance suite of 6 incl.
-  fixture). `pnpm build`, dashboard `tsc --noEmit`, api+dashboard vitest 609 passed. NOT committed yet
-  / branch `feat/supplier-portal`.
+  - new Namecheap app-password KB URL; Zoho/Fastmail/Yandex→`app_password`; GoDaddy/OVH/IONOS→`regular`),
+    ISPDB/guess derive from app-password-URL presence (`hintFromAppPasswordUrl`, guess→`regular`). The
+    discover endpoint already returns the discovery object verbatim, so no handler change. Dashboard:
+    pure `passwordGuidanceForFailure(discovered)` in `connect/imap/connect-plan.ts` maps the hint to
+    accurate failure copy (`regular`→"use your normal mailbox password, not an app password"; `_if_2fa`→
+    "only if you've turned on two-factor"; `app_password`→needs one + "Create an app password" link when
+    a URL exists). Form relabeled **App password → Password** with a neutral helper; page intro + the
+    failure alert now route through the helper. +9 tests (6 discovery, "+" guidance suite of 6 incl.
+    fixture). `pnpm build`, dashboard `tsc --noEmit`, api+dashboard vitest 609 passed. NOT committed yet
+    / branch `feat/supplier-portal`.
 - **2026-06-12 — IMAP connect form simplified to email + app password (TDD):** `/connect/imap` no longer
   shows host/port/security by default — server settings are autodiscovered. New pure
   `apps/api/src/imap-discovery.ts` (29 tests), chain ordered first-hit-wins: (1) OAuth-provider detection —
@@ -383,12 +466,11 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   recommendations, approval cards (any decision channel — dashboard, email link, telegram link — since
   they share the approval rows), `merchant.notify` heads-ups with their audited content + delivered
   state, and human touchpoints (`case.escalated_to_human` with merchant-friendly reason copy mirroring
-  the Telegram copy map, `case.taken_over`, `case.resumed` incl. dashboard_retry, `case.resolved`).
-  Hidden on purpose: `agent.handoff`, Shopify/knowledge/tracking lookups, `case.update_*`,
-  `llm.decision`, `event.held_human_takeover`, `case.waiting_for_approval` (the approval card carries
-  that story). Mode buttons relabeled Activity / Email thread / Full audit. Tests: +1 agents prompt,
-  e2e audit-details assertions, case-timeline 13 (mode default flip + curation rules). Verified
-  `pnpm build`, dashboard `next build`, ci-local green per commit (1568 passed / 5 skipped).
+  the Telegram copy map, `case.taken_over`, `case.resumed` incl. dashboard*retry, `case.resolved`).
+  Hidden on purpose: `agent.handoff`, Shopify/knowledge/tracking lookups, `case.update*\*`,
+`llm.decision`, `event.held_human_takeover`, `case.waiting_for_approval`(the approval card carries
+that story). Mode buttons relabeled Activity / Email thread / Full audit. Tests: +1 agents prompt,
+e2e audit-details assertions, case-timeline 13 (mode default flip + curation rules). Verified`pnpm build`, dashboard `next build`, ci-local green per commit (1568 passed / 5 skipped).
 - **2026-06-12 — Merchant Telegram notifications (full slice, TDD):** Channel-neutral
   `MerchantNotificationService` (services Tag + test layer + pure copy builders in
   `merchant-notification.ts`) with Telegram as the first transport — the first realization of the
@@ -409,7 +491,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   (4) **worker cron** `llm.credits-check` (`30 */6 * * *`): each active openrouter BYOK key's balance
   from `GET /api/v1/credits`; ONE `llm_credits_low` ping per below-threshold crossing (default $5,
   `LLM_CREDITS_ALERT_THRESHOLD_USD`); the once-flag lives in connector metadata, is stamped ONLY after
-  a *delivered* ping (no channel yet → retried next pass) and re-arms on recovery; anthropic/openai
+  a _delivered_ ping (no channel yet → retried next pass) and re-arms on recovery; anthropic/openai
   skipped (no balance API). (5) **api:** `POST /dashboard/connections/telegram` mints a 15-min signed
   t.me deep link (fixed-width binary base64url token ≤64 chars — the dot-separated install-grant format
   doesn't fit /start's charset; same authenticated-mint trust rules); bot webhook
@@ -443,19 +525,19 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   to an explicit, narrowly-typed `liveTrackingStatus` named field (tolerant projection of the tracking
   union; unknown sub-keys stripped at decode) + the agent prompt updated to write `liveTrackingStatus`.
   Rule going forward: a genuinely-needed-but-unsupported key is a signal to add a NAMED field (with tests
-  + clear render-back rules), never to reopen a generic `extra`. (4) **Refund scope guard** —
-  `refundCustomerMismatchFlag` stamps `refund_customer_mismatch` onto case context (→ ApprovalCard chip)
-  when a refund targets an order whose customer ≠ the case's runtime-stamped `customerEmail`; the
-  order→email map is built from `shopify.get_order` results in the same tick (no extra Shopify call,
-  fails open). (5) **`ask_customer` recipient guard** already present (`assertRecipientsInThread`) — added
-  the explicit off-thread-rejection test (it auto-executes, so higher-risk than reply); new
-  `risk-flag-label.ts` gives the mismatch flag friendly copy. Tests: +5 agent-core, +5 services messages,
-  +2 services prompt, +6 refund-scope helper, +2 case tool, +2 knowledge tool, +2 ask_customer recipient,
-  +1 refund-mismatch e2e, +1 L8 e2e, +3 dashboard label. `pnpm build` + dashboard `next build` green; full
-  vitest **1207 passed / 266 skipped**. NOTE: framing is a mitigation, not a guarantee — the durable
-  defenses remain the tool-permission gates + recipient/scope constraints. Read-scoping of
-  `shopify.get_order`/`get_customer` left store-wide on purpose (reads can't exfiltrate past the reply gate;
-  refund is the money path and now carries the mismatch flag).
+  - clear render-back rules), never to reopen a generic `extra`. (4) **Refund scope guard** —
+    `refundCustomerMismatchFlag` stamps `refund_customer_mismatch` onto case context (→ ApprovalCard chip)
+    when a refund targets an order whose customer ≠ the case's runtime-stamped `customerEmail`; the
+    order→email map is built from `shopify.get_order` results in the same tick (no extra Shopify call,
+    fails open). (5) **`ask_customer` recipient guard** already present (`assertRecipientsInThread`) — added
+    the explicit off-thread-rejection test (it auto-executes, so higher-risk than reply); new
+    `risk-flag-label.ts` gives the mismatch flag friendly copy. Tests: +5 agent-core, +5 services messages,
+    +2 services prompt, +6 refund-scope helper, +2 case tool, +2 knowledge tool, +2 ask_customer recipient,
+    +1 refund-mismatch e2e, +1 L8 e2e, +3 dashboard label. `pnpm build` + dashboard `next build` green; full
+    vitest **1207 passed / 266 skipped**. NOTE: framing is a mitigation, not a guarantee — the durable
+    defenses remain the tool-permission gates + recipient/scope constraints. Read-scoping of
+    `shopify.get_order`/`get_customer` left store-wide on purpose (reads can't exfiltrate past the reply gate;
+    refund is the money path and now carries the mismatch flag).
 - **2026-06-12 — Structured return-intent capture (small slice):** Applied the "named field, not a generic
   `extra`" rule to its first real case. Returns still route through `refund-review-agent` as `refund_request`,
   but the agent now stamps narrow literal `returnReason` + `requestedResolution` fields (RETURN CAPTURE step)
@@ -486,7 +568,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   `mouseleave` close. Fix (TDD, `test/cone.test.ts` 15 tests): `pointerDirection` → `advanceHeading` with
   (a) anchor that only advances when the accumulated move clears `minDelta=3`, (b) distance-weighted
   blending for aligned moves (`blendDelta=16` re-aims fully), (c) a reversal accumulator — opposed (dot<0)
-  travel holds the heading until `reverseDelta=12`px accumulate, then snaps, so the *intentional*
+  travel holds the heading until `reverseDelta=12`px accumulate, then snaps, so the _intentional_
   close-on-reversal still fires at any retreat speed but twitches never flip it (a pure LERP can never flip
   on an antiparallel reversal — caught in design review). Also: clip-path fallback apex `50% 50%` → `0% 50%`
   (widest wedge between open and first move), and the S13 sign-out POST guard test re-pointed at
@@ -585,7 +667,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   a `human_takeover` case records `event.held_human_takeover` and returns the new `PausedForHumanTakeover` result
   without running the agent. Added the resume path so takeover is no longer a one-way door: `resumeCase` (db)
   flips `human_takeover → in_progress` (transition + `case.resumed` audit, no-op if not in takeover), `POST
-  /dashboard/cases/:id/resume`, api-client `resume`, `resumeAction`, and a "Hand back to agent" button on the case
+/dashboard/cases/:id/resume`, api-client `resume`, `resumeAction`, and a "Hand back to agent" button on the case
   page (shown only when `human_takeover`). Resume is a pure status flip — the agent re-engages on the next inbound
   message (the runtime has no message-history replay, so it deliberately doesn't replay the already-seen reply).
   TDD: runtime e2e (held reply, status unchanged, LLM never called) + 3 resume integration tests. `pnpm build`
@@ -613,7 +695,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   groups (`api` = Fastify public HTTPS on `:4000` w/ `/healthz`; `worker` = pg-boss + crons, no port),
   built from the EXISTING `deploy/railway/Dockerfile`; migrations via `release_command` (so neither
   group migrates at boot; `DEPLOY_ROLE` is unused — the process command IS the role). `fly config
-  validate` green. Runbook keeps the DB on Railway (public `DATABASE_PUBLIC_URL`) as the fast path,
+validate` green. Runbook keeps the DB on Railway (public `DATABASE_PUBLIC_URL`) as the fast path,
   bulk-imports secrets from Railway with the host-specific overrides (DATABASE_URL/PORT) called out,
   and documents the custom-domain repoint (replacing the cloudflared tunnel on
   `support-agent-api.nacirianas.com`). Railway stays viable for Gmail/Graph-API tenants (HTTPS, no
@@ -773,84 +855,84 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
 ### Audit A — pilot provisioning & deploy
 
 - [x] **A1 (HIGH) — Pilot provisioning can be bypassed.** FIXED 2026-06-06 (commit `3b3157d`): the gate is enforced authoritatively at the install/callback resolver (`resolveShopifyAppForTenant` takes `requireProvisioning`); pilot mode with no non-revoked row → 403 `shopify_provisioning_required`, no global fallback. The manage page mirrors the overview's disabled "Awaiting setup" button. The
-  `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` gate only guards the dashboard
-  *overview*. A merchant can visit the Shopify integration page or hit
-  `/shopify/install` directly, which **falls back to the global Shopify app
-  credentials** when no provisioning row exists — so an unprovisioned tenant
-  can still install against the global app.
-  Evidence: `apps/dashboard/app/settings/integrations/[provider]/page.tsx:67`,
-  `apps/api/src/shopify-app-resolver.ts:49`, `apps/api/src/server.ts:1619`.
-  Fix direction: enforce the provisioning gate at the **install endpoint** and
-  the integration page, not just the overview. When the flag is set and there's
-  no non-revoked provisioning row, **refuse the install** instead of resolving
-  the global fallback app.
+      `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` gate only guards the dashboard
+      _overview_. A merchant can visit the Shopify integration page or hit
+      `/shopify/install` directly, which **falls back to the global Shopify app
+      credentials** when no provisioning row exists — so an unprovisioned tenant
+      can still install against the global app.
+      Evidence: `apps/dashboard/app/settings/integrations/[provider]/page.tsx:67`,
+      `apps/api/src/shopify-app-resolver.ts:49`, `apps/api/src/server.ts:1619`.
+      Fix direction: enforce the provisioning gate at the **install endpoint** and
+      the integration page, not just the overview. When the flag is set and there's
+      no non-revoked provisioning row, **refuse the install** instead of resolving
+      the global fallback app.
 - [x] **A2 (HIGH) — Revoking provisioning does not prevent installs.** FIXED 2026-06-06 (commit `3b3157d`): a revoked row is not installable on the OAuth path (403, reason `revoked`); `put()` reactivates a revoked row to `ready` so re-entering creds un-blocks it; the webhook secret path still resolves a revoked row's secret. Revoked
-  provisioning rows are still resolved and usable for OAuth, and re-entering
-  credentials for a revoked app **preserves `revoked`** instead of
-  reactivating.
-  Evidence: `apps/api/src/shopify-app-resolver.ts:38`,
-  `packages/db/src/shopify-app-provisioning-live.ts:79`.
-  Fix direction: the **OAuth/install** resolve path must treat a revoked row as
-  not-installable. **GOTCHA — keep the two resolve paths distinct:** a revoked
-  row **must still resolve its secret for webhook HMAC verification** (revoked
-  apps' compliance/uninstall webhooks must still verify — see
-  [[project_pilot_shopify_app_provisioning]]). So block installs, not webhook
-  verify. Separately, `put()` should reset status to `ready`/`connected` on
-  re-provision so re-entering creds reactivates.
+      provisioning rows are still resolved and usable for OAuth, and re-entering
+      credentials for a revoked app **preserves `revoked`** instead of
+      reactivating.
+      Evidence: `apps/api/src/shopify-app-resolver.ts:38`,
+      `packages/db/src/shopify-app-provisioning-live.ts:79`.
+      Fix direction: the **OAuth/install** resolve path must treat a revoked row as
+      not-installable. **GOTCHA — keep the two resolve paths distinct:** a revoked
+      row **must still resolve its secret for webhook HMAC verification** (revoked
+      apps' compliance/uninstall webhooks must still verify — see
+      [[project_pilot_shopify_app_provisioning]]). So block installs, not webhook
+      verify. Separately, `put()` should reset status to `ready`/`connected` on
+      re-provision so re-entering creds reactivates.
 - [x] **A3 (MEDIUM/HIGH) — Shopify webhook secret routing can become
-  ambiguous.** FIXED 2026-06-06 (commit `bb188d8`, migration 0012): partial unique index on `shop_domain WHERE status <> 'revoked'`; `getByShop` orders non-revoked-then-newest; `markConnected` clears other rows holding the shop; `put` reactivation clears the stale shop_domain. `shopify_app_provisioning.shop_domain` was **not unique**, but
-  webhook resolution selects the *first* matching row. A shop transferred
-  between tenants can leave multiple provisioning rows for the same shop →
-  nondeterministic secret selection.
-  Evidence: `packages/db/src/schema.ts:301`,
-  `packages/db/src/shopify-app-provisioning-live.ts:114`,
-  `apps/api/src/tenant-resolver.ts`.
-  Fix direction: make shop→row resolution deterministic — e.g. a partial unique
-  index on `shop_domain WHERE status != 'revoked'`, and/or prefer the
-  `connected` (active) row; reconcile with the shop-transfer path that
-  nulls/moves `shop_domain` so stale rows can't shadow the live one.
+      ambiguous.** FIXED 2026-06-06 (commit `bb188d8`, migration 0012): partial unique index on `shop_domain WHERE status <> 'revoked'`; `getByShop` orders non-revoked-then-newest; `markConnected` clears other rows holding the shop; `put` reactivation clears the stale shop_domain. `shopify_app_provisioning.shop_domain` was **not unique**, but
+      webhook resolution selects the _first_ matching row. A shop transferred
+      between tenants can leave multiple provisioning rows for the same shop →
+      nondeterministic secret selection.
+      Evidence: `packages/db/src/schema.ts:301`,
+      `packages/db/src/shopify-app-provisioning-live.ts:114`,
+      `apps/api/src/tenant-resolver.ts`.
+      Fix direction: make shop→row resolution deterministic — e.g. a partial unique
+      index on `shop_domain WHERE status != 'revoked'`, and/or prefer the
+      `connected` (active) row; reconcile with the shop-transfer path that
+      nulls/moves `shop_domain` so stale rows can't shadow the live one.
 - [x] **A4 (MEDIUM) — Custom-distribution install URL is not stored.** FIXED 2026-06-06 (commit `fef9040`): the operator can record the store domain at provisioning (`PUT .../shopify-app` optional `shopDomain` + apps/admin form field). It's normalized, recorded on the row, and bound to the tenant via `claimShopifyShopForTenant` (so `tenants.shopify_domain` resolves a no-state callback; 409 if the shop is actively owned elsewhere). With the shop known, the install uses that store's standard OAuth authorize URL instead of the unverified managed-install picker. (Deviation from the original direction: we build the proven authorize URL from the captured shop rather than storing Shopify's generated link.) The
-  provisioning model stores credentials but **not** Shopify's generated
-  custom-distribution install link; the app builds a generic URL from the
-  client id (`buildManagedInstallUrl` → `admin.shopify.com/oauth/install`),
-  which is **unproven for a real custom-distribution app**.
-  Evidence: `packages/db/src/schema.ts:276`, `apps/api/src/shopify-install.ts:143`.
-  Fix direction: this is the install-mechanism design surfaced this session —
-  capture the store `shop_domain` + the generated install link at provisioning,
-  persist `tenants.shopify_domain` so the no-state callback's `findTenantByShop`
-  resolves, and use the stored link instead of the unverified managed-install
-  URL. (Custom distribution requires the store domain anyway — see the design
-  note in the session log + [[project_pilot_shopify_app_provisioning]].)
+      provisioning model stores credentials but **not** Shopify's generated
+      custom-distribution install link; the app builds a generic URL from the
+      client id (`buildManagedInstallUrl` → `admin.shopify.com/oauth/install`),
+      which is **unproven for a real custom-distribution app**.
+      Evidence: `packages/db/src/schema.ts:276`, `apps/api/src/shopify-install.ts:143`.
+      Fix direction: this is the install-mechanism design surfaced this session —
+      capture the store `shop_domain` + the generated install link at provisioning,
+      persist `tenants.shopify_domain` so the no-state callback's `findTenantByShop`
+      resolves, and use the stored link instead of the unverified managed-install
+      URL. (Custom distribution requires the store domain anyway — see the design
+      note in the session log + [[project_pilot_shopify_app_provisioning]].)
 - [x] **A5 (MEDIUM) — Full pilot deployment is incomplete.** FIXED (code) 2026-06-07 (commit `0caa9bb`): both front-ends now `cf:build` green on Cloudflare/OpenNext. `apps/admin` was already green. **`apps/dashboard` was unblocked** by going middleware-less (option 2 below, chosen by the user over a Node runtime): Next 16's proxy is Node-only and OpenNext refuses Node middleware, so the proxy was removed and AuthKit reads the session straight from the cookie (`lib/session.ts` `getSession()` — `iron-session` unseal + public `getTokenClaims`). Trade-off: no request-path token refresh (re-auth on access-token expiry). Full writeup in DEPLOY.md "apps/dashboard". **Remaining is operational only:** actually running `cf:deploy` for both front-ends needs the user's Cloudflare account + DNS (`app.<domain>`, admin behind Cloudflare Access). api+worker remain on Railway (`deploy/railway/`).
 - [x] **A6 (LOW) — Pure-pilot deploys still require global Shopify creds.** FIXED 2026-06-06 (commit `1b08a05`): in pilot mode (`SHOPIFY_CONNECT_REQUIRES_PROVISIONING=true`) the global `SHOPIFY_APP_CLIENT_ID/SECRET` are not just optional but **disallowed** — `loadApiConfig` fails fast if they're set with the pilot flag (no ambiguous hybrid), and boots fine without them. `globalShopifyApp()` returns null so the resolver fails closed. The
-  api can't boot using only per-tenant Shopify credentials.
-  Evidence: `apps/api/src/bootstrap.ts:188` (`requireEnv`).
-  Fix direction: make `cfg.shopify` optional when
-  `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` is set, so a pure-pilot deployment
-  with no global app boots on per-tenant provisioning alone. (Already noted as a
-  follow-up in [[project_pilot_shopify_app_provisioning]].)
+      api can't boot using only per-tenant Shopify credentials.
+      Evidence: `apps/api/src/bootstrap.ts:188` (`requireEnv`).
+      Fix direction: make `cfg.shopify` optional when
+      `SHOPIFY_CONNECT_REQUIRES_PROVISIONING` is set, so a pure-pilot deployment
+      with no global app boots on per-tenant provisioning alone. (Already noted as a
+      follow-up in [[project_pilot_shopify_app_provisioning]].)
 
 ### Audit B — account-deletion / onboarding / admin (the "item 6" follow-up)
 
 - [x] **B1 (HIGH) — External OAuth-grant revocation is not implemented.** FIXED 2026-06-06 (commit `4709a0a`): new `packages/providers/oauth-revocation.ts` (Google token revoke, Shopify app uninstall, Gmail `users.stop`) + `revokeConnectorGrant` dispatcher. The api captures active OAuth grants **before** the wipe and passes them in the `account.cleanup` job with tokens AES-GCM-encrypted under the shared `CREDENTIAL_ENCRYPTION_KEY` (never plaintext in the job table); the worker decrypts + revokes each best-effort before the WorkOS/email steps. LLM BYOK keys excluded.
-  Account deletion wipes connector credentials **before** cleanup runs, and the
-  cleanup job only deletes the WorkOS org + sends a confirmation email. So
-  provider-side, **Google/Gmail grants, Gmail watches, and Shopify
-  installations stay active** after deletion.
-  Evidence: `apps/worker/src/account-cleanup.ts:38`, `apps/api/src/server.ts:756`.
-  Fix direction: capture the tokens/install refs **before** wiping (or revoke
-  in the same step) and revoke provider-side during cleanup — Shopify app
-  uninstall / token revoke, Google OAuth token revoke, and `users.stop` for the
-  Gmail watch.
+      Account deletion wipes connector credentials **before** cleanup runs, and the
+      cleanup job only deletes the WorkOS org + sends a confirmation email. So
+      provider-side, **Google/Gmail grants, Gmail watches, and Shopify
+      installations stay active** after deletion.
+      Evidence: `apps/worker/src/account-cleanup.ts:38`, `apps/api/src/server.ts:756`.
+      Fix direction: capture the tokens/install refs **before** wiping (or revoke
+      in the same step) and revoke provider-side during cleanup — Shopify app
+      uninstall / token revoke, Google OAuth token revoke, and `users.stop` for the
+      Gmail watch.
 - [x] **B2 (MEDIUM) — New users aren't reliably routed through `/sign-up`.** FIXED 2026-06-06 (commit `13a45e8`): `getDashboardContext` + `requireOrganization` redirect logged-out users to the legal-gated `/sign-up` (not WorkOS-hosted `/sign-in`); returning users use the "Sign in" link there. The onboarding legal fallback + the api tenant-level connector gate remain the airtight net. The
-  legal-gated `/sign-up` exists and the goodbye page links to it, but
-  unauthenticated dashboard access still redirects to `/sign-in` (WorkOS-hosted
-  sign-in), which **lets a user bypass the custom legal-gated sign-up page**.
-  Evidence: `apps/dashboard/app/sign-in/route.ts:19`,
-  `apps/dashboard/lib/api-client.ts:163`.
-  Fix direction: route unauthenticated users to `/sign-up` (or enforce the
-  legal-acceptance gate on the `/sign-in` path) so legal acceptance can't be
-  skipped. See [[project_legal_accept_at_signup]].
+      legal-gated `/sign-up` exists and the goodbye page links to it, but
+      unauthenticated dashboard access still redirects to `/sign-in` (WorkOS-hosted
+      sign-in), which **lets a user bypass the custom legal-gated sign-up page**.
+      Evidence: `apps/dashboard/app/sign-in/route.ts:19`,
+      `apps/dashboard/lib/api-client.ts:163`.
+      Fix direction: route unauthenticated users to `/sign-up` (or enforce the
+      legal-acceptance gate on the `/sign-in` path) so legal acceptance can't be
+      skipped. See [[project_legal_accept_at_signup]].
 - [~] **B3 (INFO) — Admin UI is a first version, not deployed/live-tested.**
   PARTIAL 2026-06-06: the admin app now has a verified-green Cloudflare/OpenNext
   deploy config (see A5) and is one `cf:deploy` away from running — but actually
@@ -865,19 +947,19 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
 A second pass found the first round's fixes weren't all failure-safe.
 
 - [x] **R1 (HIGH) — deletion-time OAuth revocation not reliable.** FIXED
-  (`96ec748`). (a) Capture grants in ANY status, not just `active` — a
-  locally-revoked row may still have a live provider grant (`buildConnectorGrants`,
-  unit-tested). (b) Worker revocation FAILS the job on a non-`already_gone`
-  failure so pg-boss retries; order revoke→org→email keeps the email
-  at-most-once. (c) Deletion is now capture → enqueue → **wipe**: a
-  connector-read or enqueue failure aborts with 503 before any data is
-  destroyed (was: wipe-then-best-effort, no recovery path); the cleanup job
-  carries `startAfter` so the worker can't act before the wipe commits.
+      (`96ec748`). (a) Capture grants in ANY status, not just `active` — a
+      locally-revoked row may still have a live provider grant (`buildConnectorGrants`,
+      unit-tested). (b) Worker revocation FAILS the job on a non-`already_gone`
+      failure so pg-boss retries; order revoke→org→email keeps the email
+      at-most-once. (c) Deletion is now capture → enqueue → **wipe**: a
+      connector-read or enqueue failure aborts with 503 before any data is
+      destroyed (was: wipe-then-best-effort, no recovery path); the cleanup job
+      carries `startAfter` so the worker can't act before the wipe commits.
 - [x] **R2 (MEDIUM) — admin tenant deletion left no surviving audit record.**
-  FIXED (`790f640`, migration 0013). New platform-scoped `admin_audit_log`
-  (no tenant FK) written in the wipe transaction → the deletion record
-  outlives the wiped tenant. Actors `admin` / `tenant_self` /
-  `shopify-compliance`. Satisfies master-plan §13.
+      FIXED (`790f640`, migration 0013). New platform-scoped `admin_audit_log`
+      (no tenant FK) written in the wipe transaction → the deletion record
+      outlives the wiped tenant. Actors `admin` / `tenant_self` /
+      `shopify-compliance`. Satisfies master-plan §13.
 - [~] **R3 (MEDIUM) — admin UI not operationally complete.** PARTIAL. R2 gives
   admin mutations a surviving audit trail, but (i) deploy/live-test still needs
   the user's Cloudflare account (overlaps A5/B3) and (ii) per-operator identity
@@ -886,9 +968,9 @@ A second pass found the first round's fixes weren't all failure-safe.
   password chosen by the user); moving to per-operator identity (e.g. WorkOS
   operator accounts) is a separate change, not yet scoped.
 - [x] **R4 (LOW) — `/sign-up` routing lacked a regression test.** FIXED
-  (`3c44ead`). Extracted pure `lib/auth-redirect.ts` + a test asserting
-  logged-out → `/sign-up` (never `/sign-in`). `/sign-in` stays available for
-  returning users via the explicit link on `/sign-up`.
+      (`3c44ead`). Extracted pure `lib/auth-redirect.ts` + a test asserting
+      logged-out → `/sign-up` (never `/sign-in`). `/sign-in` stays available for
+      returning users via the explicit link on `/sign-up`.
 
 ---
 
@@ -905,25 +987,34 @@ These come from master-plan §16, §20, and the "never moves earlier" list (line
 - [x] `pnpm test` is green
 - [x] No `any`; `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` satisfied
 - [x] No secrets in git (real `.env*` files are gitignored; only local
-  app/package/deploy `.env.example` templates are committed)
+      app/package/deploy `.env.example` templates are committed)
 - [x] **Prompt-injection framing holds (2026-06-12):** every system prompt is prefixed with
-  `UNTRUSTED_PREAMBLE`, and all attacker-controllable spans reaching the model are wrapped via
-  `wrapUntrusted` — inbound customer subject+body and the `case.resumed` context dump (in
-  `buildInitialMessages`) and `knowledge.search` document bodies. The trusted `[Thread context:…]` header
-  stays OUTSIDE the fence. Don't pass raw customer/tool-result prose into the prompt without fencing it.
+      `UNTRUSTED_PREAMBLE`, and all attacker-controllable spans reaching the model are wrapped via
+      `wrapUntrusted` — inbound customer subject+body and the `case.resumed` context dump (in
+      `buildInitialMessages`) and `knowledge.search` document bodies. The trusted `[Thread context:…]` header
+      stays OUTSIDE the fence. Don't pass raw customer/tool-result prose into the prompt without fencing it.
 - [x] **`case.update_context` stays a closed schema** — no open `extra` / `Record` field. The context blob
-  is re-injected verbatim on `case.resumed`, so any new derived fact gets a NAMED field, never an escape
-  hatch. (2026-06-12)
+      is re-injected verbatim on `case.resumed`, so any new derived fact gets a NAMED field, never an escape
+      hatch. (2026-06-12)
 - [x] **Refund scope flag** — `refund.create` proposals are checked against the case's runtime-stamped
-  `customerEmail`; a mismatch stamps `refund_customer_mismatch` (surfaced on the ApprovalCard). Keep the
-  `customerEmail` stamp runtime-controlled (never LLM-writable) or the guard becomes forgeable. (2026-06-12)
+      `customerEmail`; a mismatch stamps `refund_customer_mismatch` (surfaced on the ApprovalCard). Keep the
+      `customerEmail` stamp runtime-controlled (never LLM-writable) or the guard becomes forgeable. (2026-06-12)
+- [x] **Order-status disclosure gate (2026-06-16)** — in the `where_is_order` flow, a `shopify.get_order`
+      whose customer email ≠ the case's runtime-stamped `customerEmail` stamps `order_customer_mismatch` +
+      persists `pendingOrderEmail`. While that flag is set and `identityVerified` is not true, the runtime
+      FORCES `conversation.reply` to human approval even if the tenant set it to auto
+      (`shouldForceReplyApproval`), so another customer's order is never auto-disclosed. The legit second-email
+      customer self-verifies: the agent asks (via `ask_customer`) for the order email, and the runtime — NOT the
+      model — sets `identityVerified` when their reply states it (`replyProvesOrderIdentity`). Keep
+      `identityVerified` / `pendingOrderEmail` runtime-stamped and OUT of the `case.update_context` allowlist, or
+      a prompt-injected reply could forge a pass.
 - [x] **Dashboard identity is the VERIFIED WorkOS JWT, never a header (S14, 2026-06-13).** Every
-  `/dashboard/*` org + user comes from `authenticateDashboardToken` verifying the forwarded WorkOS access
-  token; `x-org-id` and `x-user-id` are not read at all. Don't reintroduce a header-asserted org/user or a
-  shared service token. The manager decision UUID is derived from the verified `sub` via
-  `dashboard-user-id.ts` — keep that hash byte-identical to the dashboard's copy (golden-tested both sides)
-  or existing role assignments / approval attributions silently re-key. `x-workspace-id` must stay
-  validated against the verified org.
+      `/dashboard/*` org + user comes from `authenticateDashboardToken` verifying the forwarded WorkOS access
+      token; `x-org-id` and `x-user-id` are not read at all. Don't reintroduce a header-asserted org/user or a
+      shared service token. The manager decision UUID is derived from the verified `sub` via
+      `dashboard-user-id.ts` — keep that hash byte-identical to the dashboard's copy (golden-tested both sides)
+      or existing role assignments / approval attributions silently re-key. `x-workspace-id` must stay
+      validated against the verified org.
 
 ---
 
@@ -943,6 +1034,7 @@ Run these before declaring any task done:
 **Goal:** empty platform that compiles and tests.
 
 Done:
+
 - [x] pnpm workspace (`pnpm-workspace.yaml`) + root `package.json`
 - [x] `tsconfig.base.json` with strict mode, ESM, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, composite refs
 - [x] Packages scaffolded: `agent-core`, `services`, `providers`, `tools`, `agents`, `db`, `plugins/sdk`
@@ -955,6 +1047,7 @@ Done:
 - [x] Root Vitest config + scripts (`vitest.config.ts`, `pnpm test`, `pnpm test:watch`) with initial `agent-core` ID tests
 
 Pending (deferred from the thin-scaffold first pass):
+
 - [x] `@effect/schema` set up — satisfied implicitly: in Effect 3.10+ the `Schema` namespace is exported from the main `effect` package (we verified `effect@3.21.2` exposes `Schema`, `Duration`, `Schedule`, `Effect`, `Data`). No separate `@effect/schema` install needed.
 - [x] Drizzle installed in `packages/db` + migration runner wired (`drizzle-kit generate` + `drizzle-kit migrate`). Phase 1 minimum schema: `tenants`, `cases`, `case_state_transitions`, `audit_log`, `approvals` with all check constraints, FKs, and indexes from §11. Migration `0000_fixed_nocturne.sql` applied to docker Postgres; integration test (7/7 incl. round-trip + CHECK rejection) green. `customers` / `users` FKs deferred (kept as nullable UUIDs without FK) until those tables land.
 - [x] pg-boss installed in `apps/worker` + first connection test. `makeQueue({ databaseUrl, schema })` opens a connection, runs migrations into the configured schema, returns a started `PgBoss` instance. Worker entrypoint declares a `worker.heartbeat` queue and registers a handler. Integration test (uses a separate `pgboss_test` schema) sends and consumes a job — 1 test passing.
@@ -965,8 +1058,8 @@ Pending (deferred from the thin-scaffold first pass):
 - [~] Smoke tests for the other packages — **deferred**. `expect(true).toBe(true)` per empty package is noise that breaks when real exports land. Tests follow real code: `agent-core` (types), `db` (schema), `worker` (queue), and `services` (OTel + HMAC) all have tests because they have non-trivial code.
 - [x] CI workflow (GitHub Actions): `.github/workflows/ci.yml` runs install + build + test on push to main and every PR. Spins up Postgres 16 as a service so integration tests have a real DB. Migrations applied before tests. `pnpm install --frozen-lockfile`, pnpm 9, node 20.
 - [x] App/package-local `.env.example` templates document only the variables
-  owned by each runtime/tool; deploy aggregates live under `deploy/`, never at
-  repo root. Env ownership is enforced by `apps/api/test/env-ownership.test.ts`.
+      owned by each runtime/tool; deploy aggregates live under `deploy/`, never at
+      repo root. Env ownership is enforced by `apps/api/test/env-ownership.test.ts`.
 - [x] `docker-compose.dev.yml` for local Postgres 16 (single `postgres` service with healthcheck and named volume)
 
 ---
@@ -999,9 +1092,9 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
 - [x] `LLMService` Tag landed early in Phase 1 (`packages/services/src/llm-service.ts`) so `AgentRuntime` can be developed and tested deterministically against a scripted layer. `LLMServiceScripted(decisions[])` pops one decision per call. `LLMServiceFromFn((req, {callIndex}) => ...)` for branching test logic. 4 unit tests.
 - [x] `LLMServiceLive` (Vercel AI SDK + OpenRouter) in `packages/providers/src/llm-service-live.ts`. Maps `ToolCallingRequest` → AI SDK `generateText` in single-step mode (the runtime drives the tool-call loop itself). Translates our `ChatMessage` union onto `ModelMessage[]`, wraps each tool's JSON Schema with `jsonSchema()` so the SDK doesn't try to introspect them as Zod, and reads `result.toolCalls[0]` (→ `tool_call`) or `result.text` (→ `final_message`). Error mapping: `statusCode === 429 || ≥500` → `ProviderUnavailable`; "context length" / "maximum context" → `ContextTooLarge`; "safety" / "content policy" / "blocked by" → `SafetyBlocked`; "invalid tool" / "tool_use" → `InvalidToolCall`; everything else → `NetworkError`. Config Tag `LLMConfig` in `packages/services` (interface only); `LLMConfigFromEnv` factory in providers reads `OPENROUTER_API_KEY` (+ optional `OPENROUTER_BASE_URL` / `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME`) and fails the Layer build if the key is missing. 8 unit tests using `vi.mock("ai")` + `vi.mock("@openrouter/ai-sdk-provider")` to assert request mapping + decision mapping + error mapping without any real network call.
 - [ ] Fix `packages/providers` `llm:smoke` Layer wiring. The 2026-06-07 env
-  cleanup confirmed `packages/providers/.env.local` loads correctly, but the
-  command then fails with `Service not found: BlobStorage`; provide the
-  package smoke command a suitable BlobStorage layer.
+      cleanup confirmed `packages/providers/.env.local` loads correctly, but the
+      command then fails with `Service not found: BlobStorage`; provide the
+      package smoke command a suitable BlobStorage layer.
 - [x] Wire `LLMServiceLive` + `AgentRuntimeDefault` + all Live repos + (raw) pg-boss consumer into the worker entrypoint. `apps/worker/src/bootstrap.ts` composes the Layer cake: `DbClientLive` → `CaseRepository` / `AuditLogService` / `ApprovalService` / `TransactionRunner` Live → `LLMServiceLive` (over `LLMConfigFromEnv`) → `ShopifyServiceLive` (over `ShopifyHttpLive` + `ShopifyCredentialStoreFromEnv`) → `AgentRegistryWith([supportTriage])` + `ToolRegistryWith([caseUpdate*, shopifyGetOrder])` + `PermissionServiceDefault` → `AgentRuntimeDefault`. The bootstrap exposes `runtimeLayer` (including `AgentRuntime` + every tool-side dep) so tool bodies can yield `CaseRepository` / `ShopifyService` at call time. `apps/worker/src/index.ts` calls `boss.work(workflow.events, ...)` **directly** (not through `WorkflowQueuePgBossLive`) — the Layer-composed consumer hits a known polling-loop flake; raw `work()` is reliable. Each job: revive `DomainEvent` → `Effect.runPromiseExit(AgentRuntime.handleEvent(event))` → log `<eventType> -> <WorkflowResult.type>`. Stale model id in `support-triage` (`anthropic/claude-3.5-sonnet`, retired) caught + swapped to `google/gemini-3-flash-preview`. Prompt tightened so the agent classifies-then-finishes in 2 turns (1 tool call + 1 final_message). Synthetic-event publisher CLI: `apps/worker/scripts/publish-event.ts` (`pnpm --filter @support-agent/worker exec tsx scripts/publish-event.ts --tenant <uuid> --subject ... --body ...`), idempotently upserts the tenant row. **End-to-end smoke** against real Postgres + real OpenRouter (Gemini 3 Flash Preview) green: `ticket.created → resolved` with the full audit chain (`event.received → llm.decision(tool_call) → tool.invoked → llm.decision(final_message) → case.resolved`) and a `new → resolved` row in `case_state_transitions`.
 - [x] `ShopifyService` Tag + `ShopifyServiceLive` (GraphQL Admin) + `ShopifyServiceTest`. Methods: `getOrder`, `getCustomer`, `searchByEmail`, `getFulfillment`. Live impl: `fetch` against `/admin/api/${apiVersion}/graphql.json` (single-call per method, full field set returned). Error mapping: 401/403 → `ShopifyAuthFailed`, 429 → `ShopifyRateLimited`, 5xx + GraphQL `errors[]` → `NetworkError`, null `data.order` / null `data.customer` → `OrderNotFound` / `CustomerNotFound`. GID coercion: plain ids auto-wrapped as `gid://shopify/{Order|Customer}/${id}`. Status enum coercion: lowercases Shopify's UPPER_SNAKE display statuses and accepts known values only (falls back to null for unknown). Domain types in `agent-core/src/shopify.ts` (intentionally narrow — not the full Admin schema). Credential store: `ShopifyCredentialStore` Tag in services with `ShopifyCredentialStoreStatic(map)` + `ShopifyCredentialStoreAny(creds)` for tests; `ShopifyCredentialStoreFromEnv` in providers reads `SHOPIFY_TEST_SHOP_DOMAIN` + `SHOPIFY_TEST_ACCESS_TOKEN` (+ optional `SHOPIFY_API_VERSION`, defaults `2025-01`). DB-backed multi-tenant store deferred to a later slice. HTTP indirection via `ShopifyHttp` Tag (`ShopifyHttpLive` wraps `fetch`; `ShopifyHttpFromFn` lets tests pin responses without `vi.stubGlobal`). 11 provider unit tests (all 4 methods + 4 error branches) + 3 tool tests.
 - [ ] Commerce-platform agnostic refactor before adding WooCommerce: introduce a provider-neutral `CommerceService` Tag (`getOrder`, `findOrderByName`, `getCustomer`, `searchCustomerByEmail`, fulfillment/tracking as needed), generic domain types (`CommerceOrder`, `CommerceCustomer`, `CommerceFulfillment`), and `commerce.get_order` / `commerce.get_customer` tools. Keep Shopify as the first Live implementation behind that Tag, then add WooCommerce as a second implementation instead of duplicating `WooCommerceService` + `woocommerce.*` tools. Replace Shopify-shaped persistence and context where practical (`cases.shopify_order_id`, `tenants.shopify_domain`, `context.shopifyCustomerId`) with normalized provider references (`provider`, `externalId`, `shopDomain` / `storeUrl`). Widen `connector_connections.provider` beyond `shopify|gmail|outlook` when the second commerce connector lands. Compatibility note: keep existing `shopify.*` tools/types as aliases or migrate agents/tests in one controlled slice so the live Shopify path does not regress.
@@ -1099,7 +1192,7 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
 - [x] Tool: `refund.recommend` — landed 2026-05-26. `packages/tools/src/shopify/recommend-refund.ts`. Read-only refund analysis (`risk: read`, `defaultPermission: allow`, `sideEffectClass: none`, no `requiredConnectorScopes` — uses scopes already required by `shopify.get_order` and `shopify.get_customer`). Returns `{ recommendation, amount, reasoning, riskFlags }` where recommendation ∈ `full_refund | partial_refund | deny | investigate`. Pure-logic rules over order state (refunded → deny; partially_refunded → investigate; non-paid → investigate; delivered > 30 days → deny; > tenant denyAbove → investigate; ≤ tenant askAbove → full_refund; mid-zone → full_refund) + customer-history risk flags (`first_order`, `frequent_refunder` if >30% refund rate, `new_customer` if <30d since first order, `high_ltv` if refunded total > $500 — last flag only fires when refund-history currency matches policy currency; never invents an FX rate). New `ShopifyService.getCustomerRefundHistory` Tag method + Live impl (GraphQL over `customer.orders(first:50).refunds`) aggregating ordersCount / refundedOrdersCount / totalRefundedAmount / firstOrderAt; `totalRefundedAmount` is `ShopifyMoney | null` (null when no refunds — never invents USD per [[feedback_no_hardcoded_currency]]). Refund-review PATH B prompt extended: agent calls `refund.recommend` BEFORE drafting `conversation.reply` so the operator approving sees the structured assessment. ApprovalCard.tsx surfaces the recommendation above the editable reply body (badge + amount + reasoning + risk-flag chips). +18 tests: 7 pure-logic (each rule branch + currency-mismatch + risk-flag combinations), 3 tool wire-up, 1 e2e PATH B flow (asserts both `tool.invoked(refund.recommend)` and the gated `conversation.reply` approval pending), plus shoring on neighbouring tests for the registry. Currency-correct end-to-end: every money value flows from order/refund records, no hardcoded `"USD"` anywhere in production paths.
 - [x] **Structured return-intent capture (small slice, landed 2026-06-12).** Returns are still classified as
       `refund_request` and handled by `refund-review-agent` (no separate category/agent yet), but the agent now
-      records *structured* return intent instead of burying it in prose: new narrow literal fields
+      records _structured_ return intent instead of burying it in prose: new narrow literal fields
       `returnReason` (`defective` / `wrong_item` / `no_longer_needed` / `arrived_late` / `other`) and
       `requestedResolution` (`refund` / `replacement` / `exchange` / `store_credit` / `repair`) on
       `case.update_context` (`packages/tools/src/case/update-context.ts`). Producer: refund-review-agent's
@@ -1161,13 +1254,13 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
         HTML incl. nav) while the import writes API-sourced text, so a resync can churn `contentHash` and
         content quality. Harmless but worth aligning (e.g. resync url-docs created by the importer back
         through the importer) if merchants start using Resync on them.
-      Deferred from the original plan, still open: exact shipping rates / delivery promises (separate
-      address/cart-aware capability), `read_inventory` (only if exact stock quantities are ever wanted),
-      `read_markets` (market-specific domains/config). `read_shipping` stays out.
+        Deferred from the original plan, still open: exact shipping rates / delivery promises (separate
+        address/cart-aware capability), `read_inventory` (only if exact stock quantities are ever wanted),
+        `read_markets` (market-specific domains/config). `read_shipping` stays out.
 - [ ] Evidence upload (object storage), photo handling
 - [x] `TimerService` Tag + Live; `timer.expired` event — landed 2026-05-27. Abstract Tag/Test layer in `packages/services/src/timer-service.ts`; Drizzle schema + migration + `TimerServiceLive` in `packages/db`; worker `timer-sweep` cron fires due timer rows into `timer.expired` workflow events using the timer id as `eventId` and case singleton key. `conversation.ask_customer` can set `remindAfterHours`, schedules a `follow_up` timer, maps timer failures to `ToolOutputInvalid`, and the runtime parks the case in `waiting_for_customer` after the ask sends. Verified with focused tool tests, `pnpm build`, worker `build:deps`, and full `pnpm test` (441 passed / 58 skipped).
 - [ ] Replay/test mode for agents against historical cases
-- [~] **Universal email connectors — provider-neutral inbound/outbound beyond Gmail.** All three connector slices LANDED 2026-06-10; cross-cutting runtime check VERIFIED 2026-06-10 (see below). Outlook OAuth connect verified live; Outlook **inbound→case verified live 2026-06-10** (real Graph subscription + real mailbox message → `message.received` → case opened — after fixing the revoked-row `get` bug below; outbound reply on a live case still unobserved). Remaining: Outlook reply leg, and IMAP end-to-end (needs a test mailbox + the poll cron running). Goal: a merchant on Gmail, Outlook/O365, or any IMAP/SMTP host (PrivateEmail, Zoho, Fastmail, cPanel, custom domain) connects their own mailbox and the agent reads + replies on that same connection. Strategy (2026-06-09): **one connector per *protocol*, not per *brand*** — Gmail API (done) + Microsoft Graph + generic IMAP/SMTP cover the market; PrivateEmail and Zoho are both the IMAP/SMTP connector, not separate code. All implement the existing `ConversationService` Tag (`packages/services/src/conversation-service.ts`); agents/tools/runtime stay untouched (master-plan §16 invariant). See memory `[[project_universal_email_connectors]]`.
+- [~] **Universal email connectors — provider-neutral inbound/outbound beyond Gmail.** All three connector slices LANDED 2026-06-10; cross-cutting runtime check VERIFIED 2026-06-10 (see below). Outlook OAuth connect verified live; Outlook **inbound→case verified live 2026-06-10** (real Graph subscription + real mailbox message → `message.received` → case opened — after fixing the revoked-row `get` bug below; outbound reply on a live case still unobserved). Remaining: Outlook reply leg, and IMAP end-to-end (needs a test mailbox + the poll cron running). Goal: a merchant on Gmail, Outlook/O365, or any IMAP/SMTP host (PrivateEmail, Zoho, Fastmail, cPanel, custom domain) connects their own mailbox and the agent reads + replies on that same connection. Strategy (2026-06-09): **one connector per _protocol_, not per _brand_** — Gmail API (done) + Microsoft Graph + generic IMAP/SMTP cover the market; PrivateEmail and Zoho are both the IMAP/SMTP connector, not separate code. All implement the existing `ConversationService` Tag (`packages/services/src/conversation-service.ts`); agents/tools/runtime stay untouched (master-plan §16 invariant). See memory `[[project_universal_email_connectors]]`.
   - [x] **Slice 1 — Per-tenant connector router (prerequisite).** LANDED 2026-06-09 (commit `877ecb4`). Today `apps/worker/src/bootstrap.ts:358` picks ONE connector statically per deployment (Gmail-or-Test). Add a dispatching `ConversationService` that resolves the tenant's installed conversation connector via `ConnectorCredentialStore.listForTenant(tenantId)` (filter to conversation providers `gmail`/`outlook`/`imap`, pick the active one) and delegates `fetchThread`/`reply`/`askCustomer` to the matching Live impl. Refactor each connector to expose its inner builder (`make…Conversation(cfg): Effect<impl, never, ConnectorCredentialStore>`) so the router holds all built impls in one context (two Layers can't both provide the `ConversationService` Tag). Bootstrap composes whichever connector env is present + falls back to `ConversationServiceTest`. Tests: dispatch by tenant provider; missing connector → `ConversationAuthMissing`.
   - [x] **Slice 2 — Microsoft Graph connector (Outlook / O365 / Exchange Online).** LANDED 2026-06-09: **2a** connector core — `graph-http`/`graph-token`/`graph-conversation-live` + router wiring (`a4af292`); **2b** OAuth install — `/microsoft/install` + `/microsoft/auth/callback`, `cfg.microsoft`, dashboard-connect routing (`6e0fe6c`); **2c** inbound — `POST /webhooks/conversations/outlook/:tenantId` (validationToken handshake + clientState verify → `message.received`), subscription creation on install + `graph.subscription-renewal` cron + create-if-missing (`d04c1b6`); **2d** dashboard `outlook` card in `_shared.tsx` (`4efd1bd`). ⚠️ **Not yet verified end-to-end** — needs an Azure app registration + public `MICROSOFT_GRAPH_NOTIFICATION_URL` + `MICROSOFT_GRAPH_WEBHOOK_SECRET` to confirm a real Outlook message opens a case (the validationToken handshake + subscription creation only exercise against a live Graph). `provider: "outlook"` (already in the `connector_connections` CHECK + `ConnectorProvider` union + dashboard `PROVIDER_LABELS`). New `packages/providers/src/graph-http.ts` (wire fns: get thread/message, send, build MIME with `In-Reply-To`/`References`; `GraphHttpError` discriminated failure; `fetchImpl` override), `graph-token.ts` (Microsoft identity refresh), `graph-conversation-live.ts` (Live `ConversationService`, refresh via `patchTokens`, error mapping). OAuth install mirroring Gmail: add `"outlook"` to `apps/api/src/install-grant.ts`; new `apps/api/src/microsoft-install.ts` + callback (scopes `Mail.ReadWrite Mail.Send offline_access openid email profile`); store via `ConnectorCredentialStore.put` (shopDomain = UPN). Inbound = Graph subscription webhook `POST /webhooks/conversations/outlook/:tenantId` (handle `validationToken` handshake + change notifications → fetch message → publish `message.received`); subscription created on install, renewed by a `graph.subscription-renewal` pg-boss cron mirroring `apps/worker/src/gmail-watch-renewal-schedule.ts` (Graph mail subscriptions expire ~3 days). Dashboard: add `outlook` to `SUPPORTED_PROVIDERS` + icon in `_shared.tsx` (label/description already present). Tests follow the Gmail set (http, conversation-live, install, webhook).
   - [x] **Slice 3 — Generic IMAP/SMTP connector (the universal catch-all).** LANDED 2026-06-10: **3a** connector core — `imap-smtp` (imapflow/nodemailer/mailparser behind `ImapSmtpOps`) + `imap-smtp-conversation-live` + migration `0017` adding `imap` to the provider CHECK + router wiring (`2a49ea8`); **3b** credential connect endpoint `POST /dashboard/connections/imap` (verifies IMAP+SMTP login then stores, `646530e`); **3c** `imap.poll` cron — per-minute, seeds cursor at top UID then publishes `message.received` past `metadata.lastUid` (`aa34370`). **3d** dashboard credential form at `/connect/imap` + integrations `imap` card + disconnect actions, and fixed the Outlook Connect allowlist gap (`372b10e`). ⚠️ Like Outlook, **not yet verified end-to-end** against a real mailbox. ORIGINAL PLAN: `provider: "imap"` (add to the `connector_connections` CHECK + `ConnectorProvider` union via a migration — the only schema touch; `metadata` jsonb + nullable `refresh_token` already absorb the rest). Credentials: app-password encrypted in `access_token_encrypted`; `metadata = { imapHost, imapPort, smtpHost, smtpPort, security }`; `shopDomain` = mailbox address; `refreshToken`/`tokenExpiresAt` null. New `packages/providers/src/imap-smtp-*.ts` — IMAP read (fetch thread via Message-ID/References, list new since stored UID) + SMTP send (RFC 5322 with threading headers); inject a client factory for tests. `imap-smtp-conversation-live.ts` Live `ConversationService`. Install is **not OAuth** — authenticated `POST /dashboard/connections/imap` that test-logs-in to IMAP+SMTP, then `store.put`; dashboard gets a credential form (host/port/user/password/security) instead of a redirect. Inbound = `imap.poll` pg-boss cron (decided 2026-06-09: polling, not IDLE) that lists new messages per active connector since `metadata.lastUid`, normalizes, publishes `message.received`, advances the cursor — mirrors the `gmail-watch-renewal` cron shape. Tests: imap/smtp wire, conversation-live, poll cursor advance, connect-validation.
@@ -1178,12 +1271,12 @@ Current next slice: run Postgres-backed integration tests, then close the audit-
     - [ ] **Follow-up — account deletion still skips Outlook/IMAP provider-side.** `apps/api/src/account-deletion.ts` `REVOCABLE_GRANT_PROVIDERS` + its local `EncryptedConnectorGrant["provider"]` are still `shopify|gmail|google_sheets`, so tenant deletion never builds revoke grants for `outlook`/`imap` (rows are still wiped locally). That's currently harmless given both revokes are no-ops, but if Outlook ever gets a real provider-side revoke (e.g. `graphDeleteSubscription` threaded with the subscription id from metadata), widen that set too.
   - [x] **Multi-mailbox — a tenant can run several conversation connectors at once (2026-06-10).** Previously the router picked ONE connector per tenant (most-recently-installed active), so a Gmail+Outlook tenant opened cases from both mailboxes but could only reply on one — the other's cases stranded. Now every thread id is **provider-namespaced at the connector boundary**: `gmail:<threadId>`, `outlook:<conversationId>`, `imap:<root Message-ID>`. New `packages/services/src/conversation-thread-id.ts` (`CONVERSATION_PROVIDERS`, `namespaceThreadId`, `parseThreadId` — splits on the FIRST colon only, IMAP Message-IDs may contain colons). The three inbound edges stamp the prefix when publishing `message.received` (`gmail-webhook.ts`, `graph-webhook.ts`, `imap-poll.ts`); `makeConversationRouter` is now pure (no store dependency) and dispatches on the parsed prefix, hands the connector the RAW provider id, re-namespaces ids on results (`ConversationThread.id`/messages, `SentMessage.threadId`), and remaps connector `ThreadNotFound` errors back to the namespaced id. Un-namespaced/unknown prefix → `ThreadNotFound`; known prefix without a configured impl → `ConversationAuthMissing(provider)`. Connector impls stay provider-pure (raw ids); runtime/tools/cases schema untouched (ThreadId stays opaque). **No back-compat by decision**: pre-existing cases hold raw thread ids and won't resume — replies on old threads open fresh namespaced cases (old rows are disposable test data). Supersedes the single-mailbox threadId notes in the cross-cutting entry above. Tests: 7 helper + 10 router (rewritten from store-based resolve) + 3 edge assertions; full suite 1165 green.
     - [x] **Legacy case fallback — dashboard probes active provider/mailbox pairs for unbound rows.** 2026-06-11. Older cases with no bound mailbox/provider were failing closed with `mailbox_ambiguous` even when one of the connected mailboxes could load the thread. Dashboard `GET /dashboard/cases/:id/conversation-thread` now probes active conversation connections by `(provider, mailbox)` before giving up, so legacy rows can resolve to the right thread without reopening the mailbox-lock leak. Verified with `pnpm exec vitest run apps/api/test/dashboard-conversation-thread.test.ts` and `pnpm build`.
-    - [x] **Same-provider multi-mailbox — rejected by policy, enforced for IMAP (2026-06-10).** Decision: one mailbox per provider per store, NOT mailbox-namespaced ids. The prefix resolves the *provider*; each impl resolves credentials via bare `get(tenantId, provider)`, so a second active mailbox on the same provider could reply from the wrong account. `POST /dashboard/connections/imap` now 409s `imap_already_connected` (+ the existing mailbox) when another ACTIVE imap row with a different `shopDomain` exists; the SAME mailbox still passes (upsert = password/host rotation); comparison is case-insensitive. Guard sits after parse, before the connectivity check. Dashboard: action maps 409 → `?error=imap_already_connected&mailbox=…`; `/connect/imap` renders a "disconnect first" alert linking to integrations. +2 integration tests (409 on second mailbox; same mailbox passes guard → 400 from verify).
+    - [x] **Same-provider multi-mailbox — rejected by policy, enforced for IMAP (2026-06-10).** Decision: one mailbox per provider per store, NOT mailbox-namespaced ids. The prefix resolves the _provider_; each impl resolves credentials via bare `get(tenantId, provider)`, so a second active mailbox on the same provider could reply from the wrong account. `POST /dashboard/connections/imap` now 409s `imap_already_connected` (+ the existing mailbox) when another ACTIVE imap row with a different `shopDomain` exists; the SAME mailbox still passes (upsert = password/host rotation); comparison is case-insensitive. Guard sits after parse, before the connectivity check. Dashboard: action maps 409 → `?error=imap_already_connected&mailbox=…`; `/connect/imap` renders a "disconnect first" alert linking to integrations. +2 integration tests (409 on second mailbox; same mailbox passes guard → 400 from verify).
     - [x] **OAuth single-mailbox guard (gmail/outlook) — DONE 2026-06-10.** Same invariant as IMAP, enforced at two layers via pure `apps/api/src/connect-guard.ts` (`activeMailboxConflict` — case-insensitive, revoked rows exempt, same-mailbox re-auth allowed for token repair; `alreadyConnectedRedirect`). (1) `POST /dashboard/connect/:provider` 409s `already_connected` (+ existing mailbox) for gmail/outlook while ANY active row exists — the merchant never reaches the consent screen; shopify/google_sheets exempt. (2) Both OAuth callbacks re-check before `store.put` (manual installs bypass the mint): a DIFFERENT account → browser redirect to `/settings/integrations?error=already_connected&provider&mailbox` (JSON 409 when no dashboard URL / Accept: json); same account proceeds (upsert = repair). Dashboard: `api.connectUrl` returns `{url} | {alreadyConnected}`, `/connect/[provider]` route redirects with the error params, integrations page renders a "disconnect first" alert. Tests: 7 unit (connect-guard) + 3 integration (mint 409 outlook/gmail + disconnect-clears-block + shopify stays open).
-  - [x] **Bugfix — Outlook inbound silently dropped every Graph notification when a revoked sibling row existed (2026-06-10).** Symptom: subscription live on Microsoft's side, webhook publicly reachable, real mail in the inbox — yet zero `message.received` ever published and the connection row never token-refreshed. Root cause: `ConnectorCredentialStore.get(tenantId, provider)` *without* `shopDomain` (the shape `graph-webhook.ts` uses) ran `WHERE tenant_id AND provider LIMIT 1` with **no status filter and no ORDER BY**; with two outlook rows (revoked wrong-account connect from the login_hint saga + the active reconnect) Postgres returned the revoked row → `ConnectorRevoked` → the handler's "no active connection" branch dropped the batch and acked 202, so Graph considered it delivered (no retries, nothing in pg-boss). Fix (`packages/db/src/connector-credential-store-live.ts`): the no-shopDomain branch now orders `status='active'` first, then `updated_at DESC`. TDD: failing integration test reproduced `ConnectorRevoked` exactly, +1 test pinning only-revoked → still `ConnectorRevoked`. Verified live end-to-end on a second api instance: replayed the real Graph notification → token refreshed + `message.received` published + case `f65e6f02` ("order inquiry") opened. Affects every bare `get` caller (gmail webhook, BYOK keys, etc.) — same latent bug everywhere a tenant ever reconnects a provider under a different account. NOTE: the revoked account's own Graph subscription (id `36047159…`) stays live on Microsoft's side until 2026-06-12; its notifications will fail message-fetch harmlessly (fetched via the active token → 404 → logged, acked) and it self-expires.
-  - [x] **Bugfix — Connect prefilled (and on Outlook, locked) the wrong account (2026-06-10).** `apps/dashboard/app/connect/[provider]/route.ts` appended `&login_hint=<WorkOS dashboard login email>` to the OAuth URL for every non-Shopify connector. That email is the merchant's *account*, not the support mailbox they're connecting — Microsoft pre-selected / locked onto it on the consent screen so the merchant couldn't pick their mailbox. Fix (decided: drop prefill for ALL OAuth connectors): new pure `connectRedirectUrl(baseUrl, provider, email)` helper in `apps/dashboard/lib/connect-redirect.ts` that NEVER appends a hint (kept as a function so the decision has a regression guard); route now redirects through it and no longer reads `getSession`. +5 unit tests (`apps/dashboard/test/connect-redirect.test.ts`). Build + dashboard `tsc --noEmit` green. NOTE: the api install handlers (`/microsoft/install`, `/google/install`) still *accept* an optional `login_hint` query param — now unused by the dashboard but harmless (manual installs can still pass one); left in scope-free.
+  - [x] **Bugfix — Outlook inbound silently dropped every Graph notification when a revoked sibling row existed (2026-06-10).** Symptom: subscription live on Microsoft's side, webhook publicly reachable, real mail in the inbox — yet zero `message.received` ever published and the connection row never token-refreshed. Root cause: `ConnectorCredentialStore.get(tenantId, provider)` _without_ `shopDomain` (the shape `graph-webhook.ts` uses) ran `WHERE tenant_id AND provider LIMIT 1` with **no status filter and no ORDER BY**; with two outlook rows (revoked wrong-account connect from the login_hint saga + the active reconnect) Postgres returned the revoked row → `ConnectorRevoked` → the handler's "no active connection" branch dropped the batch and acked 202, so Graph considered it delivered (no retries, nothing in pg-boss). Fix (`packages/db/src/connector-credential-store-live.ts`): the no-shopDomain branch now orders `status='active'` first, then `updated_at DESC`. TDD: failing integration test reproduced `ConnectorRevoked` exactly, +1 test pinning only-revoked → still `ConnectorRevoked`. Verified live end-to-end on a second api instance: replayed the real Graph notification → token refreshed + `message.received` published + case `f65e6f02` ("order inquiry") opened. Affects every bare `get` caller (gmail webhook, BYOK keys, etc.) — same latent bug everywhere a tenant ever reconnects a provider under a different account. NOTE: the revoked account's own Graph subscription (id `36047159…`) stays live on Microsoft's side until 2026-06-12; its notifications will fail message-fetch harmlessly (fetched via the active token → 404 → logged, acked) and it self-expires.
+  - [x] **Bugfix — Connect prefilled (and on Outlook, locked) the wrong account (2026-06-10).** `apps/dashboard/app/connect/[provider]/route.ts` appended `&login_hint=<WorkOS dashboard login email>` to the OAuth URL for every non-Shopify connector. That email is the merchant's _account_, not the support mailbox they're connecting — Microsoft pre-selected / locked onto it on the consent screen so the merchant couldn't pick their mailbox. Fix (decided: drop prefill for ALL OAuth connectors): new pure `connectRedirectUrl(baseUrl, provider, email)` helper in `apps/dashboard/lib/connect-redirect.ts` that NEVER appends a hint (kept as a function so the decision has a regression guard); route now redirects through it and no longer reads `getSession`. +5 unit tests (`apps/dashboard/test/connect-redirect.test.ts`). Build + dashboard `tsc --noEmit` green. NOTE: the api install handlers (`/microsoft/install`, `/google/install`) still _accept_ an optional `login_hint` query param — now unused by the dashboard but harmless (manual installs can still pass one); left in scope-free.
   - [x] **Outlook emails rendered as raw plain-text junk → now formatted + secure (2026-06-13).** Symptom: marketing/notification mail (e.g. Azure) showed in the case thread as the plain-text MIME alternative — invisible preheader spacers (`͏ ‌` = U+034F/U+200C runs) and `<https://…>` reference links — unreadable. Root cause: the Graph connector requested `Prefer: outlook.body-content-type="text"` in both `graphGetConversation` + `graphGetMessage`, so `bodyHtml` was always null and the dashboard fell back to plain text. Gmail/IMAP already capture HTML; only Outlook was text-only. Fix (`packages/providers/src/graph-http.ts`): request `…="html"`, so `bodyHtml` flows through the existing `sanitizeEmailHtml` allowlist (no scripts/inline-styles/remote-images/tracking-pixels; http/https/mailto links only). New module-local `htmlToText` derives a clean `bodyText` for the agent (drops `<script>/<style>/<head>/comments` so CSS never leaks, block tags → newlines, decodes common entities, strips invisible spacer chars) — replaces the old naive `replace(/<[^>]+>/, " ")` that would have dumped CSS into the agent's text. Defense-in-depth: `cleanPlainTextBody` in `apps/api/src/dashboard-conversation-thread.ts` strips the same invisible spacers from the plain-text fallback so genuinely text-only mail is readable too. TDD: 3 new graph-http tests (Prefer=html, html→clean bodyText, invisible-char collapse) + 1 api projection test. Full `pnpm build` green; providers + api suites green (525 passed). FOLLOW-UP: two `htmlToText` impls now exist (graph-http + `url-fetch-html.ts` for KB snapshots) — kept separate (email needs spacer-stripping, KB drops nav/footer); dedup if a third caller appears.
-  - [x] **Filtered inline-CSS allowlist so emails render formatted (2026-06-13).** Follow-up to the Outlook-HTML fix: `sanitizeEmailHtml` (`apps/api/src/dashboard-conversation-thread.ts`) previously stripped ALL styling (only `href` on `<a>`), so even HTML emails rendered as bare structure. Now it keeps `style` attributes through a per-property CSS allowlist (`SAFE_STYLES`: color/background-color/font-*/text-*/padding/margin/border*/width/height/display/vertical-align — value regexes reject `url()`/`expression()`/`javascript:` by construction; properties absent from the map like `position`, `background` shorthand, `content` are dropped) plus the presentational table attributes email layout needs (`width`/`align`/`valign`/`bgcolor`/`colspan`/`rowspan`/`cellpadding`…). Decided with user: **filtered inline CSS, NOT an iframe** (iframe explicitly rejected), and **images stay fully blocked** (`<img>` not in the tag allowlist — privacy/anti-tracking; no remote loads, no tracking pixels). Keeping `display:none` means hidden preheader `<div>`s now stay hidden (resolves the earlier preheader-visibility follow-up). Had to re-allow `class`/`id`/`type` attributes — the quoted-reply `exclusiveFilter` keys off them and the new `*` attribute wildcard otherwise hid them from the filter (inert in output; no stylesheet survives). TDD: +4 sanitizer tests (safe styles kept, dangerous css dropped, table attrs kept, display:none kept) + updated the old "strips styles" test. Build + full api suite green (272 passed). Won't match Outlook Web exactly (no `<style>` blocks, no images) but renders colors/fonts/spacing/tables.
+  - [x] **Filtered inline-CSS allowlist so emails render formatted (2026-06-13).** Follow-up to the Outlook-HTML fix: `sanitizeEmailHtml` (`apps/api/src/dashboard-conversation-thread.ts`) previously stripped ALL styling (only `href` on `<a>`), so even HTML emails rendered as bare structure. Now it keeps `style` attributes through a per-property CSS allowlist (`SAFE_STYLES`: color/background-color/font-_/text-_/padding/margin/border*/width/height/display/vertical-align — value regexes reject `url()`/`expression()`/`javascript:` by construction; properties absent from the map like `position`, `background` shorthand, `content` are dropped) plus the presentational table attributes email layout needs (`width`/`align`/`valign`/`bgcolor`/`colspan`/`rowspan`/`cellpadding`…). Decided with user: **filtered inline CSS, NOT an iframe** (iframe explicitly rejected), and **images stay fully blocked** (`<img>` not in the tag allowlist — privacy/anti-tracking; no remote loads, no tracking pixels). Keeping `display:none` means hidden preheader `<div>`s now stay hidden (resolves the earlier preheader-visibility follow-up). Had to re-allow `class`/`id`/`type` attributes — the quoted-reply `exclusiveFilter` keys off them and the new `*`attribute wildcard otherwise hid them from the filter (inert in output; no stylesheet survives). TDD: +4 sanitizer tests (safe styles kept, dangerous css dropped, table attrs kept, display:none kept) + updated the old "strips styles" test. Build + full api suite green (272 passed). Won't match Outlook Web exactly (no`<style>` blocks, no images) but renders colors/fonts/spacing/tables.
   - [x] **`.email-html` reset class — stop the dashboard boxing table-layout email (2026-06-13).** After keeping the email's own inline CSS, marketing email rendered with a border grid: the case-thread body container (`apps/dashboard/app/cases/[id]/page.tsx`) forced `[&_td]:border [&_th]:border [&_table]:w-full [&_*]:p-1` via arbitrary variants — fine for a data table, but table-based email uses a cell per section/spacer, so every cell got boxed. Replaced the long variant string with a single `.email-html` class (plain CSS in `apps/dashboard/app/globals.css`, outside `@layer` so it beats utilities) that zeroes `td/th` border-width+padding (email's own inline `border:`/`padding:` win by specificity), caps `table { max-width:100% }`, and keeps sensible list/link/blockquote defaults. Container now `className="email-html break-words rounded-md bg-muted/30 p-3 text-sm leading-relaxed"`. Only the cases page renders email HTML (approvals page doesn't). Pure presentational change; `pnpm build` green.
   - [x] **Dashboard approve buttons recolored green → brand blue (2026-06-13).** The 4 approve `SubmitButton`s (`apps/dashboard/app/cases/[id]/ApprovalCard.tsx` ×2, `apps/dashboard/app/approvals/[id]/page.tsx` ×2) switched `variant="success"` → `variant="default"` (brand blue `#0057ff`); the email approval-confirm page button (`apps/api/src/approval-endpoints.ts`, `.btn.ok`) recolored `#065f46` → `#0057ff`. Status `<Alert>`/`<Badge>` success variants left green (indicators, not buttons). NOTE: the email confirm page still shows a green "Approve" badge pill above the now-blue button — left for consistency follow-up.
 - [ ] Aftership/EasyPost carrier-level tracking integration: `TrackingService` Tag + Live impl, per-tenant carrier credentials (new provider variant in `connector_connections`), `tracking.lookup` tool returning live scan events / exception detail / carrier-normalized status, `POST /webhooks/tracking/:tenantId` for scan-event ingestion → `tracking.changed` domain event. Real per-merchant cost (~$0.01–$0.12 per shipment depending on tier/provider). Defer until a specialist agent actually needs scan-level fidelity beyond what `order.fulfillments` already exposes through `shopify.get_order`; today's "where is my order?" use case is fully served by Shopify's static tracking fields. Master-plan §11 routing table already reserves the webhook path.
