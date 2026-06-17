@@ -428,12 +428,58 @@ const executionKeyFor = (
   tool: AnyTool,
   input: unknown,
   fallback: string,
+  scope?: string,
 ): string => {
-  if (!tool.idempotencyKey) return fallback;
-  try {
-    return `${tool.name}:${tool.idempotencyKey(input as never)}`;
-  } catch {
-    return fallback;
+  const base = (() => {
+    if (!tool.idempotencyKey) return fallback;
+    try {
+      return `${tool.name}:${tool.idempotencyKey(input as never)}`;
+    } catch {
+      return fallback;
+    }
+  })();
+  return scope ? `${scope}:${base}` : base;
+};
+
+/**
+ * Per-delivery discriminator for the C2 execution-marker key. The marker
+ * exists only to stop a REDELIVERED job (the same event replayed from turn
+ * 0 after a crash) from re-running a side-effecting tool. Because the
+ * marker is stored case-scoped and never expires, an UNscoped key also
+ * (wrongly) deduped a *different* delivery that happened to reuse a tool's
+ * idempotency key — e.g. a second customer reply on the same thread whose
+ * agent re-drafts `conversation.reply` with the same `draftId`, or a fresh
+ * approval execution after an earlier approved send on the same case. That
+ * silently swallowed the reply.
+ *
+ * Scoping the key by the delivery keeps the redelivery guarantee (a
+ * redelivered job carries the same discriminator) while letting a genuinely
+ * new delivery re-invoke the tool. Inbound messages key by their provider
+ * message id — stable across redeliveries, distinct per new message, and
+ * already the unit `ProcessedMessageStore` claims on; resuming events key by
+ * their own correlation id. (`supplier.updated` / `case.resumed` /
+ * `manual.takeover` fall back to the case id: the event carries no
+ * per-delivery id, so two of the same on one case could still cross-dedup —
+ * rare, and a follow-up.)
+ */
+const deliveryScopeFor = (event: DomainEvent): string => {
+  switch (event.type) {
+    case "message.received":
+    case "customer.replied":
+      return `msg:${event.payload.messageId}`;
+    case "approval.approved":
+    case "approval.rejected":
+      return `appr:${event.approvalId}`;
+    case "timer.expired":
+      return `timer:${event.timerId}`;
+    case "ticket.created":
+      return `ticket:${event.source}`;
+    case "tracking.changed":
+      return `track:${event.orderId}`;
+    case "supplier.updated":
+    case "manual.takeover":
+    case "case.resumed":
+      return `case:${event.caseId}`;
   }
 };
 
@@ -996,7 +1042,12 @@ export const AgentRuntimeDefault = Layer.effect(
           // executes twice. The key is input-derived when the tool
           // declares an idempotencyKey, so even a second approval row
           // for the same draft dedupes.
-          const executionKey = executionKeyFor(toolToRun, toolInput, callId);
+          const executionKey = executionKeyFor(
+            toolToRun,
+            toolInput,
+            callId,
+            `appr:${approval.id}`,
+          );
           const priorMarker = Option.isSome(maybeExecutions)
             ? yield* maybeExecutions.value
                 .find(working.id, executionKey)
@@ -1394,6 +1445,40 @@ export const AgentRuntimeDefault = Layer.effect(
             );
             return { type: "PausedWaitingForSupplier" } as const;
           }
+        }
+
+        // 2.97. Reopen a resolved case when the customer writes back on the
+        // thread. The state machine permits `resolved → in_progress` (a reply
+        // re-enters the loop) but nothing performed the transition: the case
+        // stayed visually `resolved` while the agent re-ran, and a closing
+        // `final_message` then short-circuited (status already resolved) so a
+        // genuine re-engagement could finish invisibly. Transitioning here
+        // surfaces the reopen on the timeline and lets the normal
+        // resolve/await paths run against a coherent status. Only inbound
+        // customer messages reopen; system events (timers, approvals) never
+        // resurrect a resolved case.
+        if (
+          (event.type === "message.received" ||
+            event.type === "customer.replied") &&
+          working.status === "resolved"
+        ) {
+          working = yield* tx.run(
+            Effect.gen(function* () {
+              const row = yield* cases.transitionStatus(
+                working.id,
+                "in_progress",
+                { reason: `reopened by ${event.type}` },
+              );
+              yield* audit.record({
+                tenantId: row.tenantId,
+                caseId: row.id,
+                actor: { type: "system", id: "runtime" },
+                action: "case.reopened",
+                details: { eventType: event.type },
+              });
+              return row;
+            }),
+          );
         }
 
         // 3. Run the workflow loop.
@@ -1837,6 +1922,7 @@ export const AgentRuntimeDefault = Layer.effect(
             tool,
             callInput,
             decision.callId,
+            deliveryScopeFor(event),
           );
           if (
             tool.sideEffectClass !== "none" &&

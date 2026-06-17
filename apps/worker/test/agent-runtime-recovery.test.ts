@@ -572,11 +572,12 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
           riskLevel: "medium",
           expiresAt: new Date(Date.now() + 60_000),
         });
-        // The marker the crashed run would have committed (semantic key).
+        // The marker the crashed run would have committed (semantic key,
+        // scoped to THIS approval delivery — `appr:<approvalId>`).
         yield* executions.record({
           tenantId: TenantId("tenant-acme"),
           caseId: caseId as never,
-          callId: "test.counted_action:counted-5",
+          callId: `appr:${approval.id}:test.counted_action:counted-5`,
           tool: "test.counted_action",
           resultOk: true,
         });
@@ -689,11 +690,12 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
         const runtime = yield* AgentRuntime;
         const executions = yield* ToolExecutionStore;
         // The same semantic action already executed in a prior (crashed)
-        // run of this tick.
+        // run of THIS tick — same `customer.replied` delivery, so the marker
+        // is scoped to its message id (`msg:msg-r1`).
         yield* executions.record({
           tenantId: TenantId("tenant-acme"),
           caseId: caseId as never,
-          callId: "test.counted_action:counted-5",
+          callId: "msg:msg-r1:test.counted_action:counted-5",
           tool: "test.counted_action",
           resultOk: true,
         });
@@ -704,6 +706,167 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
 
     expect(counter.count).toBe(0);
     expect(out.result.type).toBe("Completed");
+  });
+
+  it("re-runs a side-effecting tool on a SECOND inbound message even when its idempotency key matches the first (no cross-delivery dedup)", async () => {
+    // Regression for the resolved-case silent-drop bug: a customer replied
+    // on a thread the agent had already answered, the agent re-drafted the
+    // reply with the SAME idempotency key (draftId), and the case-scoped C2
+    // marker from the first send wrongly deduped it — so nothing went out.
+    // Two DISTINCT inbound messages (different messageId) must both run the
+    // action; only a redelivery of the SAME message dedups.
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([
+        // Tick 1 (message msg-1) → run the action, resolve.
+        {
+          type: "tool_call",
+          callId: "t1",
+          tool: "test.counted_action",
+          input: { amount: 5 },
+        },
+        { type: "final_message", text: "done 1" },
+        // Tick 2 (message msg-2, same thread, case now resolved) → run the
+        // SAME action (same idempotency key) again, resolve.
+        {
+          type: "tool_call",
+          callId: "t2",
+          tool: "test.counted_action",
+          input: { amount: 5 },
+        },
+        { type: "final_message", text: "done 2" },
+      ]) as never,
+      [
+        recoveryAgent({
+          id: AgentId("support-triage"),
+          permissionOverrides: { "test.counted_action": "allow" },
+        }),
+      ],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const inbound = (messageId: string): DomainEvent => ({
+      type: "message.received",
+      tenantId: TenantId("tenant-acme"),
+      threadId: "gmail:thread-reopen" as never,
+      payload: {
+        threadId: "gmail:thread-reopen" as never,
+        messageId,
+        from: { name: null, email: "cust@example.com" },
+        to: [],
+        subject: "Where is my order?",
+        bodyText: "still not here",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [],
+      },
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const first = yield* runtime.handleEvent(inbound("msg-1"));
+          const firstRow = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "gmail:thread-reopen" as never,
+          );
+          const second = yield* runtime.handleEvent(inbound("msg-2"));
+          const secondRow = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "gmail:thread-reopen" as never,
+          );
+          return {
+            first,
+            second,
+            firstStatus: firstRow?.status,
+            secondStatus: secondRow?.status,
+          };
+        }),
+        layer as never,
+      ) as Effect.Effect<
+        {
+          first: { type: string };
+          second: { type: string };
+          firstStatus: string | undefined;
+          secondStatus: string | undefined;
+        },
+        never,
+        never
+      >,
+    );
+
+    expect(out.first.type).toBe("Completed");
+    expect(out.firstStatus).toBe("resolved");
+    expect(out.second.type).toBe("Completed");
+    expect(out.secondStatus).toBe("resolved");
+    // The SECOND inbound message re-ran the action — it was NOT falsely
+    // deduped by the first message's marker. Before the delivery-scoping
+    // fix this was 1 (the reply silently vanished).
+    expect(counter.count).toBe(2);
+  });
+});
+
+describe("AgentRuntime — reopen on customer reply (resolved → in_progress)", () => {
+  it("reopens a resolved case and audits case.reopened when the customer replies", async () => {
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([
+        { type: "final_message", text: "resolved first" },
+        { type: "final_message", text: "re-engaged" },
+      ]) as never,
+      [recoveryAgent({ id: AgentId("support-triage") })],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const inbound = (messageId: string): DomainEvent => ({
+      type: "message.received",
+      tenantId: TenantId("tenant-acme"),
+      threadId: "gmail:thread-reopen-2" as never,
+      payload: {
+        threadId: "gmail:thread-reopen-2" as never,
+        messageId,
+        from: { name: null, email: "cust@example.com" },
+        to: [],
+        subject: "Help",
+        bodyText: "anything else?",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [],
+      },
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          yield* runtime.handleEvent(inbound("msg-1"));
+          const afterFirst = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "gmail:thread-reopen-2" as never,
+          );
+          yield* runtime.handleEvent(inbound("msg-2"));
+          const entries = afterFirst ? yield* audit.forCase(afterFirst.id) : [];
+          return {
+            firstStatus: afterFirst?.status,
+            actions: entries.map((e) => e.action),
+          };
+        }),
+        layer as never,
+      ) as Effect.Effect<
+        { firstStatus: string | undefined; actions: ReadonlyArray<string> },
+        never,
+        never
+      >,
+    );
+
+    expect(out.firstStatus).toBe("resolved");
+    // The second inbound flips the resolved case back to in_progress with a
+    // visible reopen marker before the agent re-runs.
+    expect(out.actions.filter((a) => a === "case.reopened")).toHaveLength(1);
   });
 });
 
