@@ -147,6 +147,7 @@ export const makeImapSmtpConversation = (
               html: draft.bodyHtml,
               inReplyTo: normalisedInReplyTo,
               references,
+              idempotencyKey: draft.draftId,
             }),
           catch: (cause): ConversationError =>
             new ConversationSendFailed({

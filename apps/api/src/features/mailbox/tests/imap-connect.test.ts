@@ -60,6 +60,23 @@ describe("parseImapConnectBody", () => {
     expect(parsed.value.config.user).toBe("login@b.com");
   });
 
+  it("accepts optional Sent-folder save settings", () => {
+    const parsed = parseImapConnectBody({
+      mailbox: "a@b.com",
+      password: "p",
+      imapHost: "imap.b.com",
+      smtpHost: "smtp.b.com",
+      sentSaveMode: "smtp_provider",
+      sentMailbox: "Sent Items",
+      sentCheckDelayMs: "2500",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.config.sentSaveMode).toBe("smtp_provider");
+    expect(parsed.value.config.sentMailbox).toBe("Sent Items");
+    expect(parsed.value.config.sentCheckDelayMs).toBe(2500);
+  });
+
   it.each([
     [{ password: "p", imapHost: "i", smtpHost: "s" }, "missing_mailbox"],
     [{ mailbox: "a@b.com", imapHost: "i", smtpHost: "s" }, "missing_password"],
@@ -82,9 +99,15 @@ describe("parseImapConnectBody", () => {
       smtpSecure: true,
       user: "u@b.com",
       password: "secret",
+      sentSaveMode: "imap_append",
+      sentMailbox: "Sent",
+      sentCheckDelayMs: 500,
     });
     expect(meta).not.toHaveProperty("password");
     expect(meta["imapHost"]).toBe("i");
     expect(meta["user"]).toBe("u@b.com");
+    expect(meta["sentSaveMode"]).toBe("imap_append");
+    expect(meta["sentMailbox"]).toBe("Sent");
+    expect(meta["sentCheckDelayMs"]).toBe(500);
   });
 });

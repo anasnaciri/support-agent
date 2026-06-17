@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ThreadId } from "@support-agent/agent-core";
 import {
   buildThread,
+  makeImapSmtpOps,
   parseRawImapMessage,
   stripBrackets,
   threadRootId,
   toConversationMessage,
+  type ImapSmtpConfig,
   type RawImapMessage,
 } from "../src/imap-smtp.js";
 
@@ -123,5 +125,141 @@ describe("parseRawImapMessage", () => {
     expect(toConversationMessage(msg, mailbox).threadId).toBe(
       ThreadId("m1@host"),
     );
+  });
+});
+
+describe("makeImapSmtpOps — Sent copy persistence", () => {
+  const config: ImapSmtpConfig = {
+    imapHost: "imap.example.com",
+    imapPort: 993,
+    imapSecure: true,
+    smtpHost: "smtp.example.com",
+    smtpPort: 465,
+    smtpSecure: true,
+    user: mailbox,
+    password: "secret",
+    sentSaveMode: "auto",
+    sentMailbox: "Sent",
+  };
+
+  const sendInput = {
+    from: { name: null, email: mailbox },
+    to: [{ name: "Jane", email: "jane@example.com" }],
+    subject: "Re: Order question",
+    text: "It shipped yesterday.",
+    html: null,
+    inReplyTo: "m1@host",
+    references: ["m1@host"],
+  };
+
+  const makeClient = (searchResult: ReadonlyArray<number>) => {
+    const append = vi.fn(async () => ({}));
+    const search = vi.fn(async () => searchResult);
+    return {
+      client: {
+        secureConnection: true,
+        connect: vi.fn(async () => {}),
+        logout: vi.fn(async () => {}),
+        list: vi.fn(async () => [
+          { path: "INBOX" },
+          { path: "Sent", specialUse: "\\Sent" },
+        ]),
+        getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+        search,
+        fetch: vi.fn(),
+        mailboxOpen: vi.fn(),
+        append,
+      },
+      append,
+      search,
+    };
+  };
+
+  const makeTransport = () => {
+    const sendMail = vi.fn(async (message: { messageId?: string }) => ({
+      messageId: message.messageId,
+    }));
+    return {
+      transport: {
+        sendMail,
+        verify: vi.fn(async () => {}),
+        close: vi.fn(),
+      },
+      sendMail,
+    };
+  };
+
+  it("uses an explicit Message-ID and does not append when Sent already has it", async () => {
+    const fakeClient = makeClient([42]);
+    const fakeTransport = makeTransport();
+    const ops = makeImapSmtpOps(config, {
+      imapFactory: () => fakeClient.client,
+      smtpFactory: () => fakeTransport.transport,
+      delay: async () => {},
+    });
+
+    const sent = await ops.send(sendInput);
+
+    expect(sent.messageId).toMatch(/@/);
+    const smtpMessage = fakeTransport.sendMail.mock.calls[0]![0];
+    expect(smtpMessage.messageId).toBe(`<${sent.messageId}>`);
+    expect(fakeClient.search).toHaveBeenCalledWith(
+      { header: { "message-id": sent.messageId } },
+      { uid: true },
+    );
+    expect(fakeClient.append).not.toHaveBeenCalled();
+  });
+
+  it("reuses the same Message-ID when the same draft is retried", async () => {
+    const fakeClient = makeClient([42]);
+    const fakeTransport = makeTransport();
+    const ops = makeImapSmtpOps(config, {
+      imapFactory: () => fakeClient.client,
+      smtpFactory: () => fakeTransport.transport,
+      delay: async () => {},
+    });
+
+    const first = await ops.send({ ...sendInput, idempotencyKey: "draft-1" });
+    const second = await ops.send({ ...sendInput, idempotencyKey: "draft-1" });
+
+    expect(second.messageId).toBe(first.messageId);
+  });
+
+  it("appends one Seen copy to Sent when the provider did not save the SMTP send", async () => {
+    const fakeClient = makeClient([]);
+    const fakeTransport = makeTransport();
+    const ops = makeImapSmtpOps(config, {
+      imapFactory: () => fakeClient.client,
+      smtpFactory: () => fakeTransport.transport,
+      delay: async () => {},
+    });
+
+    const sent = await ops.send(sendInput);
+
+    expect(fakeClient.append).toHaveBeenCalledOnce();
+    const [mailboxName, source, flags] = fakeClient.append.mock.calls[0]!;
+    expect(mailboxName).toBe("Sent");
+    expect(flags).toEqual(["\\Seen"]);
+    expect(String(source)).toContain(`Message-ID: <${sent.messageId}>`);
+    expect(String(source)).toContain("In-Reply-To: <m1@host>");
+    expect(String(source)).toContain("It shipped yesterday.");
+  });
+
+  it("skips IMAP Sent writes when the connection is configured for provider-side saving", async () => {
+    const fakeClient = makeClient([]);
+    const fakeTransport = makeTransport();
+    const ops = makeImapSmtpOps(
+      { ...config, sentSaveMode: "smtp_provider" },
+      {
+        imapFactory: () => fakeClient.client,
+        smtpFactory: () => fakeTransport.transport,
+        delay: async () => {},
+      },
+    );
+
+    await ops.send(sendInput);
+
+    expect(fakeClient.search).not.toHaveBeenCalled();
+    expect(fakeClient.append).not.toHaveBeenCalled();
   });
 });

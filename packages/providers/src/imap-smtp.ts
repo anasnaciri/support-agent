@@ -11,6 +11,7 @@
 // `makeImapSmtpOps` glue talks to a live server and is verified with real
 // credentials, the same way the Gmail/Graph HTTP layers are.
 
+import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow } from "imapflow";
 import { simpleParser, type AddressObject } from "mailparser";
 import nodemailer from "nodemailer";
@@ -26,6 +27,8 @@ import type { ConnectorConnection } from "@support-agent/services";
 // Config + wire types
 // ============================================================
 
+export type SentSaveMode = "auto" | "smtp_provider" | "imap_append" | "none";
+
 export interface ImapSmtpConfig {
   readonly imapHost: string;
   readonly imapPort: number;
@@ -35,6 +38,21 @@ export interface ImapSmtpConfig {
   readonly smtpSecure: boolean;
   readonly user: string;
   readonly password: string;
+  /**
+   * How outbound SMTP sends should appear in the mailbox's Sent folder.
+   *
+   * - auto: wait briefly, search Sent for the SMTP Message-ID, append only if
+   *   the provider did not save it.
+   * - smtp_provider: trust the provider to save submitted SMTP mail.
+   * - imap_append: always manage the Sent copy from this app, still searching
+   *   first to avoid duplicates if provider behavior changes.
+   * - none: do not attempt to save a Sent copy.
+   */
+  readonly sentSaveMode?: SentSaveMode;
+  /** Sent mailbox path. Defaults to the folder with \Sent special-use, then "Sent". */
+  readonly sentMailbox?: string;
+  /** Test/operator override for auto-save propagation wait. Defaults to 1500ms. */
+  readonly sentCheckDelayMs?: number;
 }
 
 export interface RawImapMessage {
@@ -59,6 +77,8 @@ export interface ImapSendInput {
   readonly html: string | null;
   readonly inReplyTo: string | null;
   readonly references: ReadonlyArray<string>;
+  /** Stable key for retrying the same logical outbound draft. */
+  readonly idempotencyKey?: string;
 }
 
 /**
@@ -80,6 +100,66 @@ export interface ImapSmtpOps {
   readonly send: (input: ImapSendInput) => Promise<{ readonly messageId: string }>;
   /** Throws if IMAP or SMTP login fails — used by the connect endpoint. */
   readonly verify: () => Promise<void>;
+}
+
+interface ImapMailboxLock {
+  readonly release: () => void;
+}
+
+interface ImapFetchMessage {
+  readonly uid: number;
+  readonly source?: Buffer;
+}
+
+interface ImapMailboxInfo {
+  readonly uidNext?: number | string;
+}
+
+interface ImapMailboxListEntry {
+  readonly path?: string;
+  readonly name?: string;
+  readonly specialUse?: string;
+  readonly flags?: ReadonlyArray<string>;
+}
+
+interface ImapClientLike {
+  readonly secureConnection: boolean;
+  readonly connect: () => Promise<void>;
+  readonly logout: () => Promise<void>;
+  readonly getMailboxLock: (path: string) => Promise<ImapMailboxLock>;
+  readonly search: (
+    query: Record<string, unknown>,
+    options: { readonly uid: true },
+  ) => Promise<ReadonlyArray<number>>;
+  readonly fetch: (
+    range: unknown,
+    query: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => AsyncIterable<ImapFetchMessage>;
+  readonly mailboxOpen: (path: string) => Promise<ImapMailboxInfo>;
+  readonly append?: (
+    path: string,
+    content: Buffer,
+    flags?: ReadonlyArray<string>,
+    idate?: Date,
+  ) => Promise<unknown>;
+  readonly list?: () => Promise<ReadonlyArray<ImapMailboxListEntry>>;
+}
+
+interface SmtpTransportLike {
+  readonly sendMail: (
+    message: Record<string, unknown>,
+  ) => Promise<{ readonly messageId?: string | null }>;
+  readonly verify: () => Promise<void>;
+  readonly close?: () => void;
+}
+
+export interface ImapSmtpOpsDeps {
+  readonly imapFactory?: () => ImapClientLike;
+  readonly smtpFactory?: () => SmtpTransportLike;
+  readonly delay?: (ms: number) => Promise<void>;
+  readonly now?: () => Date;
+  readonly mintMessageId?: () => string;
 }
 
 // ============================================================
@@ -152,6 +232,9 @@ const numFromMeta = (v: unknown, fallback: number): number =>
 const boolFromMeta = (v: unknown, fallback: boolean): boolean =>
   typeof v === "boolean" ? v : fallback;
 
+const sentSaveModeFromMeta = (v: unknown): SentSaveMode =>
+  v === "smtp_provider" || v === "imap_append" || v === "none" ? v : "auto";
+
 /**
  * Build transport config from a stored `imap` connection: app-password in
  * `accessToken`, host/port/security in `metadata`, mailbox in `shopDomain`
@@ -168,6 +251,10 @@ export const imapConfigFromConnection = (
   const user =
     typeof m["user"] === "string" && m["user"] ? (m["user"] as string) : conn.shopDomain;
   const smtpPort = numFromMeta(m["smtpPort"], 465);
+  const sentMailbox =
+    typeof m["sentMailbox"] === "string" && m["sentMailbox"]
+      ? (m["sentMailbox"] as string)
+      : null;
   return {
     imapHost,
     imapPort: numFromMeta(m["imapPort"], 993),
@@ -177,6 +264,9 @@ export const imapConfigFromConnection = (
     smtpSecure: boolFromMeta(m["smtpSecure"], smtpPort === 465),
     user,
     password: conn.accessToken,
+    sentSaveMode: sentSaveModeFromMeta(m["sentSaveMode"]),
+    ...(sentMailbox ? { sentMailbox } : {}),
+    sentCheckDelayMs: numFromMeta(m["sentCheckDelayMs"], 1500),
   };
 };
 
@@ -276,15 +366,150 @@ export const parseRawImapMessage = async (
 const formatAddress = (p: MessageParticipant): string =>
   p.name ? `${p.name} <${p.email}>` : p.email;
 
+const DEFAULT_SENT_MAILBOX = "Sent";
+const DEFAULT_SENT_CHECK_DELAY_MS = 1500;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const normaliseMessageId = (s: string): string =>
+  stripBrackets(s).replace(/[<>\r\n]/g, "").trim();
+
+const headerValue = (s: string): string =>
+  s.replace(/[\r\n]+/g, " ").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+
+const mimeAddress = (p: MessageParticipant): string => {
+  const email = headerValue(p.email);
+  if (!p.name) return email;
+  const name = headerValue(p.name).replace(/"/g, "");
+  return name ? `"${name}" <${email}>` : email;
+};
+
+const messageIdDomain = (fromEmail: string): string => {
+  const domain = fromEmail.split("@").at(-1)?.toLowerCase() ?? "";
+  const clean = domain.replace(/[^a-z0-9.-]/g, "");
+  return clean.length > 0 ? clean : "support-agent.local";
+};
+
+const makeMessageId = (
+  fromEmail: string,
+  seed: string | null,
+  mint: () => string = randomUUID,
+): string => {
+  const token = seed
+    ? createHash("sha256").update(seed).digest("hex").slice(0, 32)
+    : mint().replace(/[^a-zA-Z0-9]/g, "");
+  return `sa-${token}@${messageIdDomain(fromEmail)}`;
+};
+
+const messageIdSeed = (input: ImapSendInput): string | null =>
+  input.idempotencyKey
+    ? [
+        input.idempotencyKey,
+        input.from.email,
+        input.to.map((p) => p.email.toLowerCase()).join(","),
+        input.subject,
+        input.text,
+        input.html ?? "",
+        input.inReplyTo ?? "",
+        input.references.join(" "),
+      ].join("\0")
+    : null;
+
+const buildSentMime = (
+  input: ImapSendInput,
+  messageId: string,
+  date: Date,
+): Buffer => {
+  const lines: Array<string> = [];
+  lines.push(`Message-ID: <${normaliseMessageId(messageId)}>`);
+  lines.push(`Date: ${date.toUTCString()}`);
+  lines.push(`From: ${mimeAddress(input.from)}`);
+  lines.push(`To: ${input.to.map(mimeAddress).join(", ")}`);
+  lines.push(`Subject: ${headerValue(input.subject)}`);
+  const inReplyTo = input.inReplyTo ? normaliseMessageId(input.inReplyTo) : null;
+  if (inReplyTo) lines.push(`In-Reply-To: <${inReplyTo}>`);
+  const references = input.references
+    .map(normaliseMessageId)
+    .filter((r) => r.length > 0);
+  if (references.length > 0) {
+    lines.push(`References: ${references.map((r) => `<${r}>`).join(" ")}`);
+  }
+  lines.push("MIME-Version: 1.0");
+
+  if (input.html) {
+    const boundary = `=_support_agent_${normaliseMessageId(messageId).replace(
+      /[^a-zA-Z0-9]/g,
+      "",
+    )}`;
+    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    lines.push("");
+    lines.push(`--${boundary}`);
+    lines.push('Content-Type: text/plain; charset="UTF-8"');
+    lines.push("");
+    lines.push(input.text);
+    lines.push(`--${boundary}`);
+    lines.push('Content-Type: text/html; charset="UTF-8"');
+    lines.push("");
+    lines.push(input.html);
+    lines.push(`--${boundary}--`);
+  } else {
+    lines.push('Content-Type: text/plain; charset="UTF-8"');
+    lines.push("");
+    lines.push(input.text);
+  }
+  return Buffer.from(lines.join("\r\n"), "utf8");
+};
+
+const resolveSentMailbox = async (
+  client: ImapClientLike,
+  configured: string | undefined,
+): Promise<string> => {
+  if (configured && configured.length > 0) return configured;
+  const boxes = client.list ? await client.list() : [];
+  const sent =
+    boxes.find((b) => b.specialUse === "\\Sent" || b.flags?.includes("\\Sent")) ??
+    boxes.find((b) => {
+      const name = (b.path ?? b.name ?? "").toLowerCase();
+      return name === "sent" || name.endsWith("/sent") || name.endsWith(".sent");
+    });
+  return sent?.path ?? sent?.name ?? DEFAULT_SENT_MAILBOX;
+};
+
+const sentContainsMessage = async (
+  client: ImapClientLike,
+  mailbox: string,
+  messageId: string,
+): Promise<boolean> => {
+  const lock = await client.getMailboxLock(mailbox);
+  try {
+    const uids =
+      (await client.search(
+        { header: { "message-id": normaliseMessageId(messageId) } },
+        { uid: true },
+      )) || [];
+    return uids.length > 0;
+  } finally {
+    lock.release();
+  }
+};
+
 /**
  * Live `ImapSmtpOps` over a real server. Connects per operation (stateless) —
  * simpler and safe across many tenants at the cost of a connect handshake per
  * call. `fetchThread` searches INBOX (the customer's messages); our own sent
  * replies live in the Sent folder and are not included in v1.
  */
-export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
-  const connectImap = async (): Promise<ImapFlow> => {
-    const client = new ImapFlow(imapClientOptions(config));
+export const makeImapSmtpOps = (
+  config: ImapSmtpConfig,
+  deps: ImapSmtpOpsDeps = {},
+): ImapSmtpOps => {
+  const sleep = deps.delay ?? delay;
+  const now = deps.now ?? (() => new Date());
+  const connectImap = async (): Promise<ImapClientLike> => {
+    const client = deps.imapFactory
+      ? deps.imapFactory()
+      : (new ImapFlow(imapClientOptions(config)) as unknown as ImapClientLike);
     await client.connect();
     // Belt-and-braces alongside doSTARTTLS: never operate on a session that
     // somehow ended up cleartext, even if the strict option regresses.
@@ -295,7 +520,45 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
     return client;
   };
 
-  const newSmtp = () => nodemailer.createTransport(smtpTransportOptions(config));
+  const newSmtp = (): SmtpTransportLike =>
+    deps.smtpFactory
+      ? deps.smtpFactory()
+      : (nodemailer.createTransport(
+          smtpTransportOptions(config),
+        ) as unknown as SmtpTransportLike);
+
+  const maybeSaveSentCopy = async (
+    input: ImapSendInput,
+    messageId: string,
+    sentDate: Date,
+  ): Promise<void> => {
+    const mode = config.sentSaveMode ?? "auto";
+    if (mode === "smtp_provider" || mode === "none") return;
+
+    try {
+      if (mode === "auto") {
+        await sleep(config.sentCheckDelayMs ?? DEFAULT_SENT_CHECK_DELAY_MS);
+      }
+      const client = await connectImap();
+      try {
+        const mailbox = await resolveSentMailbox(client, config.sentMailbox);
+        if (await sentContainsMessage(client, mailbox, messageId)) return;
+        if (!client.append) return;
+        await client.append(
+          mailbox,
+          buildSentMime(input, messageId, sentDate),
+          ["\\Seen"],
+          sentDate,
+        );
+      } finally {
+        await client.logout();
+      }
+    } catch {
+      // SMTP already accepted the customer-facing message. Do not surface a
+      // Sent-folder bookkeeping failure as a send failure, because a runtime
+      // retry could send the customer a duplicate email.
+    }
+  };
 
   const fetchThread = async (
     rootId: string,
@@ -377,8 +640,15 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
     input: ImapSendInput,
   ): Promise<{ messageId: string }> => {
     const transport = newSmtp();
+    const messageId = makeMessageId(
+      input.from.email,
+      messageIdSeed(input),
+      deps.mintMessageId,
+    );
+    const sentDate = now();
     try {
       const info = await transport.sendMail({
+        messageId: `<${messageId}>`,
         from: formatAddress(input.from),
         to: input.to.map(formatAddress),
         subject: input.subject,
@@ -389,9 +659,11 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
           ? { references: input.references.slice() }
           : {}),
       });
-      return { messageId: stripBrackets(info.messageId ?? "") };
+      const acceptedId = normaliseMessageId(info.messageId ?? messageId) || messageId;
+      await maybeSaveSentCopy(input, acceptedId, sentDate);
+      return { messageId: acceptedId };
     } finally {
-      transport.close();
+      transport.close?.();
     }
   };
 
@@ -402,7 +674,7 @@ export const makeImapSmtpOps = (config: ImapSmtpConfig): ImapSmtpOps => {
     try {
       await transport.verify();
     } finally {
-      transport.close();
+      transport.close?.();
     }
   };
 

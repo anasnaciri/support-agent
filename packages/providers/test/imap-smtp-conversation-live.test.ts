@@ -147,6 +147,7 @@ describe("makeImapSmtpConversation — reply / askCustomer", () => {
     expect(sendArg.inReplyTo).toBe("m1@host");
     expect(sendArg.references).toEqual(["m1@host"]);
     expect(sendArg.from.email).toBe(mailbox);
+    expect(sendArg.idempotencyKey).toBe("d-1");
   });
 
   it("askCustomer derives In-Reply-To from the latest thread message", async () => {
