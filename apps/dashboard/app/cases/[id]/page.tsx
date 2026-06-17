@@ -26,7 +26,12 @@ import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
-import { resumeAction, retryAction, takeOverAction } from "./actions";
+import {
+  resumeAction,
+  retryAction,
+  retrySendAction,
+  takeOverAction,
+} from "./actions";
 import {
   buildCaseTimelineHref,
   conversationThreadUnavailableView,
@@ -57,6 +62,7 @@ interface Params {
     readonly takenOver?: string;
     readonly resumed?: string;
     readonly retried?: string;
+    readonly retrySend?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -121,6 +127,23 @@ const retryBanner = (kind: string | undefined): Banner | null => {
     return {
       tone: "info",
       text: "This case wasn't under human takeover — no change.",
+    };
+  }
+  return null;
+};
+
+const retrySendBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "queued") {
+    return {
+      tone: "success",
+      text: "Re-sending the reply now. If it goes through, the case resolves automatically; if it fails again it stays here.",
+    };
+  }
+  if (kind === "no_failed_delivery") {
+    return {
+      tone: "info",
+      text: "There's no failed reply to re-send on this case — no change.",
     };
   }
   return null;
@@ -429,6 +452,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     takeOverBanner(sp.takenOver) ??
     resumeBanner(sp.resumed) ??
     retryBanner(sp.retried) ??
+    retrySendBanner(sp.retrySend) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread] = await Promise.all([
@@ -474,6 +498,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
+  // A drafted customer reply failed to send. The agent already escalated the
+  // case; offer a direct "re-send the same email" action (distinct from the
+  // agent retry, which re-drafts).
+  const replyDeliveryFailed = riskFlags.includes("reply_delivery_failed");
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .slice()
@@ -550,6 +578,17 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           ) : null}
           {canResume ? (
             <div className="ml-auto flex items-center gap-2">
+              {replyDeliveryFailed ? (
+                <form action={retrySendAction}>
+                  <input type="hidden" name="caseId" value={caseRow.id} />
+                  <SubmitButton
+                    pendingLabel="Re-sending…"
+                    title="Re-send the same drafted reply that failed to deliver to the customer"
+                  >
+                    Retry sending email
+                  </SubmitButton>
+                </form>
+              ) : null}
               <form action={resumeAction}>
                 <input type="hidden" name="caseId" value={caseRow.id} />
                 <SubmitButton
@@ -563,6 +602,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               <form action={retryAction}>
                 <input type="hidden" name="caseId" value={caseRow.id} />
                 <SubmitButton
+                  variant={replyDeliveryFailed ? "outline" : "default"}
                   pendingLabel="Retrying…"
                   title="Hand the case back and have the agent try again right now"
                 >

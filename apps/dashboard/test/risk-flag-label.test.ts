@@ -17,4 +17,10 @@ describe("riskFlagLabel", () => {
   it("humanises unknown flags instead of leaking snake_case", () => {
     expect(riskFlagLabel("some_future_flag")).toBe("Some future flag");
   });
+
+  it("humanises the failed-reply-delivery flag", () => {
+    expect(riskFlagLabel("reply_delivery_failed")).toBe(
+      "Reply didn't send — delivery failed",
+    );
+  });
 });

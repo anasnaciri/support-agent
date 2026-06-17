@@ -929,6 +929,19 @@ export const api = {
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },
 
+  // Re-send the SAME drafted reply whose delivery failed (NOT a re-run of the
+  // agent): requeues the failed reply-delivery so the worker sweep sends it.
+  retrySend: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<{ readonly kind: string }> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/retry-send`,
+      { method: "POST", ctx },
+    );
+    return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
   // ---- Members & roles (members.manage) ----
   members: async (ctx: CallCtx): Promise<MembersResponse> =>
     okBody("/members", ctx) as Promise<MembersResponse>,
