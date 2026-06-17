@@ -8,6 +8,16 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  * `defaultPermission: "ask"`, so the runtime parks the case in
  * `waiting_for_approval` until a human approves the draft.
  *
+ * Identity gate: order details are private, so before disclosing anything the
+ * agent compares the order's customer email against the address the customer is
+ * writing from. On a mismatch it does NOT reveal details — it asks the customer
+ * (via `conversation.ask_customer`) to confirm the email used to place the
+ * order. The runtime verifies that confirmation deterministically (it stamps
+ * `order_customer_mismatch` + `identityVerified` on the case context and forces
+ * the reply to human approval until identity is verified — see
+ * orderCustomerMismatchFlag / replyProvesOrderIdentity / shouldForceReplyApproval
+ * in agent-runtime), so the gate holds even if the tenant set the reply to auto.
+ *
  * Mode is `subagent` — this config is never selected as a case's initial
  * agent, only reached through handoff.
  */
@@ -29,6 +39,18 @@ export const orderStatusAgent: AgentConfig = {
     "DECISION RULE — read this carefully each turn:",
     "",
     "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the value of `identifiedOrderId` from the case context. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
+    "",
+    "IDENTITY GATE — check this every time BEFORE you reveal any order detail:",
+    "  Order details are private. Only share them with the person who placed the order.",
+    "  1. If the latest message contains an `[Identity check PASSED ...]` directive, the system has already verified the customer — skip the rest of this gate and proceed normally.",
+    "  2. Otherwise compare the `email` on the `shopify.get_order` result with the address the customer is writing from (the `from=` value in the `[Thread context: ...]` header), case-insensitively. If they MATCH, proceed normally.",
+    "  3. If they DIFFER, do NOT reveal any order details (no status, tracking, items, dates, or addresses). Instead, unless you have already asked this case (an `[Identity check REQUIRED ...]` directive plus a customer reply that still doesn't match means they failed — see below), call `conversation.ask_customer` ONCE to verify identity:",
+    "     - `threadId` and `to[0].email`: from the `[Thread context: ...]` header.",
+    "     - `to[0].name`: null. `subject`: null. `bodyHtml`: null. `inReplyToMessageId`: null.",
+    "     - `bodyText`: 1–2 short, polite sentences asking them to confirm the email address used to place the order so you can verify their identity before sharing details. Do NOT reveal the order's actual email or any other order detail.",
+    "     - `draftId`: a stable string of the form `order-status-verify-<threadId>`.",
+    "     The case parks until they reply. Do NOT call `conversation.reply` on this turn.",
+    "  4. If an `[Identity check REQUIRED ...]` directive is present and the customer's reply still does not state the order's email, do NOT disclose. Call `conversation.reply` ONCE with a brief apology asking them to write in from the email address used at checkout so you can help — share no order details.",
     "",
     "Turn 2 — OPTIONAL live tracking enrichment (CONDITIONAL):",
     "  If the `shopify.get_order` tool result has at least one fulfillment carrying a non-null `trackingNumbers[0]`, call `tracking.lookup` ONCE with:",
@@ -54,18 +76,21 @@ export const orderStatusAgent: AgentConfig = {
     "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
     "- Never call `shopify.get_order` more than once per case.",
     "- Never call `tracking.lookup` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
+    "- Never call `conversation.ask_customer` more than once per case — the identity check is asked at most once; if it fails, decline via `conversation.reply`.",
+    "- Never reveal the order's customer email, or any other order detail, while the identity gate is unsatisfied.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
-    "- Treat `conversation.reply` as terminal for this case. Do not call any other action after a successful `conversation.reply`.",
+    "- Treat a successful `conversation.reply` or `conversation.ask_customer` as terminal for this case. Do not call any other action after it.",
   ].join("\n"),
   tools: [
     "shopify.get_order",
     "tracking.lookup",
     "case.update_context",
     "conversation.reply",
+    "conversation.ask_customer",
     "knowledge.search",
     "merchant.notify",
   ],
@@ -74,7 +99,9 @@ export const orderStatusAgent: AgentConfig = {
   // BRANCH path may emit up to 5 tool calls (shopify.get_order +
   // tracking.lookup + case.update_context + knowledge.search +
   // conversation.reply) before the final plain-text turn, plus an optional
-  // merchant.notify heads-up. Give +1 to keep slack.
-  maxTurnsPerTick: 9,
+  // merchant.notify heads-up. The identity gate adds at most one extra call
+  // (conversation.ask_customer instead of reply, or a get_order on the verified
+  // resume). Give slack on top of the shared-with-triage budget.
+  maxTurnsPerTick: 11,
   temperature: 0,
 };

@@ -11,14 +11,16 @@ describe("order-status-agent config", () => {
     expect(orderStatusAgent.id).toBe("order-status-agent");
     expect(orderStatusAgent.mode).toBe("subagent");
     expect(orderStatusAgent.provider).toBe("openrouter");
-    // It must be able to look up the order, record context patches, and
-    // propose the customer reply through the approval-gated reply tool.
-    // It must not be able to hand off or transition status directly.
+    // It must be able to look up the order, record context patches, propose
+    // the customer reply through the approval-gated reply tool, and run the
+    // identity challenge via ask_customer. It must not be able to hand off or
+    // transition status directly.
     expect(orderStatusAgent.tools).toEqual([
       "shopify.get_order",
       "tracking.lookup",
       "case.update_context",
       "conversation.reply",
+      "conversation.ask_customer",
       "knowledge.search",
       "merchant.notify",
     ]);
@@ -26,6 +28,16 @@ describe("order-status-agent config", () => {
     expect(orderStatusAgent.handoffs).toEqual([]);
     expect(orderStatusAgent.maxTurnsPerTick).toBeGreaterThan(1);
     expect(orderStatusAgent.promptTemplate.length).toBeGreaterThan(50);
+  });
+
+  it("instructs an identity gate before disclosing order details", () => {
+    // The order-status flow must not reveal another customer's order to a
+    // requester writing in from a different email. The prompt drives the
+    // self-serve challenge; the runtime enforces the hard gate.
+    expect(orderStatusAgent.promptTemplate).toContain("IDENTITY GATE");
+    expect(orderStatusAgent.promptTemplate).toContain(
+      "conversation.ask_customer",
+    );
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {

@@ -204,6 +204,46 @@ const buildUserMessageFromInbound = (
   };
 };
 
+/**
+ * Trusted directive injected on resume of a `where_is_order` case that was
+ * flagged as an order/customer mismatch. Tells the specialist either to run the
+ * identity challenge (ask the customer to confirm the order's email before
+ * disclosing) or, once the runtime has verified that confirmation, to go ahead
+ * and send the status. Carries the order id + reply wiring so the agent can act
+ * without the prior tick's tool results. Returns "" for every case that isn't
+ * mid-verification, so normal flows are untouched. Stays OUTSIDE the untrusted
+ * fence — it's runtime-authored, not customer text.
+ */
+const orderIdentityDirective = (
+  context: Record<string, unknown>,
+  threadId: ThreadId | null,
+): string => {
+  if (context["classification"] !== "where_is_order") return "";
+  const flags = Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+  if (!flags.includes("order_customer_mismatch")) return "";
+  const orderRef =
+    typeof context["identifiedOrderId"] === "string"
+      ? `order ${context["identifiedOrderId"]}`
+      : "the order";
+  const wiring = [
+    threadId ? `threadId=${threadId}` : null,
+    typeof context["customerEmail"] === "string"
+      ? `reply to=${context["customerEmail"]}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const wiringNote = wiring ? ` (${wiring})` : "";
+  if (context["identityVerified"] === true) {
+    return `[Identity check PASSED${wiringNote}: the customer confirmed the email used to place ${orderRef} and the system verified it. Look up the order and send the status reply now.]`;
+  }
+  return `[Identity check REQUIRED${wiringNote}: this customer is writing from a different email than the one ${orderRef} was placed under. Do NOT share any order details yet. Ask them to confirm the email used to place the order via conversation.ask_customer; only after they reply with the matching email may you share the status. If the email they give does not match the order, do not disclose — apologise and ask them to write in from the email used at checkout.]`;
+};
+
 export const buildInitialMessages = (
   event: DomainEvent,
   caseRow: {
@@ -224,9 +264,11 @@ export const buildInitialMessages = (
     ];
   }
   if (event.type === "customer.replied") {
+    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
+    const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
     return [
       buildUserMessageFromInbound(
-        wrapUntrusted(event.payload.bodyText ?? "(empty reply)"),
+        directive ? `${directive}\n\n${body}` : body,
         event.payload.attachments,
       ),
     ];
@@ -244,10 +286,13 @@ export const buildInitialMessages = (
     // the fence so the agent can still wire conversation.* tools from it. The
     // customer-authored subject + body go INSIDE the untrusted fence.
     const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
+    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
     const customerBlock = wrapUntrusted(
       `Subject: ${subject}\n\n${event.payload.bodyText}`,
     );
-    const text = `${header}\n\n${customerBlock}`;
+    const text = directive
+      ? `${header}\n\n${directive}\n\n${customerBlock}`
+      : `${header}\n\n${customerBlock}`;
     return [buildUserMessageFromInbound(text, event.payload.attachments)];
   }
   if (event.type === "case.resumed") {
@@ -485,6 +530,81 @@ export const refundCustomerMismatchFlag = (
     return null;
   }
   return "refund_customer_mismatch";
+};
+
+/** Trim + lowercase an email for comparison, or null if it isn't a usable string. */
+const normalizeEmailForMatch = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  return v === "" ? null : v;
+};
+
+/** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */
+const readRiskFlags = (context: Record<string, unknown>): string[] =>
+  Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+
+/**
+ * Order-status identity guard (the `where_is_order` flow). Returns
+ * `"order_customer_mismatch"` when the looked-up order's customer email differs
+ * from the case's bound (runtime-stamped) customer, else null. The sibling of
+ * {@link refundCustomerMismatchFlag} for read-disclosure rather than refunds:
+ * replying with the order's status would leak another customer's order details.
+ *
+ * Fails OPEN (null) on any missing input — an unknown order email or an
+ * unidentified case customer never raises a false alarm. Pure + exported so the
+ * decision is unit-tested without the runtime.
+ */
+export const orderCustomerMismatchFlag = (
+  orderEmail: unknown,
+  caseContext: Record<string, unknown>,
+): string | null => {
+  const order = normalizeEmailForMatch(orderEmail);
+  const caseEmail = normalizeEmailForMatch(caseContext["customerEmail"]);
+  if (!order || !caseEmail) return null;
+  return order === caseEmail ? null : "order_customer_mismatch";
+};
+
+/**
+ * Deterministic identity check for the order-status verification challenge:
+ * does the customer's reply state the email the order was placed under? Pulls
+ * email-shaped tokens out of the (untrusted) reply text and matches any against
+ * the order email, normalized. Run by the RUNTIME — never the model — so a
+ * prompt-injected reply body can't talk its way to a pass. Fails closed (false)
+ * on missing inputs.
+ */
+export const replyProvesOrderIdentity = (
+  replyText: unknown,
+  orderEmail: unknown,
+): boolean => {
+  const target = normalizeEmailForMatch(orderEmail);
+  if (!target || typeof replyText !== "string") return false;
+  const tokens = replyText.toLowerCase().match(/[^\s<>()"']+@[^\s<>()"']+/g);
+  if (!tokens) return false;
+  return tokens.some((t) => t.replace(/[.,;:!?]+$/, "") === target);
+};
+
+/**
+ * Backstop that survives the tenant's auto/ask toggle: should a
+ * `conversation.reply` on this case be forced to human approval no matter what
+ * the per-agent permission resolves to? True when the case is a
+ * `where_is_order` case flagged as an order/customer mismatch whose requester
+ * has NOT verified their identity — i.e. sending the reply would disclose a
+ * different customer's order. Once {@link replyProvesOrderIdentity} has stamped
+ * `identityVerified`, the gate lifts and the reply flows on its normal
+ * permission. Pure + exported for unit coverage.
+ */
+export const shouldForceReplyApproval = (
+  toolName: string,
+  context: Record<string, unknown>,
+): boolean => {
+  if (toolName !== "conversation.reply") return false;
+  if (context["classification"] !== "where_is_order") return false;
+  if (context["identityVerified"] === true) return false;
+  return readRiskFlags(context).includes("order_customer_mismatch");
 };
 
 const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
@@ -1061,6 +1181,46 @@ export const AgentRuntimeDefault = Layer.effect(
                 Effect.catchAll(() => Effect.succeed(working)),
               );
           }
+        }
+
+        // 2a-bis. Order-status identity verification — when a customer replies
+        // to a case we flagged as an order/customer mismatch, check (in the
+        // runtime, never the model) whether their reply states the email the
+        // order was placed under. A match clears the disclosure gate so the
+        // status reply can proceed automatically; a miss leaves the case gated
+        // (the reply still routes to human approval via the backstop at the
+        // permission check). Keyed off `pendingOrderEmail`, persisted at
+        // detection time. Best-effort: a write failure simply leaves the gate
+        // up. The model cannot set `identityVerified` — it's stamped here and
+        // absent from the case.update_context allowlist — so a prompt-injected
+        // reply body can't fake a pass.
+        if (
+          (event.type === "message.received" ||
+            event.type === "customer.replied") &&
+          working.context["identityVerified"] !== true &&
+          readRiskFlags(working.context).includes("order_customer_mismatch") &&
+          replyProvesOrderIdentity(
+            event.payload.bodyText,
+            working.context["pendingOrderEmail"],
+          )
+        ) {
+          working = yield* cases
+            .update(working.id, {
+              context: {
+                ...working.context,
+                identityVerified: true,
+              } as never,
+            })
+            .pipe(Effect.catchAll(() => Effect.succeed(working)));
+          yield* audit
+            .record({
+              tenantId: working.tenantId,
+              caseId: working.id,
+              actor: { type: "system", id: "runtime" },
+              action: "case.identity_verified",
+              details: { method: "order_email_confirmed" },
+            })
+            .pipe(Effect.catchAll(() => Effect.void));
         }
 
         // 2b. Photo signals — when an inbound message carries image
@@ -1738,7 +1898,18 @@ export const AgentRuntimeDefault = Layer.effect(
             caseId: current.id,
           });
 
-          if (permission === "deny") {
+          // Order-status disclosure backstop: a `where_is_order` reply on an
+          // unverified order/customer mismatch is forced to human approval even
+          // when the tenant set `conversation.reply` to auto. The gate lives in
+          // the runtime (not the per-agent policy) so it survives the auto/ask
+          // toggle; it only ever escalates allow→ask, never relaxes a deny.
+          const effectivePermission =
+            permission === "allow" &&
+            shouldForceReplyApproval(tool.name, current.context)
+              ? "ask"
+              : permission;
+
+          if (effectivePermission === "deny") {
             messages.push({
               role: "tool",
               toolCallId: decision.callId,
@@ -1748,7 +1919,7 @@ export const AgentRuntimeDefault = Layer.effect(
             continue;
           }
 
-          if (permission === "ask") {
+          if (effectivePermission === "ask") {
             // Approval row + park transition + audit row in ONE tx (audit
             // L6) — a crash between them previously left a pending approval
             // on an un-parked case, so the agent could keep acting and a
@@ -2012,6 +2183,32 @@ export const AgentRuntimeDefault = Layer.effect(
               }
               if (typeof o["name"] === "string") {
                 seenOrderEmails.set(o["name"] as string, email);
+              }
+              // Order-status identity guard (where_is_order flow only): if the
+              // looked-up order belongs to a different customer than the one
+              // writing in, stamp a risk flag so the reply is gated + the
+              // dashboard warns, and persist the order's email so the customer's
+              // later confirmation reply can be verified by the runtime (not the
+              // model). Additive + best-effort — a write failure never blocks
+              // the tick, and a fail-open (null) result leaves the case alone.
+              if (current.context["classification"] === "where_is_order") {
+                const mismatchFlag = orderCustomerMismatchFlag(
+                  email,
+                  current.context,
+                );
+                if (mismatchFlag) {
+                  const existingFlags = readRiskFlags(current.context);
+                  const patch: Record<string, unknown> = {
+                    ...current.context,
+                    pendingOrderEmail: normalizeEmailForMatch(email),
+                  };
+                  if (!existingFlags.includes(mismatchFlag)) {
+                    patch["riskFlags"] = [...existingFlags, mismatchFlag];
+                  }
+                  current = yield* cases
+                    .update(current.id, { context: patch as never })
+                    .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                }
               }
             }
             // The tool may have mutated the case (e.g. transitioned status).

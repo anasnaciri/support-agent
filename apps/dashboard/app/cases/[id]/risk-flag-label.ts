@@ -12,5 +12,8 @@ export const riskFlagLabel = (flag: string): string => {
   if (flag === "refund_customer_mismatch") {
     return "Refund order belongs to a different customer";
   }
+  if (flag === "order_customer_mismatch") {
+    return "Order belongs to a different customer — identity unverified";
+  }
   return humanizeSlug(flag);
 };

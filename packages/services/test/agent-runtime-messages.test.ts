@@ -226,6 +226,60 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     expect(text).not.toContain("conversation.fetch_thread");
   });
 
+  it("injects the identity-check directive (outside the fence) on a flagged where_is_order resume", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("can you check my order?", "Help"), {
+        subject: null,
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          identifiedOrderId: "#1001",
+          customerEmail: "asker@somewhere.com",
+          riskFlags: ["order_customer_mismatch"],
+        },
+      }),
+    );
+    const open = text.indexOf(UNTRUSTED_OPEN);
+    // Runtime-authored directive stays OUTSIDE the customer fence.
+    expect(text).toContain("Identity check REQUIRED");
+    expect(text).toContain("#1001");
+    expect(text.indexOf("Identity check REQUIRED")).toBeLessThan(open);
+    expect(text).toContain("conversation.ask_customer");
+  });
+
+  it("switches the directive to PASSED once identity is verified", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("it was victim@example.com", "Help"), {
+        subject: null,
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          identifiedOrderId: "#1001",
+          customerEmail: "asker@somewhere.com",
+          riskFlags: ["order_customer_mismatch"],
+          identityVerified: true,
+        },
+      }),
+    );
+    expect(text).toContain("Identity check PASSED");
+    expect(text).not.toContain("Identity check REQUIRED");
+  });
+
+  it("adds no directive for an ordinary where_is_order case (no mismatch flag)", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("where is my order?", "Help"), {
+        subject: null,
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          identifiedOrderId: "#1001",
+          customerEmail: "asker@somewhere.com",
+        },
+      }),
+    );
+    expect(text).not.toContain("Identity check");
+  });
+
   it("fences the prior-attempt context dump on case.resumed", () => {
     const resumed: DomainEvent = {
       type: "case.resumed",
