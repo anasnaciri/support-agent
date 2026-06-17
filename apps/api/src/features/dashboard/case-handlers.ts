@@ -23,9 +23,11 @@ import {
   casesList,
   connectionsList,
   DbClient,
+  getActiveReplyDeliveryForCase,
   getMemberAccess,
   parsePageNumber,
   parsePageSize,
+  requeueReplyDeliveryNow,
   resumeCase,
   takeOverCase,
   todaySummary,
@@ -576,4 +578,37 @@ export const handleDashboardRetry = async (
     ),
   });
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/retry-send — re-send the SAME drafted customer
+// reply whose delivery failed (distinct from /retry, which re-runs the agent).
+// Requeues the case's reply-delivery outbox row (fresh attempt budget, due
+// now); the worker's reply-delivery-retry sweep re-sends it within the minute
+// and auto-resolves the case on success.
+export const handleDashboardRetrySend = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const outcome = await runWithDb(layer, async (db) => {
+    // Tenant-scope the action: the outbox row carries its tenant, so a case id
+    // from another workspace finds nothing.
+    const active = await getActiveReplyDeliveryForCase(db, id);
+    if (!active || active.tenantId !== auth.tenantId) {
+      return { kind: "no_failed_delivery" as const };
+    }
+    const requeued = await requeueReplyDeliveryNow(db, id);
+    return requeued
+      ? { kind: "queued" as const }
+      : { kind: "no_failed_delivery" as const };
+  });
+  return sendJson(
+    res,
+    outcome.kind === "no_failed_delivery" ? 404 : 200,
+    outcome,
+  );
 };

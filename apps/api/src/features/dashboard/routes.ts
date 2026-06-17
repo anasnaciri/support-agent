@@ -16,6 +16,7 @@ import {
   handleDashboardConnections,
   handleDashboardResume,
   handleDashboardRetry,
+  handleDashboardRetrySend,
   handleDashboardShopifyApp,
   handleDashboardTakeover,
   handleDashboardToday,
@@ -217,6 +218,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/retry",
     "Hand a taken-over case back and have the agent retry now (manager)",
     handleDashboardRetry,
+    "cases.retry",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/retry-send",
+    "Re-send the drafted customer reply whose delivery failed (manager)",
+    handleDashboardRetrySend,
     "cases.retry",
   );
   // Org-scoped (no resolved workspace) — these use authenticateDashboardOrg and
