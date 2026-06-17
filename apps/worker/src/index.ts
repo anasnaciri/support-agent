@@ -49,6 +49,10 @@ import {
   LLM_CREDITS_QUEUE,
   registerLlmCreditsCheck,
 } from "./llm-credits-schedule.js";
+import {
+  REPLY_DELIVERY_RETRY_QUEUE,
+  registerReplyDeliveryRetrySweep,
+} from "./reply-delivery-retry-schedule.js";
 
 interface WorkflowJobData {
   readonly eventId: string;
@@ -229,6 +233,14 @@ const main = async (): Promise<void> => {
   await registerLlmCreditsCheck({ boss, runtimeLayer });
   console.log(
     `[worker] scheduled llm-credits cron on queue=${LLM_CREDITS_QUEUE}`,
+  );
+
+  // Reply-delivery retry sweep: re-sends customer replies whose send failed
+  // (the reply_deliveries outbox), auto-resolving the case on success and
+  // abandoning to human_takeover at the attempt cap.
+  await registerReplyDeliveryRetrySweep({ boss, runtimeLayer });
+  console.log(
+    `[worker] scheduled reply-delivery-retry cron on queue=${REPLY_DELIVERY_RETRY_QUEUE}`,
   );
 
   const onShutdown = async (signal: NodeJS.Signals) => {
