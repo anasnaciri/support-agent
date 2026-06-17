@@ -90,6 +90,7 @@ export const pollOne = async (
 
     const { messages, latestUid } = await ops.listSince(lastUidRaw);
     let polled = 0;
+    const acceptedInboundUids: Array<number> = [];
     for (const raw of messages) {
       const msg = toConversationMessage(raw, conn.shopDomain);
       if (msg.direction === "outbound") continue; // mail we sent
@@ -106,7 +107,17 @@ export const pollOne = async (
         threadId: inbound.threadId,
         payload: inbound,
       });
+      acceptedInboundUids.push(raw.uid);
       polled += 1;
+    }
+    if (acceptedInboundUids.length > 0) {
+      await ops.markRead(acceptedInboundUids).catch((cause) => {
+        console.warn(
+          `[imap-poll] failed to mark messages read for ${conn.shopDomain}: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      });
     }
     if (latestUid > lastUidRaw) {
       await store.patchMetadata({

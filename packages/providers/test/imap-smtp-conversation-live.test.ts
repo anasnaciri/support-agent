@@ -60,6 +60,7 @@ const fakeOps = (over: Partial<ImapSmtpOps> = {}): ImapSmtpOps => ({
   fetchThread: vi.fn(async () => [rawMsg()]),
   listSince: vi.fn(async () => ({ messages: [], latestUid: 0 })),
   latestUid: vi.fn(async () => 0),
+  markRead: vi.fn(async () => {}),
   send: vi.fn(async () => ({ messageId: "sent-1@host" })),
   verify: vi.fn(async () => {}),
   ...over,

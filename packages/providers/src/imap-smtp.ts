@@ -96,6 +96,8 @@ export interface ImapSmtpOps {
   ) => Promise<{ readonly messages: ReadonlyArray<RawImapMessage>; readonly latestUid: number }>;
   /** Highest INBOX UID, without fetching bodies — used to seed the poll cursor. */
   readonly latestUid: () => Promise<number>;
+  /** Mark INBOX messages as read after the workflow has accepted them. */
+  readonly markRead: (uids: ReadonlyArray<number>) => Promise<void>;
   /** Send a message; returns the assigned Message-ID (brackets stripped). */
   readonly send: (input: ImapSendInput) => Promise<{ readonly messageId: string }>;
   /** Throws if IMAP or SMTP login fails — used by the connect endpoint. */
@@ -137,6 +139,11 @@ interface ImapClientLike {
     options?: Record<string, unknown>,
   ) => AsyncIterable<ImapFetchMessage>;
   readonly mailboxOpen: (path: string) => Promise<ImapMailboxInfo>;
+  readonly messageFlagsAdd?: (
+    range: unknown,
+    flags: ReadonlyArray<string>,
+    options?: Record<string, unknown>,
+  ) => Promise<boolean>;
   readonly append?: (
     path: string,
     content: Buffer,
@@ -636,6 +643,22 @@ export const makeImapSmtpOps = (
     }
   };
 
+  const markRead = async (uids: ReadonlyArray<number>): Promise<void> => {
+    const unique = [...new Set(uids)].filter((uid) => Number.isInteger(uid) && uid > 0);
+    if (unique.length === 0) return;
+    const client = await connectImap();
+    try {
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        await client.messageFlagsAdd?.(unique, ["\\Seen"], { uid: true });
+      } finally {
+        lock.release();
+      }
+    } finally {
+      await client.logout();
+    }
+  };
+
   const send = async (
     input: ImapSendInput,
   ): Promise<{ messageId: string }> => {
@@ -678,5 +701,5 @@ export const makeImapSmtpOps = (
     }
   };
 
-  return { fetchThread, listSince, latestUid, send, verify };
+  return { fetchThread, listSince, latestUid, markRead, send, verify };
 };

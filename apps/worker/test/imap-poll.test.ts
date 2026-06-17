@@ -48,6 +48,7 @@ const fakeOps = (over: Partial<ImapSmtpOps> = {}): ImapSmtpOps => ({
   fetchThread: vi.fn(async () => []),
   listSince: vi.fn(async () => ({ messages: [], latestUid: 0 })),
   latestUid: vi.fn(async () => 0),
+  markRead: vi.fn(async () => {}),
   send: vi.fn(async () => ({ messageId: "x" })),
   verify: vi.fn(async () => {}),
   ...over,
@@ -86,6 +87,7 @@ describe("imap-poll pollOne", () => {
   });
 
   it("publishes inbound messages, skips outbound, and advances the cursor", async () => {
+    const markRead = vi.fn(async () => {});
     const ops = fakeOps({
       listSince: vi.fn(async () => ({
         messages: [
@@ -98,6 +100,7 @@ describe("imap-poll pollOne", () => {
         ],
         latestUid: 7,
       })),
+      markRead,
     });
     const published: DomainEvent[] = [];
     const { ops: store, calls } = recordingStore();
@@ -113,6 +116,7 @@ describe("imap-poll pollOne", () => {
     expect(
       (published[0]!.payload as { mailbox?: string }).mailbox,
     ).toBe(mailbox);
+    expect(markRead).toHaveBeenCalledWith([6]);
     expect(calls[0]!.metadata["lastUid"]).toBe(7);
   });
 
@@ -125,6 +129,33 @@ describe("imap-poll pollOne", () => {
     const res = await pollOne(conn({ imapHost: "i", smtpHost: "s", lastUid: 5 }), depsWith(ops, published), store);
     expect(res.outcome).toEqual({ polled: 0 });
     expect(calls).toHaveLength(0);
+  });
+
+  it("still advances the cursor when marking messages read fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ops = fakeOps({
+      listSince: vi.fn(async () => ({
+        messages: [rawMsg({ uid: 6, messageId: "m6@host" })],
+        latestUid: 6,
+      })),
+      markRead: vi.fn(async () => {
+        throw new Error("flags unavailable");
+      }),
+    });
+    const published: DomainEvent[] = [];
+    const { ops: store, calls } = recordingStore();
+    try {
+      const res = await pollOne(
+        conn({ imapHost: "i", smtpHost: "s", lastUid: 5 }),
+        depsWith(ops, published),
+        store,
+      );
+      expect(res.outcome).toEqual({ polled: 1 });
+      expect(published).toHaveLength(1);
+      expect(calls[0]!.metadata["lastUid"]).toBe(6);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("skips a connector with incomplete host metadata", async () => {

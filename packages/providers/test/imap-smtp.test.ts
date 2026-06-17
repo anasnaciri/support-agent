@@ -128,7 +128,7 @@ describe("parseRawImapMessage", () => {
   });
 });
 
-describe("makeImapSmtpOps — Sent copy persistence", () => {
+describe("makeImapSmtpOps — mailbox side effects", () => {
   const config: ImapSmtpConfig = {
     imapHost: "imap.example.com",
     imapPort: 993,
@@ -155,6 +155,7 @@ describe("makeImapSmtpOps — Sent copy persistence", () => {
   const makeClient = (searchResult: ReadonlyArray<number>) => {
     const append = vi.fn(async () => ({}));
     const search = vi.fn(async () => searchResult);
+    const messageFlagsAdd = vi.fn(async () => true);
     return {
       client: {
         secureConnection: true,
@@ -168,9 +169,11 @@ describe("makeImapSmtpOps — Sent copy persistence", () => {
         search,
         fetch: vi.fn(),
         mailboxOpen: vi.fn(),
+        messageFlagsAdd,
         append,
       },
       append,
+      messageFlagsAdd,
       search,
     };
   };
@@ -261,5 +264,23 @@ describe("makeImapSmtpOps — Sent copy persistence", () => {
 
     expect(fakeClient.search).not.toHaveBeenCalled();
     expect(fakeClient.append).not.toHaveBeenCalled();
+  });
+
+  it("marks accepted inbound INBOX UIDs as read", async () => {
+    const fakeClient = makeClient([]);
+    const fakeTransport = makeTransport();
+    const ops = makeImapSmtpOps(config, {
+      imapFactory: () => fakeClient.client,
+      smtpFactory: () => fakeTransport.transport,
+      delay: async () => {},
+    });
+
+    await ops.markRead([9, 9, 10]);
+
+    expect(fakeClient.messageFlagsAdd).toHaveBeenCalledWith(
+      [9, 10],
+      ["\\Seen"],
+      { uid: true },
+    );
   });
 });
