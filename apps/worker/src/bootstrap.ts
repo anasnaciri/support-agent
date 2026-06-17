@@ -46,6 +46,7 @@ import {
   DbClient,
   DbClientLive,
   SupplierEscalationServiceLive,
+  ReplyDeliveryServiceLive,
   ImageHashStoreLive,
   ProcessedMessageStoreLive,
   ToolExecutionStoreLive,
@@ -299,6 +300,11 @@ export const buildWorker = async (
     // Backs the supplier.escalate tool — records the escalation row + resolves
     // the workspace's supplier so the runtime can park in waiting_for_supplier.
     SupplierEscalationServiceLive,
+    // Durable outbox for FAILED customer-reply sends: the runtime enqueues here
+    // on a send failure so the retry cron + the dashboard retry button can
+    // re-send the verbatim draft. DbClient-backed (satisfied by the dbLayer
+    // provide below).
+    ReplyDeliveryServiceLive,
   );
 
   // LLM — depends on LLMCredentialResolver. In production each tenant

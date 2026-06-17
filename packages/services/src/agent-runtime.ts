@@ -52,6 +52,11 @@ import {
 } from "./idempotency-store.js";
 import { parseThreadId } from "./conversation-thread-id.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
+import {
+  REPLY_DELIVERY_FAILED_FLAG,
+  ReplyDeliveryService,
+  isReplyDeliverySendFailure,
+} from "./reply-delivery.js";
 
 // ============================================================
 // Helpers
@@ -764,6 +769,10 @@ export const AgentRuntimeDefault = Layer.effect(
     const maybeNotifications = yield* Effect.serviceOption(
       MerchantNotificationService,
     );
+    // Optional durable outbox for FAILED customer-reply sends — present in the
+    // worker (ReplyDeliveryServiceLive). Absent in lean test layers, in which
+    // case the case is still flagged + parked, just not durably re-sent.
+    const maybeReplyDelivery = yield* Effect.serviceOption(ReplyDeliveryService);
 
     // Best-effort merchant ping. Swallows every failure and runs OUTSIDE
     // any SQL transaction (audit D6 — external HTTP never shares a tx).
@@ -892,6 +901,69 @@ export const AgentRuntimeDefault = Layer.effect(
               }),
             );
             return updated;
+          });
+
+        // A customer-reply (`conversation.reply` / `ask_customer`) send FAILED.
+        // Don't lose it and don't let the case resolve as if it went out:
+        //   1. persist the verbatim draft into the reply-delivery outbox so the
+        //      worker sweep + the dashboard "Retry sending email" button can
+        //      re-send the SAME email (no LLM re-run);
+        //   2. stamp the `reply_delivery_failed` risk flag so the dashboard
+        //      shows it + the merchant knows the customer wasn't reached;
+        //   3. park the case in `human_takeover` (NEEDS ATTENTION, never
+        //      resolved) — a successful retry later auto-resolves it.
+        // Steps 1+2 are best-effort; the park (audit L4) always happens.
+        const parkForReplyDeliveryFailure = (
+          caseRow: typeof working,
+          agentId: string,
+          toolName: string,
+          draftInput: unknown,
+          errLeft: unknown,
+        ) =>
+          Effect.gen(function* () {
+            const issues = (errLeft as { readonly issues?: unknown }).issues;
+            const errTag = (errLeft as { readonly _tag?: unknown })._tag;
+            const errorLabel =
+              Array.isArray(issues) && issues.length > 0
+                ? issues.filter((i) => typeof i === "string").join(",")
+                : typeof errTag === "string"
+                  ? errTag
+                  : "ConversationSendFailed";
+            const rawDraftId = (draftInput as { readonly draftId?: unknown })
+              .draftId;
+            const draftId =
+              typeof rawDraftId === "string" && rawDraftId.length > 0
+                ? rawDraftId
+                : `${caseRow.id}:${toolName}`;
+            if (Option.isSome(maybeReplyDelivery)) {
+              yield* maybeReplyDelivery.value
+                .enqueue({
+                  tenantId: caseRow.tenantId,
+                  caseId: caseRow.id,
+                  agentId,
+                  tool: toolName,
+                  mailbox: caseRow.mailbox ?? null,
+                  draftId,
+                  draft: draftInput,
+                  error: errorLabel,
+                })
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
+            const existingFlags = readRiskFlags(caseRow.context);
+            if (!existingFlags.includes(REPLY_DELIVERY_FAILED_FLAG)) {
+              yield* cases
+                .update(caseRow.id, {
+                  context: {
+                    ...caseRow.context,
+                    riskFlags: [...existingFlags, REPLY_DELIVERY_FAILED_FLAG],
+                  } as never,
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(caseRow)));
+            }
+            yield* escalateToHuman(caseRow.id, REPLY_DELIVERY_FAILED_FLAG, {
+              tool: toolName,
+              error: errorLabel,
+            });
           });
 
         // 2.5. Approval-resume short-circuit. `approval.approved` and
@@ -1138,10 +1210,26 @@ export const AgentRuntimeDefault = Layer.effect(
             // yes; the platform tried; the platform failed). Without the
             // transition the case dangles in `waiting_for_approval` with no
             // pending row and nothing surfaces the failure (audit L4).
-            yield* escalateToHuman(working.id, "approved_tool_failed", {
-              approvalId: approval.id,
-              tool: approval.tool,
-            });
+            //
+            // A customer-reply SEND failure is special: the approved draft is
+            // captured into the reply-delivery outbox (so the worker sweep + the
+            // dashboard "Retry sending email" button can re-send the SAME email)
+            // and the case is flagged `reply_delivery_failed` — otherwise it's a
+            // generic `approved_tool_failed` escalation.
+            if (isReplyDeliverySendFailure(approval.tool, exec.left)) {
+              yield* parkForReplyDeliveryFailure(
+                working,
+                approval.agentId,
+                approval.tool,
+                toolInput,
+                exec.left,
+              );
+            } else {
+              yield* escalateToHuman(working.id, "approved_tool_failed", {
+                approvalId: approval.id,
+                tool: approval.tool,
+              });
+            }
             return {
               type: "HumanTakeoverRequired",
               reason: `approved tool ${approval.tool} failed`,
@@ -2308,6 +2396,24 @@ export const AgentRuntimeDefault = Layer.effect(
               toolName: tool.name,
               content: { error: errTag },
             });
+            // A customer-reply SEND failure must NOT be swallowed: feeding the
+            // error back to the LLM lets it emit `final_message` and resolve a
+            // case whose reply never reached the customer (the silent-delivery
+            // bug). Capture the draft for retry, flag + park the case, and end
+            // the tick — a later successful retry auto-resolves it.
+            if (isReplyDeliverySendFailure(tool.name, exec.left)) {
+              yield* parkForReplyDeliveryFailure(
+                current,
+                agent.id,
+                tool.name,
+                callInput,
+                exec.left,
+              );
+              return {
+                type: "HumanTakeoverRequired",
+                reason: REPLY_DELIVERY_FAILED_FLAG,
+              } as const;
+            }
           }
         }
 
