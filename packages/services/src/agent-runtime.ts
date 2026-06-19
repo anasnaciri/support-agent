@@ -11,6 +11,7 @@ import {
   type DomainEvent,
   type InboundMessage,
   type LLMDecision,
+  type LLMError,
   type TenantId,
   type ThreadId,
   type ToolContext,
@@ -1088,25 +1089,15 @@ export const AgentRuntimeDefault = Layer.effect(
           // (prompt-injection scope guard — see refundCustomerMismatchFlag).
           const seenOrderEmails = new Map<string, string | null>();
 
-          for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
-            const schemas = yield* tools.schemasFor(agent.tools);
-            // BYOK: surface missing/revoked per-tenant LLM credentials as
-            // human_takeover instead of a generic Failed. Other LLM errors
-            // continue to bubble up to the outer catchAllCause.
-            const decisionEither = yield* llm
-              .runToolCalling({
-                tenantId: current.tenantId,
-                model: agent.model,
-                system: buildSystemPrompt(agent, tenantSettings, knowledgeTitles),
-                messages,
-                tools: schemas,
-                ...(agent.temperature !== undefined
-                  ? { temperature: agent.temperature }
-                  : {}),
-              })
-              .pipe(Effect.either);
-            if (decisionEither._tag === "Left") {
-              const err = decisionEither.left;
+          // Map an LLM call failure to a terminal result: BYOK credential gaps
+          // and deterministic failures park for a human; anything else is a
+          // retryable Failed (pg-boss retries with backoff).
+          const handleLlmFailure = (
+            err: LLMError,
+            current: typeof working,
+            turn: number,
+          ) =>
+            Effect.gen(function* () {
               if (
                 err._tag === "LLMCredentialMissing" ||
                 err._tag === "LLMCredentialRevoked"
@@ -1174,6 +1165,133 @@ export const AgentRuntimeDefault = Layer.effect(
                 reason: `llm transient error: ${err._tag}`,
                 retryable: true,
               } as const;
+            });
+
+          // Park the case in waiting_for_approval (approval row + transition +
+          // audit in one tx) and fan out the signed approval links. Always ends
+          // the tick with PausedWaitingForApproval.
+          const parkForApproval = (
+            tool: AnyTool,
+            callInput: unknown,
+            agent: AgentConfig,
+            current: typeof working,
+            turn: number,
+            reasoning: string,
+          ) =>
+            Effect.gen(function* () {
+              // Approval row + park transition + audit row in ONE tx (audit
+              // L6) — a crash between them previously left a pending approval
+              // on an un-parked case, so the agent could keep acting and a
+              // second approval could be created. master-plan §4: the audit
+              // write shares the transaction with the state change.
+              const parked = yield* tx.run(
+                Effect.gen(function* () {
+                  const approval = yield* approvals.create({
+                    tenantId: current.tenantId,
+                    caseId: current.id,
+                    agentId: agent.id,
+                    tool: tool.name,
+                    proposedInput: callInput,
+                    reasoning: reasoning,
+                    riskLevel: riskFor(tool),
+                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                  });
+                  const row = yield* cases.transitionStatus(
+                    current.id,
+                    "waiting_for_approval",
+                    { reason: `tool ${tool.name} pending approval` },
+                  );
+                  yield* audit.record({
+                    tenantId: row.tenantId,
+                    caseId: row.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "case.waiting_for_approval",
+                    details: {
+                      approvalId: approval.id,
+                      tool: tool.name,
+                      turn,
+                    },
+                  });
+                  return { approval, row };
+                }),
+              );
+              const approval = parked.approval;
+              current = parked.row;
+
+              // Fire the approval-link email. Best-effort: a Resend outage,
+              // a tenant without `notificationEmail` configured, or any other
+              // mail failure must NOT block the case. The approval row is
+              // the source of truth and the dashboard (when it lands) will
+              // pick it up regardless. Each URL carries its OWN signed token
+              // with the action bound into the HMAC (audit S3) — holding a
+              // reject link must not allow approving by editing the path.
+              const approveToken = signApprovalToken({
+                approvalId: approval.id,
+                action: "approve",
+                secret: linkConfig.signingKey,
+                ttlMs: linkConfig.ttlMs,
+              });
+              const rejectToken = signApprovalToken({
+                approvalId: approval.id,
+                action: "reject",
+                secret: linkConfig.signingKey,
+                ttlMs: linkConfig.ttlMs,
+              });
+              const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodeURIComponent(approveToken)}`;
+              const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodeURIComponent(rejectToken)}`;
+              const draftPreview = derivePreview(callInput);
+              const draftSubject = deriveSubject(callInput);
+              yield* mail
+                .sendApprovalLink({
+                  tenantId: current.tenantId,
+                  approvalId: approval.id,
+                  draftSubject,
+                  draftPreview,
+                  toolName: tool.name,
+                  approveUrl,
+                  rejectUrl,
+                })
+                .pipe(Effect.either);
+              // Same best-effort fan-out on the merchant's push channel
+              // (master-plan §9): the chat ping carries the same signed
+              // decision links as the email.
+              yield* notifyMerchant(
+                current.tenantId,
+                approvalRequestedNotification({
+                  caseId: current.id,
+                  toolName: tool.name,
+                  draftSubject,
+                  draftPreview,
+                  approveUrl,
+                  rejectUrl,
+                }),
+              );
+
+              return {
+                type: "PausedWaitingForApproval",
+                approvalId: approval.id,
+              } as const;
+            });
+
+          for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
+            const schemas = yield* tools.schemasFor(agent.tools);
+            // BYOK: surface missing/revoked per-tenant LLM credentials as
+            // human_takeover instead of a generic Failed. Other LLM errors
+            // continue to bubble up to the outer catchAllCause.
+            const decisionEither = yield* llm
+              .runToolCalling({
+                tenantId: current.tenantId,
+                model: agent.model,
+                system: buildSystemPrompt(agent, tenantSettings, knowledgeTitles),
+                messages,
+                tools: schemas,
+                ...(agent.temperature !== undefined
+                  ? { temperature: agent.temperature }
+                  : {}),
+              })
+              .pipe(Effect.either);
+            if (decisionEither._tag === "Left") {
+              return yield* handleLlmFailure(decisionEither.left, current, turn);
             }
             const decision: LLMDecision = decisionEither.right;
 
@@ -1561,98 +1679,14 @@ export const AgentRuntimeDefault = Layer.effect(
             }
 
             if (effectivePermission === "ask") {
-              // Approval row + park transition + audit row in ONE tx (audit
-              // L6) — a crash between them previously left a pending approval
-              // on an un-parked case, so the agent could keep acting and a
-              // second approval could be created. master-plan §4: the audit
-              // write shares the transaction with the state change.
-              const parked = yield* tx.run(
-                Effect.gen(function* () {
-                  const approval = yield* approvals.create({
-                    tenantId: current.tenantId,
-                    caseId: current.id,
-                    agentId: agent.id,
-                    tool: tool.name,
-                    proposedInput: callInput,
-                    reasoning: decision.reasoning ?? "",
-                    riskLevel: riskFor(tool),
-                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-                  });
-                  const row = yield* cases.transitionStatus(
-                    current.id,
-                    "waiting_for_approval",
-                    { reason: `tool ${tool.name} pending approval` },
-                  );
-                  yield* audit.record({
-                    tenantId: row.tenantId,
-                    caseId: row.id,
-                    actor: { type: "agent", id: agent.id },
-                    action: "case.waiting_for_approval",
-                    details: {
-                      approvalId: approval.id,
-                      tool: tool.name,
-                      turn,
-                    },
-                  });
-                  return { approval, row };
-                }),
+              return yield* parkForApproval(
+                tool,
+                callInput,
+                agent,
+                current,
+                turn,
+                decision.reasoning ?? "",
               );
-              const approval = parked.approval;
-              current = parked.row;
-
-              // Fire the approval-link email. Best-effort: a Resend outage,
-              // a tenant without `notificationEmail` configured, or any other
-              // mail failure must NOT block the case. The approval row is
-              // the source of truth and the dashboard (when it lands) will
-              // pick it up regardless. Each URL carries its OWN signed token
-              // with the action bound into the HMAC (audit S3) — holding a
-              // reject link must not allow approving by editing the path.
-              const approveToken = signApprovalToken({
-                approvalId: approval.id,
-                action: "approve",
-                secret: linkConfig.signingKey,
-                ttlMs: linkConfig.ttlMs,
-              });
-              const rejectToken = signApprovalToken({
-                approvalId: approval.id,
-                action: "reject",
-                secret: linkConfig.signingKey,
-                ttlMs: linkConfig.ttlMs,
-              });
-              const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodeURIComponent(approveToken)}`;
-              const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodeURIComponent(rejectToken)}`;
-              const draftPreview = derivePreview(callInput);
-              const draftSubject = deriveSubject(callInput);
-              yield* mail
-                .sendApprovalLink({
-                  tenantId: current.tenantId,
-                  approvalId: approval.id,
-                  draftSubject,
-                  draftPreview,
-                  toolName: tool.name,
-                  approveUrl,
-                  rejectUrl,
-                })
-                .pipe(Effect.either);
-              // Same best-effort fan-out on the merchant's push channel
-              // (master-plan §9): the chat ping carries the same signed
-              // decision links as the email.
-              yield* notifyMerchant(
-                current.tenantId,
-                approvalRequestedNotification({
-                  caseId: current.id,
-                  toolName: tool.name,
-                  draftSubject,
-                  draftPreview,
-                  approveUrl,
-                  rejectUrl,
-                }),
-              );
-
-              return {
-                type: "PausedWaitingForApproval",
-                approvalId: approval.id,
-              } as const;
             }
 
             // allow → execute. The tool's external side effect runs OUTSIDE
