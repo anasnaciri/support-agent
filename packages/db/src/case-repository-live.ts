@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   CaseNotFound,
@@ -41,6 +41,7 @@ const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 import {
   cases,
+  caseMessageIds,
   caseStateTransitions,
   type CaseRow,
 } from "./schema.js";
@@ -196,6 +197,62 @@ export const CaseRepositoryLive = Layer.effect(
         return provider && isConversationProvider(provider) ? provider : null;
       });
 
+    const findByMessageIds = (
+      tenantId: TenantId,
+      messageIds: ReadonlyArray<string>,
+    ): Effect.Effect<Case | null, CaseRepositoryError> =>
+      Effect.gen(function* () {
+        const ids = [...new Set(messageIds.filter((m) => m.length > 0))];
+        if (ids.length === 0) return null;
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "findByMessageIds",
+          db
+            .select({ case: cases })
+            .from(caseMessageIds)
+            .innerJoin(cases, eq(caseMessageIds.caseId, cases.id))
+            .where(
+              and(
+                eq(caseMessageIds.tenantId, tenantId),
+                inArray(caseMessageIds.messageId, ids),
+              ),
+            )
+            // Several ids resolving to different cases is pathological (they
+            // belong to one thread); pick the most recent deterministically.
+            .orderBy(desc(cases.createdAt))
+            .limit(1),
+        );
+        const row = rows[0]?.case;
+        return row ? rowToCase(row) : null;
+      });
+
+    const recordMessageId = (input: {
+      readonly tenantId: TenantId;
+      readonly caseId: CaseId;
+      readonly messageId: string;
+      readonly direction: "inbound" | "outbound";
+    }): Effect.Effect<void, CaseRepositoryError> =>
+      Effect.gen(function* () {
+        if (input.messageId.length === 0) return;
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "recordMessageId",
+          db
+            .insert(caseMessageIds)
+            .values({
+              tenantId: input.tenantId,
+              caseId: input.caseId,
+              messageId: input.messageId,
+              direction: input.direction,
+            })
+            // Idempotent: a redelivered poll / retried send re-records the
+            // same id; the first writer (whichever case) keeps the mapping.
+            .onConflictDoNothing({
+              target: [caseMessageIds.tenantId, caseMessageIds.messageId],
+            }),
+        );
+      });
+
     const update = (
       id: CaseId,
       patch: UpdatableCaseFields,
@@ -329,6 +386,8 @@ export const CaseRepositoryLive = Layer.effect(
       getById,
       findByThreadId,
       findThreadProvider,
+      findByMessageIds,
+      recordMessageId,
       update,
       transitionStatus,
     });

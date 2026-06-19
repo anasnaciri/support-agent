@@ -177,6 +177,33 @@ export class CaseRepository extends Context.Tag("CaseRepository")<
       threadId: ThreadId,
     ) => Effect.Effect<ConversationProviderId | null, CaseRepositoryError>;
 
+    /**
+     * Find the case that owns ANY of these RFC Message-IDs in the message-id
+     * index. Used to correlate an inbound reply to its existing case when the
+     * thread-id derived from its (reordered / truncated) `References` header
+     * doesn't exact-match the case's stored `threadId` — the reply's
+     * In-Reply-To / References point at a message we already recorded (a prior
+     * inbound or our own outbound). Returns the most recently created match
+     * when several ids resolve (they belong to the same thread in practice).
+     */
+    readonly findByMessageIds: (
+      tenantId: TenantId,
+      messageIds: ReadonlyArray<string>,
+    ) => Effect.Effect<Case | null, CaseRepositoryError>;
+
+    /**
+     * Record an RFC Message-ID against a case in the message-id index, so a
+     * later reply citing it resolves to this case. Idempotent — re-recording
+     * the same id (redelivered poll / retried send) is a no-op. Recorded for
+     * BOTH directions: inbound on accept, outbound on a successful send.
+     */
+    readonly recordMessageId: (input: {
+      readonly tenantId: TenantId;
+      readonly caseId: CaseId;
+      readonly messageId: string;
+      readonly direction: "inbound" | "outbound";
+    }) => Effect.Effect<void, CaseRepositoryError>;
+
     readonly update: (
       id: CaseId,
       patch: UpdatableCaseFields,
@@ -222,6 +249,11 @@ export const CaseRepositoryTest = Layer.effect(
     // Provider stamp lives off to the side: the `Case` domain type doesn't
     // carry it (it's routing metadata, not agent-visible state).
     const providerOf = new Map<string, ConversationProviderId | null>();
+    // Message-id index: `${tenantId}\0${messageId}` -> caseId. Globally unique
+    // per RFC, so within a tenant a message id maps to at most one case.
+    const messageIndex = new Map<string, CaseId>();
+    const indexKey = (tenantId: TenantId, messageId: string): string =>
+      `${tenantId} ${messageId}`;
 
     // D9: enforce the optional tenant scope exactly like the Live impl — a
     // case under another tenant is indistinguishable from a missing one.
@@ -270,6 +302,30 @@ export const CaseRepositoryTest = Layer.effect(
             }
           }
           return null;
+        }),
+
+      findByMessageIds: (tenantId, messageIds) =>
+        Effect.sync(() => {
+          const matches: Case[] = [];
+          for (const messageId of messageIds) {
+            const caseId = messageIndex.get(indexKey(tenantId, messageId));
+            if (!caseId) continue;
+            const c = store.get(caseId);
+            if (c && c.tenantId === tenantId) matches.push(c);
+          }
+          if (matches.length === 0) return null;
+          // Most recently created wins when several ids resolve (mirrors the
+          // Live impl's ORDER BY created_at DESC).
+          return matches.reduce((a, b) =>
+            b.createdAt.getTime() > a.createdAt.getTime() ? b : a,
+          );
+        }),
+
+      recordMessageId: ({ tenantId, caseId, messageId }) =>
+        Effect.sync(() => {
+          const key = indexKey(tenantId, messageId);
+          // Idempotent: first writer wins, mirroring ON CONFLICT DO NOTHING.
+          if (!messageIndex.has(key)) messageIndex.set(key, caseId);
         }),
 
       update: (id, patch, tenantId) =>

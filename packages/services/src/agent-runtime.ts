@@ -9,6 +9,7 @@ import {
   type CaseChannel,
   type ChatMessage,
   type DomainEvent,
+  type InboundMessage,
   type LLMDecision,
   type TenantId,
   type ThreadId,
@@ -488,6 +489,34 @@ const deliveryScopeFor = (event: DomainEvent): string => {
   }
 };
 
+/**
+ * RFC Message-IDs an inbound reply points at — its In-Reply-To plus every
+ * entry in its References chain. These are the ids of EARLIER messages in the
+ * thread (a prior inbound, or our own outbound reply), which the runtime looks
+ * up in the message-id index to correlate the reply to its existing case when
+ * the derived thread-id doesn't exact-match (clients reorder/truncate the
+ * chain, so `references[0]` is not a reliable thread root). The message's own
+ * id is deliberately excluded — it's new and can't match an existing case.
+ * Deduped, brackets-trimmed, empties dropped. Exported for unit testing.
+ */
+export const inboundReplyCandidateIds = (
+  payload: InboundMessage,
+): ReadonlyArray<string> => {
+  const trim = (s: string): string => s.replace(/^<+/, "").replace(/>+$/, "").trim();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | null | undefined): void => {
+    if (!raw) return;
+    const id = trim(raw);
+    if (id.length === 0 || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+  add(payload.inReplyTo);
+  for (const ref of payload.references ?? []) add(ref);
+  return out;
+};
+
 const refundAuditDetails = (
   toolName: string,
   input: unknown,
@@ -885,15 +914,39 @@ export const AgentRuntimeDefault = Layer.effect(
               if (existing) {
                 row = existing;
               } else {
-                row = yield* cases.create({
-                  tenantId: makeTenantId(lookup.tenantId),
-                  channel: lookup.channel,
-                  currentAgentId: makeAgentId("support-triage"),
-                  subject: lookup.subject,
-                  threadId: makeThreadId(lookup.threadId),
-                  mailbox: lookup.mailbox ?? null,
-                });
-                wasCreated = true;
+                // The derived thread-id didn't exact-match. Before minting a
+                // new case, correlate by the message-id index: the reply's
+                // In-Reply-To / References point at a message we already
+                // recorded for some case (a prior inbound, or our own outbound
+                // reply). This is what keeps a reply whose client reordered or
+                // dropped the `References` chain from splitting off a duplicate
+                // case (the IMAP `references[0]` thread-root is unreliable).
+                const candidateIds =
+                  event.type === "message.received"
+                    ? inboundReplyCandidateIds(event.payload)
+                    : [];
+                const byMessageId =
+                  candidateIds.length > 0
+                    ? yield* cases.findByMessageIds(
+                        makeTenantId(lookup.tenantId),
+                        candidateIds,
+                      )
+                    : null;
+                if (byMessageId) {
+                  // Attach to the existing case; keep its stored threadId so
+                  // outbound replies keep threading through the original root.
+                  row = byMessageId;
+                } else {
+                  row = yield* cases.create({
+                    tenantId: makeTenantId(lookup.tenantId),
+                    channel: lookup.channel,
+                    currentAgentId: makeAgentId("support-triage"),
+                    subject: lookup.subject,
+                    threadId: makeThreadId(lookup.threadId),
+                    mailbox: lookup.mailbox ?? null,
+                  });
+                  wasCreated = true;
+                }
               }
             }
             yield* audit.record({
@@ -903,6 +956,24 @@ export const AgentRuntimeDefault = Layer.effect(
               action: "event.received",
               details: { eventType: event.type },
             });
+            // Index this inbound message id so a later reply that cites it —
+            // even one whose own References never reach the thread root —
+            // resolves back to this case. Best-effort: a recording hiccup must
+            // not roll back the case create + audit it shares this tx with.
+            if (
+              (event.type === "message.received" ||
+                event.type === "customer.replied") &&
+              event.payload.messageId
+            ) {
+              yield* cases
+                .recordMessageId({
+                  tenantId: row.tenantId,
+                  caseId: row.id,
+                  messageId: event.payload.messageId,
+                  direction: "inbound",
+                })
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
             return { row, wasCreated };
           }),
         );
@@ -947,6 +1018,38 @@ export const AgentRuntimeDefault = Layer.effect(
               }),
             );
             return updated;
+          });
+
+        // Index the RFC Message-ID of an outbound customer reply so a later
+        // inbound reply that cites it (In-Reply-To / References) correlates
+        // back to this case — even when the customer's client truncates the
+        // `References` chain to just our message and the derived thread-root
+        // no longer matches. Best-effort: a recording failure never fails the
+        // send (the customer already got the email). `conversation.reply` /
+        // `ask_customer` return `{ id, threadId, sentAt }`; the dedup short-
+        // circuit returns `{ deduped: true }`, which has no `id` and is skipped.
+        const recordOutboundReplyId = (
+          caseRow: typeof working,
+          toolName: string,
+          result: unknown,
+        ): Effect.Effect<void> =>
+          Effect.gen(function* () {
+            if (
+              toolName !== "conversation.reply" &&
+              toolName !== "conversation.ask_customer"
+            ) {
+              return;
+            }
+            const id = (result as { readonly id?: unknown } | null)?.id;
+            if (typeof id !== "string" || id.length === 0) return;
+            yield* cases
+              .recordMessageId({
+                tenantId: caseRow.tenantId,
+                caseId: caseRow.id,
+                messageId: id,
+                direction: "outbound",
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
           });
 
         // A customer-reply (`conversation.reply` / `ask_customer`) send FAILED.
@@ -1284,6 +1387,9 @@ export const AgentRuntimeDefault = Layer.effect(
               reason: `approved tool ${approval.tool} failed`,
             } as const;
           }
+          // The approved reply went out — index its Message-ID for correlation
+          // of the customer's eventual reply (best-effort, no-op otherwise).
+          yield* recordOutboundReplyId(working, approval.tool, exec.right);
           working = yield* tx.run(
             Effect.gen(function* () {
               const resolved = yield* cases.transitionStatus(
@@ -2334,6 +2440,10 @@ export const AgentRuntimeDefault = Layer.effect(
           );
 
           if (exec._tag === "Right") {
+            // Index our outbound reply's Message-ID for thread correlation of
+            // the customer's eventual reply (best-effort, no-op for non-reply
+            // tools).
+            yield* recordOutboundReplyId(current, tool.name, exec.right);
             if (tool.name === "conversation.ask_customer") {
               current = yield* tx.run(
                 Effect.gen(function* () {

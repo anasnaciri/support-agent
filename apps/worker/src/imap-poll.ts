@@ -100,6 +100,12 @@ export const pollOne = async (
         ...toInboundMessage(msg),
         threadId: namespaceThreadId("imap", msg.threadId),
         mailbox: conn.shopDomain,
+        // RFC threading headers — the runtime correlates this reply to its
+        // existing case by matching these against the message-id index, which
+        // is robust to clients that reorder/drop `References` (the failure
+        // that otherwise minted a duplicate case per reply).
+        inReplyTo: raw.inReplyTo,
+        references: raw.references,
       };
       await deps.publish({
         type: "message.received",

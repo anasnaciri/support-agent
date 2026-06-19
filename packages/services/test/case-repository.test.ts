@@ -190,4 +190,69 @@ describe("CaseRepository (Test layer)", () => {
       expect(exit.cause.error).toBeInstanceOf(CaseStateConflict);
     }
   });
+
+  it("recordMessageId + findByMessageIds correlate a reply to its case", async () => {
+    const result = await newRun(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const c = yield* repo.create({
+          tenantId: TenantId("t1"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+        });
+        yield* repo.recordMessageId({
+          tenantId: TenantId("t1"),
+          caseId: c.id,
+          messageId: "m1@h",
+          direction: "inbound",
+        });
+        // A reply that cites m1@h anywhere in its candidate ids resolves.
+        const hit = yield* repo.findByMessageIds(TenantId("t1"), [
+          "nope@h",
+          "m1@h",
+        ]);
+        const miss = yield* repo.findByMessageIds(TenantId("t1"), ["other@h"]);
+        // Scoped by tenant: another tenant citing the same id sees nothing.
+        const crossTenant = yield* repo.findByMessageIds(TenantId("t2"), [
+          "m1@h",
+        ]);
+        return { caseId: c.id, hitId: hit?.id, miss, crossTenant };
+      }),
+    );
+    expect(result.hitId).toBe(result.caseId);
+    expect(result.miss).toBeNull();
+    expect(result.crossTenant).toBeNull();
+  });
+
+  it("recordMessageId is idempotent — first writer keeps the mapping", async () => {
+    const result = await newRun(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const mk = () =>
+          repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email" as const,
+            currentAgentId: AgentId("support-triage"),
+          });
+        const a = yield* mk();
+        const b = yield* mk();
+        yield* repo.recordMessageId({
+          tenantId: TenantId("t1"),
+          caseId: a.id,
+          messageId: "dup@h",
+          direction: "inbound",
+        });
+        // A second record of the same id (e.g. redelivered) is a no-op.
+        yield* repo.recordMessageId({
+          tenantId: TenantId("t1"),
+          caseId: b.id,
+          messageId: "dup@h",
+          direction: "outbound",
+        });
+        const hit = yield* repo.findByMessageIds(TenantId("t1"), ["dup@h"]);
+        return { aId: a.id, hitId: hit?.id };
+      }),
+    );
+    expect(result.hitId).toBe(result.aId);
+  });
 });

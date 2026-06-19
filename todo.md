@@ -90,6 +90,42 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-19 — Fixed: IMAP "RE:" replies created DUPLICATE cases instead of threading
+  (TDD, branch `feat/supplier-portal`, `pnpm build` green; services+worker+db+tools+providers
+  suites green incl. the live-DB integration tests; NOT committed).** Reported by tenant Elva Labs
+  (IMAP/SMTP `mail.privateemail.com`): customer replies minted a new case per reply, and the case's
+  "email thread" tab couldn't show them. **Root cause:** IMAP has no provider-stable thread id, so a
+  case's thread is reconstructed from `threadRootId(msg) = references[0] ?? messageId`
+  (`packages/providers/src/imap-smtp.ts:185`) and the case is found by EXACT `threadId` match. Many
+  clients reorder/truncate the `References` chain, so `references[0]` is NOT a reliable thread root —
+  a reply roots on a different id (often the immediate parent = our own `sa-…@domain` outbound id) →
+  exact lookup misses → duplicate case. (Gmail/Outlook are immune — provider-stable `conversationId`.)
+  **Fix (user chose DETERMINISTIC-only — message-id index, NO subject net):** new `case_message_ids`
+  table (migration `0027`, clean `db:generate` — chain still healthy post-0026) recording the RFC
+  Message-ID of BOTH every inbound message we accept AND every outbound reply we send, unique on
+  (tenant, message_id), FK→cases ON DELETE CASCADE (redaction cascades, no code change). `InboundMessage`
+  now carries `inReplyTo`/`references` (IMAP poll populates from `raw`; Gmail/Outlook leave unset). New
+  `CaseRepository.findByMessageIds` + `recordMessageId` (Tag + in-memory Test + Live, ON CONFLICT DO
+  NOTHING). Runtime `loadOrCreateByThread`: after an exact-threadId miss, correlate by
+  `inboundReplyCandidateIds(payload)` (= In-Reply-To + the WHOLE References chain, deduped, NOT the
+  message's own id) → `findByMessageIds` → attach to the existing case (keeping its stored threadId);
+  records the inbound id on every accept and the outbound id on every successful
+  `conversation.reply`/`ask_customer` (in-loop AND approval-resume legs). Recording both directions is
+  what makes a reply that cites only its immediate parent resolve. **New invariant:** every accepted
+  inbound + every sent outbound customer message MUST be recorded in the message-id index, and inbound
+  case resolution MUST try the index before minting a new case. Tests: runtime regression (reply with a
+  divergent derived root + In-Reply-To citing the recorded first message → no duplicate case, both land
+  on the original, 2 `event.received`), `inboundReplyCandidateIds` unit, Test+Live repo parity,
+  imap-poll header-flow. See [[project_imap_threading_re_fix]].
+  - **KNOWN REMAINING GAP (not fixed — needs a decision):** the case "email thread" tab renders via
+    live `conversation.fetchThread(caseRoot)`, which for IMAP searches the INBOX by the single root id
+    (`imap-smtp.ts:570`). A reply that doesn't cite the root is now correlated to the right case but
+    STILL won't appear in that tab (the search can't bridge `root → our Sent sa-… → the reply`). The
+    customer's reply IS handled + visible on the case timeline; only the live thread-tab body is
+    incomplete. Fixing it means feeding the case's indexed message-ids into `fetchThread` (signature
+    change across all connectors) OR transitive INBOX+Sent expansion inside the IMAP connector — a
+    separate, larger change deferred pending user sign-off.
+
 - **2026-06-17 — Failed customer-reply DELIVERY is now durable + retriable (6 TDD commits on
   `feat/supplier-portal`, full `ci:local` green at each commit — build + ~1863 tests; dashboard
   `tsc --noEmit` + `next build` verified separately).** Root cause from a live Fly diagnosis (tenant

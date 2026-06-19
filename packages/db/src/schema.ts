@@ -175,6 +175,53 @@ export const cases = pgTable(
   ],
 );
 
+// RFC 5322 Message-ID ↔ case index. IMAP/SMTP has no provider-stable thread
+// id, so a case's `thread_id` is reconstructed from the first inbound
+// message's `References` header — brittle, because many clients reorder or
+// drop that chain on subsequent replies, which would otherwise mint a
+// duplicate case (the reply roots on a different id). We instead record the
+// RFC Message-ID of every message we accept (inbound) and send (outbound)
+// against its case; an incoming reply is correlated by matching ANY id in its
+// In-Reply-To / References against this index. Recording BOTH directions is
+// what makes a reply that only cites its immediate parent resolve — the parent
+// is always either a prior inbound or our own outbound, both indexed here.
+export const caseMessageIds = pgTable(
+  "case_message_ids",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id, { onDelete: "cascade" }),
+    /** RFC Message-ID, angle brackets stripped. */
+    messageId: text("message_id").notNull(),
+    direction: text("direction").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check(
+      "case_message_ids_direction_check",
+      sql`${t.direction} IN ('inbound','outbound')`,
+    ),
+    // A Message-ID is globally unique by RFC, so within a tenant it maps to at
+    // most one case. The unique index doubles as the lookup index for
+    // correlation and makes re-recording (redelivered poll / retried send)
+    // idempotent via ON CONFLICT DO NOTHING.
+    uniqueIndex("case_message_ids_tenant_message_unique").on(
+      t.tenantId,
+      t.messageId,
+    ),
+    index("case_message_ids_case_idx").on(t.caseId),
+  ],
+);
+
+export type CaseMessageIdRow = typeof caseMessageIds.$inferSelect;
+export type CaseMessageIdInsert = typeof caseMessageIds.$inferInsert;
+
 export const caseStateTransitions = pgTable(
   "case_state_transitions",
   {

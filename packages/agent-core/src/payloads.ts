@@ -17,6 +17,17 @@ export interface InboundMessage {
   /** Connected mailbox that received this message. */
   readonly mailbox?: string;
   readonly messageId: string;
+  /**
+   * RFC 5322 threading headers, when the connector can supply them (IMAP/SMTP
+   * does; Gmail/Outlook thread on a provider-stable conversation id and leave
+   * these unset). The runtime uses them to correlate a reply to its existing
+   * case via a recorded message-id index — robust against clients that reorder
+   * or drop the `References` chain, which would otherwise mint a duplicate
+   * case. `inReplyTo` is the immediate parent; `references` is the full chain
+   * (root id is somewhere in here, not reliably first).
+   */
+  readonly inReplyTo?: string | null;
+  readonly references?: ReadonlyArray<string>;
   readonly from: { readonly name: string | null; readonly email: string };
   readonly to: ReadonlyArray<{ readonly name: string | null; readonly email: string }>;
   readonly subject: string;

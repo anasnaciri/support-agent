@@ -91,7 +91,12 @@ describe("imap-poll pollOne", () => {
     const ops = fakeOps({
       listSince: vi.fn(async () => ({
         messages: [
-          rawMsg({ uid: 6, messageId: "m6@host" }),
+          rawMsg({
+            uid: 6,
+            messageId: "m6@host",
+            inReplyTo: "root@host",
+            references: ["root@host", "m5@host"],
+          }),
           rawMsg({
             uid: 7,
             messageId: "m7@host",
@@ -109,13 +114,23 @@ describe("imap-poll pollOne", () => {
     expect(ops.listSince).toHaveBeenCalledWith(5);
     expect(published).toHaveLength(1);
     expect(published[0]!.type).toBe("message.received");
-    expect(published[0]!.threadId).toBe("imap:m6@host");
+    // The root is References[0] (the conversation root), not the message's id.
+    expect(published[0]!.threadId).toBe("imap:root@host");
     expect(
       (published[0]!.payload as { threadId?: string }).threadId,
-    ).toBe("imap:m6@host");
+    ).toBe("imap:root@host");
     expect(
       (published[0]!.payload as { mailbox?: string }).mailbox,
     ).toBe(mailbox);
+    // RFC threading headers flow through so the runtime can correlate the
+    // reply to its case via the message-id index.
+    expect(
+      (published[0]!.payload as { inReplyTo?: string | null }).inReplyTo,
+    ).toBe("root@host");
+    expect(
+      (published[0]!.payload as { references?: ReadonlyArray<string> })
+        .references,
+    ).toEqual(["root@host", "m5@host"]);
     expect(markRead).toHaveBeenCalledWith([6]);
     expect(calls[0]!.metadata["lastUid"]).toBe(7);
   });

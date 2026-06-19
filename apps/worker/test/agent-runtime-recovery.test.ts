@@ -987,3 +987,123 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
     expect(out.fetched.currentAgentId).toBe("recovery-test-agent");
   });
 });
+
+describe("AgentRuntime — IMAP reply thread correlation (message-id index)", () => {
+  it("correlates a reply to its existing case via the message-id index when the derived thread-root differs", async () => {
+    // Regression for the IMAP "RE:" duplicate-case bug: a customer reply whose
+    // mail client reordered / truncated the `References` chain derives a
+    // DIFFERENT `imap:<root>` thread-id than the case was created with, so the
+    // exact `findByThreadId` lookup misses and (before this fix) a duplicate
+    // case was minted per reply. The reply's In-Reply-To still cites the first
+    // inbound message, which the runtime recorded in the message-id index on
+    // accept — so it must resolve back to the original case.
+    const layer = buildLayer(
+      LLMServiceScripted([
+        { type: "final_message", text: "answered 1" },
+        { type: "final_message", text: "answered 2" },
+      ]) as never,
+      [recoveryAgent({ id: AgentId("support-triage") })],
+      [caseUpdateContext, makeCountedTool({ count: 0 }), makeFailingTool()],
+    );
+
+    // First inbound: thread-root "root-1", own Message-ID "m1".
+    const first: DomainEvent = {
+      type: "message.received",
+      tenantId: TenantId("tenant-acme"),
+      threadId: "imap:root-1" as never,
+      payload: {
+        threadId: "imap:root-1" as never,
+        messageId: "m1",
+        from: { name: null, email: "cust@example.com" },
+        to: [],
+        subject: "Order help",
+        bodyText: "where is my order",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [],
+      },
+    };
+
+    // The reply: a client-mangled chain makes the connector derive "root-2"
+    // (≠ "root-1"), but In-Reply-To still points at the first message "m1".
+    const reply: DomainEvent = {
+      type: "message.received",
+      tenantId: TenantId("tenant-acme"),
+      threadId: "imap:root-2" as never,
+      payload: {
+        threadId: "imap:root-2" as never,
+        messageId: "m2",
+        inReplyTo: "m1",
+        references: ["root-2", "m1"],
+        from: { name: null, email: "cust@example.com" },
+        to: [],
+        subject: "RE: Order help",
+        bodyText: "any update?",
+        bodyHtml: null,
+        receivedAt: new Date(),
+        attachments: [],
+      },
+    };
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const r1 = yield* runtime.handleEvent(first);
+          const caseA = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "imap:root-1" as never,
+          );
+          const r2 = yield* runtime.handleEvent(reply);
+          const byRoot1 = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "imap:root-1" as never,
+          );
+          const byRoot2 = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "imap:root-2" as never,
+          );
+          const byReplyId = yield* repo.findByMessageIds(
+            TenantId("tenant-acme"),
+            ["m2"],
+          );
+          const entries = caseA ? yield* audit.forCase(caseA.id) : [];
+          return {
+            r1,
+            r2,
+            caseAId: caseA?.id,
+            byRoot1Id: byRoot1?.id,
+            byRoot2,
+            byReplyId: byReplyId?.id,
+            received: entries.filter((e) => e.action === "event.received").length,
+          };
+        }),
+        layer as never,
+      ) as Effect.Effect<
+        {
+          r1: { type: string };
+          r2: { type: string };
+          caseAId: string | undefined;
+          byRoot1Id: string | undefined;
+          byRoot2: { id: string } | null;
+          byReplyId: string | undefined;
+          received: number;
+        },
+        never,
+        never
+      >,
+    );
+
+    expect(out.r1.type).toBe("Completed");
+    expect(out.r2.type).toBe("Completed");
+    // No duplicate case was created for the reply's derived root.
+    expect(out.byRoot2).toBeNull();
+    // Both messages landed on the SAME original case.
+    expect(out.byRoot1Id).toBe(out.caseAId);
+    expect(out.byReplyId).toBe(out.caseAId);
+    // The original case saw two inbound events (original + reply).
+    expect(out.received).toBe(2);
+  });
+});

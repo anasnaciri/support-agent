@@ -129,4 +129,47 @@ describeIfDb("CaseRepository (Live, integration)", () => {
       expect(exit.cause.error).toBeInstanceOf(CaseStateConflict);
     }
   });
+
+  it("recordMessageId + findByMessageIds correlate a reply, idempotently and tenant-scoped", async () => {
+    const result = await runLive(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const messageId = `m-${randomUUID()}@host`;
+        const c = yield* repo.create({
+          tenantId: TenantId(tenantId),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          threadId: ThreadId(`thread-${randomUUID()}`),
+        });
+        yield* repo.recordMessageId({
+          tenantId: TenantId(tenantId),
+          caseId: c.id,
+          messageId,
+          direction: "inbound",
+        });
+        // Re-recording the same id (redelivery) is a no-op (ON CONFLICT).
+        yield* repo.recordMessageId({
+          tenantId: TenantId(tenantId),
+          caseId: c.id,
+          messageId,
+          direction: "outbound",
+        });
+        const hit = yield* repo.findByMessageIds(TenantId(tenantId), [
+          "absent@host",
+          messageId,
+        ]);
+        const miss = yield* repo.findByMessageIds(TenantId(tenantId), [
+          "absent@host",
+        ]);
+        const crossTenant = yield* repo.findByMessageIds(
+          TenantId(randomUUID()),
+          [messageId],
+        );
+        return { caseId: c.id, hitId: hit?.id, miss, crossTenant };
+      }),
+    );
+    expect(result.hitId).toBe(result.caseId);
+    expect(result.miss).toBeNull();
+    expect(result.crossTenant).toBeNull();
+  });
 });

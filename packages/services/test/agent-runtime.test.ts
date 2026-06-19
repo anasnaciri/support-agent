@@ -4,16 +4,51 @@ import {
   UNTRUSTED_PREAMBLE,
   type AgentConfig,
 } from "@support-agent/agent-core";
+import type { InboundMessage } from "@support-agent/agent-core";
 import {
   applyOverride,
   buildSystemPrompt,
   defaultRefundPolicy,
+  inboundReplyCandidateIds,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
   toolFailureAuditDetail,
   type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
+
+// The message-id candidates the runtime looks up to correlate a reply to its
+// existing case (its In-Reply-To + full References chain, NOT its own id).
+describe("inboundReplyCandidateIds", () => {
+  const base: InboundMessage = {
+    threadId: "imap:root-1" as never,
+    messageId: "m2",
+    from: { name: null, email: "c@x.com" },
+    to: [],
+    subject: "RE: hi",
+    bodyText: "hi",
+    bodyHtml: null,
+    receivedAt: new Date(0),
+    attachments: [],
+  };
+
+  it("collects In-Reply-To then every reference, deduped and bracket-trimmed", () => {
+    expect(
+      inboundReplyCandidateIds({
+        ...base,
+        inReplyTo: "<m1@h>",
+        references: ["<root@h>", "<m1@h>"],
+      }),
+    ).toEqual(["m1@h", "root@h"]);
+  });
+
+  it("excludes the message's own id and tolerates missing headers", () => {
+    expect(inboundReplyCandidateIds(base)).toEqual([]);
+    expect(
+      inboundReplyCandidateIds({ ...base, references: ["", "  ", "a@h"] }),
+    ).toEqual(["a@h"]);
+  });
+});
 
 // Every system prompt is prefixed with the untrusted-content preamble
 // (prompt-injection mitigation). The header-composition tests below pin the
