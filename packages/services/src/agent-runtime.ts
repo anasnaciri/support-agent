@@ -1273,6 +1273,510 @@ export const AgentRuntimeDefault = Layer.effect(
               } as const;
             });
 
+          // Run one tool_call decision: push the assistant message, intercept
+          // agent.handoff, validate + dedup + permission-gate, then execute (or
+          // park). Returns the (possibly handed-off) agent, the refreshed case,
+          // and `done`: a terminal WorkflowResult to end the tick, or null to
+          // continue the loop. messages/seenOrderEmails are mutated in place.
+          const executeToolCall = (
+            decision: Extract<LLMDecision, { type: "tool_call" }>,
+            agent: AgentConfig,
+            current: typeof working,
+            turn: number,
+          ) =>
+            Effect.gen(function* () {
+              // tool_call
+
+              // Record the LLM's tool call in the conversation BEFORE invoking
+              // the tool. The Anthropic/Gemini APIs (and the AI SDK in front of
+              // them) expect every `tool` role message to be paired with a
+              // preceding `assistant` message that carries the matching
+              // `toolCallId`. Without this push, subsequent turns see only
+              // user + orphan tool results — providers drop the tool messages
+              // and the model behaves as if no prior tool call ever happened,
+              // looping on the same tool every turn until `max_turns_exceeded`.
+              messages.push({
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: decision.callId,
+                    name: decision.tool,
+                    input: decision.input,
+                  },
+                ],
+              });
+
+              // `agent.handoff` is a runtime-controlled pseudo-tool: it appears
+              // in the LLM tool list (so the model can invoke it) but the runtime
+              // intercepts the call here rather than running the tool body.
+              // We swap the active agent for the rest of the tick, persist the
+              // new `currentAgentId`, audit the handoff as a `tool.invoked`, and
+              // push a tool-result back into the conversation so the new agent
+              // sees the prior agent's work plus a record of the transition.
+              if (decision.tool === "agent.handoff") {
+                const raw = decision.input as {
+                  readonly targetAgent?: unknown;
+                  readonly reason?: unknown;
+                } | null;
+                const target =
+                  raw && typeof raw.targetAgent === "string"
+                    ? raw.targetAgent
+                    : null;
+                const reason =
+                  raw && typeof raw.reason === "string" ? raw.reason : "";
+                const allowed =
+                  target !== null &&
+                  agent.handoffs.some((h) => (h as string) === target);
+
+                if (!allowed) {
+                  yield* tx.run(
+                    audit.record({
+                      tenantId: current.tenantId,
+                      caseId: current.id,
+                      actor: { type: "agent", id: agent.id },
+                      action: "tool.invoked",
+                      details: {
+                        tool: "agent.handoff",
+                        callId: decision.callId,
+                        ok: false,
+                        error: "target_not_in_handoffs",
+                        target,
+                        turn,
+                      },
+                    }),
+                  );
+                  messages.push({
+                    role: "tool",
+                    toolCallId: decision.callId,
+                    toolName: "agent.handoff",
+                    content: {
+                      error: "target_not_in_handoffs",
+                      target,
+                      allowed: agent.handoffs,
+                    },
+                  });
+                  return { agent, current, done: null };
+                }
+
+                const targetAgentId = makeAgentId(target as string);
+                const targetAgent = applyOverride(
+                  yield* registry.resolve(targetAgentId),
+                  overrideMap,
+                );
+                current = yield* tx.run(
+                  Effect.gen(function* () {
+                    const updated = yield* cases.update(current.id, {
+                      currentAgentId: targetAgentId,
+                    });
+                    yield* audit.record({
+                      tenantId: updated.tenantId,
+                      caseId: updated.id,
+                      actor: { type: "agent", id: agent.id },
+                      action: "tool.invoked",
+                      details: {
+                        tool: "agent.handoff",
+                        callId: decision.callId,
+                        ok: true,
+                        target: target as string,
+                        reason,
+                        turn,
+                      },
+                    });
+                    return updated;
+                  }),
+                );
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: "agent.handoff",
+                  content: { ok: true, targetAgent: target as string },
+                });
+                agent = targetAgent;
+                return { agent, current, done: null };
+              }
+
+              const tool = yield* tools.tryGet(decision.tool);
+              if (!tool) {
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: decision.tool,
+                  content: { error: "unknown_tool" },
+                });
+                return { agent, current, done: null };
+              }
+
+              // Validate the LLM's JSON against the tool's input schema before
+              // any permission check or execution (audit L10). On mismatch the
+              // model gets a structured `invalid_input` result and self-corrects
+              // next turn instead of the malformed payload failing deep inside
+              // connector code (or partially succeeding).
+              const decodedCall = Schema.decodeUnknownEither(
+                tool.inputSchema as Schema.Schema<unknown>,
+              )(decision.input);
+              if (Either.isLeft(decodedCall)) {
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: tool.name,
+                  content: {
+                    error: "invalid_input",
+                    issue: String(decodedCall.left.message).slice(0, 500),
+                  },
+                });
+                return { agent, current, done: null };
+              }
+              const callInput = decodedCall.right;
+
+              // C2 (in-loop): a redelivered job replays the whole tick from
+              // turn 0 — side-effecting tools whose semantic action already
+              // executed (matched via their input-derived idempotency key)
+              // are skipped with a structured dedup result. Checked before
+              // the permission gate: an already-done action must not re-ask.
+              const loopExecutionKey = executionKeyFor(
+                tool,
+                callInput,
+                decision.callId,
+                deliveryScopeFor(event),
+              );
+              if (
+                tool.sideEffectClass !== "none" &&
+                Option.isSome(maybeExecutions)
+              ) {
+                const marker = yield* maybeExecutions.value
+                  .find(current.id, loopExecutionKey)
+                  .pipe(Effect.catchAll(() => Effect.succeed(null)));
+                if (marker) {
+                  messages.push({
+                    role: "tool",
+                    toolCallId: decision.callId,
+                    toolName: tool.name,
+                    content: {
+                      deduped: true,
+                      priorResultOk: marker.resultOk,
+                    },
+                  });
+                  return { agent, current, done: null };
+                }
+              }
+
+              // Refund scope guard (prompt-injection mitigation): before gating a
+              // refund, check whether it targets an order whose customer differs
+              // from the case's bound customer and, if so, stamp a risk flag onto
+              // the case context. The approval card surfaces riskFlags as chips,
+              // so the human approver is warned the refund may be aimed at an
+              // unrelated order. Best-effort and additive — a write failure or a
+              // fail-open (unknown) result never blocks the refund.
+              if (tool.name === "refund.create") {
+                const mismatchFlag = refundCustomerMismatchFlag(
+                  callInput,
+                  current.context,
+                  seenOrderEmails,
+                );
+                if (mismatchFlag) {
+                  const existingFlags = Array.isArray(current.context["riskFlags"])
+                    ? (current.context["riskFlags"] as unknown[]).filter(
+                        (f): f is string => typeof f === "string",
+                      )
+                    : [];
+                  if (!existingFlags.includes(mismatchFlag)) {
+                    const patched: Record<string, unknown> = {
+                      ...current.context,
+                      riskFlags: [...existingFlags, mismatchFlag],
+                    };
+                    current = yield* cases
+                      .update(current.id, { context: patched as never })
+                      .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                  }
+                }
+              }
+
+              const permission = yield* perms.check({
+                tenantId: current.tenantId,
+                agent,
+                tool,
+                payload: callInput,
+                caseId: current.id,
+              });
+
+              // Order-status disclosure backstop: a `where_is_order` reply on an
+              // unverified order/customer mismatch is forced to human approval even
+              // when the tenant set `conversation.reply` to auto. The gate lives in
+              // the runtime (not the per-agent policy) so it survives the auto/ask
+              // toggle; it only ever escalates allow→ask, never relaxes a deny.
+              const effectivePermission =
+                permission === "allow" &&
+                shouldForceReplyApproval(tool.name, current.context)
+                  ? "ask"
+                  : permission;
+
+              if (effectivePermission === "deny") {
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: tool.name,
+                  content: { error: "denied_by_policy" },
+                });
+                return { agent, current, done: null };
+              }
+
+              if (effectivePermission === "ask") {
+                return {
+                  agent,
+                  current,
+                  done: yield* parkForApproval(
+                    tool,
+                    callInput,
+                    agent,
+                    current,
+                    turn,
+                    decision.reasoning ?? "",
+                  ),
+                };
+              }
+
+              // allow → execute. The tool's external side effect runs OUTSIDE
+              // the SQL transaction (audit D6): holding a pool connection across
+              // provider HTTP latency starved the pool, and a commit failure
+              // AFTER an email was actually sent rolled back the audit record of
+              // a send that really happened. The audit row + execution marker
+              // then commit together in one tx (master-plan §4: the audit write
+              // shares the transaction with the state change — the external
+              // effect itself was never transactional). Tools that mutate case
+              // state (case.update_status) keep their own atomic writes.
+              const ctx: ToolContext = {
+                tenantId: current.tenantId,
+                caseId: current.id,
+                ...(current.mailbox ? { mailbox: current.mailbox } : {}),
+                agentId: agent.id,
+                callId: decision.callId,
+                attemptNumber: 1,
+              };
+              // Tool<unknown, unknown> declares R=unknown (master-plan §17). The
+              // concrete dependencies a tool actually needs are satisfied by the
+              // runtime's outer Layer, so we narrow R to never at the call site.
+              const rawToolEffect = tool.execute(
+                callInput,
+                ctx,
+              ) as unknown as Effect.Effect<unknown, unknown, never>;
+              // Honor the tool's declared timeout (audit L15) — a hung connector
+              // call must not pin the tick (and previously its DB tx) until the
+              // HTTP client's own timeout while the job clock runs toward
+              // redelivery.
+              const toolEffect = tool.timeout
+                ? rawToolEffect.pipe(Effect.timeout(tool.timeout))
+                : rawToolEffect;
+              const result = yield* toolEffect.pipe(Effect.either);
+              const exec = yield* tx.run(
+                Effect.gen(function* () {
+                  const outputDetails =
+                    tool.name === "refund.recommend" && result._tag === "Right"
+                      ? { output: result.right }
+                      : // Capture the heads-up content (and whether it reached
+                        // the merchant) so the dashboard timeline can show WHAT
+                        // the agent flagged, not just that merchant.notify ran.
+                        tool.name === "merchant.notify" && result._tag === "Right"
+                        ? {
+                            notify: {
+                              ...(typeof (callInput as { title?: unknown }).title ===
+                              "string"
+                                ? { title: (callInput as { title: string }).title }
+                                : {}),
+                              ...(typeof (callInput as { message?: unknown })
+                                .message === "string"
+                                ? {
+                                    message: (callInput as { message: string })
+                                      .message,
+                                  }
+                                : {}),
+                              delivered:
+                                (result.right as { delivered?: unknown })
+                                  .delivered === true,
+                            },
+                          }
+                        : {};
+                  yield* audit.record({
+                    tenantId: current.tenantId,
+                    caseId: current.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "tool.invoked",
+                    details: {
+                      tool: tool.name,
+                      callId: decision.callId,
+                      ok: result._tag === "Right",
+                      ...refundAuditDetails(tool.name, callInput),
+                      ...outputDetails,
+                      ...(result._tag === "Left"
+                        ? toolFailureAuditDetail(result.left)
+                        : {}),
+                    },
+                  });
+                  // C2 marker — same tx as the audit row; only meaningful
+                  // for tools with externally-visible effects.
+                  if (
+                    tool.sideEffectClass !== "none" &&
+                    Option.isSome(maybeExecutions)
+                  ) {
+                    yield* maybeExecutions.value
+                      .record({
+                        tenantId: current.tenantId,
+                        caseId: current.id,
+                        callId: loopExecutionKey,
+                        tool: tool.name,
+                        resultOk: result._tag === "Right",
+                      })
+                      .pipe(Effect.catchAll(() => Effect.void));
+                  }
+                  return result;
+                }),
+              );
+
+              if (exec._tag === "Right") {
+                // Index our outbound reply's Message-ID for thread correlation of
+                // the customer's eventual reply (best-effort, no-op for non-reply
+                // tools).
+                yield* recordOutboundReplyId(current, tool.name, exec.right);
+                if (tool.name === "conversation.ask_customer") {
+                  current = yield* tx.run(
+                    Effect.gen(function* () {
+                      const updated = yield* cases.transitionStatus(
+                        current.id,
+                        "waiting_for_customer",
+                        { reason: "conversation.ask_customer" },
+                      );
+                      yield* audit.record({
+                        tenantId: updated.tenantId,
+                        caseId: updated.id,
+                        actor: { type: "agent", id: agent.id },
+                        action: "case.waiting_for_customer",
+                        details: { tool: tool.name, callId: decision.callId },
+                      });
+                      return updated;
+                    }),
+                  );
+                  return { agent, current, done: { type: "PausedWaitingForCustomer" } as const };
+                }
+                if (
+                  tool.name === "supplier.escalate" &&
+                  (exec.right as { readonly escalated?: boolean }).escalated === true
+                ) {
+                  // Producer for `waiting_for_supplier` (mirror of ask_customer) —
+                  // ONLY when a supplier was actually found (`escalated: true`). A
+                  // `no_supplier` result falls through to the generic tool-result
+                  // push below so the agent reads it and falls back to a direct
+                  // reply (it must NOT park a case nobody is working). The escalation
+                  // row was written by the tool's service; here we park the case +
+                  // audit in one tx, then end the tick. The case re-engages on
+                  // `supplier.updated` (the consumer). Runs only when escalate
+                  // resolved to `allow` (per-agent) — under the default `ask`, the
+                  // permission gate above parks in waiting_for_approval instead.
+                  current = yield* tx.run(
+                    Effect.gen(function* () {
+                      const updated = yield* cases.transitionStatus(
+                        current.id,
+                        "waiting_for_supplier",
+                        { reason: "supplier.escalate" },
+                      );
+                      yield* audit.record({
+                        tenantId: updated.tenantId,
+                        caseId: updated.id,
+                        actor: { type: "agent", id: agent.id },
+                        action: "case.waiting_for_supplier",
+                        details: { tool: tool.name, callId: decision.callId },
+                      });
+                      return updated;
+                    }),
+                  );
+                  return { agent, current, done: { type: "PausedWaitingForSupplier" } as const };
+                }
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: tool.name,
+                  content: exec.right,
+                });
+                // Capture the order→customer-email mapping from any get_order
+                // result so a later refund.create can be checked against the
+                // case's bound customer (refund scope guard).
+                if (
+                  tool.name === "shopify.get_order" &&
+                  exec.right &&
+                  typeof exec.right === "object"
+                ) {
+                  const o = exec.right as Record<string, unknown>;
+                  const email =
+                    typeof o["email"] === "string" ? (o["email"] as string) : null;
+                  if (typeof o["id"] === "string") {
+                    seenOrderEmails.set(o["id"] as string, email);
+                  }
+                  if (typeof o["name"] === "string") {
+                    seenOrderEmails.set(o["name"] as string, email);
+                  }
+                  // Order-status identity guard (where_is_order flow only): if the
+                  // looked-up order belongs to a different customer than the one
+                  // writing in, stamp a risk flag so the reply is gated + the
+                  // dashboard warns, and persist the order's email so the customer's
+                  // later confirmation reply can be verified by the runtime (not the
+                  // model). Additive + best-effort — a write failure never blocks
+                  // the tick, and a fail-open (null) result leaves the case alone.
+                  if (current.context["classification"] === "where_is_order") {
+                    const mismatchFlag = orderCustomerMismatchFlag(
+                      email,
+                      current.context,
+                    );
+                    if (mismatchFlag) {
+                      const existingFlags = readRiskFlags(current.context);
+                      const patch: Record<string, unknown> = {
+                        ...current.context,
+                        pendingOrderEmail: normalizeEmailForMatch(email),
+                      };
+                      if (!existingFlags.includes(mismatchFlag)) {
+                        patch["riskFlags"] = [...existingFlags, mismatchFlag];
+                      }
+                      current = yield* cases
+                        .update(current.id, { context: patch as never })
+                        .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                    }
+                  }
+                }
+                // The tool may have mutated the case (e.g. transitioned status).
+                current = yield* cases.getById(current.id, current.tenantId);
+              } else {
+                const errTag =
+                  (exec.left as { readonly _tag?: string })._tag ?? "ToolFailure";
+                messages.push({
+                  role: "tool",
+                  toolCallId: decision.callId,
+                  toolName: tool.name,
+                  content: { error: errTag },
+                });
+                // A customer-reply SEND failure must NOT be swallowed: feeding the
+                // error back to the LLM lets it emit `final_message` and resolve a
+                // case whose reply never reached the customer (the silent-delivery
+                // bug). Capture the draft for retry, flag + park the case, and end
+                // the tick — a later successful retry auto-resolves it.
+                if (isReplyDeliverySendFailure(tool.name, exec.left)) {
+                  yield* parkForReplyDeliveryFailure(
+                    current,
+                    agent.id,
+                    tool.name,
+                    callInput,
+                    exec.left,
+                  );
+                  return {
+                    agent,
+                    current,
+                    done: {
+                      type: "HumanTakeoverRequired",
+                      reason: REPLY_DELIVERY_FAILED_FLAG,
+                    } as const,
+                  };
+                }
+              }
+              return { agent, current, done: null };
+            });
+
           for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
             const schemas = yield* tools.schemasFor(agent.tools);
             // BYOK: surface missing/revoked per-tenant LLM credentials as
@@ -1442,486 +1946,16 @@ export const AgentRuntimeDefault = Layer.effect(
               } as const;
             }
 
-            // tool_call
-
-            // Record the LLM's tool call in the conversation BEFORE invoking
-            // the tool. The Anthropic/Gemini APIs (and the AI SDK in front of
-            // them) expect every `tool` role message to be paired with a
-            // preceding `assistant` message that carries the matching
-            // `toolCallId`. Without this push, subsequent turns see only
-            // user + orphan tool results — providers drop the tool messages
-            // and the model behaves as if no prior tool call ever happened,
-            // looping on the same tool every turn until `max_turns_exceeded`.
-            messages.push({
-              role: "assistant",
-              content: "",
-              toolCalls: [
-                {
-                  id: decision.callId,
-                  name: decision.tool,
-                  input: decision.input,
-                },
-              ],
-            });
-
-            // `agent.handoff` is a runtime-controlled pseudo-tool: it appears
-            // in the LLM tool list (so the model can invoke it) but the runtime
-            // intercepts the call here rather than running the tool body.
-            // We swap the active agent for the rest of the tick, persist the
-            // new `currentAgentId`, audit the handoff as a `tool.invoked`, and
-            // push a tool-result back into the conversation so the new agent
-            // sees the prior agent's work plus a record of the transition.
-            if (decision.tool === "agent.handoff") {
-              const raw = decision.input as {
-                readonly targetAgent?: unknown;
-                readonly reason?: unknown;
-              } | null;
-              const target =
-                raw && typeof raw.targetAgent === "string"
-                  ? raw.targetAgent
-                  : null;
-              const reason =
-                raw && typeof raw.reason === "string" ? raw.reason : "";
-              const allowed =
-                target !== null &&
-                agent.handoffs.some((h) => (h as string) === target);
-
-              if (!allowed) {
-                yield* tx.run(
-                  audit.record({
-                    tenantId: current.tenantId,
-                    caseId: current.id,
-                    actor: { type: "agent", id: agent.id },
-                    action: "tool.invoked",
-                    details: {
-                      tool: "agent.handoff",
-                      callId: decision.callId,
-                      ok: false,
-                      error: "target_not_in_handoffs",
-                      target,
-                      turn,
-                    },
-                  }),
-                );
-                messages.push({
-                  role: "tool",
-                  toolCallId: decision.callId,
-                  toolName: "agent.handoff",
-                  content: {
-                    error: "target_not_in_handoffs",
-                    target,
-                    allowed: agent.handoffs,
-                  },
-                });
-                continue;
-              }
-
-              const targetAgentId = makeAgentId(target as string);
-              const targetAgent = applyOverride(
-                yield* registry.resolve(targetAgentId),
-                overrideMap,
-              );
-              current = yield* tx.run(
-                Effect.gen(function* () {
-                  const updated = yield* cases.update(current.id, {
-                    currentAgentId: targetAgentId,
-                  });
-                  yield* audit.record({
-                    tenantId: updated.tenantId,
-                    caseId: updated.id,
-                    actor: { type: "agent", id: agent.id },
-                    action: "tool.invoked",
-                    details: {
-                      tool: "agent.handoff",
-                      callId: decision.callId,
-                      ok: true,
-                      target: target as string,
-                      reason,
-                      turn,
-                    },
-                  });
-                  return updated;
-                }),
-              );
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: "agent.handoff",
-                content: { ok: true, targetAgent: target as string },
-              });
-              agent = targetAgent;
-              continue;
-            }
-
-            const tool = yield* tools.tryGet(decision.tool);
-            if (!tool) {
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: decision.tool,
-                content: { error: "unknown_tool" },
-              });
-              continue;
-            }
-
-            // Validate the LLM's JSON against the tool's input schema before
-            // any permission check or execution (audit L10). On mismatch the
-            // model gets a structured `invalid_input` result and self-corrects
-            // next turn instead of the malformed payload failing deep inside
-            // connector code (or partially succeeding).
-            const decodedCall = Schema.decodeUnknownEither(
-              tool.inputSchema as Schema.Schema<unknown>,
-            )(decision.input);
-            if (Either.isLeft(decodedCall)) {
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: tool.name,
-                content: {
-                  error: "invalid_input",
-                  issue: String(decodedCall.left.message).slice(0, 500),
-                },
-              });
-              continue;
-            }
-            const callInput = decodedCall.right;
-
-            // C2 (in-loop): a redelivered job replays the whole tick from
-            // turn 0 — side-effecting tools whose semantic action already
-            // executed (matched via their input-derived idempotency key)
-            // are skipped with a structured dedup result. Checked before
-            // the permission gate: an already-done action must not re-ask.
-            const loopExecutionKey = executionKeyFor(
-              tool,
-              callInput,
-              decision.callId,
-              deliveryScopeFor(event),
-            );
-            if (
-              tool.sideEffectClass !== "none" &&
-              Option.isSome(maybeExecutions)
-            ) {
-              const marker = yield* maybeExecutions.value
-                .find(current.id, loopExecutionKey)
-                .pipe(Effect.catchAll(() => Effect.succeed(null)));
-              if (marker) {
-                messages.push({
-                  role: "tool",
-                  toolCallId: decision.callId,
-                  toolName: tool.name,
-                  content: {
-                    deduped: true,
-                    priorResultOk: marker.resultOk,
-                  },
-                });
-                continue;
-              }
-            }
-
-            // Refund scope guard (prompt-injection mitigation): before gating a
-            // refund, check whether it targets an order whose customer differs
-            // from the case's bound customer and, if so, stamp a risk flag onto
-            // the case context. The approval card surfaces riskFlags as chips,
-            // so the human approver is warned the refund may be aimed at an
-            // unrelated order. Best-effort and additive — a write failure or a
-            // fail-open (unknown) result never blocks the refund.
-            if (tool.name === "refund.create") {
-              const mismatchFlag = refundCustomerMismatchFlag(
-                callInput,
-                current.context,
-                seenOrderEmails,
-              );
-              if (mismatchFlag) {
-                const existingFlags = Array.isArray(current.context["riskFlags"])
-                  ? (current.context["riskFlags"] as unknown[]).filter(
-                      (f): f is string => typeof f === "string",
-                    )
-                  : [];
-                if (!existingFlags.includes(mismatchFlag)) {
-                  const patched: Record<string, unknown> = {
-                    ...current.context,
-                    riskFlags: [...existingFlags, mismatchFlag],
-                  };
-                  current = yield* cases
-                    .update(current.id, { context: patched as never })
-                    .pipe(Effect.catchAll(() => Effect.succeed(current)));
-                }
-              }
-            }
-
-            const permission = yield* perms.check({
-              tenantId: current.tenantId,
+            const toolStep = yield* executeToolCall(
+              decision,
               agent,
-              tool,
-              payload: callInput,
-              caseId: current.id,
-            });
-
-            // Order-status disclosure backstop: a `where_is_order` reply on an
-            // unverified order/customer mismatch is forced to human approval even
-            // when the tenant set `conversation.reply` to auto. The gate lives in
-            // the runtime (not the per-agent policy) so it survives the auto/ask
-            // toggle; it only ever escalates allow→ask, never relaxes a deny.
-            const effectivePermission =
-              permission === "allow" &&
-              shouldForceReplyApproval(tool.name, current.context)
-                ? "ask"
-                : permission;
-
-            if (effectivePermission === "deny") {
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: tool.name,
-                content: { error: "denied_by_policy" },
-              });
-              continue;
-            }
-
-            if (effectivePermission === "ask") {
-              return yield* parkForApproval(
-                tool,
-                callInput,
-                agent,
-                current,
-                turn,
-                decision.reasoning ?? "",
-              );
-            }
-
-            // allow → execute. The tool's external side effect runs OUTSIDE
-            // the SQL transaction (audit D6): holding a pool connection across
-            // provider HTTP latency starved the pool, and a commit failure
-            // AFTER an email was actually sent rolled back the audit record of
-            // a send that really happened. The audit row + execution marker
-            // then commit together in one tx (master-plan §4: the audit write
-            // shares the transaction with the state change — the external
-            // effect itself was never transactional). Tools that mutate case
-            // state (case.update_status) keep their own atomic writes.
-            const ctx: ToolContext = {
-              tenantId: current.tenantId,
-              caseId: current.id,
-              ...(current.mailbox ? { mailbox: current.mailbox } : {}),
-              agentId: agent.id,
-              callId: decision.callId,
-              attemptNumber: 1,
-            };
-            // Tool<unknown, unknown> declares R=unknown (master-plan §17). The
-            // concrete dependencies a tool actually needs are satisfied by the
-            // runtime's outer Layer, so we narrow R to never at the call site.
-            const rawToolEffect = tool.execute(
-              callInput,
-              ctx,
-            ) as unknown as Effect.Effect<unknown, unknown, never>;
-            // Honor the tool's declared timeout (audit L15) — a hung connector
-            // call must not pin the tick (and previously its DB tx) until the
-            // HTTP client's own timeout while the job clock runs toward
-            // redelivery.
-            const toolEffect = tool.timeout
-              ? rawToolEffect.pipe(Effect.timeout(tool.timeout))
-              : rawToolEffect;
-            const result = yield* toolEffect.pipe(Effect.either);
-            const exec = yield* tx.run(
-              Effect.gen(function* () {
-                const outputDetails =
-                  tool.name === "refund.recommend" && result._tag === "Right"
-                    ? { output: result.right }
-                    : // Capture the heads-up content (and whether it reached
-                      // the merchant) so the dashboard timeline can show WHAT
-                      // the agent flagged, not just that merchant.notify ran.
-                      tool.name === "merchant.notify" && result._tag === "Right"
-                      ? {
-                          notify: {
-                            ...(typeof (callInput as { title?: unknown }).title ===
-                            "string"
-                              ? { title: (callInput as { title: string }).title }
-                              : {}),
-                            ...(typeof (callInput as { message?: unknown })
-                              .message === "string"
-                              ? {
-                                  message: (callInput as { message: string })
-                                    .message,
-                                }
-                              : {}),
-                            delivered:
-                              (result.right as { delivered?: unknown })
-                                .delivered === true,
-                          },
-                        }
-                      : {};
-                yield* audit.record({
-                  tenantId: current.tenantId,
-                  caseId: current.id,
-                  actor: { type: "agent", id: agent.id },
-                  action: "tool.invoked",
-                  details: {
-                    tool: tool.name,
-                    callId: decision.callId,
-                    ok: result._tag === "Right",
-                    ...refundAuditDetails(tool.name, callInput),
-                    ...outputDetails,
-                    ...(result._tag === "Left"
-                      ? toolFailureAuditDetail(result.left)
-                      : {}),
-                  },
-                });
-                // C2 marker — same tx as the audit row; only meaningful
-                // for tools with externally-visible effects.
-                if (
-                  tool.sideEffectClass !== "none" &&
-                  Option.isSome(maybeExecutions)
-                ) {
-                  yield* maybeExecutions.value
-                    .record({
-                      tenantId: current.tenantId,
-                      caseId: current.id,
-                      callId: loopExecutionKey,
-                      tool: tool.name,
-                      resultOk: result._tag === "Right",
-                    })
-                    .pipe(Effect.catchAll(() => Effect.void));
-                }
-                return result;
-              }),
+              current,
+              turn,
             );
-
-            if (exec._tag === "Right") {
-              // Index our outbound reply's Message-ID for thread correlation of
-              // the customer's eventual reply (best-effort, no-op for non-reply
-              // tools).
-              yield* recordOutboundReplyId(current, tool.name, exec.right);
-              if (tool.name === "conversation.ask_customer") {
-                current = yield* tx.run(
-                  Effect.gen(function* () {
-                    const updated = yield* cases.transitionStatus(
-                      current.id,
-                      "waiting_for_customer",
-                      { reason: "conversation.ask_customer" },
-                    );
-                    yield* audit.record({
-                      tenantId: updated.tenantId,
-                      caseId: updated.id,
-                      actor: { type: "agent", id: agent.id },
-                      action: "case.waiting_for_customer",
-                      details: { tool: tool.name, callId: decision.callId },
-                    });
-                    return updated;
-                  }),
-                );
-                return { type: "PausedWaitingForCustomer" } as const;
-              }
-              if (
-                tool.name === "supplier.escalate" &&
-                (exec.right as { readonly escalated?: boolean }).escalated === true
-              ) {
-                // Producer for `waiting_for_supplier` (mirror of ask_customer) —
-                // ONLY when a supplier was actually found (`escalated: true`). A
-                // `no_supplier` result falls through to the generic tool-result
-                // push below so the agent reads it and falls back to a direct
-                // reply (it must NOT park a case nobody is working). The escalation
-                // row was written by the tool's service; here we park the case +
-                // audit in one tx, then end the tick. The case re-engages on
-                // `supplier.updated` (the consumer). Runs only when escalate
-                // resolved to `allow` (per-agent) — under the default `ask`, the
-                // permission gate above parks in waiting_for_approval instead.
-                current = yield* tx.run(
-                  Effect.gen(function* () {
-                    const updated = yield* cases.transitionStatus(
-                      current.id,
-                      "waiting_for_supplier",
-                      { reason: "supplier.escalate" },
-                    );
-                    yield* audit.record({
-                      tenantId: updated.tenantId,
-                      caseId: updated.id,
-                      actor: { type: "agent", id: agent.id },
-                      action: "case.waiting_for_supplier",
-                      details: { tool: tool.name, callId: decision.callId },
-                    });
-                    return updated;
-                  }),
-                );
-                return { type: "PausedWaitingForSupplier" } as const;
-              }
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: tool.name,
-                content: exec.right,
-              });
-              // Capture the order→customer-email mapping from any get_order
-              // result so a later refund.create can be checked against the
-              // case's bound customer (refund scope guard).
-              if (
-                tool.name === "shopify.get_order" &&
-                exec.right &&
-                typeof exec.right === "object"
-              ) {
-                const o = exec.right as Record<string, unknown>;
-                const email =
-                  typeof o["email"] === "string" ? (o["email"] as string) : null;
-                if (typeof o["id"] === "string") {
-                  seenOrderEmails.set(o["id"] as string, email);
-                }
-                if (typeof o["name"] === "string") {
-                  seenOrderEmails.set(o["name"] as string, email);
-                }
-                // Order-status identity guard (where_is_order flow only): if the
-                // looked-up order belongs to a different customer than the one
-                // writing in, stamp a risk flag so the reply is gated + the
-                // dashboard warns, and persist the order's email so the customer's
-                // later confirmation reply can be verified by the runtime (not the
-                // model). Additive + best-effort — a write failure never blocks
-                // the tick, and a fail-open (null) result leaves the case alone.
-                if (current.context["classification"] === "where_is_order") {
-                  const mismatchFlag = orderCustomerMismatchFlag(
-                    email,
-                    current.context,
-                  );
-                  if (mismatchFlag) {
-                    const existingFlags = readRiskFlags(current.context);
-                    const patch: Record<string, unknown> = {
-                      ...current.context,
-                      pendingOrderEmail: normalizeEmailForMatch(email),
-                    };
-                    if (!existingFlags.includes(mismatchFlag)) {
-                      patch["riskFlags"] = [...existingFlags, mismatchFlag];
-                    }
-                    current = yield* cases
-                      .update(current.id, { context: patch as never })
-                      .pipe(Effect.catchAll(() => Effect.succeed(current)));
-                  }
-                }
-              }
-              // The tool may have mutated the case (e.g. transitioned status).
-              current = yield* cases.getById(current.id, current.tenantId);
-            } else {
-              const errTag =
-                (exec.left as { readonly _tag?: string })._tag ?? "ToolFailure";
-              messages.push({
-                role: "tool",
-                toolCallId: decision.callId,
-                toolName: tool.name,
-                content: { error: errTag },
-              });
-              // A customer-reply SEND failure must NOT be swallowed: feeding the
-              // error back to the LLM lets it emit `final_message` and resolve a
-              // case whose reply never reached the customer (the silent-delivery
-              // bug). Capture the draft for retry, flag + park the case, and end
-              // the tick — a later successful retry auto-resolves it.
-              if (isReplyDeliverySendFailure(tool.name, exec.left)) {
-                yield* parkForReplyDeliveryFailure(
-                  current,
-                  agent.id,
-                  tool.name,
-                  callInput,
-                  exec.left,
-                );
-                return {
-                  type: "HumanTakeoverRequired",
-                  reason: REPLY_DELIVERY_FAILED_FLAG,
-                } as const;
-              }
+            agent = toolStep.agent;
+            current = toolStep.current;
+            if (toolStep.done) {
+              return toolStep.done;
             }
           }
 
