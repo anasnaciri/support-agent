@@ -426,7 +426,10 @@ export const AgentRuntimeDefault = Layer.effect(
         // tool is mid-workflow (`refund.create` followed by a reply),
         // widen this branch to push the tool result into a fresh tick
         // and re-enter the agent loop.
-        if (event.type === "approval.approved") {
+        const resumeApprovedTool = (
+          event: Extract<DomainEvent, { type: "approval.approved" }>,
+        ) =>
+          Effect.gen(function* () {
           const approval = yield* approvals
             .getById(event.approvalId, working.tenantId)
             .pipe(
@@ -709,9 +712,12 @@ export const AgentRuntimeDefault = Layer.effect(
             }),
           );
           return { type: "Completed" } as const;
-        }
+        });
 
-        if (event.type === "approval.rejected") {
+        const handleApprovalRejected = (
+          event: Extract<DomainEvent, { type: "approval.rejected" }>,
+        ) =>
+          Effect.gen(function* () {
           working = yield* tx.run(
             Effect.gen(function* () {
               const updated = yield* cases.transitionStatus(
@@ -745,8 +751,9 @@ export const AgentRuntimeDefault = Layer.effect(
             type: "HumanTakeoverRequired",
             reason: "approval rejected",
           } as const;
-        }
+        });
 
+        const enrichCase = Effect.gen(function* () {
         // 2a. Customer identification — only on a freshly-created case
         // bound to an inbound message. Best-effort: the tick proceeds
         // even if Shopify is down / not configured / has no match for
@@ -902,7 +909,9 @@ export const AgentRuntimeDefault = Layer.effect(
               .pipe(Effect.catchAll(() => Effect.succeed(working)));
           }
         }
+        });
 
+        const checkParkGuards = Effect.gen(function* () {
         // 2.9. Hold events that arrive while an approval is still pending.
         // A case parked in `waiting_for_approval` must stay parked until
         // the manager decides (`approval.approved` / `approval.rejected`,
@@ -987,7 +996,10 @@ export const AgentRuntimeDefault = Layer.effect(
             return { type: "PausedWaitingForSupplier" } as const;
           }
         }
+          return null;
+        });
 
+        const maybeReopen = Effect.gen(function* () {
         // 2.97. Reopen a resolved case when the customer writes back on the
         // thread. The state machine permits `resolved → in_progress` (a reply
         // re-enters the loop) but nothing performed the transition: the case
@@ -1021,7 +1033,9 @@ export const AgentRuntimeDefault = Layer.effect(
             }),
           );
         }
+        });
 
+        const runAgentLoop = Effect.gen(function* () {
         // 3. Run the workflow loop.
         // Load per-tenant overrides once per tick. A handoff later in the
         // same tick reuses this map — overrides don't change mid-tick.
@@ -1892,6 +1906,21 @@ export const AgentRuntimeDefault = Layer.effect(
           type: "HumanTakeoverRequired",
           reason: "max_turns_exceeded",
         } as const;
+        });
+
+        if (event.type === "approval.approved") {
+          return yield* resumeApprovedTool(event);
+        }
+        if (event.type === "approval.rejected") {
+          return yield* handleApprovalRejected(event);
+        }
+        yield* enrichCase;
+        const held = yield* checkParkGuards;
+        if (held) {
+          return held;
+        }
+        yield* maybeReopen;
+        return yield* runAgentLoop;
       }).pipe(
         // Anything that escapes the tick (repo/DB failures, defects) is
         // worth retrying — pg-boss applies backoff and the dead-letter
