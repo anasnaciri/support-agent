@@ -106,13 +106,19 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   reference and only the two approval closures taking the narrowed event as a param. Bodies moved
   verbatim;
   (4) `style: reindent` (`386921f`) — AST-derived +2-space reindent of the 6 closure bodies, verified
-  `git diff -w` empty (whitespace-only). **Deviation from the "separate files" reading of full
-  decomposition:** the stateful phases stay in ONE file as closures (the deps-object rewrite that
-  separate files would need is high-churn/high-risk on the most critical file); they are clean extraction
-  points if a file split is wanted later. See [[project_agent_runtime_decomposition]].
-  **Remaining (optional, NOT done):** `runAgentLoop` is still ~870 lines — extracting `executeToolCall`
-  is the next decomposition but the riskiest (mutates loop state: `agent`/`current`/`messages`/
-  `seenOrderEmails`); unify the two handoff paths (decision-level + `agent.handoff` pseudo-tool); add
+  `git diff -w` empty (whitespace-only);
+  (5) `runAgentLoop` itself split (`6fa2c98` + `6db0ee8`): `handleLlmFailure` (LLM-error
+  classification) + `parkForApproval` (approval row/park/email) extracted as always-return closures, then
+  `executeToolCall(decision, agent, current, turn)` extracted for the whole tool_call body. Because that
+  body mixes `continue`/`return` and reassigns `agent`/`current`, it returns a `{ agent, current, done }`
+  protocol (`done` = terminal WorkflowResult or null=continue); `messages`/`seenOrderEmails` stay shared
+  by reference. The for-loop is now LLM call → handleLlmFailure → decision dispatch → executeToolCall →
+  thread agent/current → max-turns. **Deviation from the "separate files" reading of full
+  decomposition:** the stateful phases stay in ONE file as closures (the deps-object rewrite separate
+  files would need is high-churn/high-risk on the most critical file); they are clean extraction points
+  if a file split is wanted later. See [[project_agent_runtime_decomposition]].
+  **Remaining (optional, NOT done):** unify the two handoff paths (decision-level + `agent.handoff`
+  pseudo-tool — they differ: the pseudo-tool must push a tool-role result, so not a clean merge); add
   `addRiskFlag` / `transitionWithAudit` micro-helpers (genuine dedup, logic-touching → needs tests).
   Branch NOT merged to `main`. Companion analysis (uncaught edge cases E1–E13 + mermaid diagrams) in
   `docs/agent-runtime-analysis.md` + `docs/diagrams/` (untracked).
