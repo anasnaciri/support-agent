@@ -90,6 +90,33 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-19 — Agent-runtime decomposition (branch `refactor/agent-runtime-decompose`, behavior-
+  preserving, full CI green at each commit — build + migrate + 1872 tests).** `agent-runtime.ts` was a
+  2666-line monolith with a single ~1700-line `tickBody`. Decomposed in staged commits, each verified:
+  (1) committed the in-flight message-id correlation feature to get a clean base (`7fdb19e`);
+  (2) `refactor: extract pure helpers` (`69b1ac2`) — ~730 lines of pure helpers (eventToCaseLookup,
+  buildSystemPrompt, buildInitialMessages, executionKeyFor, deliveryScopeFor, the prompt-injection flag
+  helpers, applyOverride, …) moved to a sibling `agent-runtime-helpers.ts`, re-exported via `export *`
+  so the package surface + test imports from `./agent-runtime.js` are unchanged (10 previously-private
+  helpers gained `export`);
+  (3) `refactor: decompose tickBody into named phase closures` (`64b4a17`) — `tickBody` is now a ~15-line
+  skeleton: load → `resumeApprovedTool`/`handleApprovalRejected` → `enrichCase` → `checkParkGuards`
+  (returns `WorkflowResult | null`) → `maybeReopen` → `runAgentLoop`. Each phase is a named closure in
+  the Layer scope capturing the resolved services (NO deps-threading), with per-tick `working` shared by
+  reference and only the two approval closures taking the narrowed event as a param. Bodies moved
+  verbatim;
+  (4) `style: reindent` (`386921f`) — AST-derived +2-space reindent of the 6 closure bodies, verified
+  `git diff -w` empty (whitespace-only). **Deviation from the "separate files" reading of full
+  decomposition:** the stateful phases stay in ONE file as closures (the deps-object rewrite that
+  separate files would need is high-churn/high-risk on the most critical file); they are clean extraction
+  points if a file split is wanted later. See [[project_agent_runtime_decomposition]].
+  **Remaining (optional, NOT done):** `runAgentLoop` is still ~870 lines — extracting `executeToolCall`
+  is the next decomposition but the riskiest (mutates loop state: `agent`/`current`/`messages`/
+  `seenOrderEmails`); unify the two handoff paths (decision-level + `agent.handoff` pseudo-tool); add
+  `addRiskFlag` / `transitionWithAudit` micro-helpers (genuine dedup, logic-touching → needs tests).
+  Branch NOT merged to `main`. Companion analysis (uncaught edge cases E1–E13 + mermaid diagrams) in
+  `docs/agent-runtime-analysis.md` + `docs/diagrams/` (untracked).
+
 - **2026-06-19 — Fixed: IMAP "RE:" replies created DUPLICATE cases instead of threading
   (TDD, branch `feat/supplier-portal`, `pnpm build` green; services+worker+db+tools+providers
   suites green incl. the live-DB integration tests; NOT committed).** Reported by tenant Elva Labs
