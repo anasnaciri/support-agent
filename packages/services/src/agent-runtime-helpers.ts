@@ -1,0 +1,752 @@
+import { Context, Effect } from "effect";
+import {
+  type AgentConfig,
+  type AnyTool,
+  type ApprovalRiskLevel,
+  type CaseChannel,
+  type ChatMessage,
+  type DomainEvent,
+  type InboundMessage,
+  type ThreadId,
+  wrapUntrusted,
+  UNTRUSTED_PREAMBLE,
+  TenantId as makeTenantId,
+  ThreadId as makeThreadId,
+} from "@support-agent/agent-core";
+import { CaseRepository } from "./case-repository.js";
+import { parseThreadId } from "./conversation-thread-id.js";
+import { parseRefundAmount } from "./permission-service-live.js";
+import type { AgentOverride } from "./tenant-agent-overrides.js";
+import type { TenantSettings } from "./tenant-repository.js";
+
+// ============================================================
+// Helpers
+// ============================================================
+
+type CaseLookup =
+  | { readonly kind: "load"; readonly caseId: string }
+  | {
+      readonly kind: "create";
+      readonly tenantId: string;
+      readonly channel: CaseChannel;
+      readonly subject: string | null;
+      readonly initialUserMessage: string | null;
+    }
+  | {
+      readonly kind: "loadOrCreateByThread";
+      readonly tenantId: string;
+      readonly threadId: string;
+      readonly mailbox: string | undefined;
+      readonly channel: CaseChannel;
+      readonly subject: string | null;
+      readonly initialUserMessage: string | null;
+    };
+
+export const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
+  switch (event.type) {
+    case "ticket.created":
+      return {
+        kind: "create",
+        tenantId: event.tenantId,
+        channel: event.source,
+        subject: event.payload.subject,
+        initialUserMessage: event.payload.body,
+      };
+    case "customer.replied":
+    case "approval.approved":
+    case "approval.rejected":
+    case "supplier.updated":
+    case "timer.expired":
+    case "manual.takeover":
+    case "case.resumed":
+      return { kind: "load", caseId: event.caseId };
+    case "message.received":
+      // The connector has already normalised this into a thread + body.
+      // First message on a thread → create a case bound to the thread;
+      // subsequent messages → resume the same case via `findByThreadId`.
+      // Channel defaults to "email" because every connector that emits
+      // this event today (Gmail; later Outlook / IMAP) is email-shaped;
+      // when a non-email connector (SMS, helpdesk) ships, widen this.
+      return {
+        kind: "loadOrCreateByThread",
+        tenantId: event.tenantId,
+        threadId: event.threadId,
+        mailbox: event.payload.mailbox,
+        channel: "email",
+        subject: event.payload.subject,
+        initialUserMessage: event.payload.bodyText,
+      };
+    case "tracking.changed":
+      // Phase 1 does not implement lookup-by-order. (When a tracking-
+      // change specialist lands, swap this for findByOrderId.)
+      return null;
+  }
+};
+
+/**
+ * Build the system prompt the runtime hands to the LLM each turn.
+ *
+ * The prompt is `agent.promptTemplate`, optionally with one or more bracketed
+ * headers appended. The `[Supplier escalation sheet: ...]` header is added when:
+ *   1. The agent declares `supplier.add_sheet_row` in its tools array, AND
+ *   2. The tenant has configured a `supplierEscalationSheet` in settings.
+ * The `[Store knowledge base — ...]` header (listing the tenant's document
+ * titles) is added under the same shape when the agent declares
+ * `knowledge.search` AND the tenant has at least one knowledge document
+ * (`knowledgeTitles`, loaded once per tick).
+ *
+ * Missing-package-agent's BRANCH A is the first user of this header — its
+ * prompt checks for the bracketed line and conditionally calls
+ * `supplier.add_sheet_row` before drafting the customer reply. Agents
+ * that don't use the tool never see the header even when the tenant has
+ * a sheet configured, so the prompt context stays minimal per agent.
+ *
+ * Pure helper — exported so a tiny unit test can pin the formatting
+ * without spinning up the full runtime.
+ */
+export const buildSystemPrompt = (
+  agent: Pick<AgentConfig, "tools" | "promptTemplate">,
+  tenantSettings: TenantSettings | null,
+  knowledgeTitles: ReadonlyArray<string> = [],
+): string => {
+  const headers: string[] = [];
+
+  const sheet = tenantSettings?.supplierEscalationSheet ?? null;
+  const usesSheetTool = agent.tools.some(
+    (t) => (t as string) === "supplier.add_sheet_row",
+  );
+  if (sheet && usesSheetTool) {
+    headers.push(
+      `[Supplier escalation sheet: spreadsheetId=${sheet.spreadsheetId}, range=${sheet.range}]`,
+    );
+  }
+
+  // Knowledge base: list the tenant's document titles so an agent that holds
+  // the `knowledge.search` tool knows what's available and pulls full text on
+  // demand. Same gating shape as the supplier header — only agents that
+  // declare the tool see it, and only when the tenant actually has documents.
+  const usesKnowledgeTool = agent.tools.some(
+    (t) => (t as string) === "knowledge.search",
+  );
+  if (usesKnowledgeTool && knowledgeTitles.length > 0) {
+    const titles = knowledgeTitles.map((t) => `"${t}"`).join(", ");
+    headers.push(
+      `[Store knowledge base — call knowledge.search to read: ${titles}]`,
+    );
+  }
+
+  const body =
+    headers.length === 0
+      ? agent.promptTemplate
+      : `${agent.promptTemplate}\n\n${headers.join("\n\n")}`;
+  // Prefix the untrusted-content preamble so the model knows that fenced
+  // customer text and every tool result are data, not instructions
+  // (prompt-injection mitigation). buildInitialMessages / tool-result
+  // serialization wrap the matching spans in the sentinels this names.
+  return `${UNTRUSTED_PREAMBLE}\n\n${body}`;
+};
+
+// Build a user-role ChatMessage from a text body + the inbound message's
+// attachments. When the message carries any image attachments, the
+// content becomes a parts array `[text, ...images]` so the LLM provider
+// boundary can dispatch a multimodal request. Non-image attachments are
+// dropped at this layer today — the runtime/agent surface only has a
+// damaged-product use case for images so far; PDF/audio support lands
+// when a specialist needs it.
+const buildUserMessageFromInbound = (
+  text: string,
+  attachments: ReadonlyArray<import("@support-agent/agent-core").MessageAttachment>,
+): ChatMessage => {
+  const images = attachments.filter((a) => a.contentType.startsWith("image/"));
+  if (images.length === 0) {
+    return { role: "user", content: text };
+  }
+  return {
+    role: "user",
+    content: [
+      { type: "text", text },
+      ...images.map((a) => ({ type: "image" as const, attachment: a })),
+    ],
+  };
+};
+
+/**
+ * Trusted directive injected on resume of a `where_is_order` case that was
+ * flagged as an order/customer mismatch. Tells the specialist either to run the
+ * identity challenge (ask the customer to confirm the order's email before
+ * disclosing) or, once the runtime has verified that confirmation, to go ahead
+ * and send the status. Carries the order id + reply wiring so the agent can act
+ * without the prior tick's tool results. Returns "" for every case that isn't
+ * mid-verification, so normal flows are untouched. Stays OUTSIDE the untrusted
+ * fence — it's runtime-authored, not customer text.
+ */
+const orderIdentityDirective = (
+  context: Record<string, unknown>,
+  threadId: ThreadId | null,
+): string => {
+  if (context["classification"] !== "where_is_order") return "";
+  const flags = Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+  if (!flags.includes("order_customer_mismatch")) return "";
+  const orderRef =
+    typeof context["identifiedOrderId"] === "string"
+      ? `order ${context["identifiedOrderId"]}`
+      : "the order";
+  const wiring = [
+    threadId ? `threadId=${threadId}` : null,
+    typeof context["customerEmail"] === "string"
+      ? `reply to=${context["customerEmail"]}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const wiringNote = wiring ? ` (${wiring})` : "";
+  if (context["identityVerified"] === true) {
+    return `[Identity check PASSED${wiringNote}: the customer confirmed the email used to place ${orderRef} and the system verified it. Look up the order and send the status reply now.]`;
+  }
+  return `[Identity check REQUIRED${wiringNote}: this customer is writing from a different email than the one ${orderRef} was placed under. Do NOT share any order details yet. Ask them to confirm the email used to place the order via conversation.ask_customer; only after they reply with the matching email may you share the status. If the email they give does not match the order, do not disclose — apologise and ask them to write in from the email used at checkout.]`;
+};
+
+export const buildInitialMessages = (
+  event: DomainEvent,
+  caseRow: {
+    readonly subject: string | null;
+    readonly threadId: ThreadId | null;
+    readonly context: Record<string, unknown>;
+  },
+): ChatMessage[] => {
+  const caseSubject = caseRow.subject;
+  if (event.type === "ticket.created") {
+    const subject = event.payload.subject ?? caseSubject ?? "(no subject)";
+    return [
+      {
+        role: "user",
+        // Subject + body are both customer-authored — fence them as untrusted.
+        content: wrapUntrusted(`Subject: ${subject}\n\n${event.payload.body}`),
+      },
+    ];
+  }
+  if (event.type === "customer.replied") {
+    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
+    const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
+    return [
+      buildUserMessageFromInbound(
+        directive ? `${directive}\n\n${body}` : body,
+        event.payload.attachments,
+      ),
+    ];
+  }
+  if (event.type === "message.received") {
+    // The payload IS the customer message — same shape as ticket.created
+    // but from a connector instead of a synthetic publisher. We pass the
+    // subject inline so the LLM sees thread context on turn 1, plus a
+    // bracketed header carrying `threadId` and the customer email so
+    // specialists (refund-review, etc.) can wire `conversation.reply`
+    // without an extra `conversation.fetch_thread` round trip.
+    const subject =
+      event.payload.subject ?? caseSubject ?? "(no subject)";
+    // The runtime-built header (threadId / from) is trusted and stays OUTSIDE
+    // the fence so the agent can still wire conversation.* tools from it. The
+    // customer-authored subject + body go INSIDE the untrusted fence.
+    const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
+    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
+    const customerBlock = wrapUntrusted(
+      `Subject: ${subject}\n\n${event.payload.bodyText}`,
+    );
+    const text = directive
+      ? `${header}\n\n${directive}\n\n${customerBlock}`
+      : `${header}\n\n${customerBlock}`;
+    return [buildUserMessageFromInbound(text, event.payload.attachments)];
+  }
+  if (event.type === "case.resumed") {
+    // A manager explicitly re-ran the case from the dashboard (or an
+    // operator replayed it). Unlike inbound events, there is no message
+    // payload here — the agent starts blind. Hand it everything the case
+    // row knows so it can re-orient: the thread id (to wire
+    // `conversation.fetch_thread` / `conversation.reply` without
+    // guessing), the subject, and the context patches accumulated on
+    // previous attempts (`case.update_context`).
+    const parts: string[] = [];
+    if (caseRow.threadId) {
+      parts.push(`[Thread context: threadId=${caseRow.threadId}]`);
+    }
+    parts.push(
+      `(system event: case.resumed — trigger: ${event.trigger})`,
+      "A manager handed this case back to you and asked you to try again.",
+    );
+    if (caseSubject) {
+      parts.push(`Subject: ${caseSubject}`);
+    }
+    if (Object.keys(caseRow.context).length > 0) {
+      // The context blob holds agent-derived fields plus free-text the LLM
+      // wrote on prior turns (notes, classification). Fence it so a prior
+      // turn's injected text can't act as instructions on resume.
+      parts.push(
+        `Context gathered on previous attempts:\n${wrapUntrusted(
+          JSON.stringify(caseRow.context, null, 2),
+        )}`,
+      );
+    }
+    if (caseRow.threadId) {
+      parts.push(
+        "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then complete the customer's request.",
+      );
+    }
+    return [{ role: "user", content: parts.join("\n\n") }];
+  }
+  if (event.type === "supplier.updated") {
+    // The supplier responded on a parked case. Re-enter the agent loop so it
+    // drafts a CUSTOMER-FACING reply. The supplier is a third party, so fence
+    // their note as untrusted and instruct the agent to REWRITE it — never
+    // quote it verbatim or reveal that the update came from a supplier. The
+    // trusted thread header stays OUTSIDE the fence so the agent can still wire
+    // conversation.* tools.
+    const parts: string[] = [];
+    // The customer email is runtime-stamped on the case context (trusted), so
+    // the agent can address conversation.reply without a thread fetch.
+    const customerEmail =
+      typeof caseRow.context["customerEmail"] === "string"
+        ? (caseRow.context["customerEmail"] as string)
+        : null;
+    if (caseRow.threadId) {
+      parts.push(
+        customerEmail
+          ? `[Thread context: threadId=${caseRow.threadId}, customer=${customerEmail}]`
+          : `[Thread context: threadId=${caseRow.threadId}]`,
+      );
+    }
+    parts.push(
+      "(system event: supplier.updated)",
+      "The supplier responded on this case. Draft a reply to the CUSTOMER that resolves their request, in your own words — do NOT quote the supplier's note verbatim, and never reveal that the update came from a supplier or warehouse.",
+    );
+    if (caseSubject) {
+      parts.push(`Subject: ${caseSubject}`);
+    }
+    const proposed = event.payload.proposedResolution;
+    parts.push(
+      `Supplier update (untrusted — rewrite for the customer):\n${wrapUntrusted(
+        `Note: ${event.payload.note}${
+          proposed ? `\n\nProposed resolution: ${proposed}` : ""
+        }`,
+      )}`,
+    );
+    if (caseRow.threadId) {
+      parts.push(
+        "Send the customer reply with conversation.reply, using the threadId and customer address from the header above.",
+      );
+    }
+    return [{ role: "user", content: parts.join("\n\n") }];
+  }
+  // Other events resume an in-flight case; for Phase 1 we don't have message
+  // history, so we just signal what woke the case up.
+  return [
+    {
+      role: "user",
+      content: `(system event: ${event.type})`,
+    },
+  ];
+};
+
+// Derive a human-readable preview of the tool input for the approval
+// email body. For `conversation.reply` / `conversation.ask_customer`,
+// the bodyText is the right thing to show; for other gated tools we
+// fall back to a JSON dump so the operator still sees what's being
+// proposed. Capped so even a long reply stays inside a reasonable
+// email height.
+const PREVIEW_MAX = 600;
+export const derivePreview = (input: unknown): string => {
+  if (input && typeof input === "object") {
+    const r = input as Record<string, unknown>;
+    if (typeof r["bodyText"] === "string") {
+      return (r["bodyText"] as string).slice(0, PREVIEW_MAX);
+    }
+  }
+  try {
+    return JSON.stringify(input, null, 2).slice(0, PREVIEW_MAX);
+  } catch {
+    return String(input).slice(0, PREVIEW_MAX);
+  }
+};
+
+export const deriveSubject = (input: unknown): string | null => {
+  if (input && typeof input === "object") {
+    const r = input as Record<string, unknown>;
+    if (typeof r["subject"] === "string") return r["subject"] as string;
+  }
+  return null;
+};
+
+/**
+ * Money details stamped onto `tool.invoked` audit rows for refund.create
+ * (audit L9). PermissionServiceLive sums these per case so the refund
+ * threshold compares the cumulative refunded amount, not each call alone.
+ */
+/**
+ * Stable execution key for the C2 dedup marker: the tool's input-derived
+ * idempotency key when declared (refund: orderId+amount+currency; reply:
+ * draftId) — so even a fresh LLM re-emission of the same action dedupes —
+ * otherwise the caller-provided fallback (LLM callId / approval id).
+ */
+export const executionKeyFor = (
+  tool: AnyTool,
+  input: unknown,
+  fallback: string,
+  scope?: string,
+): string => {
+  const base = (() => {
+    if (!tool.idempotencyKey) return fallback;
+    try {
+      return `${tool.name}:${tool.idempotencyKey(input as never)}`;
+    } catch {
+      return fallback;
+    }
+  })();
+  return scope ? `${scope}:${base}` : base;
+};
+
+/**
+ * Per-delivery discriminator for the C2 execution-marker key. The marker
+ * exists only to stop a REDELIVERED job (the same event replayed from turn
+ * 0 after a crash) from re-running a side-effecting tool. Because the
+ * marker is stored case-scoped and never expires, an UNscoped key also
+ * (wrongly) deduped a *different* delivery that happened to reuse a tool's
+ * idempotency key — e.g. a second customer reply on the same thread whose
+ * agent re-drafts `conversation.reply` with the same `draftId`, or a fresh
+ * approval execution after an earlier approved send on the same case. That
+ * silently swallowed the reply.
+ *
+ * Scoping the key by the delivery keeps the redelivery guarantee (a
+ * redelivered job carries the same discriminator) while letting a genuinely
+ * new delivery re-invoke the tool. Inbound messages key by their provider
+ * message id — stable across redeliveries, distinct per new message, and
+ * already the unit `ProcessedMessageStore` claims on; resuming events key by
+ * their own correlation id. (`supplier.updated` / `case.resumed` /
+ * `manual.takeover` fall back to the case id: the event carries no
+ * per-delivery id, so two of the same on one case could still cross-dedup —
+ * rare, and a follow-up.)
+ */
+export const deliveryScopeFor = (event: DomainEvent): string => {
+  switch (event.type) {
+    case "message.received":
+    case "customer.replied":
+      return `msg:${event.payload.messageId}`;
+    case "approval.approved":
+    case "approval.rejected":
+      return `appr:${event.approvalId}`;
+    case "timer.expired":
+      return `timer:${event.timerId}`;
+    case "ticket.created":
+      return `ticket:${event.source}`;
+    case "tracking.changed":
+      return `track:${event.orderId}`;
+    case "supplier.updated":
+    case "manual.takeover":
+    case "case.resumed":
+      return `case:${event.caseId}`;
+  }
+};
+
+/**
+ * RFC Message-IDs an inbound reply points at — its In-Reply-To plus every
+ * entry in its References chain. These are the ids of EARLIER messages in the
+ * thread (a prior inbound, or our own outbound reply), which the runtime looks
+ * up in the message-id index to correlate the reply to its existing case when
+ * the derived thread-id doesn't exact-match (clients reorder/truncate the
+ * chain, so `references[0]` is not a reliable thread root). The message's own
+ * id is deliberately excluded — it's new and can't match an existing case.
+ * Deduped, brackets-trimmed, empties dropped. Exported for unit testing.
+ */
+export const inboundReplyCandidateIds = (
+  payload: InboundMessage,
+): ReadonlyArray<string> => {
+  const trim = (s: string): string => s.replace(/^<+/, "").replace(/>+$/, "").trim();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | null | undefined): void => {
+    if (!raw) return;
+    const id = trim(raw);
+    if (id.length === 0 || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+  add(payload.inReplyTo);
+  for (const ref of payload.references ?? []) add(ref);
+  return out;
+};
+
+export const refundAuditDetails = (
+  toolName: string,
+  input: unknown,
+): Record<string, unknown> => {
+  if (toolName !== "refund.create") return {};
+  const parsed = parseRefundAmount(input);
+  return parsed
+    ? {
+        amountMinorUnits: parsed.amountMinorUnits,
+        currencyCode: parsed.currencyCode,
+      }
+    : {};
+};
+
+/**
+ * A concise, length-capped failure label for a FAILED `tool.invoked` audit row.
+ * Without this the audit only records `{ok:false}` — a real delivery failure
+ * (`ConversationSendFailed`, a provider tag, …) leaves no readable trace in prod
+ * (the reason only ever hit stdout). Prefers the `ToolOutputInvalid` issues (the
+ * conversation tools put the underlying `ConversationError` `_tag` there), then a
+ * raw error `_tag`, then a stringified fallback. Each issue is truncated at the
+ * first `:` so a recipient/mailbox suffix (e.g. an email in
+ * `recipient_not_in_thread:<addr>`) can never leak into the audit — we keep the
+ * diagnostic KEY, not the PII value.
+ */
+export const toolFailureAuditDetail = (
+  left: unknown,
+): Record<string, string> => {
+  if (left === null || left === undefined) return {};
+  if (typeof left !== "object") {
+    const s = String(left).trim();
+    return s ? { error: s.slice(0, 200) } : {};
+  }
+  const e = left as {
+    readonly _tag?: unknown;
+    readonly issues?: unknown;
+    readonly code?: unknown;
+    readonly message?: unknown;
+    readonly name?: unknown;
+  };
+  if (Array.isArray(e.issues)) {
+    const joined = e.issues
+      .filter((i): i is string => typeof i === "string")
+      .map((i) => i.split(":")[0] ?? i)
+      .join(",")
+      .slice(0, 200);
+    if (joined) return { error: joined };
+  }
+  if (typeof e._tag === "string" && e._tag) return { error: e._tag };
+  // Non-tagged failures (a bare Error from the connector, an SMTP error): keep a
+  // readable reason. Prefer a short error CODE (e.g. nodemailer `EAUTH`,
+  // `ETIMEDOUT`) over the free-text message, then the message, then the class.
+  if (typeof e.code === "string" && e.code) return { error: e.code.slice(0, 200) };
+  if (typeof e.message === "string" && e.message) {
+    return { error: e.message.slice(0, 200) };
+  }
+  if (typeof e.name === "string" && e.name) return { error: e.name.slice(0, 200) };
+  return {};
+};
+
+/**
+ * Lock key for serializing a tick (audit L2): the case id when the event
+ * references (or correlates to) an existing case; the thread key for a
+ * first message whose case doesn't exist yet; null for events with no
+ * case affinity (fresh ticket create, unsupported types).
+ */
+export const deriveTickLockKey = (
+  event: DomainEvent,
+  cases: Context.Tag.Service<CaseRepository>,
+): Effect.Effect<string | null> => {
+  switch (event.type) {
+    case "customer.replied":
+    case "approval.approved":
+    case "approval.rejected":
+    case "supplier.updated":
+    case "timer.expired":
+    case "manual.takeover":
+    case "case.resumed":
+      return Effect.succeed(`case-tick:${event.caseId}`);
+    case "message.received":
+      return cases
+        .findByThreadId(
+          makeTenantId(event.tenantId),
+          makeThreadId(event.threadId),
+          parseThreadId(event.threadId)?.provider,
+          event.payload.mailbox,
+        )
+        .pipe(
+          Effect.map((row) =>
+            row
+              ? `case-tick:${row.id}`
+              : `thread-tick:${event.tenantId}:${event.payload.mailbox ?? "legacy"}:${event.threadId}`,
+          ),
+          Effect.catchAll(() =>
+            Effect.succeed(
+              `thread-tick:${event.tenantId}:${event.payload.mailbox ?? "legacy"}:${event.threadId}`,
+            ),
+          ),
+        );
+    case "ticket.created":
+    case "tracking.changed":
+      return Effect.succeed(null);
+  }
+};
+
+/**
+ * Prompt-injection mitigation (refund scope): warn when a proposed
+ * `refund.create` targets an order whose customer email doesn't match the
+ * case's bound customer. A prompt-injected agent could be steered to refund an
+ * unrelated order; the order's customer is authoritative (Shopify data) and
+ * the case's `customerEmail` is stamped by the runtime from the inbound
+ * sender (not the LLM), so a divergence is a strong "this refund may be aimed
+ * at the wrong order" signal for the human approver.
+ *
+ * Returns the risk-flag string to stamp, or null when there's nothing to warn
+ * about: not a refund, the case customer is unknown, the order wasn't looked
+ * up this tick, the looked-up order has no email, or the emails match. Fails
+ * OPEN (null) on every missing input so it never blocks a legitimate refund —
+ * it only adds a warning when it has positive evidence of a mismatch.
+ *
+ * Pure + exported so the decision logic is unit-tested without the runtime.
+ */
+export const refundCustomerMismatchFlag = (
+  input: unknown,
+  caseContext: Record<string, unknown>,
+  seenOrderEmails: ReadonlyMap<string, string | null>,
+): string | null => {
+  const caseEmail = caseContext["customerEmail"];
+  if (typeof caseEmail !== "string" || caseEmail.trim() === "") return null;
+  if (!input || typeof input !== "object") return null;
+  const orderId = (input as Record<string, unknown>)["orderId"];
+  if (typeof orderId !== "string") return null;
+  if (!seenOrderEmails.has(orderId)) return null;
+  const orderEmail = seenOrderEmails.get(orderId);
+  if (typeof orderEmail !== "string" || orderEmail.trim() === "") return null;
+  if (orderEmail.trim().toLowerCase() === caseEmail.trim().toLowerCase()) {
+    return null;
+  }
+  return "refund_customer_mismatch";
+};
+
+/** Trim + lowercase an email for comparison, or null if it isn't a usable string. */
+export const normalizeEmailForMatch = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  return v === "" ? null : v;
+};
+
+/** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */
+export const readRiskFlags = (context: Record<string, unknown>): string[] =>
+  Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+
+/**
+ * Order-status identity guard (the `where_is_order` flow). Returns
+ * `"order_customer_mismatch"` when the looked-up order's customer email differs
+ * from the case's bound (runtime-stamped) customer, else null. The sibling of
+ * {@link refundCustomerMismatchFlag} for read-disclosure rather than refunds:
+ * replying with the order's status would leak another customer's order details.
+ *
+ * Fails OPEN (null) on any missing input — an unknown order email or an
+ * unidentified case customer never raises a false alarm. Pure + exported so the
+ * decision is unit-tested without the runtime.
+ */
+export const orderCustomerMismatchFlag = (
+  orderEmail: unknown,
+  caseContext: Record<string, unknown>,
+): string | null => {
+  const order = normalizeEmailForMatch(orderEmail);
+  const caseEmail = normalizeEmailForMatch(caseContext["customerEmail"]);
+  if (!order || !caseEmail) return null;
+  return order === caseEmail ? null : "order_customer_mismatch";
+};
+
+/**
+ * Deterministic identity check for the order-status verification challenge:
+ * does the customer's reply state the email the order was placed under? Pulls
+ * email-shaped tokens out of the (untrusted) reply text and matches any against
+ * the order email, normalized. Run by the RUNTIME — never the model — so a
+ * prompt-injected reply body can't talk its way to a pass. Fails closed (false)
+ * on missing inputs.
+ */
+export const replyProvesOrderIdentity = (
+  replyText: unknown,
+  orderEmail: unknown,
+): boolean => {
+  const target = normalizeEmailForMatch(orderEmail);
+  if (!target || typeof replyText !== "string") return false;
+  const tokens = replyText.toLowerCase().match(/[^\s<>()"']+@[^\s<>()"']+/g);
+  if (!tokens) return false;
+  return tokens.some((t) => t.replace(/[.,;:!?]+$/, "") === target);
+};
+
+/**
+ * Backstop that survives the tenant's auto/ask toggle: should a
+ * `conversation.reply` on this case be forced to human approval no matter what
+ * the per-agent permission resolves to? True when the case is a
+ * `where_is_order` case flagged as an order/customer mismatch whose requester
+ * has NOT verified their identity — i.e. sending the reply would disclose a
+ * different customer's order. Once {@link replyProvesOrderIdentity} has stamped
+ * `identityVerified`, the gate lifts and the reply flows on its normal
+ * permission. Pure + exported for unit coverage.
+ */
+export const shouldForceReplyApproval = (
+  toolName: string,
+  context: Record<string, unknown>,
+): boolean => {
+  if (toolName !== "conversation.reply") return false;
+  if (context["classification"] !== "where_is_order") return false;
+  if (context["identityVerified"] === true) return false;
+  return readRiskFlags(context).includes("order_customer_mismatch");
+};
+
+export const riskFor = (tool: AnyTool): ApprovalRiskLevel => {
+  switch (tool.risk) {
+    case "read":
+      return "low";
+    case "communicate":
+    case "write":
+      return "medium";
+    case "money":
+      return "high";
+  }
+};
+
+/**
+ * Apply per-tenant per-agent overrides on top of the in-code AgentConfig:
+ *   - `model` replaces `AgentConfig.model`.
+ *   - `systemPrompt` is appended to `AgentConfig.promptTemplate` as extra
+ *     instructions (brand voice / policy / tone) — the built-in prompt is kept
+ *     so the agent's tool / handoff / approval scaffolding survives.
+ *     `buildSystemPrompt` reads the patched `promptTemplate`, so the append
+ *     flows through for the initial agent and any handoff.
+ *   - `toolPermissions` overlays the tenant's per-tool "ask first" vs "auto"
+ *     choices onto `permissionOverrides`. The tenant value wins over any in-code
+ *     pin (e.g. an agent that statically pins a tool to `allow`), since the
+ *     merchant's explicit choice is the more specific intent. `PermissionService`
+ *     then reads the merged map unchanged.
+ * Returns the same object reference when no override applies, so the hot path
+ * doesn't allocate. Pure + exported so it can be unit-tested without booting the
+ * runtime layer. Future fields (temperature, …) plug in here.
+ */
+export const applyOverride = (
+  agent: AgentConfig,
+  overrideMap: ReadonlyMap<AgentConfig["id"], AgentOverride>,
+): AgentConfig => {
+  const o = overrideMap.get(agent.id);
+  if (!o) return agent;
+  let next = agent;
+  if (o.model && o.model !== agent.model) {
+    next = { ...next, model: o.model };
+  }
+  const extra = o.systemPrompt?.trim();
+  if (extra) {
+    next = {
+      ...next,
+      promptTemplate: `${agent.promptTemplate}\n\n${extra}`,
+    };
+  }
+  if (o.toolPermissions && Object.keys(o.toolPermissions).length > 0) {
+    next = {
+      ...next,
+      permissionOverrides: {
+        ...next.permissionOverrides,
+        ...o.toolPermissions,
+      },
+    };
+  }
+  return next;
+};
