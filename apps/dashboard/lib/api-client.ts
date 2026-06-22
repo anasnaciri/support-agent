@@ -942,6 +942,23 @@ export const api = {
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
 
+  // Send a human-drafted customer reply while driving a taken-over case. Goes
+  // out on the same connector/thread the agent uses; the case stays in
+  // human_takeover. Returns the discriminated outcome (sent | not_in_takeover |
+  // no_thread | send_failed | …).
+  sendReply: async (
+    ctx: CallCtx,
+    caseId: string,
+    bodyText: string,
+  ): Promise<{ readonly kind: string }> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/reply`, {
+      method: "POST",
+      body: { bodyText },
+      ctx,
+    });
+    return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
   // ---- Members & roles (members.manage) ----
   members: async (ctx: CallCtx): Promise<MembersResponse> =>
     okBody("/members", ctx) as Promise<MembersResponse>,

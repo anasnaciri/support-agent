@@ -14,7 +14,11 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-NEXT: add a draft email feature on the cases/:id page: an input where the human can draft and send an email, it will also have rephrase with ai feature, the rephrase model will be configured in the settings, and from a small drop down on top of the text input (make the small dropdown be only the name of the current model plus a chevron down, make it minimalistic)
+NEXT: draft-email feature on cases/:id — **slice 1 (the input) LANDED 2026-06-22** (composer
+that drafts + sends a customer reply while in human_takeover; see "Manual reply composer" below).
+Remaining slices: (2) "Rephrase with AI" action on the draft; (3) the rephrase model is configured
+in settings; (4) a minimalistic model dropdown on top of the text input (just the current model
+name + a chevron-down).
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
@@ -92,6 +96,33 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 ---
 
 ### Session history (summarized)
+
+- **2026-06-22 — Manual reply composer (draft-email feature, slice 1 of 4).** A human driving a case
+  (`human_takeover`) can now draft and send a customer reply straight from `/cases/:id`. Product
+  decisions (asked + recorded): composer is shown **only in `human_takeover`** (gated on the existing
+  `canResume`), and a manual send **keeps the case in `human_takeover`** (no auto-resolve — the person
+  decides when they're done). Build (TDD):
+  - **Core** `apps/api/src/features/dashboard/case-reply.ts` — DI'd `sendManualReply` (mirrors
+    `retryCaseNow`): guards `empty_body → case_not_found → not_in_takeover → no_thread → send_failed`,
+    best-effort `recordSent` (a bookkeeping failure never downgrades a real send). 7 unit tests.
+  - **Endpoint** `POST /dashboard/cases/:id/reply` (`handleDashboardCaseReply`), gated on the
+    pre-existing-but-unused `cases.reply` RBAC permission. Sends via `ConversationService.reply` (same
+    connector/thread the agent uses): resolves the live thread to pick the recipient (latest inbound
+    sender) + `inReplyTo`, lets the connector inherit the `Re:` subject, then **replicates the runtime's
+    `recordOutboundReplyId`** (`recordMessageId` direction `outbound`) so the customer's next reply still
+    threads back, plus a `case.replied` audit row.
+  - **Layer**: added `AuditLogService` (`AuditLogServiceLive`) to `ApiLayer` (it wasn't provided before)
+    so the handler can write the audit entry.
+  - **UI**: `ReplyComposer.tsx` (Textarea + Send) + `sendReplyAction`; rendered on the case page only
+    when `status === human_takeover`; result banner (`sent` / `send_failed` / `not_in_takeover` / …).
+  - Verified: `pnpm build` green; new + sibling unit tests pass (11/11); dashboard `typecheck` clean.
+  - **Follow-ups / known gaps**: (a) a manual send is currently **synchronous** — on connector failure
+    it reports `send_failed` and does **not** enqueue the durable `reply_deliveries` outbox (reusing it
+    would wrongly auto-resolve the case via the worker sweep; teaching the sweep to skip manual replies
+    is the durable-retry follow-up); (b) if the live thread can't be resolved we surface `send_failed`
+    rather than falling back to the context `customerEmail`; (c) on traditional IMAP the sent message may
+    not appear in the "Email thread" tab (same Sent-folder limitation as agent replies) — the
+    `case.replied` audit row is what shows it in Activity/Full audit. **Not yet committed.**
 
 - **2026-06-22 — Consolidated branches/worktrees back into `main`.** Fast-forwarded
   `fix/imap-smtp-send-reliability` into `main`, then merged `fix/runtime-recovery` via merge commit

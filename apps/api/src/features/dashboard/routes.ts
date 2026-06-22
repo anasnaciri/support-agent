@@ -11,6 +11,7 @@ import {
   handleDashboardCaseConversationThread,
   handleDashboardCaseDetail,
   handleDashboardCaseEvents,
+  handleDashboardCaseReply,
   handleDashboardCaseShopify,
   handleDashboardCases,
   handleDashboardConnections,
@@ -225,6 +226,12 @@ export const registerDashboardRoutes = (
     "Re-send the drafted customer reply whose delivery failed (manager)",
     handleDashboardRetrySend,
     "cases.retry",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/reply",
+    "Send a human-drafted customer reply while driving a taken-over case",
+    handleDashboardCaseReply,
+    "cases.reply",
   );
   // Org-scoped (no resolved workspace) — these use authenticateDashboardOrg and
   // remain reachable by any org member; workspace/account management is an

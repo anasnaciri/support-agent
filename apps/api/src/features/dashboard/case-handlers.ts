@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   applyApprovalDecision,
+  AuditLogService,
   CaseRepository,
   ConnectorCredentialStore,
   ConversationService,
@@ -10,7 +11,8 @@ import {
   namespaceThreadId,
   ShopifyAppProvisioningStore,
 } from "@support-agent/services";
-import { CaseId, TenantId, UserId } from "@support-agent/agent-core";
+import { CaseId, TenantId, ThreadId, UserId } from "@support-agent/agent-core";
+import { randomUUID } from "node:crypto";
 import {
   activeShopifyShopDomain,
   agentOverrides,
@@ -35,6 +37,10 @@ import {
 } from "@support-agent/db";
 import { decideAuthz } from "../../auth/dashboard-authz.js";
 import { retryCaseNow } from "./case-retry.js";
+import {
+  sendManualReply,
+  type ManualReplyCaseView,
+} from "./case-reply.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
@@ -611,4 +617,186 @@ export const handleDashboardRetrySend = async (
     outcome.kind === "no_failed_delivery" ? 404 : 200,
     outcome,
   );
+};
+
+// POST /dashboard/cases/:id/reply — a human drafts and sends a customer-facing
+// reply directly, while driving the case in `human_takeover`. The reply goes
+// out on the SAME connector/thread the agent uses (ConversationService.reply),
+// so threading stays natural; the case stays in `human_takeover` (no
+// auto-resolve — the person decides when they're done). The orchestration +
+// guards live in the unit-tested `sendManualReply` core; this handler wires it
+// to the live services.
+export const handleDashboardCaseReply = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const bodyText = typeof body["bodyText"] === "string" ? body["bodyText"] : "";
+  const bodyHtml =
+    typeof body["bodyHtml"] === "string" ? (body["bodyHtml"] as string) : null;
+  const tenantId = TenantId(auth.tenantId);
+  const caseId = CaseId(id);
+  const userId = auth.userId;
+  // One idempotency key for this send; reused if the connector retries
+  // internally within the request (master-plan §9).
+  const draftId = `manual:${randomUUID()}`;
+
+  // Resolve the live thread to learn who to reply to (the customer) + which
+  // message to thread under. Never fails — degrades to a tagged error result
+  // the core surfaces as `send_failed`.
+  const deliverEffect = (threadId: string, mailbox: string) =>
+    Effect.gen(function* () {
+      const cases = yield* CaseRepository;
+      const conversation = yield* ConversationService;
+      const connectorStore = yield* ConnectorCredentialStore;
+      const rawThreadId = parseThreadId(threadId)?.raw ?? threadId;
+      const provider =
+        parseThreadId(threadId)?.provider ??
+        (yield* cases.findThreadProvider(tenantId, ThreadId(threadId)));
+      const connections = yield* connectorStore.listForTenant(tenantId);
+      const resolution = yield* resolveCaseConversationThread(
+        mailbox,
+        provider,
+        connections,
+        (candidateProvider, mb) =>
+          conversation.fetchThread(
+            tenantId,
+            namespaceThreadId(candidateProvider, rawThreadId),
+            mb,
+          ),
+      );
+      if (!resolution.ok) {
+        return { kind: "error" as const, error: `thread_${resolution.reason}` };
+      }
+      // Reply to the latest inbound message's sender (the customer) and thread
+      // under it; fall back to any thread participant that isn't our mailbox.
+      const own = mailbox.trim().toLowerCase();
+      const inbound = resolution.thread.messages
+        .filter((m) => m.direction === "inbound")
+        .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+      const latestInbound = inbound[inbound.length - 1];
+      const target = latestInbound
+        ? {
+            to: { name: latestInbound.from.name, email: latestInbound.from.email },
+            inReplyToMessageId: latestInbound.id,
+          }
+        : (() => {
+            const other = resolution.thread.participants.find(
+              (p) => p.email.trim().toLowerCase() !== own,
+            );
+            return other
+              ? {
+                  to: { name: other.name, email: other.email },
+                  inReplyToMessageId: null,
+                }
+              : null;
+          })();
+      if (!target) return { kind: "error" as const, error: "no_recipient" };
+      const sent = yield* conversation
+        .reply(tenantId, {
+          threadId: ThreadId(threadId),
+          mailbox,
+          to: [target.to],
+          // null → connector inherits the thread subject (`Re: <subject>`).
+          subject: null,
+          bodyText,
+          bodyHtml,
+          attachments: [],
+          inReplyToMessageId: target.inReplyToMessageId,
+          draftId,
+        })
+        .pipe(Effect.either);
+      return sent._tag === "Left"
+        ? { kind: "error" as const, error: sent.left._tag }
+        : {
+            kind: "ok" as const,
+            sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
+          };
+    }).pipe(
+      Effect.catchAll((e) =>
+        Effect.succeed({
+          kind: "error" as const,
+          error:
+            typeof (e as { _tag?: unknown })._tag === "string"
+              ? String((e as { _tag: string })._tag)
+              : String(e),
+        }),
+      ),
+    );
+
+  const outcome = await sendManualReply({
+    bodyText,
+    loadCase: () =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const cases = yield* CaseRepository;
+            return yield* cases.getById(caseId, tenantId).pipe(
+              Effect.map(
+                (c): ManualReplyCaseView => ({
+                  status: c.status,
+                  threadId: c.threadId,
+                  mailbox: c.mailbox,
+                }),
+              ),
+            );
+          }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+          layer,
+        ),
+      ),
+    deliver: async ({ threadId, mailbox }) => {
+      const result = await Effect.runPromise(
+        Effect.provide(deliverEffect(threadId, mailbox), layer),
+      );
+      if (result.kind === "error") throw new Error(result.error);
+      return result.sent;
+    },
+    recordSent: (sent) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const cases = yield* CaseRepository;
+            const audit = yield* AuditLogService;
+            // Index the outbound message id so the customer's next reply threads
+            // back to this case (mirrors the runtime's recordOutboundReplyId).
+            yield* cases
+              .recordMessageId({
+                tenantId,
+                caseId,
+                messageId: sent.id,
+                direction: "outbound",
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+            yield* audit
+              .record({
+                tenantId,
+                caseId,
+                actor: { type: "user", id: userId },
+                action: "case.replied",
+                details: { messageId: sent.id, via: "manual_reply" },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+          }),
+          layer,
+        ),
+      ),
+  });
+
+  const status =
+    outcome.kind === "sent"
+      ? 200
+      : outcome.kind === "case_not_found"
+        ? 404
+        : outcome.kind === "empty_body"
+          ? 400
+          : outcome.kind === "send_failed"
+            ? 502
+            : 409; // not_in_takeover | no_thread
+  return sendJson(res, status, outcome);
 };

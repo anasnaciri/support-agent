@@ -46,6 +46,24 @@ export const retryAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?retried=${result.kind}`);
 };
 
+// Send a human-drafted customer reply while driving a taken-over case. Goes
+// out on the same email thread the agent uses; the case stays in human_takeover.
+export const sendReplyAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const bodyText = formData.get("bodyText");
+  const ctx = await getDashboardContext();
+
+  const result = await api.sendReply(
+    ctx,
+    caseId,
+    typeof bodyText === "string" ? bodyText : "",
+  );
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?replied=${result.kind}`);
+};
+
 // Re-send the SAME drafted reply whose delivery failed (distinct from the
 // agent retry above): requeues the failed reply-delivery for the worker sweep.
 export const retrySendAction = async (formData: FormData): Promise<void> => {

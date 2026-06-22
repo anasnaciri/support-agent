@@ -2,6 +2,7 @@ import { Layer } from "effect";
 import {
   AccountOpenRouterCredentialStore,
   ApprovalService,
+  AuditLogService,
   BlobStorage,
   BlobStorageTest,
   CaseRepository,
@@ -19,6 +20,7 @@ import {
 import {
   AccountOpenRouterCredentialStoreLive,
   ApprovalServiceLive,
+  AuditLogServiceLive,
   CaseRepositoryLive,
   ConnectorCredentialStoreLive,
   DbClient,
@@ -492,6 +494,10 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
   const tx = TransactionRunnerLive.pipe(Layer.provide(dbLayer));
+  // AuditLogService for the manual-reply handler (records `case.replied` so a
+  // human-sent reply shows in the case timeline). Non-redacted default —
+  // matches the existing dashboard read/write paths.
+  const audit = AuditLogServiceLive.pipe(Layer.provide(dbLayer));
   // BlobStorage: Live over R2 when R2_* env is set (Gmail webhook
   // uploads image attachments here so the runtime / LLM can read them
   // back); in-memory Test layer otherwise — dev + integration tests
@@ -530,6 +536,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     conversation,
     approvals,
     tx,
+    audit,
     dbLayer,
     blob,
     shopify,
@@ -547,6 +554,7 @@ export type ApiLayer = Layer.Layer<
   | CaseRepository
   | ShopifyAppProvisioningStore
   | ApprovalService
+  | AuditLogService
   | TransactionRunner
   | DbClient
   | BlobStorage

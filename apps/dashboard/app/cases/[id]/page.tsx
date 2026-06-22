@@ -26,6 +26,7 @@ import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
+import { ReplyComposer } from "./ReplyComposer";
 import {
   resumeAction,
   retryAction,
@@ -65,6 +66,7 @@ interface Params {
     readonly resumed?: string;
     readonly retried?: string;
     readonly retrySend?: string;
+    readonly replied?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -146,6 +148,35 @@ const retrySendBanner = (kind: string | undefined): Banner | null => {
     return {
       tone: "info",
       text: "There's no failed reply to re-send on this case — no change.",
+    };
+  }
+  return null;
+};
+
+const replyBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "sent") {
+    return { tone: "success", text: "Your reply was sent to the customer." };
+  }
+  if (kind === "send_failed") {
+    return {
+      tone: "warn",
+      text: "The reply couldn't be sent. Check the connected mailbox and try again.",
+    };
+  }
+  if (kind === "empty_body") {
+    return { tone: "warn", text: "Write a message before sending." };
+  }
+  if (kind === "not_in_takeover") {
+    return {
+      tone: "info",
+      text: "You can only send a manual reply while you've taken over the case.",
+    };
+  }
+  if (kind === "no_thread") {
+    return {
+      tone: "warn",
+      text: "This case has no connected email thread to reply on.",
     };
   }
   return null;
@@ -455,6 +486,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     resumeBanner(sp.resumed) ??
     retryBanner(sp.retried) ??
     retrySendBanner(sp.retrySend) ??
+    replyBanner(sp.replied) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread] = await Promise.all([
@@ -678,6 +710,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           shopDomain={shopDomain}
         />
       </div>
+
+      {canResume ? (
+        <ReplyComposer caseId={caseRow.id} customerEmail={customerEmail} />
+      ) : null}
 
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
