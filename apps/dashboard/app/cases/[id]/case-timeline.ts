@@ -97,6 +97,10 @@ const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
   approval_denied_by_policy:
     "Your policy settings blocked the approved action.",
   approved_tool_failed: "The approved action failed while executing.",
+  approved_tool_unavailable: "The approved action is no longer available.",
+  approval_not_runnable:
+    "The approval was no longer runnable when the workflow resumed.",
+  supplier_unreachable: "The supplier could not be reached.",
   "approval rejected": "A draft was rejected, so the case moved to you.",
   llm_credential_missing: "The AI provider key is missing.",
   llm_credential_revoked: "The AI provider key was revoked.",

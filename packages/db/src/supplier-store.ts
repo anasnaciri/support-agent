@@ -458,10 +458,12 @@ export const recordSupplierUpdate = async (
 
 export interface UnsentSupplierEscalation {
   readonly id: string;
+  readonly caseId: string;
   readonly tenantId: string;
   readonly supplierEmail: string;
   readonly problem: string;
   readonly orderRef: string | null;
+  readonly notifyAttempts: number;
 }
 
 /**
@@ -477,17 +479,21 @@ export const listUnsentSupplierEscalations = async (
   const rows = await db
     .select({
       id: caseSupplierEscalations.id,
+      caseId: caseSupplierEscalations.caseId,
       tenantId: caseSupplierEscalations.tenantId,
       supplierEmail: suppliers.email,
       problem: caseSupplierEscalations.problem,
       orderRef: caseSupplierEscalations.orderRef,
+      notifyAttempts: caseSupplierEscalations.notifyAttempts,
     })
     .from(caseSupplierEscalations)
     .innerJoin(suppliers, eq(suppliers.id, caseSupplierEscalations.supplierId))
+    .innerJoin(cases, eq(cases.id, caseSupplierEscalations.caseId))
     .where(
       and(
         sql`${caseSupplierEscalations.notifiedAt} IS NULL`,
         sql`${caseSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
+        eq(cases.status, "waiting_for_supplier"),
       ),
     )
     .orderBy(asc(caseSupplierEscalations.createdAt))

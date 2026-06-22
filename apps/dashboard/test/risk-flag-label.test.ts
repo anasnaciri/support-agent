@@ -23,4 +23,10 @@ describe("riskFlagLabel", () => {
       "Reply didn't send — delivery failed",
     );
   });
+
+  it("humanises the supplier-unreachable flag", () => {
+    expect(riskFlagLabel("supplier_unreachable")).toBe(
+      "Supplier could not be reached",
+    );
+  });
 });

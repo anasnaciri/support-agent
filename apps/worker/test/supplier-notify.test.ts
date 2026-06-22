@@ -1,7 +1,18 @@
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
+import { AgentId, TenantId } from "@support-agent/agent-core";
 import type { UnsentSupplierEscalation } from "@support-agent/db";
-import type { SendSupplierEscalationInput } from "@support-agent/services";
 import {
+  AuditLogService,
+  AuditLogServiceTest,
+  CaseRepository,
+  CaseRepositoryTest,
+  TransactionRunnerPassthrough,
+  type SendSupplierEscalationInput,
+} from "@support-agent/services";
+import {
+  SUPPLIER_UNREACHABLE_FLAG,
+  escalateSupplierNotifyFailure,
   fireSupplierNotificationsOnce,
   type SendOutcome,
   type SupplierNotifyDeps,
@@ -12,10 +23,12 @@ const esc = (
   over: Partial<UnsentSupplierEscalation> = {},
 ): UnsentSupplierEscalation => ({
   id,
+  caseId: "case-1",
   tenantId: "t1",
   supplierEmail: "wh@x.com",
   problem: "P",
   orderRef: "#1",
+  notifyAttempts: 0,
   ...over,
 });
 
@@ -39,9 +52,11 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
       recordFailure: async (id, e) => {
         failures.push([id, e]);
       },
+      abandonFailure: async () => {},
+      maxAttempts: 6,
     };
     const res = await fireSupplierNotificationsOnce(deps);
-    expect(res).toEqual({ sent: 1, failed: 1 });
+    expect(res).toEqual({ sent: 1, failed: 1, abandoned: 0 });
     expect(marked).toEqual(["e1"]); // only the success is stamped notified
     expect(failures).toEqual([["e2", "smtp down"]]); // the failure is retried later
     // Portal deep link is built per-escalation; the PII-free projection forwarded.
@@ -67,6 +82,8 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
       },
       markNotified: async () => {},
       recordFailure: async () => {},
+      abandonFailure: async () => {},
+      maxAttempts: 6,
     });
     expect(captured?.portalUrl).toBeNull();
   });
@@ -78,7 +95,73 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
       send: async () => "sent",
       markNotified: async () => {},
       recordFailure: async () => {},
+      abandonFailure: async () => {},
+      maxAttempts: 6,
     });
-    expect(res).toEqual({ sent: 0, failed: 0 });
+    expect(res).toEqual({ sent: 0, failed: 0, abandoned: 0 });
+  });
+
+  it("abandons instead of retrying when the final notification attempt fails", async () => {
+    const failures: Array<[string, string]> = [];
+    const abandoned: Array<[string, string]> = [];
+    const res = await fireSupplierNotificationsOnce({
+      portalBaseUrl: null,
+      listUnsent: async () => [esc("e-cap", { notifyAttempts: 5 })],
+      send: async () => ({ error: "hard bounce" }) as SendOutcome,
+      markNotified: async () => {},
+      recordFailure: async (id, error) => {
+        failures.push([id, error]);
+      },
+      abandonFailure: async (escalation, error) => {
+        abandoned.push([escalation.id, error]);
+      },
+      maxAttempts: 6,
+    });
+
+    expect(res).toEqual({ sent: 0, failed: 1, abandoned: 1 });
+    expect(failures).toEqual([]);
+    expect(abandoned).toEqual([["e-cap", "hard bounce"]]);
+  });
+
+  it("parks and flags the merchant case when supplier notification is abandoned", async () => {
+    const layer = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      TransactionRunnerPassthrough,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const row = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("missing-package-agent"),
+            status: "waiting_for_supplier",
+            subject: "Missing order",
+          });
+          yield* escalateSupplierNotifyFailure({
+            escalation: esc("e-cap", { caseId: row.id }),
+            error: "hard bounce",
+          });
+          const fetched = yield* repo.getById(row.id);
+          const entries = yield* audit.forCase(row.id);
+          return { fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.fetched.context["riskFlags"]).toContain(
+      SUPPLIER_UNREACHABLE_FLAG,
+    );
+    const escalation = out.entries.find(
+      (entry) => entry.action === "case.escalated_to_human",
+    );
+    expect(escalation?.details["reason"]).toBe(SUPPLIER_UNREACHABLE_FLAG);
+    expect(escalation?.details["escalationId"]).toBe("e-cap");
   });
 });

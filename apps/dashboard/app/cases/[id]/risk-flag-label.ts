@@ -18,5 +18,8 @@ export const riskFlagLabel = (flag: string): string => {
   if (flag === "reply_delivery_failed") {
     return "Reply didn't send — delivery failed";
   }
+  if (flag === "supplier_unreachable") {
+    return "Supplier could not be reached";
+  }
   return humanizeSlug(flag);
 };

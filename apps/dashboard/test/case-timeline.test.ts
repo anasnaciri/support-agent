@@ -142,6 +142,26 @@ describe("curatedTimelineEvent", () => {
     expect(description).not.toContain("weird_new_reason");
   });
 
+  it("shows recovery-dead-end escalation reasons with specific copy", () => {
+    const approvalItem = curatedTimelineEvent(
+      entry("case.escalated_to_human", {
+        reason: "approved_tool_unavailable",
+      }),
+      null,
+    ) as { description: string | null };
+    expect(approvalItem.description).toBe(
+      "The approved action is no longer available.",
+    );
+
+    const supplierItem = curatedTimelineEvent(
+      entry("case.escalated_to_human", { reason: "supplier_unreachable" }),
+      null,
+    ) as { description: string | null };
+    expect(supplierItem.description).toBe(
+      "The supplier could not be reached.",
+    );
+  });
+
   it("shows takeover, hand-back, and resolution milestones", () => {
     expect(
       curatedTimelineEvent(entry("case.taken_over", {}), null),

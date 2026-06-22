@@ -52,6 +52,7 @@ import {
   parseRequestedResolution,
 } from "./return-labels";
 import { buildContextRows } from "./case-context";
+import { shouldShowRetrySendAction } from "./retry-send-visibility";
 import { cn } from "@/lib/utils";
 
 interface Params {
@@ -498,10 +499,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
-  // A drafted customer reply failed to send. The agent already escalated the
-  // case; offer a direct "re-send the same email" action (distinct from the
-  // agent retry, which re-drafts).
-  const replyDeliveryFailed = riskFlags.includes("reply_delivery_failed");
+  // A drafted customer reply failed to send. The active reply-delivery row is
+  // the source of truth for whether the dashboard can re-send that same draft.
+  const showRetrySend = shouldShowRetrySendAction({
+    caseStatus: caseRow.status,
+    activeReplyDelivery: detail.activeReplyDelivery,
+    riskFlags,
+  });
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .slice()
@@ -578,7 +582,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           ) : null}
           {canResume ? (
             <div className="ml-auto flex items-center gap-2">
-              {replyDeliveryFailed ? (
+              {showRetrySend ? (
                 <form action={retrySendAction}>
                   <input type="hidden" name="caseId" value={caseRow.id} />
                   <SubmitButton
@@ -602,7 +606,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               <form action={retryAction}>
                 <input type="hidden" name="caseId" value={caseRow.id} />
                 <SubmitButton
-                  variant={replyDeliveryFailed ? "outline" : "default"}
+                  variant={showRetrySend ? "outline" : "default"}
                   pendingLabel="Retrying…"
                   title="Hand the case back and have the agent try again right now"
                 >
