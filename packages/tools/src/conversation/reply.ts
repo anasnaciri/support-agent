@@ -24,6 +24,11 @@ const Participant = Schema.Struct({
  * have weak `fetchThread` support, and a genuinely bogus thread id makes
  * the send itself fail. The exfiltration shape this guards against
  * (real thread, foreign recipient) always has fetchable history.
+ *
+ * Returns the fetched thread so the caller can REUSE it to derive the
+ * reply subject — otherwise the connector would open a second connection
+ * to read the same thread, which is real connection pressure on stateful
+ * IMAP/SMTP providers. Returns `null` when the fetch failed (fail-open).
  */
 export const assertRecipientsInThread = (
   tenantId: import("@support-agent/agent-core").TenantId,
@@ -31,7 +36,7 @@ export const assertRecipientsInThread = (
   threadId: string,
   toolName: string,
   mailbox?: string,
-): Effect.Effect<void, ToolOutputInvalid, ConversationService> =>
+): Effect.Effect<ConversationThread | null, ToolOutputInvalid, ConversationService> =>
   Effect.gen(function* () {
     if (mailbox) {
       const ownAddress = mailbox.trim().toLowerCase();
@@ -54,8 +59,9 @@ export const assertRecipientsInThread = (
     const threadEither = yield* convo
       .fetchThread(tenantId, ThreadId(threadId), mailbox)
       .pipe(Effect.either);
-    if (threadEither._tag === "Left") return;
-    const allowed = participantEmails(threadEither.right);
+    if (threadEither._tag === "Left") return null;
+    const thread = threadEither.right;
+    const allowed = participantEmails(thread);
     const offThread = recipients.filter(
       (r) => !allowed.has(r.email.trim().toLowerCase()),
     );
@@ -69,7 +75,19 @@ export const assertRecipientsInThread = (
         }),
       );
     }
+    return thread;
   });
+
+/**
+ * Reply subject from an inbound subject: prefix `Re: ` unless already
+ * present. Mirrors the per-connector helper, but applied at the tool layer
+ * so the connector never has to read the mailbox just to learn the subject.
+ */
+export const replySubject = (subject: string | null | undefined): string => {
+  const trimmed = (subject ?? "").trim();
+  if (!trimmed) return "Re: support";
+  return /^re:/iu.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+};
 
 export const participantEmails = (
   thread: ConversationThread,
@@ -147,19 +165,26 @@ export const conversationReply = defineTool({
         "conversation.reply",
       );
       const convo = yield* ConversationService;
-      yield* assertRecipientsInThread(
+      const thread = yield* assertRecipientsInThread(
         ctx.tenantId,
         input.to,
         input.threadId,
         "conversation.reply",
         mailbox,
       );
+      // Reuse the thread already fetched for the recipient check to fill a
+      // null subject, so the connector doesn't open a second connection to
+      // read the same thread. Only the provider-neutral subject is reused —
+      // the parent (In-Reply-To) is provider-specific, so the connector
+      // still owns it.
+      const subject =
+        input.subject ?? (thread ? replySubject(thread.subject) : null);
       const sent = yield* convo
         .reply(ctx.tenantId, {
           threadId: ThreadId(input.threadId),
           mailbox,
           to: input.to.map((p) => ({ name: p.name, email: p.email })),
-          subject: input.subject,
+          subject,
           bodyText: input.bodyText,
           bodyHtml: input.bodyHtml,
           attachments: input.attachments ?? [],

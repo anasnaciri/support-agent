@@ -7,6 +7,7 @@ import {
 import { ConversationService, TimerService } from "@support-agent/services";
 import {
   assertRecipientsInThread,
+  replySubject,
   requireConversationMailbox,
 } from "./reply.js";
 
@@ -70,19 +71,23 @@ export const conversationAskCustomer = defineTool({
       );
       const convo = yield* ConversationService;
       // Recipient constraint (audit S9) — same rule as conversation.reply.
-      yield* assertRecipientsInThread(
+      const thread = yield* assertRecipientsInThread(
         ctx.tenantId,
         input.to,
         input.threadId,
         "conversation.ask_customer",
         mailbox,
       );
+      // Reuse the recipient-check thread to fill a null subject (saves the
+      // connector a second read of the same thread); see conversation.reply.
+      const subject =
+        input.subject ?? (thread ? replySubject(thread.subject) : null);
       const sent = yield* convo
         .askCustomer(ctx.tenantId, {
           threadId: ThreadId(input.threadId),
           mailbox,
           to: input.to.map((p) => ({ name: p.name, email: p.email })),
-          subject: input.subject,
+          subject,
           bodyText: input.bodyText,
           bodyHtml: input.bodyHtml,
           attachments: input.attachments ?? [],

@@ -151,6 +151,34 @@ describe("makeImapSmtpConversation — reply / askCustomer", () => {
     expect(sendArg.idempotencyKey).toBe("d-1");
   });
 
+  it("skips the pre-send read when the subject is already provided", async () => {
+    // The reply tool now passes the subject down (derived from the thread it
+    // already fetched for the S9 recipient check), so the connector must NOT
+    // open a SECOND IMAP connection just to read the same thread. The parent
+    // defaults to the thread root → References=[root].
+    const send = vi.fn(async () => ({ messageId: "sent-z@host" }));
+    const fetchThread = vi.fn(async () => [rawMsg()]);
+    const ops = fakeOps({ fetchThread, send });
+    const r: ConversationReply = {
+      threadId: ThreadId("root@host"),
+      to: [{ name: "Jane", email: "jane@example.com" }],
+      subject: "Re: Order question",
+      bodyText: "It shipped.",
+      bodyHtml: null,
+      attachments: [],
+      inReplyToMessageId: null,
+      draftId: "d-skip",
+    };
+    const exit = await run(ops, [conn()], (svc) => svc.reply(tenantId, r));
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(fetchThread).not.toHaveBeenCalled();
+    const sendArg = (send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendArg.subject).toBe("Re: Order question");
+    expect(sendArg.references).toEqual(["root@host"]);
+    expect(sendArg.inReplyTo).toBeNull();
+  });
+
   it("still sends when the pre-send thread read fails (non-fatal)", async () => {
     // The SMTP send must not be blocked by a flaky IMAP read used only to
     // derive the subject / parent. On a failed read we fall back to a generic

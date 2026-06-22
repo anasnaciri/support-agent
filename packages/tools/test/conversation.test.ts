@@ -192,6 +192,86 @@ describe("conversation.reply tool", () => {
     expect(handle.sent).toHaveLength(0);
   });
 
+  it("reuses the recipient-check thread to fill a null subject", async () => {
+    // The tool already fetches the thread once for the S9 recipient check;
+    // reuse it to derive `Re: <subject>` so the IMAP connector doesn't open a
+    // SECOND connection to read the same thread just for the subject line.
+    const { layer, handle } = makeConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Your order is in transit.",
+            bodyHtml: null,
+            inReplyToMessageId: null,
+            draftId: "draft-subj",
+          } as never,
+          baseCtx("c-subj"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]!.input.subject).toBe("Re: Where is my order?");
+  });
+
+  it("passes an explicit subject through unchanged", async () => {
+    const { layer, handle } = makeConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: "Re: custom subject",
+            bodyText: "Hello.",
+            bodyHtml: null,
+            inReplyToMessageId: null,
+            draftId: "draft-subj2",
+          } as never,
+          baseCtx("c-subj2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(handle.sent[0]!.input.subject).toBe("Re: custom subject");
+  });
+
+  it("leaves the subject null when the thread is unavailable (connector derives it)", async () => {
+    // No thread seeded → the recipient check fails open → no subject to reuse.
+    // The connector's own best-effort read remains the fallback.
+    const { layer, handle } = makeConversationServiceTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Hello.",
+            bodyHtml: null,
+            inReplyToMessageId: null,
+            draftId: "draft-subj3",
+          } as never,
+          baseCtx("c-subj3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]!.input.subject).toBeNull();
+  });
+
   it("refuses to send a customer reply to the connected mailbox itself", async () => {
     const { layer, handle } = makeConversationServiceTest({
       threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
@@ -339,6 +419,30 @@ describe("conversation.ask_customer tool", () => {
     );
     expect(handle.sent).toHaveLength(1);
     expect(handle.sent[0]!.kind).toBe("askCustomer");
+  });
+
+  it("reuses the recipient-check thread to fill a null subject", async () => {
+    const { layer, handle } = makeConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    await Effect.runPromise(
+      Effect.provide(
+        conversationAskCustomer.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: null, email: "customer@example.com" }],
+            subject: null,
+            bodyText: "What is your order number?",
+            bodyHtml: null,
+            draftId: "ask-subj",
+          } as never,
+          baseCtx("c-ask-subj"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]!.input.subject).toBe("Re: Where is my order?");
   });
 
   it("fails closed when the case is not bound to a mailbox", async () => {

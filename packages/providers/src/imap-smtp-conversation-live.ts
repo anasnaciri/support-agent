@@ -114,15 +114,20 @@ export const makeImapSmtpConversation = (
             ? (draft.inReplyToMessageId ?? null)
             : null;
 
-        // Derive the subject and the immediate parent message when not given,
-        // by reading the thread once. This read is BEST-EFFORT: a transient
-        // IMAP failure (connection-limit, timeout) must NOT block the SMTP
-        // send — losing the customer reply is far worse than a generic
-        // subject. On a failed/empty read we fall back to "Re: support" (at
-        // send) and References=[root]; threading still holds via the recorded
-        // message-id index. Reading the mailbox here is also why a tenant with
-        // a low concurrent-connection cap saw sends fail under poll pressure.
-        if (!subject || inReplyTo === null) {
+        // Read the thread ONLY when we lack the subject — the one thing we
+        // can't reconstruct without it. The reply/ask_customer tools already
+        // fetch the thread for their recipient check and pass the subject
+        // down, so in the healthy path this read never happens (it's a second
+        // connection to the same mailbox — real pressure on providers with a
+        // low concurrent-connection cap). The parent (In-Reply-To) is left to
+        // default below; a reply still threads via References=[root].
+        //
+        // This read is also BEST-EFFORT: a transient IMAP failure (connection
+        // limit, timeout) must NOT block the SMTP send — losing the customer
+        // reply is far worse than a generic subject. On a failed/empty read we
+        // fall back to "Re: support" (at send) + References=[root]; threading
+        // still holds via the recorded message-id index.
+        if (!subject) {
           const raws = yield* Effect.tryPromise({
             try: () => ops.fetchThread(root),
             catch: (): ConversationError =>
