@@ -93,6 +93,13 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-22 — Consolidated branches/worktrees back into `main`.** Fast-forwarded
+  `fix/imap-smtp-send-reliability` into `main`, then merged `fix/runtime-recovery` via merge commit
+  `f35dd2c`. Verified merged `main` with `pnpm build` and `pnpm test` (1583 passed, 315 skipped in the
+  current non-DB environment). Planned cleanup after verification: remove
+  `/private/tmp/support-agent-runtime-recovery` and delete the now-merged feature branches so the repo is
+  back to one active branch/worktree.
+
 - **2026-06-22 — Checked the other worktree `/private/tmp/support-agent-runtime-recovery`
   (`fix/runtime-recovery`) against the architecture-review issues (no production code edits).** It has
   code commits `4120ab3 fix(runtime): surface recovery dead ends` and `bcb9e6e feat(dashboard): surface a failed-send timeline card with inline retry`, and `pnpm build` is green there.
