@@ -351,6 +351,19 @@ export const AgentRuntimeDefault = Layer.effect(
               .pipe(Effect.catchAll(() => Effect.void));
           });
 
+        // Add a single risk-flag to the case context (deduped), best-effort:
+        // a write failure degrades to the unchanged row rather than aborting.
+        const addRiskFlag = (row: typeof working, flag: string) =>
+          Effect.gen(function* () {
+            const existing = readRiskFlags(row.context);
+            if (existing.includes(flag)) return row;
+            return yield* cases
+              .update(row.id, {
+                context: { ...row.context, riskFlags: [...existing, flag] } as never,
+              })
+              .pipe(Effect.catchAll(() => Effect.succeed(row)));
+          });
+
         // A customer-reply (`conversation.reply` / `ask_customer`) send FAILED.
         // Don't lose it and don't let the case resolve as if it went out:
         //   1. persist the verbatim draft into the reply-delivery outbox so the
@@ -397,17 +410,7 @@ export const AgentRuntimeDefault = Layer.effect(
                 })
                 .pipe(Effect.catchAll(() => Effect.void));
             }
-            const existingFlags = readRiskFlags(caseRow.context);
-            if (!existingFlags.includes(REPLY_DELIVERY_FAILED_FLAG)) {
-              yield* cases
-                .update(caseRow.id, {
-                  context: {
-                    ...caseRow.context,
-                    riskFlags: [...existingFlags, REPLY_DELIVERY_FAILED_FLAG],
-                  } as never,
-                })
-                .pipe(Effect.catchAll(() => Effect.succeed(caseRow)));
-            }
+            yield* addRiskFlag(caseRow, REPLY_DELIVERY_FAILED_FLAG);
             yield* escalateToHuman(caseRow.id, REPLY_DELIVERY_FAILED_FLAG, {
               tool: toolName,
               error: errorLabel,
@@ -1475,20 +1478,7 @@ export const AgentRuntimeDefault = Layer.effect(
                   seenOrderEmails,
                 );
                 if (mismatchFlag) {
-                  const existingFlags = Array.isArray(current.context["riskFlags"])
-                    ? (current.context["riskFlags"] as unknown[]).filter(
-                        (f): f is string => typeof f === "string",
-                      )
-                    : [];
-                  if (!existingFlags.includes(mismatchFlag)) {
-                    const patched: Record<string, unknown> = {
-                      ...current.context,
-                      riskFlags: [...existingFlags, mismatchFlag],
-                    };
-                    current = yield* cases
-                      .update(current.id, { context: patched as never })
-                      .pipe(Effect.catchAll(() => Effect.succeed(current)));
-                  }
+                  current = yield* addRiskFlag(current, mismatchFlag);
                 }
               }
 
