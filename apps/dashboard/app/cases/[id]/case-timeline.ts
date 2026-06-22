@@ -3,6 +3,10 @@ import type {
 } from "@support-agent/dashboard-contracts";
 
 import { humanizeSlug } from "../../../lib/labels";
+import {
+  shouldShowRetrySendAction,
+  type RetrySendVisibilityInput,
+} from "./retry-send-visibility";
 
 export type CaseTimelineMode = "full" | "simplified" | "email";
 
@@ -77,6 +81,14 @@ export type CuratedTimelineItem =
       readonly id: string;
       readonly title: string;
       readonly description: string | null;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly kind: "deliveryFailed";
+      readonly id: string;
+      readonly title: "Email failed to send";
+      /** Last transport error, surfaced so the merchant knows why. */
+      readonly lastError: string | null;
       readonly occurredAt: string;
     };
 
@@ -215,6 +227,37 @@ export const curatedTimelineEvent = (
   }
 
   return null;
+};
+
+// The failed-send card is NOT derived from an audit row (failed `tool.invoked`
+// rows stay hidden, above): it mirrors the live reply-delivery outbox so the
+// card and the inline "Retry sending email" button share one condition — the
+// same `shouldShowRetrySendAction` that gates the header button. `occurredAt`
+// is the delivery's `updatedAt` (its last failed attempt), so the card sorts
+// to where the send actually broke.
+export interface ReplyDeliveryFailedInput
+  extends Omit<RetrySendVisibilityInput, "activeReplyDelivery"> {
+  readonly activeReplyDelivery: null | {
+    readonly id: string;
+    readonly status: string;
+    readonly lastError: string | null;
+    readonly updatedAt: string;
+  };
+}
+
+export const replyDeliveryFailedTimelineItem = (
+  input: ReplyDeliveryFailedInput,
+): CuratedTimelineItem | null => {
+  if (!shouldShowRetrySendAction(input)) return null;
+  const delivery = input.activeReplyDelivery;
+  if (!delivery) return null;
+  return {
+    kind: "deliveryFailed",
+    id: `reply-delivery-${delivery.id}`,
+    title: "Email failed to send",
+    lastError: delivery.lastError,
+    occurredAt: delivery.updatedAt,
+  };
 };
 
 const formatUnit = (value: number, unit: string): string => {

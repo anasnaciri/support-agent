@@ -38,6 +38,7 @@ import {
   formatAttachmentSize,
   parseCaseTimelineMode,
   curatedTimelineEvent,
+  replyDeliveryFailedTimelineItem,
   type CuratedTimelineItem,
 } from "./case-timeline";
 import {
@@ -531,11 +532,17 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         : [];
     },
   );
+  const failedDeliveryItem = replyDeliveryFailedTimelineItem({
+    caseStatus: caseRow.status,
+    activeReplyDelivery: detail.activeReplyDelivery,
+    riskFlags,
+  });
   const simplifiedTimelineItems: SimplifiedTimelineItem[] = [
     ...entries
       .map((entry) => curatedTimelineEvent(entry, customerEmail))
       .filter((item): item is CuratedTimelineItem => item !== null),
     ...recommendationTimelineItems,
+    ...(failedDeliveryItem ? [failedDeliveryItem] : []),
     ...allApprovals.map((approval) => ({
       kind: "approval" as const,
       id: `approval-${approval.id}`,
@@ -730,8 +737,21 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                     key={item.id}
                     className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
                   >
-                    <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
-                    <Card>
+                    <span
+                      className={cn(
+                        "absolute -left-[5px] top-3 size-2 rounded-full",
+                        item.kind === "deliveryFailed"
+                          ? "bg-destructive"
+                          : "bg-primary",
+                      )}
+                    />
+                    <Card
+                      className={
+                        item.kind === "deliveryFailed"
+                          ? "border-destructive"
+                          : undefined
+                      }
+                    >
                       {item.kind === "email" ? (
                         <CardContent className="space-y-1.5 p-4">
                           <div className="font-medium text-sm">
@@ -788,6 +808,37 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                           <RefundRecommendationBlock
                             recommendation={item.recommendation}
                           />
+                        </CardContent>
+                      ) : item.kind === "deliveryFailed" ? (
+                        <CardContent className="space-y-2 p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-medium text-sm text-destructive">
+                              {item.title}
+                            </div>
+                            <Badge variant="destructive">Not delivered</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDateTime(item.occurredAt)}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            The drafted reply couldn&apos;t be sent to the
+                            customer.
+                            {item.lastError ? ` Last error: ${item.lastError}` : ""}
+                          </p>
+                          <form action={retrySendAction} className="pt-1">
+                            <input
+                              type="hidden"
+                              name="caseId"
+                              value={caseRow.id}
+                            />
+                            <SubmitButton
+                              size="sm"
+                              pendingLabel="Re-sending…"
+                              title="Re-send the same drafted reply that failed to deliver to the customer"
+                            >
+                              Retry sending email
+                            </SubmitButton>
+                          </form>
                         </CardContent>
                       ) : (
                         <CardContent className="space-y-3 p-4">
