@@ -23,6 +23,7 @@ import {
   type AuditEntry,
   type AuditFilter,
   type CaseDetail,
+  type CaseDetailReplyDelivery,
   type CasesFilter,
   type CaseEventsResult,
   type CaseListRow,
@@ -43,6 +44,7 @@ import {
   tenantKnowledgeDocuments,
   tenants,
 } from "./schema.js";
+import { getActiveReplyDeliveryForCase } from "./reply-delivery-store.js";
 
 // Read queries backing the dashboard's HTTP API (Path B). The dashboard
 // hosts on Cloudflare Workers and can't open a Postgres TCP pool, so these
@@ -69,6 +71,7 @@ export type {
   TodaySummary,
   CaseListRow,
   CaseDetailCase,
+  CaseDetailReplyDelivery,
   AuditEntry,
   ApprovalDetail,
   CaseDetail,
@@ -84,6 +87,26 @@ export type {
 } from "@support-agent/dashboard-contracts";
 
 const TOP_N = 5;
+
+const toCaseDetailReplyDelivery = (
+  row: Awaited<ReturnType<typeof getActiveReplyDeliveryForCase>>,
+): CaseDetailReplyDelivery | null =>
+  row
+    ? {
+        id: row.id,
+        caseId: row.caseId,
+        status: row.status,
+        tool: row.tool,
+        mailbox: row.mailbox,
+        draftId: row.draftId,
+        attempts: row.attempts,
+        maxAttempts: row.maxAttempts,
+        lastError: row.lastError,
+        nextAttemptAt: row.nextAttemptAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }
+    : null;
 
 // An org owns many workspaces (tenant rows). The "default" workspace — what
 // a request without an explicit workspace resolves to — is the OLDEST row,
@@ -419,7 +442,7 @@ export const caseDetail = async (
     .limit(1);
   if (!row) return null;
 
-  const [entries, caseApprovals] = await Promise.all([
+  const [entries, caseApprovals, activeReplyDelivery] = await Promise.all([
     db
       .select()
       .from(auditLog)
@@ -430,6 +453,7 @@ export const caseDetail = async (
       .from(approvals)
       .where(and(eq(approvals.caseId, caseId), eq(approvals.tenantId, tenantId)))
       .orderBy(asc(approvals.createdAt)),
+    getActiveReplyDeliveryForCase(db, caseId),
   ]);
 
   return {
@@ -448,6 +472,7 @@ export const caseDetail = async (
     },
     auditEntries: entries.map(toAuditEntry),
     approvals: caseApprovals.map(toApprovalDetail),
+    activeReplyDelivery: toCaseDetailReplyDelivery(activeReplyDelivery),
   };
 };
 

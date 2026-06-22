@@ -38,6 +38,7 @@ import {
   formatAttachmentSize,
   parseCaseTimelineMode,
   curatedTimelineEvent,
+  replyDeliveryFailedTimelineItem,
   type CuratedTimelineItem,
 } from "./case-timeline";
 import {
@@ -52,6 +53,7 @@ import {
   parseRequestedResolution,
 } from "./return-labels";
 import { buildContextRows } from "./case-context";
+import { shouldShowRetrySendAction } from "./retry-send-visibility";
 import { cn } from "@/lib/utils";
 
 interface Params {
@@ -498,10 +500,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
-  // A drafted customer reply failed to send. The agent already escalated the
-  // case; offer a direct "re-send the same email" action (distinct from the
-  // agent retry, which re-drafts).
-  const replyDeliveryFailed = riskFlags.includes("reply_delivery_failed");
+  // A drafted customer reply failed to send. The active reply-delivery row is
+  // the source of truth for whether the dashboard can re-send that same draft.
+  const showRetrySend = shouldShowRetrySendAction({
+    caseStatus: caseRow.status,
+    activeReplyDelivery: detail.activeReplyDelivery,
+    riskFlags,
+  });
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .slice()
@@ -527,11 +532,17 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         : [];
     },
   );
+  const failedDeliveryItem = replyDeliveryFailedTimelineItem({
+    caseStatus: caseRow.status,
+    activeReplyDelivery: detail.activeReplyDelivery,
+    riskFlags,
+  });
   const simplifiedTimelineItems: SimplifiedTimelineItem[] = [
     ...entries
       .map((entry) => curatedTimelineEvent(entry, customerEmail))
       .filter((item): item is CuratedTimelineItem => item !== null),
     ...recommendationTimelineItems,
+    ...(failedDeliveryItem ? [failedDeliveryItem] : []),
     ...allApprovals.map((approval) => ({
       kind: "approval" as const,
       id: `approval-${approval.id}`,
@@ -578,7 +589,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           ) : null}
           {canResume ? (
             <div className="ml-auto flex items-center gap-2">
-              {replyDeliveryFailed ? (
+              {showRetrySend ? (
                 <form action={retrySendAction}>
                   <input type="hidden" name="caseId" value={caseRow.id} />
                   <SubmitButton
@@ -602,7 +613,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               <form action={retryAction}>
                 <input type="hidden" name="caseId" value={caseRow.id} />
                 <SubmitButton
-                  variant={replyDeliveryFailed ? "outline" : "default"}
+                  variant={showRetrySend ? "outline" : "default"}
                   pendingLabel="Retrying…"
                   title="Hand the case back and have the agent try again right now"
                 >
@@ -726,8 +737,21 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                     key={item.id}
                     className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
                   >
-                    <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
-                    <Card>
+                    <span
+                      className={cn(
+                        "absolute -left-[5px] top-3 size-2 rounded-full",
+                        item.kind === "deliveryFailed"
+                          ? "bg-destructive"
+                          : "bg-primary",
+                      )}
+                    />
+                    <Card
+                      className={
+                        item.kind === "deliveryFailed"
+                          ? "border-destructive"
+                          : undefined
+                      }
+                    >
                       {item.kind === "email" ? (
                         <CardContent className="space-y-1.5 p-4">
                           <div className="font-medium text-sm">
@@ -784,6 +808,37 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                           <RefundRecommendationBlock
                             recommendation={item.recommendation}
                           />
+                        </CardContent>
+                      ) : item.kind === "deliveryFailed" ? (
+                        <CardContent className="space-y-2 p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-medium text-sm text-destructive">
+                              {item.title}
+                            </div>
+                            <Badge variant="destructive">Not delivered</Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDateTime(item.occurredAt)}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            The drafted reply couldn&apos;t be sent to the
+                            customer.
+                            {item.lastError ? ` Last error: ${item.lastError}` : ""}
+                          </p>
+                          <form action={retrySendAction} className="pt-1">
+                            <input
+                              type="hidden"
+                              name="caseId"
+                              value={caseRow.id}
+                            />
+                            <SubmitButton
+                              size="sm"
+                              pendingLabel="Re-sending…"
+                              title="Re-send the same drafted reply that failed to deliver to the customer"
+                            >
+                              Retry sending email
+                            </SubmitButton>
+                          </form>
                         </CardContent>
                       ) : (
                         <CardContent className="space-y-3 p-4">

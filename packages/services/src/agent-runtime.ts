@@ -373,13 +373,16 @@ export const AgentRuntimeDefault = Layer.effect(
         //      shows it + the merchant knows the customer wasn't reached;
         //   3. park the case in `human_takeover` (NEEDS ATTENTION, never
         //      resolved) — a successful retry later auto-resolves it.
-        // Steps 1+2 are best-effort; the park (audit L4) always happens.
+        // All recovery writes succeed together. If the durable draft capture
+        // fails, the tick fails retryably so the worker can redeliver instead
+        // of parking a case with no resend path.
         const parkForReplyDeliveryFailure = (
           caseRow: typeof working,
           agentId: string,
           toolName: string,
           draftInput: unknown,
           errLeft: unknown,
+          executionKey: string,
         ) =>
           Effect.gen(function* () {
             const issues = (errLeft as { readonly issues?: unknown }).issues;
@@ -396,25 +399,71 @@ export const AgentRuntimeDefault = Layer.effect(
               typeof rawDraftId === "string" && rawDraftId.length > 0
                 ? rawDraftId
                 : `${caseRow.id}:${toolName}`;
-            if (Option.isSome(maybeReplyDelivery)) {
-              yield* maybeReplyDelivery.value
-                .enqueue({
-                  tenantId: caseRow.tenantId,
-                  caseId: caseRow.id,
-                  agentId,
-                  tool: toolName,
-                  mailbox: caseRow.mailbox ?? null,
-                  draftId,
-                  draft: draftInput,
-                  error: errorLabel,
-                })
-                .pipe(Effect.catchAll(() => Effect.void));
-            }
-            yield* addRiskFlag(caseRow, REPLY_DELIVERY_FAILED_FLAG);
-            yield* escalateToHuman(caseRow.id, REPLY_DELIVERY_FAILED_FLAG, {
-              tool: toolName,
-              error: errorLabel,
-            });
+            const updated = yield* tx.run(
+              Effect.gen(function* () {
+                const replyDelivery = Option.getOrUndefined(maybeReplyDelivery);
+                if (!replyDelivery) {
+                  yield* Effect.dieMessage("ReplyDeliveryService unavailable");
+                } else {
+                  yield* replyDelivery.enqueue({
+                    tenantId: caseRow.tenantId,
+                    caseId: caseRow.id,
+                    agentId,
+                    tool: toolName,
+                    mailbox: caseRow.mailbox ?? null,
+                    draftId,
+                    draft: draftInput,
+                    error: errorLabel,
+                  });
+                }
+                const existing = readRiskFlags(caseRow.context);
+                if (!existing.includes(REPLY_DELIVERY_FAILED_FLAG)) {
+                  yield* cases.update(caseRow.id, {
+                    context: {
+                      ...caseRow.context,
+                      riskFlags: [...existing, REPLY_DELIVERY_FAILED_FLAG],
+                    } as never,
+                  });
+                }
+                const row = yield* cases.transitionStatus(
+                  caseRow.id,
+                  "human_takeover",
+                  {
+                    reason: REPLY_DELIVERY_FAILED_FLAG,
+                    tenantId: caseRow.tenantId,
+                  },
+                );
+                yield* audit.record({
+                  tenantId: row.tenantId,
+                  caseId: row.id,
+                  actor: { type: "system", id: "agent-runtime" },
+                  action: "case.escalated_to_human",
+                  details: {
+                    reason: REPLY_DELIVERY_FAILED_FLAG,
+                    tool: toolName,
+                    error: errorLabel,
+                  },
+                });
+                if (Option.isSome(maybeExecutions)) {
+                  yield* maybeExecutions.value.record({
+                    tenantId: caseRow.tenantId,
+                    caseId: caseRow.id,
+                    callId: executionKey,
+                    tool: toolName,
+                    resultOk: false,
+                  });
+                }
+                return row;
+              }),
+            );
+            yield* notifyMerchant(
+              updated.tenantId,
+              humanTakeoverNotification({
+                caseId: updated.id,
+                subject: updated.subject,
+                reason: REPLY_DELIVERY_FAILED_FLAG,
+              }),
+            );
           });
 
         // 2.5. Approval-resume short-circuit. `approval.approved` and
@@ -472,10 +521,13 @@ export const AgentRuntimeDefault = Layer.effect(
               approval.status === "cancelled" ||
               approval.status === "expired"
             ) {
+              yield* escalateToHuman(working.id, "approval_not_runnable", {
+                approvalId: approval.id,
+                status: approval.status,
+              });
               return {
-                type: "Failed",
-                reason: `approval ${approval.id} is ${approval.status}`,
-                retryable: false,
+                type: "HumanTakeoverRequired",
+                reason: "approval_not_runnable",
               } as const;
             }
             // Expiry (audit L7): an undecided row past its expiry must not
@@ -497,10 +549,13 @@ export const AgentRuntimeDefault = Layer.effect(
             }
             const toolToRun = yield* tools.tryGet(approval.tool);
             if (!toolToRun) {
+              yield* escalateToHuman(working.id, "approved_tool_unavailable", {
+                approvalId: approval.id,
+                tool: approval.tool,
+              });
               return {
-                type: "Failed",
-                reason: `tool ${approval.tool} not in registry`,
-                retryable: false,
+                type: "HumanTakeoverRequired",
+                reason: "approved_tool_unavailable",
               } as const;
             }
             // Input validation (audit L8): `approvedInput` is manager-edited
@@ -645,7 +700,13 @@ export const AgentRuntimeDefault = Layer.effect(
                   });
                   // Marker shares the tx with the audit row (audit C2):
                   // both commit or neither does.
-                  if (Option.isSome(maybeExecutions)) {
+                  const deferFailedReplyMarker =
+                    result._tag === "Left" &&
+                    isReplyDeliverySendFailure(approval.tool, result.left);
+                  if (
+                    Option.isSome(maybeExecutions) &&
+                    !deferFailedReplyMarker
+                  ) {
                     yield* maybeExecutions.value
                       .record({
                         tenantId: working.tenantId,
@@ -680,6 +741,7 @@ export const AgentRuntimeDefault = Layer.effect(
                   approval.tool,
                   toolInput,
                   exec.left,
+                  executionKey,
                 );
               } else {
                 yield* escalateToHuman(working.id, "approved_tool_failed", {
@@ -1604,9 +1666,13 @@ export const AgentRuntimeDefault = Layer.effect(
                   });
                   // C2 marker — same tx as the audit row; only meaningful
                   // for tools with externally-visible effects.
+                  const deferFailedReplyMarker =
+                    result._tag === "Left" &&
+                    isReplyDeliverySendFailure(tool.name, result.left);
                   if (
                     tool.sideEffectClass !== "none" &&
-                    Option.isSome(maybeExecutions)
+                    Option.isSome(maybeExecutions) &&
+                    !deferFailedReplyMarker
                   ) {
                     yield* maybeExecutions.value
                       .record({
@@ -1753,6 +1819,7 @@ export const AgentRuntimeDefault = Layer.effect(
                     tool.name,
                     callInput,
                     exec.left,
+                    loopExecutionKey,
                   );
                   return {
                     agent,

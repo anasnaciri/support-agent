@@ -101,8 +101,9 @@ const replyAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
 const buildLayer = (
   llm: ReturnType<typeof LLMServiceScripted>,
   agents: ReadonlyArray<AgentConfig>,
+  replyDeliveryFixtures: { readonly writeFailed?: boolean } = {},
 ) => {
-  const replyDelivery = makeReplyDeliveryServiceTest();
+  const replyDelivery = makeReplyDeliveryServiceTest(replyDeliveryFixtures);
   const env = Layer.mergeAll(
     CaseRepositoryTest,
     AuditLogServiceTest,
@@ -215,6 +216,46 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
       (e) => e.action === "tool.invoked" && e.details["ok"] === false,
     );
     expect(toolInvoked?.details["error"]).toBe("ConversationSendFailed");
+  });
+
+  it("does not park the case when the retryable reply draft cannot be captured", async () => {
+    const { layer, handle } = buildLayer(
+      LLMServiceScripted([
+        {
+          type: "tool_call",
+          callId: "r0",
+          tool: "conversation.reply",
+          input: { draftId: "draft-lost", bodyText: "Please do not lose me" },
+        },
+      ]) as never,
+      [replyAgent({ permissionOverrides: { "conversation.reply": "allow" } })],
+      { writeFailed: true },
+    );
+
+    const out = await runWithCase(layer as never, "reply-test-agent", (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const result = yield* runtime.handleEvent(customerReplied(caseId));
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        return { result, fetched, entries };
+      }),
+    );
+
+    expect(out.result.type).toBe("Failed");
+    if (out.result.type === "Failed") {
+      expect(out.result.retryable).toBe(true);
+    }
+    expect(out.fetched.status).toBe("new");
+    expect(out.fetched.context["riskFlags"] ?? []).not.toContain(
+      "reply_delivery_failed",
+    );
+    expect(handle.enqueued).toHaveLength(0);
+    expect(out.entries.map((e) => e.action)).not.toContain(
+      "case.escalated_to_human",
+    );
   });
 
   it("approval-resume: a failed approved reply captures the draft + flags reply_delivery_failed", async () => {

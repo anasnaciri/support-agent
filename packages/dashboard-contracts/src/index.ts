@@ -149,10 +149,26 @@ export interface ApprovalDetail {
   readonly createdAt: string;
 }
 
+export interface CaseDetailReplyDelivery {
+  readonly id: string;
+  readonly caseId: string;
+  readonly status: string;
+  readonly tool: string;
+  readonly mailbox: string | null;
+  readonly draftId: string;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly lastError: string | null;
+  readonly nextAttemptAt: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export interface CaseDetail {
   readonly case: CaseDetailCase;
   readonly auditEntries: ReadonlyArray<AuditEntry>;
   readonly approvals: ReadonlyArray<ApprovalDetail>;
+  readonly activeReplyDelivery: CaseDetailReplyDelivery | null;
 }
 
 export interface DashboardConversationParticipant {

@@ -420,6 +420,52 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     expect(out.fetched.status).toBe("human_takeover");
   });
 
+  it("parks when an approved tool is no longer registered", async () => {
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([]) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const approvals = yield* ApprovalService;
+        const approval = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 5 },
+          reasoning: "test",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+          reason: "test",
+          tenantId: TenantId("tenant-acme"),
+        });
+        const result = yield* runtime.handleEvent(
+          approvedEvent(approval.id, caseId),
+        );
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        return { result, fetched, entries };
+      }),
+    );
+
+    expect(counter.count).toBe(0);
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    const escalation = out.entries.find(
+      (entry) => entry.action === "case.escalated_to_human",
+    );
+    expect(escalation?.details["reason"]).toBe("approved_tool_unavailable");
+  });
+
   it("does not execute an approved tool whose input no longer validates", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(

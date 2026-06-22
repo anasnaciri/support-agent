@@ -1,11 +1,15 @@
-import { Effect, Layer } from "effect";
+import { Effect, FiberRef, Layer } from "effect";
 import {
   ReplyDeliveryService,
   ReplyDeliveryWriteFailed,
   nextReplyDeliveryBackoffMs,
 } from "@support-agent/services";
-import { DbClient } from "./db-client.js";
+import { CurrentTxRef, DbClient } from "./db-client.js";
+import type { DrizzleDb } from "./client.js";
 import { enqueueReplyDelivery } from "./reply-delivery-store.js";
+
+const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
+  FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 
 /**
  * Live `ReplyDeliveryService` over Postgres. Persists a failed customer-reply
@@ -20,22 +24,25 @@ export const ReplyDeliveryServiceLive = Layer.effect(
     const db = yield* DbClient;
     return ReplyDeliveryService.of({
       enqueue: (input) =>
-        Effect.tryPromise({
-          try: () =>
-            enqueueReplyDelivery(db, {
-              tenantId: input.tenantId,
-              caseId: input.caseId,
-              agentId: String(input.agentId),
-              tool: input.tool,
-              mailbox: input.mailbox,
-              draftId: input.draftId,
-              draft: input.draft,
-              error: input.error,
-              nextAttemptAt: new Date(
-                Date.now() + nextReplyDeliveryBackoffMs(1),
-              ),
-            }),
-          catch: (cause) => new ReplyDeliveryWriteFailed({ cause }),
+        Effect.gen(function* () {
+          const activeDb = yield* useDb(db);
+          return yield* Effect.tryPromise({
+            try: () =>
+              enqueueReplyDelivery(activeDb, {
+                tenantId: input.tenantId,
+                caseId: input.caseId,
+                agentId: String(input.agentId),
+                tool: input.tool,
+                mailbox: input.mailbox,
+                draftId: input.draftId,
+                draft: input.draft,
+                error: input.error,
+                nextAttemptAt: new Date(
+                  Date.now() + nextReplyDeliveryBackoffMs(1),
+                ),
+              }),
+            catch: (cause) => new ReplyDeliveryWriteFailed({ cause }),
+          });
         }),
     });
   }),

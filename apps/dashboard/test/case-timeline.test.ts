@@ -5,6 +5,7 @@ import {
   curatedTimelineEvent,
   formatAttachmentSize,
   parseCaseTimelineMode,
+  replyDeliveryFailedTimelineItem,
 } from "../app/cases/[id]/case-timeline.js";
 
 describe("case timeline navigation", () => {
@@ -142,6 +143,26 @@ describe("curatedTimelineEvent", () => {
     expect(description).not.toContain("weird_new_reason");
   });
 
+  it("shows recovery-dead-end escalation reasons with specific copy", () => {
+    const approvalItem = curatedTimelineEvent(
+      entry("case.escalated_to_human", {
+        reason: "approved_tool_unavailable",
+      }),
+      null,
+    ) as { description: string | null };
+    expect(approvalItem.description).toBe(
+      "The approved action is no longer available.",
+    );
+
+    const supplierItem = curatedTimelineEvent(
+      entry("case.escalated_to_human", { reason: "supplier_unreachable" }),
+      null,
+    ) as { description: string | null };
+    expect(supplierItem.description).toBe(
+      "The supplier could not be reached.",
+    );
+  });
+
   it("shows takeover, hand-back, and resolution milestones", () => {
     expect(
       curatedTimelineEvent(entry("case.taken_over", {}), null),
@@ -179,6 +200,61 @@ describe("curatedTimelineEvent", () => {
         entry("tool.invoked", { tool: "conversation.reply", ok: false }),
         null,
       ),
+    ).toBeNull();
+  });
+});
+
+describe("replyDeliveryFailedTimelineItem", () => {
+  const delivery = {
+    id: "delivery-1",
+    status: "abandoned",
+    lastError: "SMTP 550 mailbox unavailable",
+    updatedAt: "2026-06-22T10:00:00.000Z",
+  };
+
+  it("surfaces a failed-delivery card when the case is parked with a retryable send", () => {
+    expect(
+      replyDeliveryFailedTimelineItem({
+        caseStatus: "human_takeover",
+        activeReplyDelivery: delivery,
+        riskFlags: [],
+      }),
+    ).toEqual({
+      kind: "deliveryFailed",
+      id: "reply-delivery-delivery-1",
+      title: "Email failed to send",
+      lastError: "SMTP 550 mailbox unavailable",
+      occurredAt: "2026-06-22T10:00:00.000Z",
+    });
+  });
+
+  it("does not surface a card once the delivery has sent", () => {
+    expect(
+      replyDeliveryFailedTimelineItem({
+        caseStatus: "human_takeover",
+        activeReplyDelivery: { ...delivery, status: "sent" },
+        riskFlags: [],
+      }),
+    ).toBeNull();
+  });
+
+  it("does not surface a card without an active delivery, even with the legacy flag", () => {
+    expect(
+      replyDeliveryFailedTimelineItem({
+        caseStatus: "human_takeover",
+        activeReplyDelivery: null,
+        riskFlags: ["reply_delivery_failed"],
+      }),
+    ).toBeNull();
+  });
+
+  it("does not surface a card while the agent still owns the case", () => {
+    expect(
+      replyDeliveryFailedTimelineItem({
+        caseStatus: "in_progress",
+        activeReplyDelivery: delivery,
+        riskFlags: [],
+      }),
     ).toBeNull();
   });
 });

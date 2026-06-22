@@ -178,19 +178,28 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   invoked but skipped because `DATABASE_URL` is not set. Covered paths: LLM credential/safety/context
   failures, max-turn exhaustion, approved-tool failures, expired approvals, retry-exhausted workflow jobs,
   and customer-reply send failures all park or surface as intended in normal conditions. Follow-ups found:
-  - [ ] Make failed reply delivery capture atomic enough that a send failure cannot park the case without
+  - [x] Make failed reply delivery capture atomic enough that a send failure cannot park the case without
         durable retry metadata: today `ReplyDeliveryService.enqueue` and `reply_delivery_failed` risk-flag
         writes are best-effort before `human_takeover`, so a DB hiccup can leave the merchant with only
         generic "Retry now" and no exact draft resend.
-  - [ ] Show the case-detail "Retry sending email" action from the active `reply_deliveries` row, not only
+  - [x] Show the case-detail "Retry sending email" action from the active `reply_deliveries` row, not only
         from `case.context.riskFlags`, so an outbox row remains recoverable even if the best-effort risk
         flag write failed.
-  - [ ] Add supplier-notify cap-exhaustion recovery: when `notify_attempts` reaches the cap, park/flag the
+  - [x] Add supplier-notify cap-exhaustion recovery: when `notify_attempts` reaches the cap, park/flag the
         merchant side (likely `human_takeover` with `supplier_unreachable`) instead of silently leaving the
         case in `waiting_for_supplier`.
-  - [ ] Escalate deterministic approval-resume failures that can leave a decided approval on a still-parked
+  - [x] Escalate deterministic approval-resume failures that can leave a decided approval on a still-parked
         case (for example tool removed from registry) instead of returning non-retryable `Failed` that the
         worker completes without a merchant-facing error.
+  - **2026-06-22 implementation on `fix/runtime-recovery`:** reply delivery recovery now requires the
+    active `reply_deliveries` capture before flagging/parking, and the live writer joins the ambient tx;
+    case detail exposes `activeReplyDelivery`, and the dashboard retry-send button keys off that row.
+    Supplier notify final-attempt failure now escalates the merchant case with `supplier_unreachable`
+    and merchant-facing timeline/risk copy. Approval resume missing-tool/non-runnable rows now park in
+    `human_takeover` with explicit escalation reasons. Verified with
+    `pnpm test apps/worker/test/reply-delivery-failure.test.ts apps/dashboard/test/retry-send-visibility.test.ts apps/worker/test/supplier-notify.test.ts apps/worker/test/agent-runtime-recovery.test.ts apps/dashboard/test/risk-flag-label.test.ts apps/dashboard/test/case-timeline.test.ts apps/api/src/features/dashboard/tests/case-retry-send.integration.test.ts`
+    (48 passed, 4 skipped because `DATABASE_URL` is unset), `pnpm build`, and full `pnpm test`
+    with socket permissions (1571 passed, 315 skipped).
 
 - **2026-06-22 — Architecture deepening review generated (no production code edits).** Used
   `$improve-codebase-architecture` + `codebase-design` vocabulary and wrote the visual report to

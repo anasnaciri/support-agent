@@ -31,6 +31,7 @@ describeIfDb("apps/api — /dashboard/cases/:id/retry-send (integration)", () =>
   const workosUser = `user_${randomUUID()}`;
 
   const caseFailed = randomUUID();
+  const caseVisible = randomUUID();
   const caseClean = randomUUID();
   const caseOther = randomUUID();
 
@@ -63,6 +64,11 @@ describeIfDb("apps/api — /dashboard/cases/:id/retry-send (integration)", () =>
         workosUser,
       ),
       body: "{}",
+    });
+
+  const get = (path: string, owner = orgId) =>
+    fetch(`${baseUrl}${path}`, {
+      headers: dashboardAuthHeaders(owner, {}, workosUser),
     });
 
   const mkCase = (id: string, owner: string) => ({
@@ -100,10 +106,12 @@ describeIfDb("apps/api — /dashboard/cases/:id/retry-send (integration)", () =>
       .insert(cases)
       .values([
         mkCase(caseFailed, tenantId),
+        mkCase(caseVisible, tenantId),
         mkCase(caseClean, tenantId),
         mkCase(caseOther, otherTenantId),
       ]);
     await seedFailedDelivery(caseFailed, tenantId);
+    await seedFailedDelivery(caseVisible, tenantId);
     await seedFailedDelivery(caseOther, otherTenantId);
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
@@ -119,6 +127,29 @@ describeIfDb("apps/api — /dashboard/cases/:id/retry-send (integration)", () =>
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
+  });
+
+  it("case detail exposes the active failed delivery even without a risk flag", async () => {
+    if (!raw) return;
+    const res = await get(`/dashboard/cases/${caseVisible}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      case: { context: unknown };
+      activeReplyDelivery: null | {
+        caseId: string;
+        status: string;
+        draftId: string;
+        lastError: string | null;
+      };
+    };
+    const context = (body.case.context ?? {}) as Record<string, unknown>;
+    expect(context["riskFlags"] ?? []).not.toContain("reply_delivery_failed");
+    expect(body.activeReplyDelivery).toMatchObject({
+      caseId: caseVisible,
+      status: "abandoned",
+      draftId: `d-${caseVisible}`,
+      lastError: "cap reached",
+    });
   });
 
   it("requeues the abandoned delivery (pending, due now, fresh attempts)", async () => {
