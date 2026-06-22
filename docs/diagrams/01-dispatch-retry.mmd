@@ -1,0 +1,32 @@
+%% Agent runtime — top-level dispatch + retry / redelivery model
+%% Render: paste into https://mermaid.live or any Mermaid renderer
+flowchart TD
+    EV["DomainEvent (pg-boss job, at-least-once)"] --> TICK["tick(event)"]
+
+    TICK -->|"message.received ONLY"| C3{"C3 ProcessedMessageStore: already seen?"}
+    C3 -->|yes| DROP["return Completed (drop)"]
+    C3 -->|no| LOCK
+    TICK -->|"customer.replied / approval / timer (no top-level dedup)"| LOCK
+
+    LOCK["pg_advisory_lock(case or thread) — BLOCKING, no timeout"]:::warn --> BODY["tickBody(event), wrapped in catchAllCause"]
+    BODY --> RES{"WorkflowResult"}
+
+    RES -->|"Failed retryable:true"| THROW["worker throws"]
+    RES -->|"Completed / Paused / HumanTakeoverRequired / Failed retryable:false"| DONE["job COMPLETE"]
+
+    THROW --> PGB{"pg-boss: retryLimit 5, backoff"}
+    PGB -->|retry| REPLAY["replay WHOLE tick from turn 0 (LLM re-samples, new callId)"]:::warn
+    REPLAY --> TICK
+    PGB -->|exhausted| DL["workflow.events.dead"]
+    DL --> DLC["dead-letter consumer: park case to human_takeover"]
+
+    DONE -.->|"C3 claim written AFTER tick, only if NOT retryable-Failed"| C3CLAIM["ProcessedMessageStore.claim"]
+
+    E1["E1: side-effect tools without idempotencyKey re-run (key falls back to volatile callId)"]:::hi
+    E12["E12: dead-letter msg.received lookup uses provider=undefined, may miss the case"]:::lo
+    REPLAY -.-> E1
+    DLC -.-> E12
+
+    classDef warn fill:#fff3cd,stroke:#b45309,color:#191919;
+    classDef hi fill:#fde2e2,stroke:#b91c1c,color:#191919;
+    classDef lo fill:#e7f0ff,stroke:#0057ff,color:#191919;

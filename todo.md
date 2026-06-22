@@ -93,6 +93,80 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-22 — Checked the other worktree `/private/tmp/support-agent-runtime-recovery`
+  (`fix/runtime-recovery`) against the architecture-review issues (no production code edits).** It has
+  code commits `4120ab3 fix(runtime): surface recovery dead ends` and `bcb9e6e feat(dashboard): surface a failed-send timeline card with inline retry`, and `pnpm build` is green there.
+  The branch fixes several concrete recovery follow-ups that overlapped the review context: reply-delivery
+  failure capture is now in the same tx as risk-flag/park/marker writes, case detail exposes
+  `activeReplyDelivery` so "Retry sending email" no longer depends only on `riskFlags`, supplier-notify
+  cap exhaustion escalates the case with `supplier_unreachable`, and deterministic approval-resume dead
+  ends park in `human_takeover`. It does **not** implement the report's deeper module recommendations:
+  no `CaseLifecycleWriter`, no collapsed `ToolExecution` module, no `ConversationThreadOwnership`
+  module, and no worker-local connector supervisor. The architecture report remains only partially
+  addressed by that worktree.
+
+- **2026-06-22 — Rechecked the architecture-review report against the current worktree (no production
+  code edits; follow-up answer to "are the issues here fixed?").** Compared
+  `/private/tmp/architecture-review-20260622-022840.html` with `git status`,
+  `git diff 681b06b..HEAD`, `git diff main..HEAD`, and source grep/line checks; verified
+  `pnpm build` green again. Conclusion: the Case lifecycle, Tool execution, and Connector supervisor
+  remarks still stand; Conversation thread ownership is only partially reduced by the IMAP/SMTP
+  reliability branch (`a03eb68`/`68f287b`/`d2037a2`) because it skips one duplicate IMAP read, adds
+  timeouts, and makes pre-send thread reads best-effort, but it does not centralize case-thread
+  ownership or fix the dashboard/fetchThread root-only shape. Local `main` changed only this checklist
+  after the report; the branch code changes are IMAP/SMTP + conversation reply/ask tooling.
+
+- **2026-06-22 — Fixed: IMAP/SMTP replies intermittently failed to send (TDD, branch
+  `fix/imap-smtp-send-reliability`, 3 commits `a03eb68`+`68f287b`+`d2037a2`; full `ci:local` green at
+  each commit — `pnpm build` + 1875→1880 tests).** Audit of the generic mailbox connector vs Gmail,
+  prompted by "messages do not send, it keeps failing." The unreliability was STRUCTURAL, not random:
+  - **The SMTP send was gated behind a live IMAP read.** Every reply hit a pre-send
+    `ops.fetchThread(root)` to derive subject + parent, because every specialist prompt passes
+    `subject: null` + `inReplyToMessageId: null` (`order-status-agent.ts:49,64,67`,
+    `missing-package-agent.ts:83,86`, `refund-review-agent.ts`, `damaged-product-agent.ts`,
+    `general-inquiry-agent.ts`). That read is a full IMAP login; on failure the send aborted with
+    `ConversationSendFailed` **before SMTP was attempted**. Fix (`imap-smtp-conversation-live.ts`): the
+    context read is now BEST-EFFORT (`Effect.orElseSucceed(() => [])`) — on failed/empty read, fall
+    back to `subject ?? "Re: support"` + `references=[root]` and still send. Threading holds via the
+    recorded message-id index.
+  - **No connection timeouts.** Fix (`imap-smtp.ts`): a `TIMEOUTS` const (connect 15s / greeting 10s /
+    socket 30s) spread into both `imapClientOptions`/`smtpTransportOptions`, so a hung handshake fails
+    in seconds instead of blocking the tick for minutes (nodemailer default socketTimeout = 10 min).
+  - **Why it bites in prod:** connector connects PER OPERATION, unpooled (`imap-smtp.ts:505`). One
+    reply = fetchThread (IMAP) + send (SMTP) + `maybeSaveSentCopy` (IMAP, after 1500ms) + the 60s poll
+    cron's IMAP login — racing handshakes on `mail.privateemail.com` (Namecheap, low concurrent-conn
+    cap) → "too many connections" → send failed. Gmail is immune (pooled HTTPS, no cap, threadId on
+    send). The reliability ARCHITECTURE was already correct (failed send → park + `reply_deliveries`
+    retry, never silent-resolve); the connector was just failing sends far more than it should.
+  - **Connection pressure cut (commit `d2037a2`):** a single reply opened up to THREE IMAP
+    connections — the tool's S9 recipient-check `fetchThread`, the connector's own `fetchThread` for
+    subject/parent, and the Sent append — two reading the SAME INBOX. Fix: `conversation.reply` /
+    `conversation.ask_customer` now REUSE the recipient-check thread to derive a null subject
+    (`Re: <subject>`) and pass it down (`reply.ts` `assertRecipientsInThread` returns the thread +
+    new `replySubject`); the IMAP connector reads the mailbox ONLY when the subject is still missing
+    (`if (!subject)`), defaulting the parent to the thread root so a reply still threads via
+    References=[root]. Removes one full IMAP connection per reply in the healthy path, no subject
+    regression. Only the provider-neutral subject is reused — the parent id is provider-specific
+    (Gmail's message id ≠ RFC id), so the connector still owns it.
+  - **REMAINING FOLLOW-UPS:**
+    - [ ] DECIDED NOT to flip `sentSaveMode` default to `smtp_provider`: traditional IMAP providers
+          (Dovecot/cPanel/Namecheap PrivateEmail) do NOT auto-file SMTP-submitted mail to Sent, so the
+          flip would hide the agent's replies from the merchant's Sent folder. `pool: true` alone is
+          inert without caching the transport across sends (we create + close one per `send()`).
+          Remaining safe pressure cut would be a per-tenant transport/connection cache — bigger change.
+    - [ ] Preserve a precise In-Reply-To (immediate parent) without a read — today the no-read path
+          uses References=[root] only; the precise parent needs the indexed message-ids threaded into
+          the send (provider-aware), deferred.
+    - [ ] Latent thread-tab bug: the router's `fetchThread` validation
+          (`conversation-router-live.ts:141`) fails the WHOLE thread when any IMAP message's derived
+          `threadId` (`references[0] ?? messageId`) ≠ root, so a reordered-References reply breaks the
+          email-thread tab even when the case is correctly correlated.
+    - [ ] The `case_message_ids` threading fix (migration 0027) is now COMMITTED on `main` (verified
+          in HEAD: migration 0027 + `findByMessageIds`), but verify it's been DEPLOYED + migrated on
+          Fly — until the deployed stack runs it, prod still mints duplicate cases per reply ("threads
+          scattered across cases").
+  - See [[project_imap_send_reliability]].
+
 - **2026-06-22 — Agent-runtime dead-end audit (no production code edits).** Static-traced the runtime
   failure exits, worker settlement/dead-letter handling, reply-delivery retry path, supplier notification
   sweep, approval maintenance, and merchant dashboard surfacing. Verified the focused recovery suites:

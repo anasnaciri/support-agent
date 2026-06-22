@@ -1,0 +1,47 @@
+%% Agent runtime — the agent loop (per-turn)
+flowchart TD
+    L0["for turn in 0..maxTurnsPerTick (counter SHARED across handoffs)"] --> LLM["llm.runToolCalling — NO TIMEOUT at runtime layer"]:::warn
+
+    LLM -->|"Credential Missing/Revoked"| H1["transition to human_takeover"]
+    LLM -->|"ContextTooLarge / SafetyBlocked"| H1
+    LLM -->|"any other _tag"| RT["Failed retryable:true, pg-boss retry"]
+    LLM -->|decision| D{"decision.type"}
+
+    D -->|final_message| FM{"status == resolved?"}
+    FM -->|no| FMR["resolve (InvalidTransition to PausedForHumanTakeover)"]
+    FM -->|yes| FMC["Completed"]
+    FMR --> FMC
+
+    D -->|handoff| HO["swap agent (allowlist), continue"]
+    D -->|"wait_for_customer / escalate_supplier"| HN["human_takeover ('not wired')"]:::warn
+    D -->|tool_call| TC["push assistant msg; handoff pseudo-tool?; tryGet; decode schema"]
+
+    TC --> C2{"C2 marker dedup (sideEffect != none)"}
+    C2 -->|hit| C2D["push deduped result, continue"]
+    C2 -->|miss| RFLAG["refund mismatch flag (best-effort)"]
+    RFLAG --> PERM["perms.check + shouldForceReplyApproval (allow to ask backstop)"]
+    PERM -->|deny| DENY["tool result 'denied', continue"]
+    PERM -->|ask| ASK["create approval + park + audit in 1 tx; email/push best-effort; PausedWaitingForApproval"]
+    PERM -->|allow| EXE["EXECUTE outside tx (Effect.timeout if declared); audit + C2 marker in 1 tx"]
+    EXE -->|ask_customer| WC["waiting_for_customer"]
+    EXE -->|"supplier.escalate escalated"| WS["waiting_for_supplier"]
+    EXE -->|"reply SEND failure"| RPARK["parkForReplyDeliveryFailure, human_takeover (NEVER resolves)"]
+    EXE -->|else| PUSH["push tool result, loop"]
+
+    L0 -->|"loop exhausted"| MTE["max_turns_exceeded, human_takeover"]
+
+    E1["E1: keyless side-effect tools (update_status, update_context, merchant.notify) NOT deduped on replay"]:::hi
+    E2["E2: NO check that a reply was actually sent, case can resolve in silence"]:::hi
+    E4["E4: hung provider pins tick + advisory lock"]:::med
+    E7["E7: unclassified deterministic 400 burns 5 retries"]:::med
+    E13["E13: this decision dead-ends, but the supplier.escalate TOOL works"]:::lo
+    C2 -.-> E1
+    FMR -.-> E2
+    LLM -.-> E4
+    LLM -.-> E7
+    HN -.-> E13
+
+    classDef warn fill:#fff3cd,stroke:#b45309,color:#191919;
+    classDef hi fill:#fde2e2,stroke:#b91c1c,color:#191919;
+    classDef med fill:#ffe8cc,stroke:#c2410c,color:#191919;
+    classDef lo fill:#e7f0ff,stroke:#0057ff,color:#191919;

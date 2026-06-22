@@ -1,0 +1,45 @@
+%% Agent runtime — tickBody pre-loop (load, approval-resume, park guards)
+flowchart TD
+    START["tickBody"] --> LOAD["1. load/create case + audit in 1 tx; unique(tenant,thread) guards double-create"]
+    LOAD --> KIND{"event.type"}
+
+    KIND -->|"approval.approved"| AA1
+    KIND -->|"approval.rejected"| AR["transition to human_takeover"]
+    KIND -->|"inbound / timer / supplier / resumed"| IDEN
+
+    AA1{"status == resolved?"}
+    AA1 -->|yes| AADUP["dup-skip, return Completed"]
+    AA1 -->|no| AA2{"approval rejected/cancelled/expired?"}
+    AA2 -->|yes| AAF["Failed"]
+    AA2 -->|no| AA3{"past expiry?"}
+    AA3 -->|yes| AAH["transition to human_takeover"]
+    AA3 -->|no| AA4["decode input + policy re-check"]
+    AA4 -->|"deny / bad input"| AAH
+    AA4 -->|ok| AA5["C2 marker, then EXECUTE gated tool"]
+    AA5 -->|fail| AAPARK["park: reply-failure or approved_tool_failed"]
+    AA5 -->|ok| AARES["resolve  (ASSUMES TOOL IS TERMINAL)"]:::warn
+
+    IDEN["3. customer identification (Shopify); 4. order-identity verify (may set identityVerified); 5. photo signals + dup-photo hash store"]:::warn
+    IDEN --> G1{"status == waiting_for_approval (pending row)?"}
+    G1 -->|yes| P1["PausedWaitingForApproval"]
+    G1 -->|no| G2{"status == human_takeover?"}
+    G2 -->|yes| P2["PausedForHumanTakeover"]
+    G2 -->|no| G3{"status == waiting_for_supplier (non-passthrough)?"}
+    G3 -->|yes| P3["PausedWaitingForSupplier"]
+    G3 -->|no| RO{"resolved + inbound reply?"}
+    RO -->|yes| ROPEN["reopen: resolved to in_progress"]
+    RO -->|no| LOOP["AGENT LOOP (see diagram 03)"]
+    ROPEN --> LOOP
+
+    E5["E5: refund.create as gated tool resolves with NO customer reply"]:::hi
+    E6["E6: only guards 'resolved'; reopened/handed-back case can run a stale draft"]:::med
+    E8["E8: steps 3-5 RUN even when the case is about to be HELD"]:::med
+    E3["E3: those writes are fail-OPEN, can drop the disclosure flag"]:::hi
+    AARES -.-> E5
+    AA1 -.-> E6
+    IDEN -.-> E8
+    IDEN -.-> E3
+
+    classDef warn fill:#fff3cd,stroke:#b45309,color:#191919;
+    classDef hi fill:#fde2e2,stroke:#b91c1c,color:#191919;
+    classDef med fill:#ffe8cc,stroke:#c2410c,color:#191919;
