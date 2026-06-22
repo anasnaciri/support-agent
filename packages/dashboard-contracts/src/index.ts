@@ -496,6 +496,13 @@ export interface ModelsResponse {
   readonly entries: ReadonlyArray<ModelOption>;
   /** Set when the upstream provider call failed; entries falls back to []. */
   readonly error: string | null;
+  /**
+   * The model currently configured for the "Rephrase with AI" action, or null
+   * when the tenant hasn't picked one (the rephrase handler then uses a
+   * built-in default). Lets the composer's model dropdown show the current
+   * selection alongside the catalog in a single fetch.
+   */
+  readonly rephraseModel?: string | null;
 }
 
 export interface LlmCredentialStatusResponse {

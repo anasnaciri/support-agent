@@ -151,6 +151,14 @@ export class TenantSettings extends Data.Class<{
    * Null means connector credential writes must be blocked.
    */
   readonly legalAcceptance: LegalAcceptance | null;
+  /**
+   * Model id used by the dashboard "Rephrase with AI" action. Optional /
+   * nullable — when unset the rephrase handler falls back to a built-in
+   * default. Picked from the tenant's provider catalog via the composer's
+   * model dropdown. Stored as a sibling key in the same `tenants.settings`
+   * JSONB; reads tolerate its absence (older rows have no value).
+   */
+  readonly rephraseModel?: string | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -199,6 +207,15 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
       tenantId: TenantId,
       acceptance: LegalAcceptance,
     ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Set (or clear, with `null`) the model used by the "Rephrase with AI"
+     * action. Same deep-merge semantics as `setRefundPolicy` — unrelated
+     * settings columns are preserved.
+     */
+    readonly setRephraseModel: (
+      tenantId: TenantId,
+      model: string | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
 
@@ -241,6 +258,7 @@ export const TenantRepositoryTest = (
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
             legalAcceptance: prev.legalAcceptance,
+            rephraseModel: prev.rephraseModel ?? null,
           }),
         );
         return Effect.void;
@@ -258,6 +276,7 @@ export const TenantRepositoryTest = (
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: sheet,
             legalAcceptance: prev.legalAcceptance,
+            rephraseModel: prev.rephraseModel ?? null,
           }),
         );
         return Effect.void;
@@ -275,6 +294,25 @@ export const TenantRepositoryTest = (
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
             legalAcceptance: acceptance,
+            rephraseModel: prev.rephraseModel ?? null,
+          }),
+        );
+        return Effect.void;
+      },
+      setRephraseModel: (tenantId, model) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            notificationEmail: prev.notificationEmail,
+            refundPolicy: prev.refundPolicy,
+            retentionDays: prev.retentionDays,
+            supplierEscalationSheet: prev.supplierEscalationSheet,
+            legalAcceptance: prev.legalAcceptance,
+            rephraseModel: model,
           }),
         );
         return Effect.void;

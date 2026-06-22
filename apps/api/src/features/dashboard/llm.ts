@@ -165,9 +165,19 @@ export const buildModelsResponse = (
     }>;
     readonly error?: string;
   } | null,
+  // Currently-configured "Rephrase with AI" model (a stored tenant setting,
+  // independent of the connection state) so the composer can show it in the
+  // model dropdown without a second fetch.
+  rephraseModel: string | null = null,
 ): ModelsResponse => {
   if (!cred) {
-    return { connected: false, provider: null, entries: [], error: null };
+    return {
+      connected: false,
+      provider: null,
+      entries: [],
+      error: null,
+      rephraseModel,
+    };
   }
   const entries: ReadonlyArray<ModelOption> = (catalog?.entries ?? []).map(
     (e) => ({
@@ -184,5 +194,6 @@ export const buildModelsResponse = (
     provider: cred.provider,
     entries,
     error: catalog?.error ?? null,
+    rephraseModel,
   };
 };

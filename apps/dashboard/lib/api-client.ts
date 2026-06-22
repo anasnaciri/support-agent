@@ -545,6 +545,16 @@ export const api = {
   models: (ctx: CallCtx): Promise<ModelsResponse> =>
     okBody("/models", ctx) as Promise<ModelsResponse>,
 
+  // Like `models`, but tolerant: returns null instead of redirecting/throwing
+  // when the member can't read the catalog (403 — lacks settings.agents) or the
+  // call otherwise fails. The case-page reply composer renders the model picker
+  // only when this resolves, so a reply-only member still gets the composer
+  // (minus the picker) rather than being bounced to /onboarding.
+  replyModels: async (ctx: CallCtx): Promise<ModelsResponse | null> => {
+    const { status, body } = await call("/models", { ctx, on403: "return" });
+    return status === 200 ? (body as ModelsResponse) : null;
+  },
+
   llmStatus: (ctx: CallCtx): Promise<LlmCredentialStatusResponse> =>
     okBody("/llm", ctx) as Promise<LlmCredentialStatusResponse>,
 
@@ -957,6 +967,20 @@ export const api = {
       ctx,
     });
     return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
+  // Persist the workspace "Rephrase with AI" model (blank string clears it →
+  // the rephrase handler falls back to its default). Gated on settings.agents.
+  setRephraseModel: async (
+    ctx: CallCtx,
+    model: string,
+  ): Promise<{ readonly ok: boolean }> => {
+    const { body } = await call(`/settings/rephrase-model`, {
+      method: "POST",
+      body: { model },
+      ctx,
+    });
+    return (body as { ok: boolean } | null) ?? { ok: false };
   },
 
   // AI-polish a reply draft. Returns the rewritten text on success, or a

@@ -151,6 +151,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly retentionDays?: unknown;
                 readonly supplierEscalationSheet?: unknown;
                 readonly legalAcceptance?: unknown;
+                readonly rephraseModel?: unknown;
               }
             | null;
           const notificationEmail =
@@ -174,12 +175,18 @@ export const TenantRepositoryLive = Layer.effect(
           const legalAcceptance = decodeLegalAcceptance(
             settings?.legalAcceptance,
           );
+          const rephraseModel =
+            typeof settings?.rephraseModel === "string" &&
+            settings.rephraseModel.length > 0
+              ? settings.rephraseModel
+              : null;
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
             retentionDays,
             supplierEscalationSheet,
             legalAcceptance,
+            rephraseModel,
           });
         }),
 
@@ -258,6 +265,33 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setLegalAcceptance",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setRephraseModel: (tenantId, model) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` merge as the other setters. `null` writes the
+          // JSONB null literal, which getSettings decodes back to null (== use
+          // the built-in default).
+          const modelJson = JSON.stringify({ rephraseModel: model });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${modelJson}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setRephraseModel",
                 cause,
               }),
           });

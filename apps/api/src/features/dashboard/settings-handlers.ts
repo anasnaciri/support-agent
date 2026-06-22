@@ -64,16 +64,62 @@ export const handleDashboardModels = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  // The configured "Rephrase with AI" model is a stored tenant setting, so it
+  // travels in the models response regardless of the connection state.
+  const rephraseModel = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo
+          .getSettings(TenantId(auth.tenantId))
+          .pipe(Effect.either);
+        return settings._tag === "Right"
+          ? (settings.right.rephraseModel ?? null)
+          : null;
+      }),
+      layer,
+    ),
+  );
   const cred = await Effect.runPromise(
     Effect.provide(resolveActiveLlmCredential(auth.tenantId), layer),
   );
-  if (!cred) return sendJson(res, 200, buildModelsResponse(null, null));
+  if (!cred) {
+    return sendJson(res, 200, buildModelsResponse(null, null, rephraseModel));
+  }
   const catalog = await fetchModelCatalog({
     provider: cred.provider,
     apiKey: cred.apiKey,
     ...(cred.baseURL !== undefined ? { baseURL: cred.baseURL } : {}),
   });
-  return sendJson(res, 200, buildModelsResponse(cred, catalog));
+  return sendJson(res, 200, buildModelsResponse(cred, catalog, rephraseModel));
+};
+
+// POST /dashboard/settings/rephrase-model — set (or clear) the workspace model
+// used by the "Rephrase with AI" composer action. A blank/whitespace body
+// clears it so the rephrase handler reverts to its built-in default.
+export const handleDashboardRephraseModelSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const model = typeof body["model"] === "string" ? body["model"].trim() : "";
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setRephraseModel(
+          TenantId(auth.tenantId),
+          model.length > 0 ? model : null,
+        );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
 };
 
 export const handleDashboardLlmStatus = async (

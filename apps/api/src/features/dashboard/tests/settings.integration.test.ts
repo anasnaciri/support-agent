@@ -663,6 +663,60 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(policy?.mode).toBe("always_deny");
   });
 
+  it("POST /dashboard/settings/rephrase-model persists + clears the model (preserves siblings)", async () => {
+    if (!raw) return;
+    const settingsOf = async (): Promise<{
+      rephraseModel?: unknown;
+      refundPolicy?: { mode?: string };
+    }> => {
+      const [row] = await raw!.db
+        .select({ settings: tenants.settings })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1);
+      return (row?.settings ?? {}) as {
+        rephraseModel?: unknown;
+        refundPolicy?: { mode?: string };
+      };
+    };
+
+    // Write a sibling setting first so this test is self-contained (independent
+    // of test order): the || merge must keep it across the model write/clear.
+    expect(
+      (
+        await post("/dashboard/refund-policy", {
+          currencyCode: "usd",
+          askAboveMinorUnits: 2500,
+          denyAboveMinorUnits: 20000,
+          mode: "always_ask",
+        })
+      ).status,
+    ).toBe(200);
+
+    const set = await post("/dashboard/settings/rephrase-model", {
+      model: "anthropic/claude-haiku-4-5",
+    });
+    expect(set.status).toBe(200);
+    const afterSet = await settingsOf();
+    expect(afterSet.rephraseModel).toBe("anthropic/claude-haiku-4-5");
+    expect(afterSet.refundPolicy?.mode).toBe("always_ask"); // sibling preserved
+
+    // GET /dashboard/models surfaces the configured model in one fetch.
+    const models = await get("/dashboard/models");
+    expect(((await models.json()) as { rephraseModel?: unknown }).rephraseModel).toBe(
+      "anthropic/claude-haiku-4-5",
+    );
+
+    // A blank model clears it back to "use the default" without touching siblings.
+    const cleared = await post("/dashboard/settings/rephrase-model", {
+      model: "  ",
+    });
+    expect(cleared.status).toBe(200);
+    const afterClear = await settingsOf();
+    expect(afterClear.rephraseModel).toBeNull();
+    expect(afterClear.refundPolicy?.mode).toBe("always_ask");
+  });
+
   it("POST /dashboard/refund-policy 400s on bad currency / amount / ordering", async () => {
     expect(
       (

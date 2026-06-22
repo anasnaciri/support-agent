@@ -220,4 +220,61 @@ describe("TenantRepositoryTest", () => {
       expect(err).toBeInstanceOf(TenantNotFound);
     }
   });
+
+  it("setRephraseModel stores the model (preserves siblings)", async () => {
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setRephraseModel(tenantId, "anthropic/claude-haiku-4-5");
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.notificationEmail).toBe("ops@example.com");
+    expect(got.refundPolicy).toEqual(defaultRefundPolicy);
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
+    expect(got.rephraseModel).toBe("anthropic/claude-haiku-4-5");
+  });
+
+  it("setRephraseModel clears the model when passed null", async () => {
+    const initial = settings({ rephraseModel: "openai/gpt-4o-mini" });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setRephraseModel(tenantId, null);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.rephraseModel).toBeNull();
+  });
+
+  it("setRephraseModel fails when the tenant is absent (TenantNotFound)", async () => {
+    const layer = TenantRepositoryTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setRephraseModel(tenantId, "x");
+        }),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(TenantNotFound);
+    }
+  });
 });

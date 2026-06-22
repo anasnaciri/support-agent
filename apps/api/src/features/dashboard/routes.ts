@@ -35,6 +35,7 @@ import {
   handleDashboardLegalAcceptance,
   handleDashboardLlmStatus,
   handleDashboardModels,
+  handleDashboardRephraseModelSet,
   handleDashboardOnboarding,
   handleDashboardSettings,
   handleDashboardShopCurrency,
@@ -273,6 +274,12 @@ export const registerDashboardRoutes = (
     "/dashboard/agents/:id/model",
     "Set a per-agent model override",
     handleDashboardAgentModelSet,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/settings/rephrase-model",
+    "Set (or clear) the model used by the Rephrase with AI composer action",
+    handleDashboardRephraseModelSet,
     "settings.agents",
   );
   dashboardPost(

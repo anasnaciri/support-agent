@@ -9,7 +9,21 @@ describe("buildModelsResponse", () => {
       provider: null,
       entries: [],
       error: null,
+      rephraseModel: null,
     });
+  });
+
+  it("carries the configured rephrase model (connected and disconnected)", () => {
+    expect(buildModelsResponse(null, null, "openai/gpt-4o-mini").rephraseModel).toBe(
+      "openai/gpt-4o-mini",
+    );
+    expect(
+      buildModelsResponse(
+        { provider: "openrouter", apiKey: "sk-or-…" },
+        { entries: [] },
+        "anthropic/claude-haiku-4-5",
+      ).rephraseModel,
+    ).toBe("anthropic/claude-haiku-4-5");
   });
 
   it("projects the catalog entries to ModelOption fields", () => {

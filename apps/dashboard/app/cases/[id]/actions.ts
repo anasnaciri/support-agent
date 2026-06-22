@@ -64,6 +64,17 @@ export const sendReplyAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?replied=${result.kind}`);
 };
 
+// Persist the workspace "Rephrase with AI" model from the composer dropdown.
+// Returns whether it stuck (the picker is gated on settings.agents, so a
+// reply-only member's change is refused). No redirect — the composer keeps its
+// place.
+export const setRephraseModelAction = async (
+  model: string,
+): Promise<{ readonly ok: boolean }> => {
+  const ctx = await getDashboardContext();
+  return api.setRephraseModel(ctx, model);
+};
+
 // AI-polish the current reply draft. Unlike the other actions this RETURNS its
 // result to the client composer (no redirect) so the textarea can be swapped in
 // place. Spent against the tenant's own LLM credential.

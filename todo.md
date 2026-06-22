@@ -14,11 +14,14 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-NEXT: draft-email feature on cases/:id — **slices 1+2 LANDED 2026-06-22** (composer that drafts +
-sends a customer reply while in human_takeover, with a "Rephrase with AI" button; see entries below).
-Remaining slices: (3) make the rephrase model **configured in settings** (today it's hardcoded
-`REPHRASE_MODEL = google/gemini-3.5-flash` in case-handlers.ts); (4) a minimalistic model dropdown on
-top of the text input (just the current model name + a chevron-down) that picks the rephrase model.
+DONE: draft-email feature on cases/:id — **all 4 slices LANDED 2026-06-22** (composer that drafts +
+sends a customer reply while in human_takeover, "Rephrase with AI", a workspace-configurable rephrase
+model, and a minimalistic model dropdown atop the composer). See the session entries below. Still
+**unverified live** end-to-end (needs a tenant LLM credential + a taken-over case).
+
+NEXT (the "Later" item): skip emails from these domains — a settings page for domains to skip so the
+agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by adding
+`suggest ignore domain: true` to the case context, which the owner approves on the case page.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
@@ -96,6 +99,27 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 ---
 
 ### Session history (summarized)
+
+- **2026-06-22 — Configurable rephrase model + minimalistic dropdown (draft-email feature, slices 3+4 of 4).**
+  The "Rephrase with AI" model is now a **workspace setting**, picked from a compact dropdown (current
+  model name + chevron) on top of the composer draft. Build (TDD):
+  - **Persistence**: added an optional `rephraseModel` to `TenantSettings` + `setRephraseModel` on
+    `TenantRepository` (Tag + Test + Live, mirroring `setRefundPolicy`'s `||` JSONB merge in
+    `tenants.settings` — **no migration**). Made the field optional so the dozen existing
+    `new TenantSettings({...})` call sites didn't need touching; Test-layer setters preserve it.
+    3 unit tests + a real-DB integration round-trip test (`settings.integration.test.ts`) that verifies
+    persist/clear + sibling preservation + the `/models` embed.
+  - **Endpoint/handler**: `POST /dashboard/settings/rephrase-model` (gated `settings.agents`) →
+    `setRephraseModel`; the rephrase handler now reads the configured model (fallback
+    `REPHRASE_MODEL`); the current model rides in `ModelsResponse.rephraseModel` (filled by
+    `handleDashboardModels` reading `getSettings`) so the composer gets list + selection in one fetch.
+  - **UI**: a compact `RephraseModelPicker` (name + chevron, lucide `ChevronDown`/`Check`) atop the
+    composer; selecting persists via `setRephraseModelAction`. The picker only renders when the catalog
+    is readable — the case page fetches it via a 403-tolerant `api.replyModels` so a reply-only member
+    (no `settings.agents`) still gets the composer, just without the picker, instead of being bounced.
+  - **Permission model**: rephrase + send stay on `cases.reply`; *changing the model* needs
+    `settings.agents` (it's a workspace setting). Verified: `pnpm build` green; unit + the new DB
+    integration test pass; dashboard `typecheck` clean.
 
 - **2026-06-22 — "Rephrase with AI" on the reply draft (draft-email feature, slice 2 of 4).**
   The manual-reply composer now has a **Rephrase with AI** button that rewrites the agent's current

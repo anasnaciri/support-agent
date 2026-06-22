@@ -8,6 +8,7 @@ import {
   ConversationService,
   decisionToEvent,
   LLMService,
+  TenantRepository,
   parseThreadId,
   namespaceThreadId,
   ShopifyAppProvisioningStore,
@@ -830,6 +831,23 @@ export const handleDashboardRephrase = async (
   const text = typeof body["text"] === "string" ? body["text"] : "";
   const tenantId = TenantId(auth.tenantId);
 
+  // The tenant-configured rephrase model (picked via the composer dropdown),
+  // falling back to the built-in default when unset or the row is missing.
+  const model = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo
+          .getSettings(tenantId)
+          .pipe(Effect.either);
+        const configured =
+          settings._tag === "Right" ? settings.right.rephraseModel : null;
+        return configured && configured.length > 0 ? configured : REPHRASE_MODEL;
+      }),
+      layer,
+    ),
+  );
+
   const outcome = await rephraseDraft({
     text,
     hasCredential: () =>
@@ -849,7 +867,7 @@ export const handleDashboardRephrase = async (
             return yield* llm
               .runToolCalling({
                 tenantId,
-                model: REPHRASE_MODEL,
+                model,
                 system: REPHRASE_SYSTEM,
                 messages: buildRephraseMessages(draft),
                 tools: [],

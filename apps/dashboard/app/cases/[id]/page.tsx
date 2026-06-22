@@ -532,6 +532,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
+  // Reply composer's model picker: only fetched when the composer renders (the
+  // case is taken over), and tolerantly (null when the member can't read the
+  // catalog) so a reply-only member still gets the composer without the picker.
+  const replyModels = canResume ? await api.replyModels(ctx) : null;
   // A drafted customer reply failed to send. The active reply-delivery row is
   // the source of truth for whether the dashboard can re-send that same draft.
   const showRetrySend = shouldShowRetrySendAction({
@@ -712,7 +716,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       </div>
 
       {canResume ? (
-        <ReplyComposer caseId={caseRow.id} customerEmail={customerEmail} />
+        <ReplyComposer
+          caseId={caseRow.id}
+          customerEmail={customerEmail}
+          models={replyModels}
+        />
       ) : null}
 
       <div>
