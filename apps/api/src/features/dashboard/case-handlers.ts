@@ -7,6 +7,7 @@ import {
   ConnectorCredentialStore,
   ConversationService,
   decisionToEvent,
+  LLMService,
   parseThreadId,
   namespaceThreadId,
   ShopifyAppProvisioningStore,
@@ -41,6 +42,12 @@ import {
   sendManualReply,
   type ManualReplyCaseView,
 } from "./case-reply.js";
+import {
+  buildRephraseMessages,
+  rephraseDraft,
+  REPHRASE_SYSTEM,
+} from "./rephrase.js";
+import { resolveActiveLlmCredential } from "./llm.js";
 import {
   conversationUnavailableReason,
   projectConversationThread,
@@ -798,5 +805,76 @@ export const handleDashboardCaseReply = async (
           : outcome.kind === "send_failed"
             ? 502
             : 409; // not_in_takeover | no_thread
+  return sendJson(res, status, outcome);
+};
+
+// Default model for the one-shot "Rephrase with AI" action. A cheap, fast model
+// is the right default for polishing a short reply; a tenant-configurable
+// override lands in a later slice.
+const REPHRASE_MODEL = "google/gemini-3.5-flash";
+
+// POST /dashboard/rephrase — AI polish of a reply draft. One-shot text
+// generation (LLMService.runToolCalling with no tools → a final message), spent
+// against the tenant's own LLM credential. Returns the discriminated outcome
+// (rephrased | empty_input | no_llm | failed); the orchestration + guards live
+// in the unit-tested `rephraseDraft` core.
+export const handleDashboardRephrase = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const text = typeof body["text"] === "string" ? body["text"] : "";
+  const tenantId = TenantId(auth.tenantId);
+
+  const outcome = await rephraseDraft({
+    text,
+    hasCredential: () =>
+      Effect.runPromise(
+        Effect.provide(
+          resolveActiveLlmCredential(auth.tenantId).pipe(
+            Effect.map((c) => c !== null),
+          ),
+          layer,
+        ),
+      ),
+    generate: async (draft) => {
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const llm = yield* LLMService;
+            return yield* llm
+              .runToolCalling({
+                tenantId,
+                model: REPHRASE_MODEL,
+                system: REPHRASE_SYSTEM,
+                messages: buildRephraseMessages(draft),
+                tools: [],
+                temperature: 0.4,
+              })
+              .pipe(Effect.either);
+          }),
+          layer,
+        ),
+      );
+      if (result._tag === "Left") {
+        const tag = (result.left as { readonly _tag?: unknown })._tag;
+        throw new Error(typeof tag === "string" ? tag : "llm_error");
+      }
+      return result.right.type === "final_message" ? result.right.text : null;
+    },
+  });
+
+  const status =
+    outcome.kind === "rephrased"
+      ? 200
+      : outcome.kind === "empty_input"
+        ? 400
+        : outcome.kind === "no_llm"
+          ? 403
+          : 502; // failed
   return sendJson(res, status, outcome);
 };

@@ -14,11 +14,11 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-NEXT: draft-email feature on cases/:id — **slice 1 (the input) LANDED 2026-06-22** (composer
-that drafts + sends a customer reply while in human_takeover; see "Manual reply composer" below).
-Remaining slices: (2) "Rephrase with AI" action on the draft; (3) the rephrase model is configured
-in settings; (4) a minimalistic model dropdown on top of the text input (just the current model
-name + a chevron-down).
+NEXT: draft-email feature on cases/:id — **slices 1+2 LANDED 2026-06-22** (composer that drafts +
+sends a customer reply while in human_takeover, with a "Rephrase with AI" button; see entries below).
+Remaining slices: (3) make the rephrase model **configured in settings** (today it's hardcoded
+`REPHRASE_MODEL = google/gemini-3.5-flash` in case-handlers.ts); (4) a minimalistic model dropdown on
+top of the text input (just the current model name + a chevron-down) that picks the rephrase model.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
@@ -96,6 +96,27 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 ---
 
 ### Session history (summarized)
+
+- **2026-06-22 — "Rephrase with AI" on the reply draft (draft-email feature, slice 2 of 4).**
+  The manual-reply composer now has a **Rephrase with AI** button that rewrites the agent's current
+  draft in place (clearer/warmer/professional, meaning + facts preserved), spent against the tenant's
+  own LLM credential. Build (TDD):
+  - **Core** `apps/api/src/features/dashboard/rephrase.ts` — DI'd `rephraseDraft`
+    (`empty_input → no_llm → failed → rephrased`) + pure prompt helpers (`REPHRASE_SYSTEM`,
+    `buildRephraseMessages`). 6 unit tests. `no_llm` is split from `failed` so the UI can say
+    "connect an AI provider" rather than a generic error.
+  - **Endpoint** `POST /dashboard/rephrase` (`handleDashboardRephrase`, gated `cases.reply`): checks
+    the tenant credential via `resolveActiveLlmCredential`, then one-shot `LLMService.runToolCalling`
+    with **`tools: []`** → the model returns a `final_message` whose `.text` is the rewrite. Model is
+    hardcoded `google/gemini-3.5-flash` for now (slice 3 makes it configurable).
+  - **Layer**: added `LLMService` to `ApiLayer` (`LLMServiceLive` over `LLMCredentialResolverLive` +
+    `BlobStorage`) — the api had no LLM surface before; this is the first one-shot LLM call outside the
+    worker runtime.
+  - **UI**: `ReplyComposer` is now a **client** component (controlled draft state); the button calls a
+    value-returning `rephraseAction` server action via `useTransition` and swaps the textarea text on
+    success (inline error otherwise). Send still flows through the `sendReplyAction` form action.
+  - Verified: `pnpm build` green; rephrase + reply unit tests pass (13/13); dashboard `typecheck` clean.
+  - **Not yet verified live** (needs a tenant LLM credential + a taken-over case). **Committed.**
 
 - **2026-06-22 — Manual reply composer (draft-email feature, slice 1 of 4).** A human driving a case
   (`human_takeover`) can now draft and send a customer reply straight from `/cases/:id`. Product

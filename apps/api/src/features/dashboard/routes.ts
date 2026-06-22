@@ -12,6 +12,7 @@ import {
   handleDashboardCaseDetail,
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
+  handleDashboardRephrase,
   handleDashboardCaseShopify,
   handleDashboardCases,
   handleDashboardConnections,
@@ -231,6 +232,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/reply",
     "Send a human-drafted customer reply while driving a taken-over case",
     handleDashboardCaseReply,
+    "cases.reply",
+  );
+  dashboardPost(
+    "/dashboard/rephrase",
+    "AI-polish a reply draft (one-shot, spent against the tenant's LLM key)",
+    handleDashboardRephrase,
     "cases.reply",
   );
   // Org-scoped (no resolved workspace) — these use authenticateDashboardOrg and

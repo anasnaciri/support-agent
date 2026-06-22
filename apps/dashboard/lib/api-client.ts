@@ -959,6 +959,21 @@ export const api = {
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
 
+  // AI-polish a reply draft. Returns the rewritten text on success, or a
+  // discriminated reason (empty_input | no_llm | failed) the composer maps to a
+  // friendly message. Spent against the tenant's own LLM credential.
+  rephrase: async (
+    ctx: CallCtx,
+    text: string,
+  ): Promise<{ readonly kind: string; readonly text?: string }> => {
+    const { body } = await call(`/rephrase`, {
+      method: "POST",
+      body: { text },
+      ctx,
+    });
+    return (body as { kind: string; text?: string } | null) ?? { kind: "error" };
+  },
+
   // ---- Members & roles (members.manage) ----
   members: async (ctx: CallCtx): Promise<MembersResponse> =>
     okBody("/members", ctx) as Promise<MembersResponse>,

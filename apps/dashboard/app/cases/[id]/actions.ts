@@ -64,6 +64,16 @@ export const sendReplyAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?replied=${result.kind}`);
 };
 
+// AI-polish the current reply draft. Unlike the other actions this RETURNS its
+// result to the client composer (no redirect) so the textarea can be swapped in
+// place. Spent against the tenant's own LLM credential.
+export const rephraseAction = async (
+  text: string,
+): Promise<{ readonly kind: string; readonly text?: string }> => {
+  const ctx = await getDashboardContext();
+  return api.rephrase(ctx, text);
+};
+
 // Re-send the SAME drafted reply whose delivery failed (distinct from the
 // agent retry above): requeues the failed reply-delivery for the worker sweep.
 export const retrySendAction = async (formData: FormData): Promise<void> => {

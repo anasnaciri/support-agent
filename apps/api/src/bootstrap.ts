@@ -9,6 +9,7 @@ import {
   ConnectorCredentialStore,
   ConversationService,
   KnowledgeBaseService,
+  LLMService,
   parseKeySet,
   ShopifyAppProvisioningStore,
   ShopifyService,
@@ -26,6 +27,7 @@ import {
   DbClient,
   DbClientLive,
   KnowledgeBaseServiceLive,
+  LLMCredentialResolverLive,
   ShopifyAppProvisioningStoreLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
@@ -36,6 +38,7 @@ import {
   BlobStorageLive,
   ConversationRouterLive,
   makeCaseProviderResolver,
+  LLMServiceLive,
   makeGmailConversation,
   makeGraphConversation,
   makeImapSmtpConversation,
@@ -506,6 +509,17 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const blob = process.env["R2_BUCKET"]
     ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
     : BlobStorageTest({});
+  // LLMService for one-shot dashboard AI actions (e.g. "Rephrase with AI" on a
+  // manual reply draft). BYOK: the resolver reads the per-tenant provider + key
+  // from the same encrypted credential stores Shopify/Gmail OAuth writes to, so
+  // a tenant with no AI provider configured simply has no credential (the
+  // handler checks that first and returns a "connect a provider" result).
+  const llmResolver = LLMCredentialResolverLive.pipe(
+    Layer.provide(Layer.mergeAll(store, accountOpenrouterStore, dbLayer)),
+  );
+  const llm = LLMServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(llmResolver, blob)),
+  );
   // ShopifyService for the dashboard's case-detail customer/order panels.
   // Credentials resolve per-tenant from the DB-backed connector store (the
   // managed-install path); the layer itself builds without any Shopify env.
@@ -537,6 +551,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     approvals,
     tx,
     audit,
+    llm,
     dbLayer,
     blob,
     shopify,
@@ -555,6 +570,7 @@ export type ApiLayer = Layer.Layer<
   | ShopifyAppProvisioningStore
   | ApprovalService
   | AuditLogService
+  | LLMService
   | TransactionRunner
   | DbClient
   | BlobStorage
