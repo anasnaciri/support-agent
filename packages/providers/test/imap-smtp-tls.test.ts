@@ -48,6 +48,19 @@ describe("imapClientOptions", () => {
       });
     }
   });
+
+  it("sets finite connect/greeting/socket timeouts so a stuck handshake fails fast", () => {
+    // Without these, a hung IMAP connect falls back to library defaults
+    // (minutes) and blocks the whole runtime tick — a reply appears to never
+    // send. Bounded timeouts let the connect fail and the retry take over.
+    const opts = imapClientOptions(config());
+    expect(opts.connectionTimeout).toBeGreaterThan(0);
+    expect(opts.connectionTimeout).toBeLessThanOrEqual(60_000);
+    expect(opts.greetingTimeout).toBeGreaterThan(0);
+    expect(opts.greetingTimeout).toBeLessThanOrEqual(60_000);
+    expect(opts.socketTimeout).toBeGreaterThan(0);
+    expect(opts.socketTimeout).toBeLessThanOrEqual(120_000);
+  });
 });
 
 describe("smtpTransportOptions", () => {
@@ -65,6 +78,19 @@ describe("smtpTransportOptions", () => {
         rejectUnauthorized: true,
       });
     }
+  });
+
+  it("sets finite connect/greeting/socket timeouts so a stuck send fails fast", () => {
+    // nodemailer's defaults are minutes (socketTimeout 10m); a stuck SMTP
+    // socket would hang the tick. Bound them so a failed send is surfaced
+    // quickly and parked for retry instead of silently hanging.
+    const opts = smtpTransportOptions(config());
+    expect(opts.connectionTimeout).toBeGreaterThan(0);
+    expect(opts.connectionTimeout).toBeLessThanOrEqual(60_000);
+    expect(opts.greetingTimeout).toBeGreaterThan(0);
+    expect(opts.greetingTimeout).toBeLessThanOrEqual(60_000);
+    expect(opts.socketTimeout).toBeGreaterThan(0);
+    expect(opts.socketTimeout).toBeLessThanOrEqual(120_000);
   });
 });
 

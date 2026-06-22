@@ -288,6 +288,25 @@ export const imapConfigFromConnection = (
 
 const TLS_FLOOR = { minVersion: "TLSv1.2", rejectUnauthorized: true } as const;
 
+// ============================================================
+// Connection timeouts — never let a stuck socket hang a tick
+// ============================================================
+//
+// We connect per operation against tenant-owned mailboxes we don't control.
+// Without explicit timeouts a hung TCP/TLS handshake falls back to the
+// libraries' defaults (nodemailer's socketTimeout is 10 minutes), so a single
+// unreachable server would block the whole runtime tick — the reply looks like
+// it "never sends". These bounded values surface the failure in seconds so the
+// reply-delivery retry can take over instead.
+const TIMEOUTS = {
+  /** Max time to establish the TCP/TLS connection. */
+  connectionTimeout: 15_000,
+  /** Max wait for the server's protocol greeting after connect. */
+  greetingTimeout: 10_000,
+  /** Max socket inactivity once connected (covers slow AUTH / fetch). */
+  socketTimeout: 30_000,
+} as const;
+
 /** imapflow options for a stored config. Exported for unit tests. */
 export const imapClientOptions = (config: ImapSmtpConfig) => ({
   host: config.imapHost,
@@ -300,6 +319,7 @@ export const imapClientOptions = (config: ImapSmtpConfig) => ({
   auth: { user: config.user, pass: config.password },
   logger: false as const,
   tls: TLS_FLOOR,
+  ...TIMEOUTS,
 });
 
 /** nodemailer transport options for a stored config. Exported for unit tests. */
@@ -312,6 +332,7 @@ export const smtpTransportOptions = (config: ImapSmtpConfig) => ({
   ...(config.smtpSecure ? {} : { requireTLS: true }),
   auth: { user: config.user, pass: config.password },
   tls: TLS_FLOOR,
+  ...TIMEOUTS,
 });
 
 // ============================================================
