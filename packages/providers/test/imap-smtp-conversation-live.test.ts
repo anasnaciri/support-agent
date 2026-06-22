@@ -151,6 +151,40 @@ describe("makeImapSmtpConversation — reply / askCustomer", () => {
     expect(sendArg.idempotencyKey).toBe("d-1");
   });
 
+  it("still sends when the pre-send thread read fails (non-fatal)", async () => {
+    // The SMTP send must not be blocked by a flaky IMAP read used only to
+    // derive the subject / parent. On a failed read we fall back to a generic
+    // subject + References=[root] and still attempt delivery — the reply
+    // threads via the recorded message ids regardless.
+    const send = vi.fn(async () => ({ messageId: "sent-x@host" }));
+    const ops = fakeOps({
+      fetchThread: vi.fn(async () => {
+        throw new Error("Maximum number of connections exceeded");
+      }),
+      send,
+    });
+    const ask: AskCustomerDraft = {
+      threadId: ThreadId("root@host"),
+      to: [{ name: null, email: "jane@example.com" }],
+      subject: null, // forces the pre-send read
+      bodyText: "Following up on your order.",
+      bodyHtml: null,
+      attachments: [],
+      draftId: "d-9",
+    };
+    const exit = await run(ops, [conn()], (svc) =>
+      svc.askCustomer(tenantId, ask),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.id).toBe("sent-x@host");
+    expect(send).toHaveBeenCalledTimes(1);
+    const sendArg = (send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendArg.subject).toBe("Re: support");
+    expect(sendArg.references).toEqual(["root@host"]);
+    expect(sendArg.inReplyTo).toBeNull();
+  });
+
   it("askCustomer derives In-Reply-To from the latest thread message", async () => {
     const ops = fakeOps({
       fetchThread: vi.fn(async () => [

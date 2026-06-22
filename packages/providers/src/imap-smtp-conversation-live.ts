@@ -24,6 +24,7 @@ import {
   stripBrackets,
   type ImapSmtpConfig,
   type ImapSmtpOps,
+  type RawImapMessage,
 } from "./imap-smtp.js";
 
 // ============================================================
@@ -114,16 +115,21 @@ export const makeImapSmtpConversation = (
             : null;
 
         // Derive the subject and the immediate parent message when not given,
-        // by reading the thread once.
+        // by reading the thread once. This read is BEST-EFFORT: a transient
+        // IMAP failure (connection-limit, timeout) must NOT block the SMTP
+        // send — losing the customer reply is far worse than a generic
+        // subject. On a failed/empty read we fall back to "Re: support" (at
+        // send) and References=[root]; threading still holds via the recorded
+        // message-id index. Reading the mailbox here is also why a tenant with
+        // a low concurrent-connection cap saw sends fail under poll pressure.
         if (!subject || inReplyTo === null) {
           const raws = yield* Effect.tryPromise({
             try: () => ops.fetchThread(root),
             catch: (): ConversationError =>
-              new ConversationSendFailed({
-                draftId: draft.draftId,
-                reason: "could not read thread for reply context",
-              }),
-          });
+              new ConversationProviderUnavailable({ provider: "imap" }),
+          }).pipe(
+            Effect.orElseSucceed(() => [] as ReadonlyArray<RawImapMessage>),
+          );
           if (raws.length > 0) {
             const thread = buildThread(raws, root, mailbox);
             subject ??= replySubject(thread.subject);
