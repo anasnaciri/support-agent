@@ -177,6 +177,7 @@ export const getTenantDetailForAdmin = (
         ? {
             clientId: prov.clientId,
             shopDomain: prov.shopDomain,
+            installLink: prov.installLink,
             status: prov.status,
             updatedAt: prov.updatedAt.toISOString(),
           }

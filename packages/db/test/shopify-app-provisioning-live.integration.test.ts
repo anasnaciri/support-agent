@@ -65,7 +65,43 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     expect(fetched!.clientId).toBe("shopify_client_abc");
     expect(fetched!.clientSecret).toBe("shpss_super_secret");
     expect(fetched!.shopDomain).toBeNull();
+    expect(fetched!.installLink).toBeNull();
     expect(fetched!.status).toBe("ready");
+  });
+
+  it("put records and round-trips the install_link", async () => {
+    const link =
+      "https://admin.shopify.com/store/pilot/oauth/install_custom_app?client_id=shopify_client_abc";
+    const fetched = await run(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        yield* store.put({
+          tenantId: TenantId(tenantId),
+          clientId: "shopify_client_abc",
+          clientSecret: "shpss_super_secret",
+          installLink: link,
+        });
+        return yield* store.get(TenantId(tenantId));
+      }),
+    );
+    expect(fetched!.installLink).toBe(link);
+  });
+
+  it("put without an install_link preserves the recorded one on a live row", async () => {
+    const fetched = await run(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        yield* store.put({
+          tenantId: TenantId(tenantId),
+          clientId: "shopify_client_abc2",
+          clientSecret: "shpss_super_secret2",
+        });
+        return yield* store.get(TenantId(tenantId));
+      }),
+    );
+    expect(fetched!.installLink).toBe(
+      "https://admin.shopify.com/store/pilot/oauth/install_custom_app?client_id=shopify_client_abc",
+    );
   });
 
   it("get returns null for a tenant with no provisioning row", async () => {
@@ -166,6 +202,8 @@ describeIfDb("ShopifyAppProvisioningStore (Live, integration)", () => {
     expect(fetched!.status).toBe("ready");
     expect(fetched!.clientId).toBe("shopify_client_reactivated");
     expect(fetched!.shopDomain).toBeNull();
+    // The stale install link is dropped alongside the shop on reactivation.
+    expect(fetched!.installLink).toBeNull();
   });
 });
 

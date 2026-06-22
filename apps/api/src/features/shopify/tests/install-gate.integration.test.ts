@@ -38,7 +38,11 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
   const revokedTenantId = randomUUID();
   const readyTenantId = randomUUID();
   const shopBoundTenantId = randomUUID();
+  const installLinkTenantId = randomUUID();
   const boundShop = "bound-store.myshopify.com";
+  const installLinkShop = "install-link-store.myshopify.com";
+  const storeInstallLink =
+    "https://admin.shopify.com/store/install-link-store/oauth/install_custom_app?client_id=pilot-client";
   const blockedShop = `install-gate-blocked-${randomUUID()}.myshopify.com`;
 
   const acceptedSettings = {
@@ -78,7 +82,11 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
   );
 
-  const provision = (tenant: string, shopDomain?: string) =>
+  const provision = (
+    tenant: string,
+    shopDomain?: string,
+    installLink?: string,
+  ) =>
     Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -88,6 +96,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
             clientId: "pilot-client",
             clientSecret: "pilot-secret",
             ...(shopDomain ? { shopDomain } : {}),
+            ...(installLink ? { installLink } : {}),
           });
         }),
         provisioningLayer,
@@ -112,6 +121,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
       revokedTenantId,
       readyTenantId,
       shopBoundTenantId,
+      installLinkTenantId,
     ]) {
       await raw.db
         .insert(tenants)
@@ -121,6 +131,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     await revoke(revokedTenantId);
     await provision(readyTenantId);
     await provision(shopBoundTenantId, boundShop);
+    await provision(installLinkTenantId, installLinkShop, storeInstallLink);
 
     pilot = await startServer(pilotCfg);
     pilotUrl = `http://localhost:${pilot.port}`;
@@ -132,7 +143,7 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     await raw.db
       .delete(tenants)
       .where(
-        sql`${tenants.id} IN (${unprovisionedTenantId}, ${revokedTenantId}, ${readyTenantId}, ${shopBoundTenantId})`,
+        sql`${tenants.id} IN (${unprovisionedTenantId}, ${revokedTenantId}, ${readyTenantId}, ${shopBoundTenantId}, ${installLinkTenantId})`,
       );
     await raw.close();
   });
@@ -194,6 +205,18 @@ describeIfDb("apps/api — GET /shopify/install (pilot provisioning gate)", () =
     expect(location).toContain(`https://${boundShop}/admin/oauth/authorize`);
     expect(location).toContain("client_id=pilot-client");
     expect(location).not.toContain("admin.shopify.com");
+  });
+
+  // Store-unique install link: when the operator pasted the link Shopify
+  // generated for this store, the no-shop Connect redirects straight to it
+  // instead of building our own OAuth authorize URL.
+  it("redirects a no-shop install to the operator's store-unique install link", async () => {
+    const res = await fetch(
+      `${pilotUrl}/shopify/install?grant=${grant(installLinkTenantId)}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(storeInstallLink);
   });
 
   // F1 — a no-shop install for a pilot tenant whose row has NO recorded shop

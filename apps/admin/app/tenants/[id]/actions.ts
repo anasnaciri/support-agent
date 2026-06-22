@@ -14,6 +14,7 @@ export async function provisionShopifyAppAction(
   const clientId = String(formData.get("clientId") ?? "").trim();
   const clientSecret = String(formData.get("clientSecret") ?? "");
   const shopDomain = String(formData.get("shopDomain") ?? "").trim();
+  const installLink = String(formData.get("installLink") ?? "").trim();
   if (!clientId || !clientSecret) {
     redirect(`/tenants/${id}?error=missing_fields`);
   }
@@ -22,21 +23,24 @@ export async function provisionShopifyAppAction(
     clientId,
     clientSecret,
     shopDomain || undefined,
+    installLink || undefined,
   );
   if (res.status === 404) redirect(`/tenants/${id}?error=tenant_not_found`);
   if (res.status === 400) {
-    // A 400 is either an unparseable/invalid shop domain or, in pilot mode, a
-    // missing-but-required one (F1). Surface them distinctly so the operator
-    // knows to add the store rather than "fix" a domain that was never wrong.
+    // A 400 is an unparseable/invalid shop domain, a missing-but-required one
+    // in pilot mode (F1), or a non-Shopify install link. Surface them
+    // distinctly so the operator fixes the field that's actually wrong.
     const code = await res
       .json()
       .then((b) => (b as { error?: string }).error)
       .catch(() => undefined);
-    redirect(
-      `/tenants/${id}?error=${
-        code === "shop_domain_required" ? "shop_domain_required" : "invalid_shop"
-      }`,
-    );
+    const mapped =
+      code === "shop_domain_required"
+        ? "shop_domain_required"
+        : code === "invalid_install_link"
+          ? "invalid_install_link"
+          : "invalid_shop";
+    redirect(`/tenants/${id}?error=${mapped}`);
   }
   if (res.status === 409) redirect(`/tenants/${id}?error=shop_conflict`);
   if (!res.ok) redirect(`/tenants/${id}?error=provision_failed`);

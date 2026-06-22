@@ -93,6 +93,7 @@ export const adminApi = {
     clientId: string,
     clientSecret: string,
     shopDomain?: string,
+    installLink?: string,
   ): Promise<Response> =>
     request(`/tenants/${tid(id)}/shopify-app`, {
       method: "PUT",
@@ -101,6 +102,7 @@ export const adminApi = {
         clientId,
         clientSecret,
         ...(shopDomain ? { shopDomain } : {}),
+        ...(installLink ? { installLink } : {}),
       }),
     }),
 

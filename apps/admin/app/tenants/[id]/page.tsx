@@ -27,6 +27,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_shop: "Store domain must be a valid *.myshopify.com domain.",
   shop_domain_required:
     "Store domain is required for a pilot install — enter the *.myshopify.com store this app is for.",
+  invalid_install_link:
+    "Install link must be an https Shopify URL (admin.shopify.com or a *.myshopify.com store).",
   shop_conflict: "That store is already connected to another tenant.",
   revoke_failed: "Revoking failed. Try again.",
   tenant_not_found: "Tenant not found.",
@@ -168,6 +170,21 @@ export default async function TenantDetailPage({
               <dd className="font-mono text-zinc-300">
                 {shopifyApp.shopDomain ?? "— (not connected yet)"}
               </dd>
+              <dt className="text-zinc-500">Install link</dt>
+              <dd className="truncate font-mono text-zinc-300">
+                {shopifyApp.installLink ? (
+                  <a
+                    href={shopifyApp.installLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-zinc-300 hover:text-white hover:underline"
+                  >
+                    {shopifyApp.installLink}
+                  </a>
+                ) : (
+                  "— (uses OAuth)"
+                )}
+              </dd>
               <dt className="text-zinc-500">Updated</dt>
               <dd className="text-zinc-300">
                 {new Date(shopifyApp.updatedAt).toLocaleString()}
@@ -229,6 +246,27 @@ export default async function TenantDetailPage({
                   Custom-distribution store this app is for. Recorded up front so
                   the merchant&apos;s Connect goes straight to the store&apos;s
                   OAuth screen and direct install links resolve to this tenant.
+                </p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label htmlFor="installLink" className="text-sm text-zinc-300">
+                  Store install link{" "}
+                  <span className="text-zinc-500">(optional — pilot)</span>
+                </label>
+                <input
+                  id="installLink"
+                  name="installLink"
+                  inputMode="url"
+                  autoComplete="off"
+                  placeholder="https://admin.shopify.com/store/acme/oauth/install_custom_app?client_id=…"
+                  defaultValue={shopifyApp?.installLink ?? ""}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm outline-none focus:border-zinc-500"
+                />
+                <p className="text-xs text-zinc-500">
+                  The store-unique install link you generate in the Shopify dev
+                  dashboard (custom distribution). When set, the merchant&apos;s
+                  Connect goes straight to this link instead of the OAuth screen.
+                  Leave blank to use the standard OAuth install.
                 </p>
               </div>
             </div>

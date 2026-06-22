@@ -34,6 +34,7 @@ export interface AdminShopifyAppView {
   readonly tenantId: string;
   readonly clientId: string;
   readonly shopDomain: string | null;
+  readonly installLink: string | null;
   readonly status: ShopifyAppProvisioning["status"];
   readonly updatedAt: string;
 }
@@ -59,6 +60,7 @@ const present = (row: ShopifyAppProvisioning): AdminShopifyAppView => ({
   tenantId: row.tenantId,
   clientId: row.clientId,
   shopDomain: row.shopDomain,
+  installLink: row.installLink,
   status: row.status,
   updatedAt: row.updatedAt.toISOString(),
 });
@@ -123,6 +125,11 @@ export interface PutAdminShopifyAppInput {
   readonly clientSecret: string;
   /** Already-normalized `*.myshopify.com` domain, or undefined (A4). */
   readonly shopDomain?: string;
+  /**
+   * Already-validated store-unique install link (Shopify host), or undefined
+   * to leave any existing link untouched.
+   */
+  readonly installLink?: string;
 }
 
 /** Provision (or rotate) a tenant's Shopify custom-app credentials. */
@@ -168,10 +175,12 @@ export const putAdminShopifyApp = (
           clientId: input.clientId,
           clientSecret: input.clientSecret,
           ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
+          ...(input.installLink ? { installLink: input.installLink } : {}),
         });
         yield* writeAudit(input.tenantId, "shopify_app.provisioned", {
           clientId: input.clientId,
           ...(input.shopDomain ? { shopDomain: input.shopDomain } : {}),
+          ...(input.installLink ? { installLinkSet: true } : {}),
         });
         return { kind: "ok", provisioning: present(row) } as const;
       }),

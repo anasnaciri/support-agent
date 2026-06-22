@@ -100,6 +100,27 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Pilot install uses the operator's store-unique install link (TDD, completes A4's original direction).**
+  In pilot mode the merchant's Connect no longer always runs our self-built OAuth dance: the operator can paste the
+  store-unique install link Shopify generates for a custom-distribution app (Dev Dashboard → custom distribution →
+  Generate link, the signed `admin.shopify.com/.../oauth/install_custom_app?...signature=` URL we can't reconstruct),
+  and Connect redirects straight to it. The link drives Shopify's own install flow and lands on our existing OAuth
+  callback (no state of our design → resolved by the recorded shop, A4). This is the install-link half of the original
+  audit-A4 direction that the 2026-06-06 fix deferred ("we build the proven authorize URL from the captured shop rather
+  than storing Shopify's generated link"). Build:
+  - **Schema/migration**: added nullable `install_link` text column to `shopify_app_provisioning` (migration
+    `0028_clear_jocasta.sql`). Threaded `installLink` through `ShopifyAppProvisioning` + `PutShopifyAppProvisioningInput`,
+    the Test layer, and the Live store (`rowToProvisioning` + `put` upsert: explicit value recorded; undefined preserved
+    on a live row, cleared on reactivation — same rule as `shop_domain`).
+  - **Admin API/console**: new pure `isValidShopifyInstallLink` (https + `admin.shopify.com`/`*.myshopify.com` host only —
+    it's a browser redirect target, so reject open-redirect hazards); `AdminShopifyAppView`/`AdminTenantDetail.shopifyApp`
+    carry `installLink`; `PUT /admin/tenants/:id/shopify-app` parses + validates it (400 `invalid_install_link`); apps/admin
+    tenant page gained a "Store install link" input + summary row + error copy.
+  - **Install handler**: `handleShopifyInstall` no-shop branch, gated on `cfg.shopifyConnectRequiresProvisioning`, redirects
+    to the stored link (re-validated via `resolveProvisionedInstallLink`) before falling back to the A4 authorize-URL /
+    managed-install paths. Leaving the link blank keeps the existing OAuth flow, so it's backward compatible.
+  - TDD: validator units + DB round-trip/preserve/clear + admin valid/invalid + install-gate redirect. `pnpm build` green;
+    full suite 1919 passing / 5 skipped. See [[project_pilot_shopify_app_provisioning]].
 - **2026-06-22 — Configurable rephrase model + minimalistic dropdown (draft-email feature, slices 3+4 of 4).**
   The "Rephrase with AI" model is now a **workspace setting**, picked from a compact dropdown (current
   model name + chevron) on top of the composer draft. Build (TDD):
@@ -1259,7 +1280,7 @@ the fix that shipped. Verified after the fixes: `pnpm build` green, full suite
       index on `shop_domain WHERE status != 'revoked'`, and/or prefer the
       `connected` (active) row; reconcile with the shop-transfer path that
       nulls/moves `shop_domain` so stale rows can't shadow the live one.
-- [x] **A4 (MEDIUM) — Custom-distribution install URL is not stored.** FIXED 2026-06-06 (commit `fef9040`): the operator can record the store domain at provisioning (`PUT .../shopify-app` optional `shopDomain` + apps/admin form field). It's normalized, recorded on the row, and bound to the tenant via `claimShopifyShopForTenant` (so `tenants.shopify_domain` resolves a no-state callback; 409 if the shop is actively owned elsewhere). With the shop known, the install uses that store's standard OAuth authorize URL instead of the unverified managed-install picker. (Deviation from the original direction: we build the proven authorize URL from the captured shop rather than storing Shopify's generated link.) The
+- [x] **A4 (MEDIUM) — Custom-distribution install URL is not stored.** FIXED 2026-06-06 (commit `fef9040`): the operator can record the store domain at provisioning (`PUT .../shopify-app` optional `shopDomain` + apps/admin form field). It's normalized, recorded on the row, and bound to the tenant via `claimShopifyShopForTenant` (so `tenants.shopify_domain` resolves a no-state callback; 409 if the shop is actively owned elsewhere). With the shop known, the install uses that store's standard OAuth authorize URL instead of the unverified managed-install picker. (Deviation from the original direction: we build the proven authorize URL from the captured shop rather than storing Shopify's generated link.) **UPDATE 2026-06-23: the deviation is now closed — the operator can also paste Shopify's generated store-unique install link (`install_link` column + apps/admin input), and pilot Connect redirects straight to it, taking precedence over the authorize-URL fallback. See the 2026-06-23 session entry.** The
       provisioning model stores credentials but **not** Shopify's generated
       custom-distribution install link; the app builds a generic URL from the
       client id (`buildManagedInstallUrl` → `admin.shopify.com/oauth/install`),

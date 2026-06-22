@@ -18,7 +18,10 @@ import {
 } from "../../auth/dashboard-context.js";
 import type { WorkosOrganizationDirectory } from "../../auth/workos-directory.js";
 import { parseAdminAuth } from "../../auth/dashboard-auth.js";
-import { normalizeShopDomain } from "../shopify/install.js";
+import {
+  isValidShopifyInstallLink,
+  normalizeShopDomain,
+} from "../shopify/install.js";
 import { redactShop } from "../account/compliance-redaction.js";
 import { revokeConnectorProviderGrants } from "../dashboard/connect-handlers.js";
 import {
@@ -388,6 +391,19 @@ export const handleAdminShopifyAppPut = async (
     sendJson(res, 400, { error: "shop_domain_required" });
     return;
   }
+  // Optional store-unique install link (pilot custom distribution). We redirect
+  // the merchant's browser to this value at Connect, so reject anything that
+  // isn't an https Shopify URL rather than store an open-redirect hazard.
+  const rawLink =
+    typeof body["installLink"] === "string" ? body["installLink"].trim() : "";
+  let installLink: string | undefined;
+  if (rawLink) {
+    if (!isValidShopifyInstallLink(rawLink)) {
+      sendJson(res, 400, { error: "invalid_install_link" });
+      return;
+    }
+    installLink = rawLink;
+  }
   const exit = await Effect.runPromiseExit(
     Effect.provide(
       putAdminShopifyApp({
@@ -395,6 +411,7 @@ export const handleAdminShopifyAppPut = async (
         clientId,
         clientSecret,
         ...(shopDomain ? { shopDomain } : {}),
+        ...(installLink ? { installLink } : {}),
       }),
       layer,
     ),

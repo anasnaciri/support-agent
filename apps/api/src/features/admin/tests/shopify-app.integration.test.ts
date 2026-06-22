@@ -132,6 +132,7 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
     expect(body.provisioning.clientId).toBe("shopify_client_admin");
     expect(body.provisioning.status).toBe("ready");
     expect(body.provisioning.shopDomain).toBeNull();
+    expect(body.provisioning.installLink).toBeNull();
     expect(body.provisioning.clientSecret).toBeUndefined();
 
     // Secret is retrievable (decrypted) through the store...
@@ -155,6 +156,39 @@ describeIfDb("apps/api — admin Shopify app provisioning (integration)", () => 
       true,
     );
     expect(audits.every((a) => a.actor === "admin")).toBe(true);
+  });
+
+  it("PUT rejects an install link that isn't an https Shopify URL", async () => {
+    const res = await fetch(url(tenantId), {
+      method: "PUT",
+      headers: { ...authed, "content-type": "application/json" },
+      body: JSON.stringify({
+        clientId: "shopify_client_admin",
+        clientSecret: SECRET,
+        installLink: "https://evil.test/steal",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_install_link");
+  });
+
+  it("PUT records and returns a valid store-unique install link", async () => {
+    const installLink =
+      "https://admin.shopify.com/store/admin-prov/oauth/install_custom_app?client_id=shopify_client_admin";
+    const res = await fetch(url(tenantId), {
+      method: "PUT",
+      headers: { ...authed, "content-type": "application/json" },
+      body: JSON.stringify({
+        clientId: "shopify_client_admin",
+        clientSecret: SECRET,
+        installLink,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.provisioning.installLink).toBe(installLink);
+    const stored = await readStored(tenantId);
+    expect(stored?.installLink).toBe(installLink);
   });
 
   it("rolls the provisioning write back when the shared transaction fails (re-audit #3)", async () => {

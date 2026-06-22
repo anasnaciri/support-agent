@@ -25,6 +25,7 @@ const seedRow = (
   clientId: "tenant_client",
   clientSecret: "tenant_secret",
   shopDomain: "pilot.myshopify.com",
+  installLink: null,
   status: "connected",
   createdAt: new Date(),
   updatedAt: new Date(),

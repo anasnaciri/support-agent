@@ -40,6 +40,7 @@ const rowToProvisioning = (
   clientId: r.clientId,
   clientSecret: decryptToStringWithKeys(keys, r.clientSecretEncrypted),
   shopDomain: r.shopDomain,
+  installLink: r.installLink,
   status: r.status as ShopifyAppProvisioningStatus,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
@@ -83,6 +84,12 @@ export const ShopifyAppProvisioningStoreLive = (
             input.shopDomain !== undefined
               ? input.shopDomain
               : sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN NULL ELSE ${shopifyAppProvisioning.shopDomain} END`;
+          // Same recording rule as shop_domain: an explicit link is recorded;
+          // without one, reactivation drops a stale link and a live row keeps it.
+          const installLinkUpdate =
+            input.installLink !== undefined
+              ? input.installLink
+              : sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN NULL ELSE ${shopifyAppProvisioning.installLink} END`;
           const rows = yield* wrap(
             db
               .insert(shopifyAppProvisioning)
@@ -92,6 +99,7 @@ export const ShopifyAppProvisioningStoreLive = (
                 clientId: input.clientId,
                 clientSecretEncrypted: encrypted,
                 shopDomain: input.shopDomain ?? null,
+                installLink: input.installLink ?? null,
                 status: "ready",
                 createdAt: now,
                 updatedAt: now,
@@ -107,6 +115,7 @@ export const ShopifyAppProvisioningStoreLive = (
                   // live `ready`/`connected` status is preserved.
                   status: sql`CASE WHEN ${shopifyAppProvisioning.status} = 'revoked' THEN 'ready' ELSE ${shopifyAppProvisioning.status} END`,
                   shopDomain: shopDomainUpdate,
+                  installLink: installLinkUpdate,
                 },
               })
               .returning(),

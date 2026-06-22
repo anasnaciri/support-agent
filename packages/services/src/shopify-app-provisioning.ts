@@ -26,6 +26,13 @@ export interface ShopifyAppProvisioning {
    * until the merchant completes Connect.
    */
   readonly shopDomain: string | null;
+  /**
+   * Operator-pasted store-unique install link from the Shopify dev/Partner
+   * dashboard (custom distribution). When present, the merchant's pilot
+   * Connect redirects straight to it instead of a self-built OAuth authorize
+   * URL. `null` when the operator hasn't supplied one.
+   */
+  readonly installLink: string | null;
   readonly status: ShopifyAppProvisioningStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -44,6 +51,12 @@ export interface PutShopifyAppProvisioningInput {
    * already-learned shop_domain untouched.
    */
   readonly shopDomain?: string;
+  /**
+   * Store-unique install link the operator generated in the Shopify
+   * dashboard. When provided it's recorded on the row; `undefined` leaves any
+   * existing install link untouched (mirrors `shopDomain`).
+   */
+  readonly installLink?: string;
 }
 
 // ============================================================
@@ -135,6 +148,10 @@ export const ShopifyAppProvisioningStoreTest = (
           // app awaits a fresh Connect — and a live row preserves it.
           shopDomain:
             input.shopDomain ?? (reactivating ? null : (prior?.shopDomain ?? null)),
+          // Same recording rule as shop_domain: an explicit link is recorded;
+          // reactivation drops a stale one; a live row preserves it.
+          installLink:
+            input.installLink ?? (reactivating ? null : (prior?.installLink ?? null)),
           // Re-provisioning a REVOKED row reactivates it to `ready` so
           // re-entering credentials un-blocks the install (A2). A live
           // `ready`/`connected` status is preserved — rotating the secret of

@@ -350,6 +350,8 @@ export interface AdminTenantDetail {
   readonly shopifyApp: {
     readonly clientId: string;
     readonly shopDomain: string | null;
+    /** Operator-pasted store-unique install link (pilot), or null. */
+    readonly installLink: string | null;
     readonly status: ShopifyAppStatus;
     readonly updatedAt: string;
   } | null;

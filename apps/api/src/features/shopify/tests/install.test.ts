@@ -6,6 +6,7 @@ import {
   buildManagedInstallUrl,
   canonicalQueryForHmac,
   isValidShopDomain,
+  isValidShopifyInstallLink,
   normalizeShopDomain,
   signState,
   verifyCallbackHmac,
@@ -45,6 +46,40 @@ describe("shopify-install — normalizeShopDomain", () => {
     expect(normalizeShopDomain("https://example.com/")).toBeNull();
     expect(normalizeShopDomain("https://acme.myshopify.com.evil.test/")).toBeNull();
     expect(normalizeShopDomain("https://acme.shopify.com/")).toBeNull();
+  });
+});
+
+describe("shopify-install — isValidShopifyInstallLink", () => {
+  it("accepts an https admin.shopify.com custom-app install link", () => {
+    expect(
+      isValidShopifyInstallLink(
+        "https://admin.shopify.com/store/acme/oauth/install_custom_app?client_id=abc&signature=xyz",
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts an https *.myshopify.com install link", () => {
+    expect(
+      isValidShopifyInstallLink(
+        "https://acme.myshopify.com/admin/oauth/install_custom_app?client_id=abc",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects non-https, non-Shopify hosts, look-alikes, and garbage", () => {
+    expect(
+      isValidShopifyInstallLink(
+        "http://admin.shopify.com/store/acme/oauth/install_custom_app",
+      ),
+    ).toBe(false);
+    expect(isValidShopifyInstallLink("https://evil.test/install")).toBe(false);
+    // A look-alike host that merely contains the suffix mid-string must fail —
+    // the leading dot guards the subdomain boundary (no open redirect).
+    expect(
+      isValidShopifyInstallLink("https://acme.myshopify.com.evil.test/install"),
+    ).toBe(false);
+    expect(isValidShopifyInstallLink("not-a-url")).toBe(false);
+    expect(isValidShopifyInstallLink("")).toBe(false);
   });
 });
 

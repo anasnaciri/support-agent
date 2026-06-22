@@ -423,6 +423,11 @@ export const shopifyAppProvisioning = pgTable(
     clientId: text("client_id").notNull(),
     clientSecretEncrypted: bytea("client_secret_encrypted").notNull(),
     shopDomain: text("shop_domain"),
+    // Operator-pasted store-unique install link from the Shopify dev/Partner
+    // dashboard (custom distribution). When present, the merchant's pilot
+    // Connect redirects straight to it instead of a self-built OAuth authorize
+    // URL. NULL when the operator hasn't supplied one (falls back to OAuth).
+    installLink: text("install_link"),
     status: text("status").notNull().default("ready"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

@@ -41,6 +41,33 @@ export const normalizeShopDomain = (shop: string): string | null => {
 };
 
 // ------------------------------------------------------------
+// Operator-supplied store-unique install link (pilot)
+// ------------------------------------------------------------
+//
+// For a custom-distribution app, the operator generates a store-unique
+// install link in the Shopify dev/Partner dashboard and pastes it into the
+// admin console. The merchant's Connect button then redirects straight to
+// it (the link drives Shopify's own install flow, landing back on our OAuth
+// callback) instead of us building the `/admin/oauth/authorize` URL.
+//
+// Because we redirect a browser to this operator-supplied value, validate it
+// strictly: an absolute HTTPS URL on a Shopify host (`admin.shopify.com` or a
+// `*.myshopify.com` store), so a bad/hostile value can't become an open
+// redirect. Path + query are Shopify's to define, so they pass through.
+
+export const isValidShopifyInstallLink = (link: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(link.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  return host === "admin.shopify.com" || host.endsWith(".myshopify.com");
+};
+
+// ------------------------------------------------------------
 // State signing (tenant binding through the OAuth redirect)
 // ------------------------------------------------------------
 //

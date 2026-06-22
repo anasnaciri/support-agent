@@ -1,0 +1,1 @@
+ALTER TABLE "shopify_app_provisioning" ADD COLUMN "install_link" text;

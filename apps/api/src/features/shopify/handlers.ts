@@ -14,6 +14,7 @@ import {
   buildInstallUrl,
   buildManagedInstallUrl,
   isValidShopDomain,
+  isValidShopifyInstallLink,
   normalizeShopDomain,
   signState,
   verifyCallbackHmac,
@@ -190,6 +191,32 @@ export const resolveProvisionedShop = async (
   return exit._tag === "Success" ? exit.value : null;
 };
 
+/**
+ * The store-unique install link the operator pasted at provisioning, or null.
+ * When present (pilot custom distribution), the dashboard-initiated install
+ * redirects the merchant straight to it — the link drives Shopify's own
+ * install flow and lands back on our OAuth callback — instead of us building
+ * the `/admin/oauth/authorize` URL. Re-validated here so a malformed stored
+ * value falls through to the normal flow rather than redirecting anywhere odd.
+ */
+export const resolveProvisionedInstallLink = async (
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<string | null> => {
+  const exit = await Effect.runPromiseExit(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* ShopifyAppProvisioningStore;
+        const row = yield* store.get(TenantId(tenantId));
+        return row?.installLink ?? null;
+      }),
+      layer,
+    ),
+  );
+  if (exit._tag !== "Success" || !exit.value) return null;
+  return isValidShopifyInstallLink(exit.value) ? exit.value : null;
+};
+
 export const handleShopifyInstall = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -231,6 +258,22 @@ export const handleShopifyInstall = async (
     if (app.kind !== "ok") {
       sendShopifyAppResolveError(res, app);
       return;
+    }
+    // Pilot custom distribution: if the operator pasted the store-unique
+    // install link Shopify generated for this store, hand the merchant
+    // straight to it instead of building our own OAuth authorize URL. The
+    // link drives Shopify's install flow and lands on our callback, which
+    // resolves the tenant by the recorded shop (no state of our design).
+    if (cfg.shopifyConnectRequiresProvisioning) {
+      const installLink = await resolveProvisionedInstallLink(layer, tenant);
+      if (installLink) {
+        sendRedirectWithHeaders(res, installLink, {
+          "Set-Cookie": clearShopifyInstallCookie(
+            cfg.shopify.callbackUrl.startsWith("https://"),
+          ),
+        });
+        return;
+      }
     }
     // A4: if the operator recorded the store at provisioning, go straight to
     // that shop's standard OAuth authorize URL (proven) instead of the
