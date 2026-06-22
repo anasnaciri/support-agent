@@ -76,7 +76,10 @@ The supplier gets a **real logged-in space** (not one-off signed magic links), l
 
 ### Follow-ups (recorded, not built)
 
-- On notify cap-exhaustion, alert the _merchant_ ("supplier unreachable") — the SLA-reminder option the user deferred.
+- On supplier notify cap-exhaustion, alert the _merchant_ ("supplier unreachable") and move/flag the
+  case for recovery. Current audit (2026-06-22) found the sweep stops selecting rows once
+  `notify_attempts` reaches the cap, leaving the case in `waiting_for_supplier` with no merchant-facing
+  error state if the supplier was never reached.
 - Live verification (invite a real supplier → post an update → confirm the gated customer reply) — not yet run.
 - A merchant-facing list of current suppliers / pending supplier invitations on `/settings/suppliers` (invite-only for now).
 - Consider hiding the new "Supplier" RBAC category from the merchant role editor (harmless today — owners only).
@@ -89,6 +92,31 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 ---
 
 ### Session history (summarized)
+
+- **2026-06-22 — Agent-runtime dead-end audit (no production code edits).** Static-traced the runtime
+  failure exits, worker settlement/dead-letter handling, reply-delivery retry path, supplier notification
+  sweep, approval maintenance, and merchant dashboard surfacing. Verified the focused recovery suites:
+  `pnpm test -- --run apps/worker/test/workflow-job.test.ts apps/worker/test/reply-delivery-failure.test.ts
+  apps/worker/test/reply-delivery-retry.test.ts apps/worker/test/supplier-notify.test.ts
+  apps/worker/test/approval-maintenance.test.ts apps/dashboard/test/risk-flag-label.test.ts
+  apps/dashboard/test/case-timeline.test.ts apps/dashboard/test/labels.test.ts
+  apps/dashboard/test/status-variants.test.ts` (58 passed). `case-retry-send.integration.test.ts` was
+  invoked but skipped because `DATABASE_URL` is not set. Covered paths: LLM credential/safety/context
+  failures, max-turn exhaustion, approved-tool failures, expired approvals, retry-exhausted workflow jobs,
+  and customer-reply send failures all park or surface as intended in normal conditions. Follow-ups found:
+  - [ ] Make failed reply delivery capture atomic enough that a send failure cannot park the case without
+        durable retry metadata: today `ReplyDeliveryService.enqueue` and `reply_delivery_failed` risk-flag
+        writes are best-effort before `human_takeover`, so a DB hiccup can leave the merchant with only
+        generic "Retry now" and no exact draft resend.
+  - [ ] Show the case-detail "Retry sending email" action from the active `reply_deliveries` row, not only
+        from `case.context.riskFlags`, so an outbox row remains recoverable even if the best-effort risk
+        flag write failed.
+  - [ ] Add supplier-notify cap-exhaustion recovery: when `notify_attempts` reaches the cap, park/flag the
+        merchant side (likely `human_takeover` with `supplier_unreachable`) instead of silently leaving the
+        case in `waiting_for_supplier`.
+  - [ ] Escalate deterministic approval-resume failures that can leave a decided approval on a still-parked
+        case (for example tool removed from registry) instead of returning non-retryable `Failed` that the
+        worker completes without a merchant-facing error.
 
 - **2026-06-22 — Architecture deepening review generated (no production code edits).** Used
   `$improve-codebase-architecture` + `codebase-design` vocabulary and wrote the visual report to
