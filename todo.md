@@ -90,6 +90,27 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-22 — Architecture deepening review generated (no production code edits).** Used
+  `$improve-codebase-architecture` + `codebase-design` vocabulary and wrote the visual report to
+  `/private/tmp/architecture-review-20260622-022840.html` (opened locally). `CONTEXT.md` and
+  `docs/adr/` were absent, so the review used `master-plan.md`, this checklist, and source inspection
+  as the domain record. Top recommendation: deepen a `CaseLifecycleWriter`-style module so case
+  state changes, audit rows, context patches, approval/outbox-adjacent writes, and state-machine guards
+  cross one semantic interface instead of being hand-composed in runtime/API/worker paths. Other
+  candidates: internal Tool execution module, Conversation thread ownership module, and worker-local
+  Conversation connector supervisor. **Potential master-plan deviations discovered, not fixed:** some
+  lifecycle paths appear to write status/transition/audit rows directly (`supplier-store.ts`,
+  `dashboard-writes.ts`) instead of centralizing through the state-machine guard; failed reply delivery
+  capture can park a case even if the outbox enqueue/risk-flag writes were only best-effort. Follow-ups:
+  - [ ] Verify and, if needed, route supplier/dashboard lifecycle writes through one state-machine-guarded
+        lifecycle module.
+  - [ ] Make failed reply delivery capture atomic with the case park + audit/outbox writes, or document
+        why the best-effort tradeoff is intentional.
+  - [ ] Deepen conversation thread ownership so the IMAP email-thread tab can use indexed message ids
+        rather than a single root-only `fetchThread` lookup.
+  - [ ] Consider a worker-local connector supervisor for Gmail watch renewal, Graph subscription renewal,
+        and IMAP poll passes.
+
 - **2026-06-19 — Agent-runtime decomposition (branch `refactor/agent-runtime-decompose`, behavior-
   preserving, full CI green at each commit — build + migrate + 1872 tests).** `agent-runtime.ts` was a
   2666-line monolith with a single ~1700-line `tickBody`. Decomposed in staged commits, each verified:
