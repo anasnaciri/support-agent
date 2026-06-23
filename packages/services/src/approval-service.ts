@@ -76,6 +76,13 @@ export interface RejectInput {
   readonly tenantId?: TenantId;
 }
 
+export interface CancelPendingForCaseInput {
+  readonly tenantId: TenantId;
+  readonly caseId: CaseId;
+  readonly decidedBy: UserId;
+  readonly decisionReason: string;
+}
+
 // ============================================================
 // Tag
 // ============================================================
@@ -109,6 +116,14 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     readonly listPending: (
       tenantId: TenantId,
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /**
+     * Cancel every pending approval for a case after an authoritative manual
+     * lifecycle write. Returns the number of rows changed.
+     */
+    readonly cancelPendingForCase: (
+      input: CancelPendingForCaseInput,
+    ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
      * Flip `pending` rows past their `expiresAt` to `expired` (audit L7).
@@ -275,6 +290,25 @@ export const ApprovalServiceTest = Layer.effect(
             }
           }
           return out;
+        }),
+
+      cancelPendingForCase: (input) =>
+        Effect.sync(() => {
+          let canceled = 0;
+          for (const [id, approval] of store.entries()) {
+            if (approval.tenantId !== input.tenantId) continue;
+            if (approval.caseId !== input.caseId) continue;
+            if (approval.status !== "pending") continue;
+            store.set(id, {
+              ...approval,
+              status: "rejected",
+              decidedBy: input.decidedBy,
+              decidedAt: new Date(),
+              decisionReason: input.decisionReason,
+            });
+            canceled += 1;
+          }
+          return canceled;
         }),
     });
   }),

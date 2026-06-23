@@ -7,6 +7,7 @@ import {
   ApprovalServiceDbError,
   ApprovalStateConflict,
   type ApproveInput,
+  type CancelPendingForCaseInput,
   type CreateApprovalInput,
   type ApprovalServiceError,
   type RejectInput,
@@ -218,6 +219,33 @@ export const ApprovalServiceLive = Layer.effect(
         input.tenantId,
       );
 
+    const cancelPendingForCase = (
+      input: CancelPendingForCaseInput,
+    ): Effect.Effect<number, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "cancelPendingForCase",
+          db
+            .update(approvals)
+            .set({
+              status: "rejected",
+              decidedAt: new Date(),
+              decidedBy: input.decidedBy,
+              decisionReason: input.decisionReason,
+            })
+            .where(
+              and(
+                eq(approvals.tenantId, input.tenantId),
+                eq(approvals.caseId, input.caseId),
+                eq(approvals.status, "pending"),
+              ),
+            )
+            .returning({ id: approvals.id }),
+        );
+        return rows.length;
+      });
+
     const listPending = (
       tenantId: TenantId,
     ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
@@ -304,6 +332,7 @@ export const ApprovalServiceLive = Layer.effect(
       approve,
       reject,
       listPending,
+      cancelPendingForCase,
       expireOverdue,
       listDecidedUnresumed,
     });

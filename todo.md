@@ -100,6 +100,20 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Architecture review follow-up: dashboard lifecycle writes now use `CaseLifecycleWriter` (TDD).**
+  Completed the next migration target from the review: `packages/db/src/dashboard-writes.ts` no longer
+  hand-rolls the case lifecycle transaction recipe for take-over, resume, or manual status changes.
+  - **services**: extended `CaseLifecycleWriter` with `takeOver`, `resume`, and `setMerchantStatus`, covering
+    terminal/no-op handling, settable-status validation, state-machine transitions, audit entries, and pending
+    approval cancellation inside `TransactionRunner`.
+  - **approvals**: added `ApprovalService.cancelPendingForCase` so manual lifecycle writes can cancel stale
+    pending approvals through the service interface instead of table writes at each caller.
+  - **db adapter**: `dashboard-writes.ts` is now a thin adapter that runs the lifecycle writer against the
+    current `DrizzleDb`; onboarding/workspace writes remain plain Drizzle because they are not case lifecycle
+    writes.
+  - **Verified**: RED first in `packages/services/test/case-lifecycle-writer.test.ts` (missing writer methods),
+    then green service tests; `pnpm build` green; `pnpm ci:local` green with local DB migrations and full suite
+    **1941 passing / 5 skipped / 0 failing**, including `apps/api/src/features/dashboard/tests/writes.integration.test.ts`.
 - **2026-06-23 — Architecture review slice: deepened case lifecycle writes (TDD).**
   Implemented the top recommendation from `/private/tmp/architecture-review-20260622-022840.html` as a
   first narrow slice: a services-level `CaseLifecycleWriter` now owns the repeated "read case → patch

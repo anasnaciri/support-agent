@@ -1,32 +1,36 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { Effect, Layer } from "effect";
+import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
-import {
-  approvals,
-  auditLog,
-  caseStateTransitions,
-  cases,
-  tenants,
-} from "./schema.js";
+import { tenants } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
-import type { LegalAcceptance } from "@support-agent/services";
 import {
-  isMerchantSettableStatus,
-  isStatusTransitionAllowed,
-  type CaseStatus,
+  CaseId,
+  TenantId,
+  UserId,
 } from "@support-agent/agent-core";
+import {
+  CaseLifecycleWriter,
+  CaseLifecycleWriterLive,
+  type LegalAcceptance,
+  type ResumeCaseOutcome,
+  type SetMerchantStatusOutcome,
+  type TakeOverCaseOutcome,
+} from "@support-agent/services";
 import { ensureOwnerRole } from "./member-rbac-store.js";
+import { ApprovalServiceLive } from "./approval-service-live.js";
+import { AuditLogServiceLive } from "./audit-log-live.js";
+import { CaseRepositoryLive } from "./case-repository-live.js";
+import { DbClient } from "./db-client.js";
+import { TransactionRunnerLive } from "./transaction-runner-live.js";
 
 // Write operations backing the dashboard's HTTP API (Path B). Ported from
 // the dashboard's lib/case-actions.ts so the api owns the mutation (the
-// Workers dashboard can't open a Postgres pool). Raw drizzle tx, not the
-// Effect services, to keep the audit-in-transaction invariant (§4) in one
-// place without dragging the runtime stack in.
+// Workers dashboard can't open a Postgres pool). Case lifecycle writes flow
+// through CaseLifecycleWriter so state-machine, audit, and adjacent approval
+// cancellation rules stay local to one deep module.
 
-export type TakeOverOutcome =
-  | { readonly kind: "taken_over"; readonly canceledApprovals: number }
-  | { readonly kind: "case_not_found" }
-  | { readonly kind: "already_terminal"; readonly status: string };
+export type TakeOverOutcome = TakeOverCaseOutcome;
 
 export interface TakeOverInput {
   readonly caseId: string;
@@ -36,10 +40,7 @@ export interface TakeOverInput {
   readonly reason?: string | undefined;
 }
 
-export type ResumeOutcome =
-  | { readonly kind: "resumed"; readonly toStatus: string }
-  | { readonly kind: "case_not_found" }
-  | { readonly kind: "not_in_takeover"; readonly status: string };
+export type ResumeOutcome = ResumeCaseOutcome;
 
 export interface ResumeInput {
   readonly caseId: string;
@@ -49,14 +50,23 @@ export interface ResumeInput {
   readonly reason?: string | undefined;
 }
 
-/** Status a resumed case lands in: actively owned by automation again. */
-const RESUME_TO_STATUS = "in_progress";
+const caseLifecycleLayer = (db: DrizzleDb) => {
+  const dbLayer = Layer.succeed(DbClient, db);
+  const deps = Layer.mergeAll(
+    ApprovalServiceLive,
+    AuditLogServiceLive,
+    CaseRepositoryLive,
+    TransactionRunnerLive,
+  );
+  return Layer.provideMerge(CaseLifecycleWriterLive, deps).pipe(
+    Layer.provide(dbLayer),
+  );
+};
 
-const TERMINAL_STATES: ReadonlySet<string> = new Set([
-  "resolved",
-  "human_takeover",
-  "failed",
-]);
+const runCaseLifecycle = <A, E>(
+  db: DrizzleDb,
+  eff: Effect.Effect<A, E, CaseLifecycleWriter>,
+): Promise<A> => Effect.runPromise(Effect.provide(eff, caseLifecycleLayer(db)));
 
 /**
  * Transition a case to `human_takeover`, cancel its pending approvals (so a
@@ -67,64 +77,22 @@ const TERMINAL_STATES: ReadonlySet<string> = new Set([
 export const takeOverCase = async (
   db: DrizzleDb,
   input: TakeOverInput,
-): Promise<TakeOverOutcome> =>
-  db.transaction(async (tx) => {
-    const [caseRow] = await tx
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(
-        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
-      )
-      .limit(1);
-    if (!caseRow) return { kind: "case_not_found" } as TakeOverOutcome;
-    if (TERMINAL_STATES.has(caseRow.status)) {
-      return {
-        kind: "already_terminal",
-        status: caseRow.status,
-      } as TakeOverOutcome;
-    }
-
-    const reason = input.reason ?? "manager takeover from dashboard";
-
-    await tx
-      .update(cases)
-      .set({ status: "human_takeover", updatedAt: sql`now()` })
-      .where(eq(cases.id, input.caseId));
-
-    await tx.insert(caseStateTransitions).values({
-      caseId: input.caseId as never,
-      fromStatus: caseRow.status,
-      toStatus: "human_takeover",
-      reason,
-    });
-
-    await tx.insert(auditLog).values({
-      tenantId: input.tenantId as never,
-      caseId: input.caseId as never,
-      actorType: "user",
-      actorId: input.managerId,
-      action: "case.taken_over",
-      details: { reason, fromStatus: caseRow.status },
-    });
-
-    const canceled = await tx
-      .update(approvals)
-      .set({
-        status: "rejected",
-        decidedAt: sql`now()`,
-        decidedBy: input.managerId as never,
-        decisionReason: "case taken over",
-      })
-      .where(
-        and(
-          eq(approvals.caseId, input.caseId),
-          eq(approvals.status, "pending"),
-        ),
-      )
-      .returning({ id: approvals.id });
-
-    return { kind: "taken_over", canceledApprovals: canceled.length };
-  });
+): Promise<TakeOverOutcome> => {
+  const reason = input.reason ?? "manager takeover from dashboard";
+  return runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle.takeOver({
+        caseId: CaseId(input.caseId),
+        tenantId: TenantId(input.tenantId),
+        actor: { type: "user", id: input.managerId },
+        decidedBy: UserId(input.managerId),
+        reason,
+      });
+    }),
+  );
+};
 
 /**
  * Hand a `human_takeover` case back to the agent: transition it to
@@ -139,61 +107,23 @@ export const takeOverCase = async (
 export const resumeCase = async (
   db: DrizzleDb,
   input: ResumeInput,
-): Promise<ResumeOutcome> =>
-  db.transaction(async (tx) => {
-    const [caseRow] = await tx
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(
-        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
-      )
-      .limit(1);
-    if (!caseRow) return { kind: "case_not_found" } as ResumeOutcome;
-    if (caseRow.status !== "human_takeover") {
-      return { kind: "not_in_takeover", status: caseRow.status } as ResumeOutcome;
-    }
+): Promise<ResumeOutcome> => {
+  const reason = input.reason ?? "manager handed the case back from dashboard";
+  return runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle.resume({
+        caseId: CaseId(input.caseId),
+        tenantId: TenantId(input.tenantId),
+        actor: { type: "user", id: input.managerId },
+        reason,
+      });
+    }),
+  );
+};
 
-    const reason = input.reason ?? "manager handed the case back from dashboard";
-
-    await tx
-      .update(cases)
-      .set({ status: RESUME_TO_STATUS, updatedAt: sql`now()` })
-      .where(eq(cases.id, input.caseId));
-
-    await tx.insert(caseStateTransitions).values({
-      caseId: input.caseId as never,
-      fromStatus: caseRow.status,
-      toStatus: RESUME_TO_STATUS,
-      reason,
-    });
-
-    await tx.insert(auditLog).values({
-      tenantId: input.tenantId as never,
-      caseId: input.caseId as never,
-      actorType: "user",
-      actorId: input.managerId,
-      action: "case.resumed",
-      details: { reason, fromStatus: caseRow.status },
-    });
-
-    return { kind: "resumed", toStatus: RESUME_TO_STATUS };
-  });
-
-export type SetCaseStatusOutcome =
-  | {
-      readonly kind: "updated";
-      readonly fromStatus: string;
-      readonly toStatus: string;
-      readonly canceledApprovals: number;
-    }
-  | { readonly kind: "unchanged"; readonly status: string }
-  | { readonly kind: "invalid_status"; readonly status: string }
-  | {
-      readonly kind: "transition_not_allowed";
-      readonly fromStatus: string;
-      readonly toStatus: string;
-    }
-  | { readonly kind: "case_not_found" };
+export type SetCaseStatusOutcome = SetMerchantStatusOutcome;
 
 export interface SetCaseStatusInput {
   readonly caseId: string;
@@ -220,88 +150,23 @@ export interface SetCaseStatusInput {
 export const setCaseStatus = async (
   db: DrizzleDb,
   input: SetCaseStatusInput,
-): Promise<SetCaseStatusOutcome> =>
-  db.transaction(async (tx) => {
-    const [caseRow] = await tx
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(
-        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
-      )
-      .limit(1);
-    if (!caseRow) return { kind: "case_not_found" } as SetCaseStatusOutcome;
-
-    if (!isMerchantSettableStatus(input.toStatus)) {
-      return {
-        kind: "invalid_status",
-        status: input.toStatus,
-      } as SetCaseStatusOutcome;
-    }
-    const to: CaseStatus = input.toStatus;
-    const from = caseRow.status as CaseStatus;
-    if (from === to) {
-      return { kind: "unchanged", status: from } as SetCaseStatusOutcome;
-    }
-    if (!isStatusTransitionAllowed(from, to)) {
-      return {
-        kind: "transition_not_allowed",
-        fromStatus: from,
-        toStatus: to,
-      } as SetCaseStatusOutcome;
-    }
-
-    const reason = input.reason ?? "case status changed manually from dashboard";
-
-    await tx
-      .update(cases)
-      .set({
-        status: to,
-        updatedAt: sql`now()`,
-        // Stamp resolvedAt when closing as resolved (mirrors the canonical
-        // transitionStatus); leave it untouched on every other target.
-        ...(to === "resolved" ? { resolvedAt: sql`now()` } : {}),
-      })
-      .where(eq(cases.id, input.caseId));
-
-    await tx.insert(caseStateTransitions).values({
-      caseId: input.caseId as never,
-      fromStatus: from,
-      toStatus: to,
-      reason,
-    });
-
-    await tx.insert(auditLog).values({
-      tenantId: input.tenantId as never,
-      caseId: input.caseId as never,
-      actorType: "user",
-      actorId: input.managerId,
-      action: "case.status_changed",
-      details: { reason, fromStatus: from, toStatus: to },
-    });
-
-    const canceled = await tx
-      .update(approvals)
-      .set({
-        status: "rejected",
-        decidedAt: sql`now()`,
-        decidedBy: input.managerId as never,
-        decisionReason: "case status changed manually",
-      })
-      .where(
-        and(
-          eq(approvals.caseId, input.caseId),
-          eq(approvals.status, "pending"),
-        ),
-      )
-      .returning({ id: approvals.id });
-
-    return {
-      kind: "updated",
-      fromStatus: from,
-      toStatus: to,
-      canceledApprovals: canceled.length,
-    };
-  });
+): Promise<SetCaseStatusOutcome> => {
+  const reason = input.reason ?? "case status changed manually from dashboard";
+  return runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle.setMerchantStatus({
+        caseId: CaseId(input.caseId),
+        tenantId: TenantId(input.tenantId),
+        actor: { type: "user", id: input.managerId },
+        decidedBy: UserId(input.managerId),
+        toStatus: input.toStatus,
+        reason,
+      });
+    }),
+  );
+};
 
 /**
  * Self-service FIRST-workspace creation for a signed-in WorkOS org (the

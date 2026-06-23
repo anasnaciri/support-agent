@@ -1,11 +1,18 @@
 import { Context, Effect, Layer } from "effect";
-import type {
-  Case,
-  CaseContext,
-  CaseId,
-  CaseStatus,
-  TenantId,
+import {
+  isMerchantSettableStatus,
+  isStatusTransitionAllowed,
+  type Case,
+  type CaseContext,
+  type CaseId,
+  type CaseStatus,
+  type TenantId,
+  type UserId,
 } from "@support-agent/agent-core";
+import {
+  ApprovalService,
+  type ApprovalServiceError,
+} from "./approval-service.js";
 import {
   type AuditLogError,
   AuditLogService,
@@ -41,7 +48,60 @@ export interface ResolveCaseInput {
   readonly action?: string;
 }
 
-export type CaseLifecycleWriterError = CaseRepositoryError | AuditLogError;
+export type TakeOverCaseOutcome =
+  | { readonly kind: "taken_over"; readonly canceledApprovals: number }
+  | { readonly kind: "case_not_found" }
+  | { readonly kind: "already_terminal"; readonly status: CaseStatus };
+
+export interface TakeOverCaseInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly actor: AuditActor;
+  readonly decidedBy: UserId;
+  readonly reason: string;
+}
+
+export type ResumeCaseOutcome =
+  | { readonly kind: "resumed"; readonly toStatus: CaseStatus }
+  | { readonly kind: "case_not_found" }
+  | { readonly kind: "not_in_takeover"; readonly status: CaseStatus };
+
+export interface ResumeCaseInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly actor: AuditActor;
+  readonly reason: string;
+}
+
+export type SetMerchantStatusOutcome =
+  | {
+      readonly kind: "updated";
+      readonly fromStatus: CaseStatus;
+      readonly toStatus: CaseStatus;
+      readonly canceledApprovals: number;
+    }
+  | { readonly kind: "unchanged"; readonly status: CaseStatus }
+  | { readonly kind: "invalid_status"; readonly status: string }
+  | {
+      readonly kind: "transition_not_allowed";
+      readonly fromStatus: CaseStatus;
+      readonly toStatus: CaseStatus;
+    }
+  | { readonly kind: "case_not_found" };
+
+export interface SetMerchantStatusInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly actor: AuditActor;
+  readonly decidedBy: UserId;
+  readonly toStatus: string;
+  readonly reason: string;
+}
+
+export type CaseLifecycleWriterError =
+  | ApprovalServiceError
+  | CaseRepositoryError
+  | AuditLogError;
 
 export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
   CaseLifecycleWriter,
@@ -53,6 +113,18 @@ export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
     readonly resolve: (
       input: ResolveCaseInput,
     ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly takeOver: (
+      input: TakeOverCaseInput,
+    ) => Effect.Effect<TakeOverCaseOutcome, CaseLifecycleWriterError>;
+
+    readonly resume: (
+      input: ResumeCaseInput,
+    ) => Effect.Effect<ResumeCaseOutcome, CaseLifecycleWriterError>;
+
+    readonly setMerchantStatus: (
+      input: SetMerchantStatusInput,
+    ) => Effect.Effect<SetMerchantStatusOutcome, CaseLifecycleWriterError>;
   }
 >() {}
 
@@ -89,9 +161,18 @@ const withoutRiskFlags = (
   return { ...context, riskFlags: next };
 };
 
+const RESUME_TO_STATUS = "in_progress" satisfies CaseStatus;
+
+const TERMINAL_TAKEOVER_STATUSES: ReadonlySet<CaseStatus> = new Set([
+  "resolved",
+  "human_takeover",
+  "failed",
+]);
+
 export const CaseLifecycleWriterLive = Layer.effect(
   CaseLifecycleWriter,
   Effect.gen(function* () {
+    const approvals = yield* ApprovalService;
     const cases = yield* CaseRepository;
     const audit = yield* AuditLogService;
     const tx = yield* TransactionRunner;
@@ -190,6 +271,156 @@ export const CaseLifecycleWriterLive = Layer.effect(
               details: auditDetails(input.reason, input.details),
             });
             return resolved;
+          }),
+        ),
+
+      takeOver: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases
+              .getById(input.caseId, input.tenantId)
+              .pipe(
+                Effect.map((case_) => ({ _tag: "found" as const, case_ })),
+                Effect.catchTag("CaseNotFound", () =>
+                  Effect.succeed({ _tag: "missing" as const }),
+                ),
+              );
+            if (current._tag === "missing") return { kind: "case_not_found" };
+            const case_ = current.case_;
+            if (TERMINAL_TAKEOVER_STATUSES.has(case_.status)) {
+              return {
+                kind: "already_terminal",
+                status: case_.status,
+              };
+            }
+
+            const updated = yield* cases.transitionStatus(
+              case_.id,
+              "human_takeover",
+              {
+                tenantId: case_.tenantId,
+                reason: input.reason,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: input.actor,
+              action: "case.taken_over",
+              details: {
+                reason: input.reason,
+                fromStatus: case_.status,
+              },
+            });
+            const canceledApprovals = yield* approvals.cancelPendingForCase({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              decidedBy: input.decidedBy,
+              decisionReason: "case taken over",
+            });
+            return { kind: "taken_over", canceledApprovals };
+          }),
+        ),
+
+      resume: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases
+              .getById(input.caseId, input.tenantId)
+              .pipe(
+                Effect.map((case_) => ({ _tag: "found" as const, case_ })),
+                Effect.catchTag("CaseNotFound", () =>
+                  Effect.succeed({ _tag: "missing" as const }),
+                ),
+              );
+            if (current._tag === "missing") return { kind: "case_not_found" };
+            const case_ = current.case_;
+            if (case_.status !== "human_takeover") {
+              return { kind: "not_in_takeover", status: case_.status };
+            }
+
+            const updated = yield* cases.transitionStatus(
+              case_.id,
+              RESUME_TO_STATUS,
+              {
+                tenantId: case_.tenantId,
+                expectedFromStatus: "human_takeover",
+                reason: input.reason,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: input.actor,
+              action: "case.resumed",
+              details: {
+                reason: input.reason,
+                fromStatus: case_.status,
+              },
+            });
+            return { kind: "resumed", toStatus: RESUME_TO_STATUS };
+          }),
+        ),
+
+      setMerchantStatus: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases
+              .getById(input.caseId, input.tenantId)
+              .pipe(
+                Effect.map((case_) => ({ _tag: "found" as const, case_ })),
+                Effect.catchTag("CaseNotFound", () =>
+                  Effect.succeed({ _tag: "missing" as const }),
+                ),
+              );
+            if (current._tag === "missing") return { kind: "case_not_found" };
+            const case_ = current.case_;
+            if (!isMerchantSettableStatus(input.toStatus)) {
+              return { kind: "invalid_status", status: input.toStatus };
+            }
+            const toStatus = input.toStatus;
+            if (case_.status === toStatus) {
+              return { kind: "unchanged", status: case_.status };
+            }
+            if (!isStatusTransitionAllowed(case_.status, toStatus)) {
+              return {
+                kind: "transition_not_allowed",
+                fromStatus: case_.status,
+                toStatus,
+              };
+            }
+
+            const updated = yield* cases.transitionStatus(
+              case_.id,
+              toStatus,
+              {
+                tenantId: case_.tenantId,
+                reason: input.reason,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: input.actor,
+              action: "case.status_changed",
+              details: {
+                reason: input.reason,
+                fromStatus: case_.status,
+                toStatus,
+              },
+            });
+            const canceledApprovals = yield* approvals.cancelPendingForCase({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              decidedBy: input.decidedBy,
+              decisionReason: "case status changed manually",
+            });
+            return {
+              kind: "updated",
+              fromStatus: case_.status,
+              toStatus,
+              canceledApprovals,
+            };
           }),
         ),
     });

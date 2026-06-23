@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AgentId, TenantId } from "@support-agent/agent-core";
 import type { UnsentSupplierEscalation } from "@support-agent/db";
 import {
+  ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
   CaseLifecycleWriterLive,
@@ -126,6 +127,7 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
 
   it("parks and flags the merchant case when supplier notification is abandoned", async () => {
     const deps = Layer.mergeAll(
+      ApprovalServiceTest,
       CaseRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
