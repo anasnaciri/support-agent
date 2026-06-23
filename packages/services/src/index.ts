@@ -3,6 +3,7 @@ export * from "./hmac.js";
 export * from "./crypto.js";
 export * from "./approval-tokens.js";
 export * from "./case-repository.js";
+export * from "./case-lifecycle-writer.js";
 export * from "./tenant-repository.js";
 export * from "./permission-service-live.js";
 export * from "./audit-log.js";

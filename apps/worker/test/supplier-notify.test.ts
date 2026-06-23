@@ -5,6 +5,7 @@ import type { UnsentSupplierEscalation } from "@support-agent/db";
 import {
   AuditLogService,
   AuditLogServiceTest,
+  CaseLifecycleWriterLive,
   CaseRepository,
   CaseRepositoryTest,
   TransactionRunnerPassthrough,
@@ -124,11 +125,12 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
   });
 
   it("parks and flags the merchant case when supplier notification is abandoned", async () => {
-    const layer = Layer.mergeAll(
+    const deps = Layer.mergeAll(
       CaseRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
     );
+    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
 
     const out = await Effect.runPromise(
       Effect.provide(

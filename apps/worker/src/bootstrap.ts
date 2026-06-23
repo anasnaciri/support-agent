@@ -10,6 +10,7 @@ import {
   AccountOpenRouterCredentialStoreTest,
   ApprovalLinkConfig,
   BlobStorageTest,
+  CaseLifecycleWriterLive,
   ConnectorCredentialStore,
   ConversationServiceTest,
   OrgDirectoryServiceTest,
@@ -21,6 +22,7 @@ import {
   type ApprovalService,
   type AuditLogService,
   type BlobStorage,
+  type CaseLifecycleWriter,
   type CaseRepository,
   type ConnectorConnection,
   type ConversationService,
@@ -100,6 +102,7 @@ export interface WorkerBootstrap {
   readonly boss: PgBoss;
   readonly runtimeLayer: Layer.Layer<
     | AgentRuntime
+    | CaseLifecycleWriter
     | CaseRepository
     | AuditLogService
     | ApprovalService
@@ -276,7 +279,7 @@ export const buildWorker = async (
     : AuditLogServiceLive;
 
   // Repos + tx runner — all depend on DbClient.
-  const repos = Layer.mergeAll(
+  const baseRepos = Layer.mergeAll(
     CaseRepositoryLive,
     auditLogLayer,
     ApprovalServiceLive,
@@ -306,6 +309,7 @@ export const buildWorker = async (
     // provide below).
     ReplyDeliveryServiceLive,
   );
+  const repos = Layer.provideMerge(CaseLifecycleWriterLive, baseRepos);
 
   // LLM — depends on LLMCredentialResolver. In production each tenant
   // brings their own provider + key (resolver consults the same

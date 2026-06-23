@@ -32,11 +32,10 @@ import {
   type DueReplyDelivery,
 } from "@support-agent/db";
 import {
-  AuditLogService,
+  CaseLifecycleWriter,
   CaseRepository,
   ConversationService,
   REPLY_DELIVERY_FAILED_FLAG,
-  TransactionRunner,
   nextReplyDeliveryBackoffMs,
 } from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
@@ -182,48 +181,20 @@ const reSendEffect = (
 const resolveDeliveredEffect = (
   caseId: string,
   tenantId: string,
-): Effect.Effect<
-  void,
-  never,
-  CaseRepository | AuditLogService | TransactionRunner
-> =>
+): Effect.Effect<void, never, CaseLifecycleWriter> =>
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
-    const audit = yield* AuditLogService;
-    const tx = yield* TransactionRunner;
-    const current = yield* cases
-      .getById(CaseId(caseId), TenantId(tenantId))
-      .pipe(Effect.either);
-    if (current._tag === "Left") return;
-    if (current.right.status === "resolved") return;
-    const ctx = current.right.context as Record<string, unknown>;
-    const flags = (Array.isArray(ctx["riskFlags"]) ? ctx["riskFlags"] : []).filter(
-      (f): f is string => typeof f === "string" && f !== REPLY_DELIVERY_FAILED_FLAG,
-    );
-    yield* tx
-      .run(
-        Effect.gen(function* () {
-          if (current.right.status === "human_takeover") {
-            yield* cases.transitionStatus(CaseId(caseId), "in_progress", {
-              reason: "reply delivered on retry",
-            });
-          }
-          yield* cases.update(CaseId(caseId), {
-            context: { ...ctx, riskFlags: flags } as never,
-          });
-          yield* cases.transitionStatus(CaseId(caseId), "resolved", {
-            reason: "reply delivered on retry",
-          });
-          yield* audit.record({
-            tenantId: TenantId(tenantId),
-            caseId: CaseId(caseId),
-            actor: { type: "system", id: "reply-delivery-retry" },
-            action: "case.resolved",
-            details: { reason: "reply_delivered_on_retry" },
-          });
-        }),
-      )
-      .pipe(Effect.catchAll(() => Effect.void));
+    const lifecycle = yield* CaseLifecycleWriter;
+    yield* lifecycle
+      .resolve({
+        caseId: CaseId(caseId),
+        tenantId: TenantId(tenantId),
+        actor: { type: "system", id: "reply-delivery-retry" },
+        reason: "reply delivered on retry",
+        bridgeFromHumanTakeover: true,
+        clearRiskFlags: [REPLY_DELIVERY_FAILED_FLAG],
+        details: { reason: "reply_delivered_on_retry" },
+      })
+      .pipe(Effect.asVoid, Effect.catchAll(() => Effect.void));
   });
 
 // ------------------------------------------------------------

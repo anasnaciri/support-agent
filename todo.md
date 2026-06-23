@@ -100,6 +100,22 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Architecture review slice: deepened case lifecycle writes (TDD).**
+  Implemented the top recommendation from `/private/tmp/architecture-review-20260622-022840.html` as a
+  first narrow slice: a services-level `CaseLifecycleWriter` now owns the repeated "read case → patch
+  context risk flags → state-machine transition → audit log inside the transaction" choreography.
+  - **services**: added `CaseLifecycleWriter` + `CaseLifecycleWriterLive` with tested `escalateToHuman`
+    and `resolve` methods. Tests cover supplier-notification cap escalation, no-op source-status guards,
+    and `human_takeover → in_progress → resolved` bridging while clearing only selected risk flags.
+  - **worker**: `supplier-notify-schedule` and `reply-delivery-retry-schedule` now call the lifecycle
+    writer instead of hand-rolling repository/audit/transaction recipes; worker bootstrap exposes the new
+    tag via `Layer.provideMerge`.
+  - **Verified**: RED first (`Cannot find module '../src/case-lifecycle-writer.js'`), then focused green
+    `pnpm test -- --run packages/services/test/case-lifecycle-writer.test.ts apps/worker/test/supplier-notify.test.ts apps/worker/test/reply-delivery-retry.test.ts`;
+    `pnpm build` green.
+  - **Follow-up from the same architecture report:** migrate remaining lifecycle write choreography in
+    `packages/db/src/dashboard-writes.ts` (`takeOverCase`, `resumeCase`, `setCaseStatus`) and then inspect
+    `packages/services/src/agent-runtime.ts` parking/resume writes for the same service boundary.
 - **2026-06-23 — Fixed the vitest teardown FK bug that polluted the shared dev DB (TDD).**
   Root-caused above: the global-teardown backstop did a single `DELETE FROM tenants`, which is blocked by
   any leaked tenant's `cases`/`approvals` rows (`ON DELETE NO ACTION`, by design). Chose the **ordered-delete**

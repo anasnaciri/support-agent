@@ -19,10 +19,8 @@ import {
   type UnsentSupplierEscalation,
 } from "@support-agent/db";
 import {
-  AuditLogService,
-  CaseRepository,
+  CaseLifecycleWriter,
   PlatformMailService,
-  TransactionRunner,
   type SendSupplierEscalationInput,
 } from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
@@ -39,66 +37,25 @@ export const SUPPLIER_UNREACHABLE_FLAG = "supplier_unreachable";
 
 export type SendOutcome = "sent" | { readonly error: string };
 
-const readRiskFlags = (
-  context: Readonly<Record<string, unknown>>,
-): ReadonlyArray<string> =>
-  Array.isArray(context["riskFlags"])
-    ? context["riskFlags"].filter((f): f is string => typeof f === "string")
-    : [];
-
 export const escalateSupplierNotifyFailure = (input: {
   readonly escalation: UnsentSupplierEscalation;
   readonly error: string;
 }) =>
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
-    const audit = yield* AuditLogService;
-    const tx = yield* TransactionRunner;
-    return yield* tx.run(
-      Effect.gen(function* () {
-        const current = yield* cases.getById(
-          CaseId(input.escalation.caseId),
-          TenantId(input.escalation.tenantId),
-        );
-        if (current.status !== "waiting_for_supplier") {
-          return current;
-        }
-        const existing = readRiskFlags(current.context);
-        if (!existing.includes(SUPPLIER_UNREACHABLE_FLAG)) {
-          yield* cases.update(
-            current.id,
-            {
-              context: {
-                ...current.context,
-                riskFlags: [...existing, SUPPLIER_UNREACHABLE_FLAG],
-              },
-            },
-            current.tenantId,
-          );
-        }
-        const updated = yield* cases.transitionStatus(
-          current.id,
-          "human_takeover",
-          {
-            tenantId: current.tenantId,
-            reason: SUPPLIER_UNREACHABLE_FLAG,
-          },
-        );
-        yield* audit.record({
-          tenantId: updated.tenantId,
-          caseId: updated.id,
-          actor: { type: "system", id: "supplier-notify" },
-          action: "case.escalated_to_human",
-          details: {
-            reason: SUPPLIER_UNREACHABLE_FLAG,
-            escalationId: input.escalation.id,
-            supplierEmail: input.escalation.supplierEmail,
-            error: input.error,
-          },
-        });
-        return updated;
-      }),
-    );
+    const lifecycle = yield* CaseLifecycleWriter;
+    return yield* lifecycle.escalateToHuman({
+      caseId: CaseId(input.escalation.caseId),
+      tenantId: TenantId(input.escalation.tenantId),
+      actor: { type: "system", id: "supplier-notify" },
+      reason: SUPPLIER_UNREACHABLE_FLAG,
+      riskFlag: SUPPLIER_UNREACHABLE_FLAG,
+      onlyFromStatus: "waiting_for_supplier",
+      details: {
+        escalationId: input.escalation.id,
+        supplierEmail: input.escalation.supplierEmail,
+        error: input.error,
+      },
+    });
   });
 
 /**
