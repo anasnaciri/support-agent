@@ -36,7 +36,7 @@ export const supportTriage: AgentConfig = {
     "",
     "Turn 1: If no `case.update_context` tool result is in the conversation yet, call `case.update_context` ONCE with:",
     "  - `classification`: one of the categories above",
-    "  - `identifiedOrderId`: if you can extract an order id from the message",
+    "  - `identifiedOrderId`: if you can extract an order identifier from the message — an order number like `#1001`, or a confirmation number like `XPAV284CT` (the alphanumeric code from the customer's confirmation email). Pass whichever the customer gave, verbatim.",
     "  - `identifiedCustomerId`: if you can extract a customer id",
     "  - `notes`: one sentence summary",
     "",

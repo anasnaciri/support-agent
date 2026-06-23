@@ -298,6 +298,7 @@ const mapFulfillment = (f: GqlFulfillment): ShopifyFulfillment => {
 type GqlOrder = {
   readonly id: string;
   readonly name: string;
+  readonly confirmationNumber: string | null;
   readonly email: string | null;
   readonly customer: { readonly id: string } | null;
   readonly displayFulfillmentStatus: string | null;
@@ -322,6 +323,7 @@ type GqlOrder = {
 const mapOrder = (o: GqlOrder): ShopifyOrder => ({
   id: makeOrderId(o.id),
   name: o.name,
+  confirmationNumber: o.confirmationNumber ?? null,
   email: o.email,
   customerId: o.customer ? makeCustomerId(o.customer.id) : null,
   fulfillmentStatus: mapFulfillmentStatus(o.displayFulfillmentStatus),
@@ -491,6 +493,7 @@ const mapProductSearchNode = (
 const ORDER_FIELDS = `
   id
   name
+  confirmationNumber
   email
   customer { id }
   displayFulfillmentStatus
@@ -659,6 +662,17 @@ const SEARCH_CUSTOMER_QUERY = `
 
 const SEARCH_ORDER_BY_NAME_QUERY = `
   query SearchOrderByName($q: String!) {
+    orders(first: 1, query: $q) {
+      nodes { ${ORDER_FIELDS} }
+    }
+  }
+`;
+
+// Confirmation-number fallback search. Shopify's `orders` query supports a
+// `confirmation_number:` filter; the code is alphanumeric so no quoting is
+// needed (the service strips anything else before building `q`).
+const SEARCH_ORDER_BY_CONFIRMATION_QUERY = `
+  query SearchOrderByConfirmation($q: String!) {
     orders(first: 1, query: $q) {
       nodes { ${ORDER_FIELDS} }
     }
@@ -1038,6 +1052,29 @@ export const ShopifyServiceLive = Layer.effect(
             tenantId,
             SEARCH_ORDER_BY_NAME_QUERY,
             { q: `name:${normalized}` },
+          ).pipe(
+            Effect.map((data) => {
+              const first = data.orders.nodes[0];
+              return first ? mapOrder(first) : null;
+            }),
+          );
+        }),
+
+      findOrderByConfirmationNumber: (tenantId, confirmationNumber) =>
+        withCreds(tenantId, (creds) => {
+          // Confirmation numbers are alphanumeric (e.g. "XPAV284CT"). Strip
+          // anything else so a stray "#", space, or search operator pasted
+          // from a customer message can't malform the `confirmation_number:`
+          // filter. An empty code after stripping is a guaranteed miss —
+          // short-circuit to null without spending a Shopify call.
+          const code = confirmationNumber.replace(/[^A-Za-z0-9]/g, "");
+          if (code.length === 0) return Effect.succeed(null);
+          return runQuery<{ orders: { nodes: ReadonlyArray<GqlOrder> } }>(
+            http,
+            creds,
+            tenantId,
+            SEARCH_ORDER_BY_CONFIRMATION_QUERY,
+            { q: `confirmation_number:${code}` },
           ).pipe(
             Effect.map((data) => {
               const first = data.orders.nodes[0];

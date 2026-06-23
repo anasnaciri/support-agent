@@ -299,6 +299,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#1001",
+      confirmationNumber: null,
       email: "cust@example.com",
       customerId: CustomerId("gid://shopify/Customer/777"),
       fulfillmentStatus: "in_transit",
@@ -1089,6 +1090,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#7001",
+      confirmationNumber: null,
       email: "cust@example.com",
       customerId: CustomerId("gid://shopify/Customer/700"),
       fulfillmentStatus: "in_transit",
@@ -1289,6 +1291,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#7002",
+      confirmationNumber: null,
       email: "cust2@example.com",
       customerId: CustomerId("gid://shopify/Customer/702"),
       fulfillmentStatus: "unfulfilled",
@@ -2285,6 +2288,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#2001",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/555"),
       fulfillmentStatus: "delivered",
@@ -2487,6 +2491,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#8001",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/555"),
       fulfillmentStatus: "in_transit",
@@ -2671,6 +2676,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#8002",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/556"),
       fulfillmentStatus: "delivered",
@@ -2827,6 +2833,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#3001",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/666"),
       fulfillmentStatus: "delivered",
@@ -3016,6 +3023,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#4001",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/777"),
       fulfillmentStatus: "delivered",
@@ -3261,6 +3269,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#9001",
+      confirmationNumber: null,
       email: "buyer@example.com",
       customerId: CustomerId("gid://shopify/Customer/911"),
       fulfillmentStatus: "delivered",
@@ -3650,6 +3659,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#3001",
+      confirmationNumber: null,
       email: "buyer2@example.com",
       customerId: CustomerId("gid://shopify/Customer/999"),
       fulfillmentStatus: "delivered",
@@ -3883,6 +3893,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#7123",
+      confirmationNumber: null,
       email: "buyer-l8@example.com",
       customerId: CustomerId("gid://shopify/Customer/7123"),
       fulfillmentStatus: "delivered",
@@ -4056,6 +4067,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
       name: "#4001",
+      confirmationNumber: null,
       email: "buyer3@example.com",
       customerId: CustomerId("gid://shopify/Customer/1000"),
       fulfillmentStatus: "delivered",
@@ -4630,6 +4642,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
   const fixtureOrder = (totalAmount: string): ShopifyOrder => ({
     id: refundOrderId,
     name: "#2001",
+    confirmationNumber: null,
     email: "buyer@example.com",
     customerId: CustomerId("gid://shopify/Customer/555"),
     fulfillmentStatus: "delivered",

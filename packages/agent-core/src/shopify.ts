@@ -81,6 +81,18 @@ export type ShopifyFulfillment = {
 export type ShopifyOrder = {
   readonly id: OrderId;
   readonly name: string; // e.g. "#1001"
+  /**
+   * Shopify's customer-facing confirmation number — a random alphanumeric
+   * code (e.g. "XPAV284CT") shown on the order confirmation page/email,
+   * often *instead of* the sequential order name. Customers frequently
+   * quote this when they can't find the `#1001`-style name, so we surface
+   * it both for display and as a lookup key (see
+   * `ShopifyService.findOrderByConfirmationNumber`). `null` when the order
+   * predates the field or the store doesn't expose it. Not guaranteed
+   * unique across orders — never treat a match as proof of identity; the
+   * order-email identity gate still applies.
+   */
+  readonly confirmationNumber: string | null;
   readonly email: string | null;
   readonly customerId: CustomerId | null;
   readonly fulfillmentStatus: ShopifyFulfillmentStatus | null;

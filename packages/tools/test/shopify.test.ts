@@ -48,6 +48,7 @@ const baseCtx = (caseId: string): ToolContext => ({
 const buildOrder = (id: string): ShopifyOrder => ({
   id: OrderId(id),
   name: "#1001",
+  confirmationNumber: "XPAV284CT",
   email: "customer@example.com",
   customerId: CustomerId("gid://shopify/Customer/777"),
   fulfillmentStatus: "in_transit",
@@ -171,10 +172,58 @@ describe("shopify.get_order tool", () => {
     expect((exit.value as Record<string, unknown>)["name"]).toBe("#1001");
   });
 
-  it("maps a null findOrderByName result to ToolOutputInvalid OrderNotFound", async () => {
-    // The ordersByName map is empty → findOrderByName returns null →
-    // the tool MUST map that to ToolOutputInvalid, not silently succeed
-    // with null and crash the output-schema decode at the runtime boundary.
+  // Customers who can't find the `#1001` order name often quote the
+  // alphanumeric confirmation number from their email instead. When the
+  // name search misses, the tool falls back to a confirmation-number
+  // lookup before giving up.
+  it("falls back to confirmation-number lookup when the name search misses", async () => {
+    const order = buildOrder("gid://shopify/Order/12098337702252");
+    const env = ShopifyServiceTest({
+      // No ordersByName entry → name search misses → fallback fires.
+      ordersByConfirmationNumber: new Map([["XPAV284CT", order]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetOrder.execute(
+          { orderId: "XPAV284CT" } as never,
+          baseCtx("c-conf"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["name"]).toBe("#1001");
+    expect(result["confirmationNumber"]).toBe("XPAV284CT");
+  });
+
+  it("surfaces the order's confirmationNumber in the output payload", async () => {
+    const orderId = OrderId("gid://shopify/Order/12345");
+    const env = ShopifyServiceTest({
+      orders: new Map([[orderId, buildOrder(orderId)]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyGetOrder.execute(
+          { orderId } as never,
+          baseCtx("c-surface"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect((exit.value as Record<string, unknown>)["confirmationNumber"]).toBe(
+      "XPAV284CT",
+    );
+  });
+
+  it("maps a miss on BOTH name and confirmation lookups to ToolOutputInvalid OrderNotFound", async () => {
+    // Both ordersByName and ordersByConfirmationNumber are empty → both
+    // searches return null → the tool MUST map that to ToolOutputInvalid,
+    // not silently succeed with null and crash the output-schema decode at
+    // the runtime boundary.
     const env = ShopifyServiceTest({});
     const exit = await Effect.runPromiseExit(
       Effect.provide(

@@ -32,6 +32,7 @@ const Fulfillment = Schema.Struct({
 const Output = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
+  confirmationNumber: Schema.NullOr(Schema.String),
   email: Schema.NullOr(Schema.String),
   fulfillmentStatus: Schema.NullOr(Schema.String),
   financialStatus: Schema.NullOr(Schema.String),
@@ -61,7 +62,7 @@ const Output = Schema.Struct({
 export const shopifyGetOrder = defineTool({
   name: "shopify.get_order",
   description:
-    "Look up a Shopify order. Accepts the merchant-facing order name (`#1001`, with or without the leading `#`), the numeric Shopify internal id, or a `gid://shopify/Order/...` GID. Returns the order with line items, fulfillment status, financial status, and tracking info. Use this to answer 'where is my order?' questions — customers typically reference orders by name (`#1001`), not by internal id.",
+    "Look up a Shopify order. Accepts the merchant-facing order name (`#1001`, with or without the leading `#`), the customer-facing confirmation number (a random alphanumeric code like `XPAV284CT` printed on the order confirmation email), the numeric Shopify internal id, or a `gid://shopify/Order/...` GID. Pass whatever identifier the customer gave verbatim — the tool tries the order name first and falls back to a confirmation-number lookup automatically. Returns the order (including its `confirmationNumber`) with line items, fulfillment status, financial status, and tracking info. Use this to answer 'where is my order?' questions — customers typically reference orders by name (`#1001`) or by the confirmation number from their email.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
@@ -75,52 +76,49 @@ export const shopifyGetOrder = defineTool({
     Effect.gen(function* () {
       const shopify = yield* ShopifyService;
 
+      const wrapErr = (e: { readonly _tag: string }) =>
+        new ToolOutputInvalid({
+          tool: "shopify.get_order",
+          issues: [e._tag],
+        });
+      const notFound = Effect.fail(
+        new ToolOutputInvalid({
+          tool: "shopify.get_order",
+          issues: ["OrderNotFound"],
+        }),
+      );
+
       // Branch on input shape:
       //   - `gid://shopify/Order/<n>` → direct id lookup (the rare power-
       //     user case where the caller already has a GID).
-      //   - `#1001` or `1001` (any non-GID string) → name search through
-      //     `findOrderByName`. Customers reference orders by their name,
-      //     not their internal numeric id, so this is the common path.
-      // The name-search returns `null` (not a typed error) when no match
-      // is found — map that to `OrderNotFound` at the tool boundary so the
-      // LLM sees the same failure shape as a by-id miss.
+      //   - any other string → resolve by *search*. Try the order name
+      //     first (`findOrderByName`) because customers usually quote
+      //     `#1001`; on a miss, fall back to a confirmation-number lookup
+      //     (`findOrderByConfirmationNumber`) since some customers only
+      //     have the `XPAV284CT`-style code from their confirmation email.
+      //     Confirmation codes are alphanumeric and never match a name
+      //     search, so the two legs don't collide. Both searches return
+      //     `null` (not a typed error) on a miss — only after BOTH miss do
+      //     we surface `OrderNotFound`, the same failure shape as a by-id
+      //     miss.
       const raw = input.orderId;
       const order = raw.startsWith("gid://")
         ? yield* shopify
             .getOrder(ctx.tenantId, OrderId(raw))
-            .pipe(
-              Effect.mapError(
-                (e) =>
-                  new ToolOutputInvalid({
-                    tool: "shopify.get_order",
-                    issues: [e._tag],
-                  }),
-              ),
-            )
-        : yield* shopify
-            .findOrderByName(ctx.tenantId, raw)
-            .pipe(
-              Effect.mapError(
-                (e) =>
-                  new ToolOutputInvalid({
-                    tool: "shopify.get_order",
-                    issues: [e._tag],
-                  }),
-              ),
-              Effect.flatMap((o) =>
-                o
-                  ? Effect.succeed(o)
-                  : Effect.fail(
-                      new ToolOutputInvalid({
-                        tool: "shopify.get_order",
-                        issues: ["OrderNotFound"],
-                      }),
-                    ),
-              ),
-            );
+            .pipe(Effect.mapError(wrapErr))
+        : yield* shopify.findOrderByName(ctx.tenantId, raw).pipe(
+            Effect.flatMap((o) =>
+              o
+                ? Effect.succeed(o)
+                : shopify.findOrderByConfirmationNumber(ctx.tenantId, raw),
+            ),
+            Effect.mapError(wrapErr),
+            Effect.flatMap((o) => (o ? Effect.succeed(o) : notFound)),
+          );
       return {
         id: order.id,
         name: order.name,
+        confirmationNumber: order.confirmationNumber,
         email: order.email,
         fulfillmentStatus: order.fulfillmentStatus,
         financialStatus: order.financialStatus,

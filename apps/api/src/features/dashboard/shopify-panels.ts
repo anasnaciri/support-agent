@@ -25,8 +25,12 @@ export const looksLikeGid = (s: string): boolean =>
 type CaseContext = Readonly<Record<string, unknown>>;
 
 /**
- * Best-effort order for a case's stamped `identifiedOrderId` (a Shopify GID
- * or a customer-facing name like "#1001"). Errors map to null.
+ * Best-effort order for a case's stamped `identifiedOrderId` (a Shopify GID,
+ * a customer-facing name like "#1001", or a confirmation number like
+ * "XPAV284CT"). Errors map to null. Mirrors `shopify.get_order`'s
+ * resolution so the operator's case view shows the same order the agent
+ * resolved — a name like `#1001` goes through `findOrderByName`; an
+ * alphanumeric code goes through `findOrderByConfirmationNumber`.
  */
 export const resolveOrderForContext = (
   tenantId: TenantId,
@@ -40,7 +44,7 @@ export const resolveOrderForContext = (
       ? shopify.getOrder(tenantId, OrderId(raw))
       : looksLikeOrderName(raw)
         ? shopify.findOrderByName(tenantId, raw)
-        : shopify.getOrder(tenantId, OrderId(raw));
+        : shopify.findOrderByConfirmationNumber(tenantId, raw);
     return yield* lookup.pipe(Effect.catchAll(() => Effect.succeed(null)));
   });
 

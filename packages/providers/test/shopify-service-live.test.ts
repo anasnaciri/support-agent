@@ -90,6 +90,7 @@ const ORDER_PAYLOAD = {
     order: {
       id: "gid://shopify/Order/12345",
       name: "#1001",
+      confirmationNumber: "XPAV284CT",
       email: "customer@example.com",
       customer: { id: "gid://shopify/Customer/777" },
       displayFulfillmentStatus: "IN_TRANSIT",
@@ -748,6 +749,98 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
       Effect.provide(
         Effect.flatMap(ShopifyService, (s) =>
           s.findOrderByName(tenantId, "#9999"),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toBeNull();
+  });
+
+  // Confirmation-number fallback: customers who only have the alphanumeric
+  // code from their confirmation email reach `findOrderByConfirmationNumber`,
+  // which uses Shopify's `orders` query with `query: "confirmation_number:X"`.
+  it("findOrderByConfirmationNumber issues a confirmation_number search and maps the result", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: { orders: { nodes: [ORDER_PAYLOAD.data.order] } },
+          }),
+      ]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByConfirmationNumber(tenantId, "XPAV284CT"),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect(exit.value).not.toBeNull();
+    expect(exit.value!.name).toBe("#1001");
+    expect(exit.value!.confirmationNumber).toBe("XPAV284CT");
+
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string };
+    };
+    expect(body.variables.q).toBe("confirmation_number:XPAV284CT");
+  });
+
+  it("findOrderByConfirmationNumber strips non-alphanumerics before building the query", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: { orders: { nodes: [ORDER_PAYLOAD.data.order] } },
+          }),
+      ]),
+    );
+    await Effect.runPromise(
+      Effect.provide(
+        // A pasted code with stray spaces / punctuation must not malform
+        // the `confirmation_number:` filter.
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByConfirmationNumber(tenantId, "  XPAV-284 CT "),
+        ),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string };
+    };
+    expect(body.variables.q).toBe("confirmation_number:XPAV284CT");
+  });
+
+  it("findOrderByConfirmationNumber short-circuits to null without an HTTP call when the code is empty after stripping", async () => {
+    reset();
+    const layer = buildLayer(httpFromSequence([]));
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByConfirmationNumber(tenantId, "###"),
+        ),
+        layer,
+      ),
+    );
+    expect(result).toBeNull();
+    expect(captures).toHaveLength(0);
+  });
+
+  it("findOrderByConfirmationNumber returns null on no match (not a typed error)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { orders: { nodes: [] } } }),
+      ]),
+    );
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrderByConfirmationNumber(tenantId, "ZZZ999"),
         ),
         layer,
       ),

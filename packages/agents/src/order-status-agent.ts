@@ -38,7 +38,7 @@ export const orderStatusAgent: AgentConfig = {
     "",
     "DECISION RULE — read this carefully each turn:",
     "",
-    "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the value of `identifiedOrderId` from the case context. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
+    "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the value of `identifiedOrderId` from the case context. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, an order name like `#1001`, or a confirmation number like `XPAV284CT` (the alphanumeric code from the customer's confirmation email) — pass it through unchanged; the tool resolves all of these.",
     "",
     "IDENTITY GATE — check this every time BEFORE you reveal any order detail:",
     "  Order details are private. Only share them with the person who placed the order.",

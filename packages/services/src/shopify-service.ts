@@ -154,6 +154,22 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       name: string,
     ) => Effect.Effect<ShopifyOrder | null, ShopifyError>;
 
+    /**
+     * Look up an order by its customer-facing confirmation number (e.g.
+     * "XPAV284CT") — the alphanumeric code Shopify prints on the order
+     * confirmation page/email, which customers often quote instead of the
+     * `#1001` order name. Backs the fallback leg of `shopify.get_order`:
+     * when a name search misses, the tool retries here before giving up.
+     * Returns null when no match exists (like `findOrderByName`, this is a
+     * search, not a lookup — a miss isn't an error). Confirmation numbers
+     * are NOT guaranteed unique, so a match is never proof of identity; the
+     * order-email identity gate still gates disclosure.
+     */
+    readonly findOrderByConfirmationNumber: (
+      tenantId: TenantId,
+      confirmationNumber: string,
+    ) => Effect.Effect<ShopifyOrder | null, ShopifyError>;
+
     readonly getFulfillment: (
       tenantId: TenantId,
       orderId: OrderId,
@@ -344,6 +360,13 @@ export interface ShopifyTestFixtures {
    * `"#1001"` or `"1001"` in the fixture.
    */
   readonly ordersByName?: ReadonlyMap<string, ShopifyOrder>;
+  /**
+   * Map from order *confirmation number* (e.g. "XPAV284CT") to ShopifyOrder,
+   * backing `findOrderByConfirmationNumber`. Keys are matched as written —
+   * a test that wants to simulate a confirmation-number lookup seeds the
+   * exact code the caller will pass.
+   */
+  readonly ordersByConfirmationNumber?: ReadonlyMap<string, ShopifyOrder>;
   readonly fulfillments?: ReadonlyMap<
     OrderId,
     ReadonlyArray<ShopifyFulfillment>
@@ -463,6 +486,12 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
             null,
         );
       },
+      findOrderByConfirmationNumber: (_tenantId, confirmationNumber) =>
+        Effect.succeed(
+          fixtures.ordersByConfirmationNumber?.get(confirmationNumber.trim()) ??
+            fixtures.ordersByConfirmationNumber?.get(confirmationNumber) ??
+            null,
+        ),
       getFulfillment: (_tenantId, orderId) =>
         Effect.succeed(fixtures.fulfillments?.get(orderId) ?? []),
       refundOrder: (_tenantId, input) => {
