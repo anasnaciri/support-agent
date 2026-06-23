@@ -364,6 +364,13 @@ export interface ResumeOutcomeView {
   readonly toStatus?: string;
   readonly status?: string;
 }
+export interface SetCaseStatusOutcomeView {
+  readonly kind: string;
+  readonly fromStatus?: string;
+  readonly toStatus?: string;
+  readonly status?: string;
+  readonly canceledApprovals?: number;
+}
 
 export interface CaseShopifyPanels {
   readonly customer: ShopifyCustomer | null;
@@ -927,6 +934,24 @@ export const api = {
       ctx,
     });
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Manually set a case's status (mark resolved, reopen, park waiting on the
+  // customer …). The api validates the move against the case state machine and
+  // returns the discriminated outcome (updated | unchanged | invalid_status |
+  // transition_not_allowed | case_not_found).
+  setStatus: async (
+    ctx: CallCtx,
+    caseId: string,
+    status: string,
+    reason?: string,
+  ): Promise<SetCaseStatusOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/status`, {
+      method: "POST",
+      body: reason !== undefined ? { status, reason } : { status },
+      ctx,
+    });
+    return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
   },
 
   // Resume + an immediate `case.resumed` tick — the agent retries now

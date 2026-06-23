@@ -33,6 +33,7 @@ import {
   parsePageSize,
   requeueReplyDeliveryNow,
   resumeCase,
+  setCaseStatus,
   takeOverCase,
   todaySummary,
   usageRows,
@@ -559,6 +560,46 @@ export const handleDashboardResume = async (
     }),
   );
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/status — manager manually sets the case status
+// (e.g. mark resolved, reopen, or park waiting on the customer). The move is
+// validated against the case state machine (§10) in the same tx that writes
+// the transition + audit rows; pending approvals are canceled. Like resume,
+// this is a pure DB transition — it does NOT tick the agent (the merchant uses
+// "Retry now" for that).
+export const handleDashboardSetCaseStatus = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const toStatus = typeof body["status"] === "string" ? body["status"] : "";
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const outcome = await runWithDb(layer, (db) =>
+    setCaseStatus(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId: auth.userId!,
+      toStatus,
+      reason,
+    }),
+  );
+  const status =
+    outcome.kind === "case_not_found"
+      ? 404
+      : outcome.kind === "invalid_status"
+        ? 400
+        : outcome.kind === "transition_not_allowed"
+          ? 409
+          : 200; // updated | unchanged
+  return sendJson(res, status, outcome);
 };
 
 // POST /dashboard/cases/:id/retry — manager hands a taken-over case back

@@ -2,7 +2,7 @@ import type {
   CaseConversationThreadUnavailableReason,
 } from "@support-agent/dashboard-contracts";
 
-import { humanizeSlug } from "../../../lib/labels";
+import { caseStatusLabel, humanizeSlug } from "../../../lib/labels";
 import {
   shouldShowRetrySendAction,
   type RetrySendVisibilityInput,
@@ -222,6 +222,17 @@ export const curatedTimelineEvent = (
       id: `audit-${entry.id}`,
       title: "Case resolved",
       description: null,
+      occurredAt: entry.occurredAt,
+    };
+  }
+
+  if (entry.action === "case.status_changed") {
+    const to = str(details["toStatus"]);
+    return {
+      kind: "status",
+      id: `audit-${entry.id}`,
+      title: "Status updated",
+      description: to ? `Changed to ${caseStatusLabel(to)}.` : null,
       occurredAt: entry.occurredAt,
     };
   }

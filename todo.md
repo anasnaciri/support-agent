@@ -100,6 +100,52 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Merchant can manually change a case's status from the dashboard (TDD).**
+  New "Update status" dropdown on the case page lets the owner set a case's status by hand — mark it
+  resolved, reopen a resolved/failed case, or park it waiting on the customer. **No schema change**
+  (reuses `cases` + `case_state_transitions` + `audit_log` + `approvals`). Build:
+  - **agent-core** (`case.ts`): `MERCHANT_SETTABLE_STATUSES` = `{in_progress, waiting_for_customer,
+    resolved, failed}` (curated — agent-internal/parked states like `triaging`/`waiting_for_supplier`/
+    `waiting_for_approval`/`human_takeover` are NOT hand-settable) + `isMerchantSettableStatus` +
+    `allowedManualStatusTargets(from)` = settable ∩ `isStatusTransitionAllowed(from,·)` − `{from}`. The
+    manual control is re-checked against the §10 matrix, so it never bypasses the state machine.
+  - **packages/db** (`dashboard-writes.ts`): `setCaseStatus` mirrors `takeOverCase` — load (tenant-scoped)
+    → validate settable + matrix → update `cases` (+ `resolvedAt` when→resolved) + `case_state_transitions`
+    + `audit_log` (`case.status_changed`) + cancel pending approvals, all ONE tx. Outcomes:
+    `updated | unchanged | invalid_status | transition_not_allowed | case_not_found`.
+  - **contracts**: new `cases.set_status` RBAC permission (implies `cases.view`; Owner auto-has it).
+  - **apps/api**: `handleDashboardSetCaseStatus` + `POST /dashboard/cases/:id/status` gated on
+    `cases.set_status`. Pure DB transition (does NOT tick the agent — "Retry now" is for that).
+  - **apps/dashboard**: api-client `setStatus` + `setStatusAction` + a `NativeSelect` "Update status"
+    form in the case-page header (current status shown as `(current)`, so submitting unchanged is a benign
+    no-op) + `statusChanged` banner + `case.status_changed` audit label + curated-timeline entry.
+  - **TDD**: 12 agent-core unit tests + 6 api HTTP integration tests (resolve+cancel-approval, reopen,
+    unchanged no-op, invalid_status 400, illegal-transition 409, cross-tenant 404). `pnpm build` green;
+    dashboard `typecheck` green; full suite **1932 passing / 5 skipped / 0 failing**.
+  - **Invariant preserved (NOT regressed):** `human_takeover → resolved` stays forbidden by the matrix
+    (the explicitly-tested L17/takeover-race guard), so a taken-over case can be hand-set to `in_progress`
+    or `failed` but not directly `resolved`. **Follow-up:** if merchants need "I handled this takeover,
+    mark it resolved," that needs an explicit invariant decision (the runtime's 2.95 park guard already
+    prevents the *agent* from auto-resolving, so loosening the matrix for an explicit human action would
+    be safe) — deferred, not done here.
+- **2026-06-23 — Maintenance: verified `733a213`, cleaned tree + polluted dev DB, definitive green `ci:local`.**
+  Follow-up to the background agent that committed the install-link feature with `--no-verify`. (a) Confirmed
+  `733a213` intact on `main`. (b) Restored the stray `apps/dashboard/next-env.d.ts` (auto-generated Next
+  dev-vs-build types path churn, `.next/types/` ↔ `.next/dev/types/` — not a real change); tree clean. (c) **Reset
+  the polluted shared dev DB** (`support_agent`): it had ~93 tenants, 85 of them test leftovers (fixed-date
+  workspace fixtures `2026-01/02/03-01`, `Supplier Test ×6`, and the whole `2026-06-22 23:xx` killed-run cluster).
+  Took a `pg_dump` backup first, then deleted the 85 in dependency order; kept the 5 real tenants
+  (`Anas's Support Team`, `support-agent-test.myshopify.com`, `aiden-support`, `Second Store`, `Anas Naciri`).
+  (d) Ran `pnpm ci:local` against the cleaned DB: **1919 passing / 5 skipped / 0 failing** (the 5 skips are
+  live-credential smoke tests) — matches the bg agent's pre-pollution run, so the commit's code was always green;
+  the earlier "181 failures" were pure DB pollution. DB left at exactly 5 tenants afterward (no leak this run).
+  - **FOLLOW-UP / BUG FOUND (not fixed — TDD a regression test first):** the vitest global teardown
+    (`vitest.global-teardown.ts`) does `DELETE FROM tenants WHERE id NOT IN (before-snapshot)` and its comment
+    claims the FK cascade carries `cases → transitions`. **It doesn't** — `cases.tenant_id` and
+    `approvals.{case_id,tenant_id}` are `ON DELETE NO ACTION`, not `CASCADE`. So any test tenant that created a
+    case (or approval) blocks its own teardown delete (FK violation, swallowed by the teardown's try/catch) and
+    accumulates. That is the pollution source. Fix options: make those FKs `ON DELETE CASCADE` (schema +
+    migration), or have the teardback delete `approvals`→`cases`→`tenants` in order. See [[stack_decisions]].
 - **2026-06-23 — Pilot install uses the operator's store-unique install link (TDD, completes A4's original direction).**
   In pilot mode the merchant's Connect no longer always runs our self-built OAuth dance: the operator can paste the
   store-unique install link Shopify generates for a custom-distribution app (Dev Dashboard → custom distribution →

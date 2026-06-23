@@ -6,6 +6,10 @@ import type {
   CaseConversationThreadResult,
   DashboardConversationParticipant,
 } from "@support-agent/dashboard-contracts";
+import {
+  allowedManualStatusTargets,
+  type CaseStatus,
+} from "@support-agent/agent-core";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import {
@@ -20,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { NativeSelect } from "@/components/ui/native-select";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 import CaseLiveBoundary from "./CaseLiveBoundary";
@@ -31,6 +36,7 @@ import {
   resumeAction,
   retryAction,
   retrySendAction,
+  setStatusAction,
   takeOverAction,
 } from "./actions";
 import {
@@ -67,6 +73,7 @@ interface Params {
     readonly retried?: string;
     readonly retrySend?: string;
     readonly replied?: string;
+    readonly statusChanged?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -177,6 +184,35 @@ const replyBanner = (kind: string | undefined): Banner | null => {
     return {
       tone: "warn",
       text: "This case has no connected email thread to reply on.",
+    };
+  }
+  return null;
+};
+
+const statusChangedBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "updated") {
+    return {
+      tone: "success",
+      text: "Case status updated. Any pending approvals on the case were canceled.",
+    };
+  }
+  if (kind === "unchanged") {
+    return {
+      tone: "info",
+      text: "That's already the case's status — no change.",
+    };
+  }
+  if (kind === "invalid_status") {
+    return {
+      tone: "warn",
+      text: "That status can't be set by hand.",
+    };
+  }
+  if (kind === "transition_not_allowed") {
+    return {
+      tone: "warn",
+      text: "That status change isn't allowed from where this case is now.",
     };
   }
   return null;
@@ -487,6 +523,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     retryBanner(sp.retried) ??
     retrySendBanner(sp.retrySend) ??
     replyBanner(sp.replied) ??
+    statusChangedBanner(sp.statusChanged) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread] = await Promise.all([
@@ -532,6 +569,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
+  // The statuses a person may move this case to by hand (matrix-validated).
+  // Shown as the "Change status" dropdown — works from any state, including
+  // reopening a resolved/failed case.
+  const statusTargets = allowedManualStatusTargets(caseRow.status as CaseStatus);
   // Reply composer's model picker: only fetched when the composer renders (the
   // case is taken over), and tolerantly (null when the member can't read the
   // catalog) so a reply-only member still gets the composer without the picker.
@@ -611,53 +652,85 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               entries.length > 0 ? entries[entries.length - 1]!.id : "0"
             }
           />
-          {canTakeOver ? (
-            <form action={takeOverAction} className="ml-auto">
-              <input type="hidden" name="caseId" value={caseRow.id} />
-              <SubmitButton
-                variant="outline"
-                pendingLabel="Taking over…"
-                title="Stop the agent on this case and handle it manually"
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {statusTargets.length > 0 ? (
+              <form
+                action={setStatusAction}
+                className="flex items-center gap-2"
+                title="Manually set this case's status"
               >
-                Take over
-              </SubmitButton>
-            </form>
-          ) : null}
-          {canResume ? (
-            <div className="ml-auto flex items-center gap-2">
-              {showRetrySend ? (
-                <form action={retrySendAction}>
-                  <input type="hidden" name="caseId" value={caseRow.id} />
-                  <SubmitButton
-                    pendingLabel="Re-sending…"
-                    title="Re-send the same drafted reply that failed to deliver to the customer"
-                  >
-                    Retry sending email
-                  </SubmitButton>
-                </form>
-              ) : null}
-              <form action={resumeAction}>
+                <input type="hidden" name="caseId" value={caseRow.id} />
+                <NativeSelect
+                  name="status"
+                  defaultValue={caseRow.status}
+                  aria-label="Change case status"
+                  className="h-9 w-auto min-w-[10rem]"
+                >
+                  <option value={caseRow.status}>
+                    {caseStatusLabel(caseRow.status)} (current)
+                  </option>
+                  {statusTargets.map((s) => (
+                    <option key={s} value={s}>
+                      {caseStatusLabel(s)}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <SubmitButton
+                  variant="outline"
+                  pendingLabel="Updating…"
+                >
+                  Update status
+                </SubmitButton>
+              </form>
+            ) : null}
+            {canTakeOver ? (
+              <form action={takeOverAction}>
                 <input type="hidden" name="caseId" value={caseRow.id} />
                 <SubmitButton
                   variant="outline"
-                  pendingLabel="Handing back…"
-                  title="Let the agent handle this case again — it resumes on the customer's next reply"
+                  pendingLabel="Taking over…"
+                  title="Stop the agent on this case and handle it manually"
                 >
-                  Hand back to agent
+                  Take over
                 </SubmitButton>
               </form>
-              <form action={retryAction}>
-                <input type="hidden" name="caseId" value={caseRow.id} />
-                <SubmitButton
-                  variant={showRetrySend ? "outline" : "default"}
-                  pendingLabel="Retrying…"
-                  title="Hand the case back and have the agent try again right now"
-                >
-                  Retry now
-                </SubmitButton>
-              </form>
-            </div>
-          ) : null}
+            ) : null}
+            {canResume ? (
+              <>
+                {showRetrySend ? (
+                  <form action={retrySendAction}>
+                    <input type="hidden" name="caseId" value={caseRow.id} />
+                    <SubmitButton
+                      pendingLabel="Re-sending…"
+                      title="Re-send the same drafted reply that failed to deliver to the customer"
+                    >
+                      Retry sending email
+                    </SubmitButton>
+                  </form>
+                ) : null}
+                <form action={resumeAction}>
+                  <input type="hidden" name="caseId" value={caseRow.id} />
+                  <SubmitButton
+                    variant="outline"
+                    pendingLabel="Handing back…"
+                    title="Let the agent handle this case again — it resumes on the customer's next reply"
+                  >
+                    Hand back to agent
+                  </SubmitButton>
+                </form>
+                <form action={retryAction}>
+                  <input type="hidden" name="caseId" value={caseRow.id} />
+                  <SubmitButton
+                    variant={showRetrySend ? "outline" : "default"}
+                    pendingLabel="Retrying…"
+                    title="Hand the case back and have the agent try again right now"
+                  >
+                    Retry now
+                  </SubmitButton>
+                </form>
+              </>
+            ) : null}
+          </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Badge variant={caseStatusVariant(caseRow.status)}>

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   CASE_STATUSES,
+  MERCHANT_SETTABLE_STATUSES,
+  allowedManualStatusTargets,
+  isMerchantSettableStatus,
   isStatusTransitionAllowed,
 } from "../src/index.js";
 
@@ -65,6 +68,69 @@ describe("isStatusTransitionAllowed", () => {
     ] as const) {
       expect(isStatusTransitionAllowed(from, "resolved")).toBe(true);
       expect(isStatusTransitionAllowed(from, "human_takeover")).toBe(true);
+    }
+  });
+});
+
+// The merchant-facing "change status manually" feature: a curated subset of
+// statuses a person may set by hand, always re-checked against the state
+// machine so the manual control never bypasses §10.
+describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
+  it("only offers human-meaningful lifecycle states (never agent-internal ones)", () => {
+    expect([...MERCHANT_SETTABLE_STATUSES].sort()).toEqual(
+      ["failed", "in_progress", "resolved", "waiting_for_customer"].sort(),
+    );
+    for (const internal of [
+      "new",
+      "triaging",
+      "approved_action_running",
+      "waiting_for_supplier",
+      "waiting_for_approval",
+      "human_takeover",
+    ] as const) {
+      expect(isMerchantSettableStatus(internal)).toBe(false);
+    }
+  });
+
+  it("isMerchantSettableStatus accepts only the curated set", () => {
+    expect(isMerchantSettableStatus("resolved")).toBe(true);
+    expect(isMerchantSettableStatus("in_progress")).toBe(true);
+    expect(isMerchantSettableStatus("not_a_status")).toBe(false);
+  });
+
+  it("an active case can be closed (resolved/failed) or parked on the customer", () => {
+    expect([...allowedManualStatusTargets("in_progress")].sort()).toEqual(
+      ["failed", "resolved", "waiting_for_customer"].sort(),
+    );
+  });
+
+  it("a resolved case can be reopened but never manually marked failed", () => {
+    const targets = allowedManualStatusTargets("resolved");
+    expect(targets).toContain("in_progress");
+    expect(targets).toContain("waiting_for_customer");
+    // §10: resolved never flips to failed.
+    expect(targets).not.toContain("failed");
+    // Never offers the current status as a target.
+    expect(targets).not.toContain("resolved");
+  });
+
+  it("a taken-over case can be handed back or closed-as-failed (not directly resolved)", () => {
+    expect([...allowedManualStatusTargets("human_takeover")].sort()).toEqual(
+      ["failed", "in_progress"].sort(),
+    );
+  });
+
+  it("a failed case can only be reopened to in_progress", () => {
+    expect(allowedManualStatusTargets("failed")).toEqual(["in_progress"]);
+  });
+
+  it("every offered target is a legal transition from its source", () => {
+    for (const from of CASE_STATUSES) {
+      for (const to of allowedManualStatusTargets(from)) {
+        expect(isStatusTransitionAllowed(from, to)).toBe(true);
+        expect(to).not.toBe(from);
+        expect(isMerchantSettableStatus(to)).toBe(true);
+      }
     }
   });
 });

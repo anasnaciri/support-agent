@@ -30,10 +30,13 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const caseTakeover = randomUUID();
   const caseResume = randomUUID();
   const caseRetry = randomUUID();
+  const caseSetStatus = randomUUID();
+  const caseHt = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
   const pTakeover = randomUUID();
+  const pSetStatus = randomUUID();
 
   const cfg = {
     port: 0,
@@ -118,12 +121,15 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseTakeover, tenantId, "waiting_for_approval"),
       mkCase(caseResume, tenantId, "human_takeover"),
       mkCase(caseRetry, tenantId, "human_takeover"),
+      mkCase(caseSetStatus, tenantId, "waiting_for_approval"),
+      mkCase(caseHt, tenantId, "human_takeover"),
     ]);
     await raw.db.insert(approvals).values([
       mkApproval(pApprove, caseApprove, tenantId),
       mkApproval(pReject, caseReject, tenantId),
       mkApproval(pCross, caseApprove, tenantId),
       mkApproval(pTakeover, caseTakeover, tenantId),
+      mkApproval(pSetStatus, caseSetStatus, tenantId),
     ]);
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
@@ -245,6 +251,88 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
             and data->'event'->>'caseId' = ${caseRetry}`,
     );
     expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(1);
+  });
+
+  it("set-status manually resolves a case + cancels its pending approval", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "resolved",
+      reason: "handled offline",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kind: string;
+      toStatus?: string;
+      canceledApprovals?: number;
+    };
+    expect(body.kind).toBe("updated");
+    expect(body.toStatus).toBe("resolved");
+    expect(body.canceledApprovals).toBe(1);
+    expect(await caseStatus(caseSetStatus)).toBe("resolved");
+    expect((await approvalRow(pSetStatus))?.status).toBe("rejected");
+  });
+
+  it("set-status reopens a resolved case to in_progress", async () => {
+    if (!raw) return;
+    // caseSetStatus is resolved from the previous test.
+    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "in_progress",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("updated");
+    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+  });
+
+  it("setting the same status is a no-op (unchanged, no mutation)", async () => {
+    if (!raw) return;
+    // caseSetStatus is in_progress from the previous test.
+    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "in_progress",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("unchanged");
+    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+  });
+
+  it("rejects a status the merchant may not set (invalid_status, 400)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "triaging",
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "invalid_status",
+    );
+    // unchanged — an agent-internal status can't be forced by hand.
+    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+  });
+
+  it("refuses an illegal transition the state machine forbids (409)", async () => {
+    if (!raw) return;
+    // §10: a human_takeover case can't be marked resolved directly.
+    const res = await post(`/dashboard/cases/${caseHt}/status`, {
+      status: "resolved",
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { kind: string; toStatus?: string };
+    expect(body.kind).toBe("transition_not_allowed");
+    expect(await caseStatus(caseHt)).toBe("human_takeover");
+  });
+
+  it("set-status 404s for a case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const otherHeaders = dashboardAuthHeaders(
+      otherOrgId,
+      { "content-type": "application/json" },
+      workosUser,
+    );
+    const r = await post(
+      `/dashboard/cases/${caseSetStatus}/status`,
+      { status: "resolved" },
+      otherHeaders,
+    );
+    expect(r.status).toBe(404);
+    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
   });
 
   it("resume 404s for a case in another tenant (no mutation)", async () => {

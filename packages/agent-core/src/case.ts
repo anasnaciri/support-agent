@@ -70,6 +70,44 @@ export const isStatusTransitionAllowed = (
   return allowed ? allowed.includes(to) : true;
 };
 
+/**
+ * The statuses a human may set BY HAND from the dashboard ("change status
+ * manually"). A curated subset of CASE_STATUSES: the agent-internal lifecycle
+ * states (`new`, `triaging`, `approved_action_running`) and the
+ * machinery-driven parks (`waiting_for_supplier` needs an escalation row;
+ * `waiting_for_approval` needs a pending approval; `human_takeover` has its own
+ * "Take over" action) are deliberately NOT offered — a person doesn't drive
+ * those directly. Picking one of these is still re-checked against
+ * `isStatusTransitionAllowed`, so the manual control never bypasses §10.
+ */
+export const MERCHANT_SETTABLE_STATUSES: ReadonlyArray<CaseStatus> = [
+  "in_progress",
+  "waiting_for_customer",
+  "resolved",
+  "failed",
+];
+
+const MERCHANT_SETTABLE_SET: ReadonlySet<string> = new Set(
+  MERCHANT_SETTABLE_STATUSES,
+);
+
+/** Whether `status` is one a merchant may set by hand (narrows to CaseStatus). */
+export const isMerchantSettableStatus = (status: string): status is CaseStatus =>
+  MERCHANT_SETTABLE_SET.has(status);
+
+/**
+ * The statuses a merchant may manually move a case to FROM `from`: the
+ * merchant-settable statuses that are also a legal transition under the state
+ * machine, excluding `from` itself. The dashboard renders exactly this set as
+ * the "change status" options, so the UI can never offer an illegal move.
+ */
+export const allowedManualStatusTargets = (
+  from: CaseStatus,
+): ReadonlyArray<CaseStatus> =>
+  MERCHANT_SETTABLE_STATUSES.filter(
+    (to) => to !== from && isStatusTransitionAllowed(from, to),
+  );
+
 export type CasePriority = "low" | "normal" | "high" | "urgent";
 
 export type CaseChannel = "email" | "form" | "chat" | "api";

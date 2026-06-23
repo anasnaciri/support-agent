@@ -10,6 +10,11 @@ import {
 } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
 import type { LegalAcceptance } from "@support-agent/services";
+import {
+  isMerchantSettableStatus,
+  isStatusTransitionAllowed,
+  type CaseStatus,
+} from "@support-agent/agent-core";
 import { ensureOwnerRole } from "./member-rbac-store.js";
 
 // Write operations backing the dashboard's HTTP API (Path B). Ported from
@@ -172,6 +177,130 @@ export const resumeCase = async (
     });
 
     return { kind: "resumed", toStatus: RESUME_TO_STATUS };
+  });
+
+export type SetCaseStatusOutcome =
+  | {
+      readonly kind: "updated";
+      readonly fromStatus: string;
+      readonly toStatus: string;
+      readonly canceledApprovals: number;
+    }
+  | { readonly kind: "unchanged"; readonly status: string }
+  | { readonly kind: "invalid_status"; readonly status: string }
+  | {
+      readonly kind: "transition_not_allowed";
+      readonly fromStatus: string;
+      readonly toStatus: string;
+    }
+  | { readonly kind: "case_not_found" };
+
+export interface SetCaseStatusInput {
+  readonly caseId: string;
+  readonly tenantId: string;
+  readonly managerId: string;
+  /** The status the merchant picked. Validated against the settable set + §10. */
+  readonly toStatus: string;
+  /** Free-text reason saved into the transition + audit details. */
+  readonly reason?: string | undefined;
+}
+
+/**
+ * Manually set a case's status from the dashboard ("change status"). The merchant
+ * picks one of the human-settable statuses (`MERCHANT_SETTABLE_STATUSES`) and the
+ * move is re-checked against the state machine (§10) under the same tx that
+ * writes the transition + audit rows — the manual control NEVER bypasses the
+ * guard. Pending approvals are canceled (a manual override is authoritative; a
+ * stale approval-link click must not act on a case the manager just re-routed —
+ * mirrors `takeOverCase`). Same-status is a no-op (`unchanged`); a target the
+ * merchant may not set is `invalid_status`; an illegal transition (e.g.
+ * resolved→failed) is `transition_not_allowed`; cross-tenant ids surface as
+ * `case_not_found` (never disclose existence).
+ */
+export const setCaseStatus = async (
+  db: DrizzleDb,
+  input: SetCaseStatusInput,
+): Promise<SetCaseStatusOutcome> =>
+  db.transaction(async (tx) => {
+    const [caseRow] = await tx
+      .select({ id: cases.id, status: cases.status })
+      .from(cases)
+      .where(
+        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
+      )
+      .limit(1);
+    if (!caseRow) return { kind: "case_not_found" } as SetCaseStatusOutcome;
+
+    if (!isMerchantSettableStatus(input.toStatus)) {
+      return {
+        kind: "invalid_status",
+        status: input.toStatus,
+      } as SetCaseStatusOutcome;
+    }
+    const to: CaseStatus = input.toStatus;
+    const from = caseRow.status as CaseStatus;
+    if (from === to) {
+      return { kind: "unchanged", status: from } as SetCaseStatusOutcome;
+    }
+    if (!isStatusTransitionAllowed(from, to)) {
+      return {
+        kind: "transition_not_allowed",
+        fromStatus: from,
+        toStatus: to,
+      } as SetCaseStatusOutcome;
+    }
+
+    const reason = input.reason ?? "case status changed manually from dashboard";
+
+    await tx
+      .update(cases)
+      .set({
+        status: to,
+        updatedAt: sql`now()`,
+        // Stamp resolvedAt when closing as resolved (mirrors the canonical
+        // transitionStatus); leave it untouched on every other target.
+        ...(to === "resolved" ? { resolvedAt: sql`now()` } : {}),
+      })
+      .where(eq(cases.id, input.caseId));
+
+    await tx.insert(caseStateTransitions).values({
+      caseId: input.caseId as never,
+      fromStatus: from,
+      toStatus: to,
+      reason,
+    });
+
+    await tx.insert(auditLog).values({
+      tenantId: input.tenantId as never,
+      caseId: input.caseId as never,
+      actorType: "user",
+      actorId: input.managerId,
+      action: "case.status_changed",
+      details: { reason, fromStatus: from, toStatus: to },
+    });
+
+    const canceled = await tx
+      .update(approvals)
+      .set({
+        status: "rejected",
+        decidedAt: sql`now()`,
+        decidedBy: input.managerId as never,
+        decisionReason: "case status changed manually",
+      })
+      .where(
+        and(
+          eq(approvals.caseId, input.caseId),
+          eq(approvals.status, "pending"),
+        ),
+      )
+      .returning({ id: approvals.id });
+
+    return {
+      kind: "updated",
+      fromStatus: from,
+      toStatus: to,
+      canceledApprovals: canceled.length,
+    };
   });
 
 /**

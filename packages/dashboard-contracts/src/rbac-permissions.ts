@@ -17,6 +17,7 @@ export type RbacPermissionId =
   | "cases.takeover"
   | "cases.resume"
   | "cases.retry"
+  | "cases.set_status"
   | "approvals.view"
   | "approvals.decide"
   | "refunds.issue"
@@ -95,6 +96,14 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     id: "cases.retry",
     label: "Retry the agent now",
     description: "Resume a case and have the agent re-try immediately.",
+    category: "Cases",
+    implies: ["cases.view"],
+  },
+  {
+    id: "cases.set_status",
+    label: "Change case status",
+    description:
+      "Manually set a case's status — e.g. mark it resolved, reopen it, or park it waiting on the customer.",
     category: "Cases",
     implies: ["cases.view"],
   },

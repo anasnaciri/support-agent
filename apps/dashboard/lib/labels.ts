@@ -59,6 +59,7 @@ const AUDIT_ACTION_LABELS: Readonly<Record<string, string>> = {
   "case.escalated_to_human": "Escalated to you",
   "case.taken_over": "You took over",
   "case.handed_back": "Handed back to agent",
+  "case.status_changed": "Status updated",
   "approval.requested": "Approval requested",
   "approval.decided": "Approval decided",
 };
