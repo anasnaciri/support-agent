@@ -100,6 +100,26 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Fixed the vitest teardown FK bug that polluted the shared dev DB (TDD).**
+  Root-caused above: the global-teardown backstop did a single `DELETE FROM tenants`, which is blocked by
+  any leaked tenant's `cases`/`approvals` rows (`ON DELETE NO ACTION`, by design). Chose the **ordered-delete**
+  fix over schema-cascade, because the NO ACTION FKs are intentional safety and production's `redactShop`
+  already deletes children in dependency order. Build:
+  - **packages/db** (`test-teardown-purge.ts`): new `purgeLeakedTenants(sql, keepTenantIds)` deletes in the
+    same order as `redactShop` — `approvals` → `cases` → `audit_log` → `tenants` (the tenant delete cascades
+    the rest: transitions, message_ids, reply_deliveries, supplier escalations, knowledge docs, overrides,
+    connector_connections, …). `audit_log` has no FK so it's deleted explicitly to avoid orphan leak.
+    `x <> ALL('{}'::uuid[])` keeps the empty-keep-list = delete-all semantics of the original.
+  - **vitest.global-teardown.ts**: now calls `purgeLeakedTenants`; the misleading "cascade carries cases →
+    transitions" comment is corrected.
+  - **TDD**: `packages/db/test/test-teardown-purge.integration.test.ts` seeds a leaked tenant owning
+    case + approval + audit row alongside a "keep" tenant; confirmed **RED** first
+    (`violates foreign key constraint "approvals_tenant_id_tenants_id_fk"` — the exact bug), then GREEN.
+  - **Verified**: `pnpm build` green; full `ci:local` **1933 passing / 5 skipped / 0 failing**; post-run dev DB
+    back to exactly 5 real tenants with 0 orphan cases/approvals (the teardown now self-cleans).
+  - **Not done (deliberately):** did NOT add a `member_role_assignments.role_id` RESTRICT pre-delete — the
+    teardown mirrors `redactShop`, which relies on the tenant-delete cascade for roles/assignments; if a future
+    member-RBAC test leaks a tenant with role rows and RESTRICT blocks the cascade, handle it then.
 - **2026-06-23 — Merchant can manually change a case's status from the dashboard (TDD).**
   New "Update status" dropdown on the case page lets the owner set a case's status by hand — mark it
   resolved, reopen a resolved/failed case, or park it waiting on the customer. **No schema change**
@@ -139,13 +159,14 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   (d) Ran `pnpm ci:local` against the cleaned DB: **1919 passing / 5 skipped / 0 failing** (the 5 skips are
   live-credential smoke tests) — matches the bg agent's pre-pollution run, so the commit's code was always green;
   the earlier "181 failures" were pure DB pollution. DB left at exactly 5 tenants afterward (no leak this run).
-  - **FOLLOW-UP / BUG FOUND (not fixed — TDD a regression test first):** the vitest global teardown
-    (`vitest.global-teardown.ts`) does `DELETE FROM tenants WHERE id NOT IN (before-snapshot)` and its comment
-    claims the FK cascade carries `cases → transitions`. **It doesn't** — `cases.tenant_id` and
+  - **FOLLOW-UP / BUG FOUND → ✅ FIXED 2026-06-23 (see next entry):** the vitest global teardown
+    (`vitest.global-teardown.ts`) did `DELETE FROM tenants WHERE id NOT IN (before-snapshot)` and its comment
+    claimed the FK cascade carried `cases → transitions`. **It didn't** — `cases.tenant_id` and
     `approvals.{case_id,tenant_id}` are `ON DELETE NO ACTION`, not `CASCADE`. So any test tenant that created a
-    case (or approval) blocks its own teardown delete (FK violation, swallowed by the teardown's try/catch) and
-    accumulates. That is the pollution source. Fix options: make those FKs `ON DELETE CASCADE` (schema +
-    migration), or have the teardback delete `approvals`→`cases`→`tenants` in order. See [[stack_decisions]].
+    case (or approval) blocked its own teardown delete (FK violation, swallowed by the teardown's try/catch) and
+    accumulated. That was the pollution source. **Resolved by the ordered-delete option**, NOT the schema-cascade
+    option: the NO ACTION FKs are intentional safety and production's `redactShop` already deletes in dependency
+    order — the teardown now mirrors it. See [[stack_decisions]].
 - **2026-06-23 — Pilot install uses the operator's store-unique install link (TDD, completes A4's original direction).**
   In pilot mode the merchant's Connect no longer always runs our self-built OAuth dance: the operator can paste the
   store-unique install link Shopify generates for a custom-distribution app (Dev Dashboard → custom distribution →

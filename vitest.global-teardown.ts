@@ -1,4 +1,5 @@
 import { makeDbClient } from "./packages/db/src/client.js";
+import { purgeLeakedTenants } from "./packages/db/src/test-teardown-purge.js";
 
 // Safety net so the test database is left exactly as the suite found it.
 //
@@ -8,12 +9,14 @@ import { makeDbClient } from "./packages/db/src/client.js";
 // rows, and a test that crashes before its afterAll runs.
 //
 // How it works: snapshot the tenant ids that exist BEFORE the suite, then after
-// the whole suite delete any tenant that wasn't in that snapshot. Everything the
-// suite writes is tenant-scoped and the FK cascade carries the children
+// the whole suite delete any tenant that wasn't in that snapshot. `cases` and
+// `approvals` are ON DELETE NO ACTION (intentional safety), so a leaked tenant
+// that owns either would block its own `DELETE FROM tenants` — purgeLeakedTenants
+// deletes in dependency order (approvals → cases → audit_log → tenants), the same
+// way redactShop does in production, and the tenant delete cascades the rest
 // (tenant_knowledge_documents, tenant_agent_overrides, cases → transitions,
-// connector_connections, …), so removing the new tenants restores the prior
-// state. Pre-existing rows (real dev data like "Anas's Support Team") are in the
-// snapshot and never touched.
+// connector_connections, …). Pre-existing rows (real dev data like "Anas's
+// Support Team") are in the snapshot and never touched.
 //
 // Limitation: non-tenant-scoped tables (admin_audit_log, pg-boss job tables) are
 // not covered. The current suite doesn't leak into those; revisit if that
@@ -35,11 +38,7 @@ export async function setup() {
   return async () => {
     const { sql, close } = makeDbClient({ databaseUrl, maxConnections: 1 });
     try {
-      const deleted = await sql<{ id: string }[]>`
-        DELETE FROM tenants
-        WHERE id <> ALL(${before}::uuid[])
-        RETURNING id
-      `;
+      const deleted = await purgeLeakedTenants(sql, before);
       if (deleted.length > 0) {
         // eslint-disable-next-line no-console
         console.warn(
