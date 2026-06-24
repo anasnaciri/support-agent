@@ -82,3 +82,30 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   knowledgeSearch as AnyTool,
   merchantNotify as AnyTool,
 ];
+
+/**
+ * Tools a merchant CANNOT assign to a custom agent — they are runtime/control
+ * plumbing, not capabilities a merchant picks:
+ *   - `agent.handoff` is implicit (the runtime grants it when the agent has
+ *     handoff targets), never chosen directly.
+ *   - `case.update_context` / `case.update_status` are case-bookkeeping the
+ *     triage flow + runtime own; a custom specialist records nothing through
+ *     them in v1.
+ * Everything else (read tools, customer messaging, refunds) is assignable and
+ * gated at runtime by the PermissionService (approval defaults + connector
+ * scopes), so "all tools, gated" holds without special-casing money tools.
+ */
+export const INTERNAL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "agent.handoff",
+  "case.update_context",
+  "case.update_status",
+]);
+
+/** Tools a merchant may assign to a custom agent (ALL_TOOLS minus internal). */
+export const ASSIGNABLE_TOOLS: ReadonlyArray<AnyTool> = ALL_TOOLS.filter(
+  (t) => !INTERNAL_TOOL_NAMES.has(t.name),
+);
+
+export const ASSIGNABLE_TOOL_NAMES: ReadonlySet<string> = new Set(
+  ASSIGNABLE_TOOLS.map((t) => t.name),
+);
