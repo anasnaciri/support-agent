@@ -12,6 +12,7 @@ export * from "./refund-review-agent.js";
 export * from "./missing-package-agent.js";
 export * from "./damaged-product-agent.js";
 export * from "./general-inquiry-agent.js";
+export * from "./custom-agent-scaffold.js";
 
 /**
  * Canonical list of every agent the platform ships with. Every consumer
