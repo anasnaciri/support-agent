@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   DEFAULT_RETENTION_DAYS,
+  CustomAgentService,
   defaultRefundPolicy,
   legalAcceptanceIsCurrent,
   TenantAgentOverridesService,
@@ -42,16 +43,34 @@ import {
 import { sendJson, parseJsonBody } from "../../platform/http.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 
-// GET /dashboard/catalog — static agent + tool inventory (settings pages).
+// GET /dashboard/catalog — built-in + custom agent inventory + the tool
+// catalog (settings pages). Workspace-scoped (NOT org-scoped) because custom
+// agents are per-workspace; the merchant's custom agents are unioned with the
+// built-ins. A custom-store read failure degrades to built-ins only.
 export const handleDashboardCatalog = async (
   cfg: ApiConfig,
-  _layer: ApiLayer,
+  layer: ApiLayer,
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = await authenticateDashboardOrg(cfg, req);
+  const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  return sendJson(res, 200, buildCatalogResponse(ALL_AGENTS, ALL_TOOLS));
+  const customs = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* CustomAgentService;
+        return yield* svc
+          .listForTenant(TenantId(auth.tenantId))
+          .pipe(Effect.catchAll(() => Effect.succeed([])));
+      }),
+      layer,
+    ),
+  );
+  return sendJson(
+    res,
+    200,
+    buildCatalogResponse(ALL_AGENTS, ALL_TOOLS, customs),
+  );
 };
 
 // GET /dashboard/models — the tenant's LLM model catalog. The decrypted key

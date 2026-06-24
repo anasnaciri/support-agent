@@ -11,6 +11,7 @@ import {
   KnowledgeBaseService,
   LLMService,
   parseKeySet,
+  CustomAgentService,
   ShopifyAppProvisioningStore,
   ShopifyService,
   TenantAgentOverridesService,
@@ -24,6 +25,7 @@ import {
   AuditLogServiceLive,
   CaseRepositoryLive,
   ConnectorCredentialStoreLive,
+  CustomAgentServiceLive,
   DbClient,
   DbClientLive,
   KnowledgeBaseServiceLive,
@@ -538,6 +540,9 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const agentOverridesSvc = TenantAgentOverridesServiceLive.pipe(
     Layer.provide(dbLayer),
   );
+  // Custom (merchant-authored) agents back the dashboard's create/edit/delete
+  // endpoints + the workspace-scoped catalog. DB-backed.
+  const customAgentsSvc = CustomAgentServiceLive.pipe(Layer.provide(dbLayer));
   // Knowledge base: CRUD for the settings/knowledge endpoints. UrlFetchService
   // (SSRF-guarded) backs the "add from URL" / resync paths; it has no deps.
   const knowledge = KnowledgeBaseServiceLive.pipe(Layer.provide(dbLayer));
@@ -557,6 +562,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     shopify,
     tenantRepo,
     agentOverridesSvc,
+    customAgentsSvc,
     knowledge,
     urlFetch,
   );
@@ -577,6 +583,7 @@ export type ApiLayer = Layer.Layer<
   | ShopifyService
   | TenantRepository
   | TenantAgentOverridesService
+  | CustomAgentService
   | KnowledgeBaseService
   | UrlFetchService,
   never,

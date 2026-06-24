@@ -4,6 +4,8 @@ import type {
   CatalogResponse,
   ToolDto,
 } from "@support-agent/dashboard-contracts";
+import { customRecordToAgentConfig } from "@support-agent/agents";
+import type { CustomAgentRecord } from "@support-agent/services";
 
 // Project the in-code agent/tool registry to plain JSON DTOs for the dashboard
 // (Path B). The dashboard renders its settings pages from this snapshot — it
@@ -28,6 +30,18 @@ export const toAgentDto = (a: AgentConfig): AgentDto => ({
   handoffs: a.handoffs,
   maxTurnsPerTick: a.maxTurnsPerTick,
   ...(a.temperature !== undefined ? { temperature: a.temperature } : {}),
+  isCustom: false,
+});
+
+// A merchant-authored agent projected for the catalog. Goes through the same
+// `customRecordToAgentConfig` projection the runtime uses (scaffold-composed
+// prompt, pinned mode/provider, implicit agent.handoff) and then carries the
+// custom-only fields (isCustom, whenToUse, callableFrom).
+export const customRecordToAgentDto = (r: CustomAgentRecord): AgentDto => ({
+  ...toAgentDto(customRecordToAgentConfig(r)),
+  isCustom: true,
+  whenToUse: r.whenToUse,
+  callableFrom: r.callableFrom,
 });
 
 export const toToolDto = (t: AnyTool): ToolDto => ({
@@ -51,7 +65,8 @@ export const toToolDto = (t: AnyTool): ToolDto => ({
 export const buildCatalogResponse = (
   agents: ReadonlyArray<AgentConfig>,
   tools: ReadonlyArray<AnyTool>,
+  customs: ReadonlyArray<CustomAgentRecord> = [],
 ): CatalogResponse => ({
-  agents: agents.map(toAgentDto),
+  agents: [...agents.map(toAgentDto), ...customs.map(customRecordToAgentDto)],
   tools: tools.map(toToolDto),
 });

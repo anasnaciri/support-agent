@@ -469,12 +469,81 @@ export interface AgentDto {
   readonly handoffs: ReadonlyArray<string>;
   readonly maxTurnsPerTick: number;
   readonly temperature?: number;
+  // True for merchant-authored custom agents; false for built-ins. The list
+  // page badges + routes custom rows to the editable form.
+  readonly isCustom: boolean;
+  // Custom-agent inbound routing (Phase C): the one-liner the handoff roster
+  // shows, and the agent ids this agent opts to be callable from.
+  readonly whenToUse?: string | null;
+  readonly callableFrom?: ReadonlyArray<string>;
 }
 
 export interface CatalogResponse {
   readonly agents: ReadonlyArray<AgentDto>;
   readonly tools: ReadonlyArray<ToolDto>;
 }
+
+// ============================================================
+// Custom (merchant-authored) agents — /dashboard/custom-agents
+// ============================================================
+
+export type CustomAgentStatus = "draft" | "active" | "disabled";
+
+// The editable shape returned by GET /dashboard/custom-agents/:id. Carries the
+// RAW `instructions` (not the scaffold-composed prompt) so the edit form can
+// prefill exactly what the merchant typed. Dates are ISO strings (Worker-safe).
+export interface CustomAgentView {
+  readonly agentId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly model: string;
+  readonly tools: ReadonlyArray<string>;
+  readonly handoffs: ReadonlyArray<string>;
+  readonly callableFrom: ReadonlyArray<string>;
+  readonly permissionOverrides: Readonly<Record<string, Permission>>;
+  readonly whenToUse: string | null;
+  readonly maxTurnsPerTick: number;
+  readonly status: CustomAgentStatus;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+// The body the dashboard POSTs/PUTs to create or update a custom agent. The
+// server assigns the id (create) and validates tools/handoffs/scopes.
+export interface CustomAgentWriteBody {
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly model: string;
+  readonly tools: ReadonlyArray<string>;
+  readonly handoffs: ReadonlyArray<string>;
+  readonly callableFrom: ReadonlyArray<string>;
+  readonly permissionOverrides: Readonly<Record<string, Permission>>;
+  readonly whenToUse: string | null;
+  readonly maxTurnsPerTick: number;
+  readonly status: CustomAgentStatus;
+}
+
+// Stable validation/error codes the api returns (HTTP 4xx) and the dashboard
+// maps to friendly copy. Unknown codes fall back to a generic message.
+export type CustomAgentErrorCode =
+  | "name_required"
+  | "name_too_long"
+  | "description_required"
+  | "description_too_long"
+  | "instructions_required"
+  | "instructions_too_long"
+  | "model_required"
+  | "invalid_tool"
+  | "invalid_handoff"
+  | "self_handoff"
+  | "invalid_callable_from"
+  | "missing_connector_scope"
+  | "invalid_permission"
+  | "invalid_status"
+  | "duplicate_name"
+  | "not_found";
 
 // ============================================================
 // Model catalog (settings/agents picker) — GET /dashboard/models
