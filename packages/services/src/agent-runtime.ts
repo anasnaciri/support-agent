@@ -91,6 +91,8 @@ import {
   shouldForceReplyApproval,
   riskFor,
   applyOverride,
+  specialistsCallableFrom,
+  effectiveHandoffIds,
 } from "./agent-runtime-helpers.js";
 
 // ============================================================
@@ -1036,6 +1038,13 @@ const AgentRuntimeLayer = Layer.effect(
                   ),
                 )
             : [];
+          // The tenant's active custom agents that opted to be callable from
+          // some agent (Phase C inbound routing). Loaded once per tick; used to
+          // extend the running agent's effective handoffs + to inject the prompt
+          // roster. Never fails (resolver swallows DB errors → []).
+          const allSpecialists = yield* resolver.customSpecialists(
+            working.tenantId,
+          );
           // Resolve the case's current agent (built-in or custom). A miss means
           // the agent was deleted/disabled (or the id is otherwise unknown):
           // park the case for a human rather than letting an UnknownAgent crash
@@ -1271,9 +1280,10 @@ const AgentRuntimeLayer = Layer.effect(
                     : null;
                 const reason =
                   raw && typeof raw.reason === "string" ? raw.reason : "";
-                const allowed =
-                  target !== null &&
-                  agent.handoffs.some((h) => (h as string) === target);
+                // Effective handoffs = the agent's static targets ∪ custom
+                // specialists that opted to be callable from it (Phase C).
+                const effective = effectiveHandoffIds(agent, allSpecialists);
+                const allowed = target !== null && effective.has(target);
 
                 if (!allowed) {
                   yield* tx.run(
@@ -1299,7 +1309,7 @@ const AgentRuntimeLayer = Layer.effect(
                     content: {
                       error: "target_not_in_handoffs",
                       target,
-                      allowed: agent.handoffs,
+                      allowed: [...effective],
                     },
                   });
                   return { agent, current, done: null };
@@ -1737,7 +1747,12 @@ const AgentRuntimeLayer = Layer.effect(
               .runToolCalling({
                 tenantId: current.tenantId,
                 model: agent.model,
-                system: buildSystemPrompt(agent, tenantSettings, knowledgeTitles),
+                system: buildSystemPrompt(
+                  agent,
+                  tenantSettings,
+                  knowledgeTitles,
+                  specialistsCallableFrom(allSpecialists, agent.id as string),
+                ),
                 messages,
                 tools: schemas,
                 ...(agent.temperature !== undefined
@@ -1836,11 +1851,11 @@ const AgentRuntimeLayer = Layer.effect(
 
             if (decision.type === "handoff") {
               // Same allowlist as the `agent.handoff` pseudo-tool below
-              // (audit L13): a decision-level handoff to an agent outside
-              // `agent.handoffs` is blocked, audited, and the loop continues
-              // with the current agent.
-              const allowed = agent.handoffs.some(
-                (h) => (h as string) === (decision.targetAgent as string),
+              // (audit L13): a decision-level handoff to an agent outside the
+              // effective handoffs (static ∪ Phase-C custom inbound) is blocked,
+              // audited, and the loop continues with the current agent.
+              const allowed = effectiveHandoffIds(agent, allSpecialists).has(
+                decision.targetAgent as string,
               );
               if (!allowed) {
                 yield* tx.run(

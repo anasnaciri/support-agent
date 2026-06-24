@@ -224,6 +224,36 @@ export const AgentForm = ({
 
         <Card>
           <CardHeader className="pb-3">
+            <CardTitle className="text-base">Routing</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Field
+              label="Reachable from"
+              hint="Agents that can hand a case to this one. Usually Support Triage — the agent that sorts new messages."
+            >
+              <MultiSelect
+                name="callableFrom"
+                values={agent?.callableFrom ?? []}
+                options={handoffOptions}
+                placeholder="Not reachable by handoff yet"
+              />
+            </Field>
+            <Field
+              label="When to use"
+              hint="A one-line hint the routing agent sees so it knows when to pick this specialist."
+            >
+              <Input
+                name="whenToUse"
+                defaultValue={agent?.whenToUse ?? ""}
+                maxLength={200}
+                placeholder="e.g. When the customer wants to return or exchange an item."
+              />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">Advanced</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">

@@ -58,6 +58,20 @@ export const AgentResolverLive = Layer.effect(
             .pipe(Effect.catchAll(() => Effect.succeed(null)));
           return custom ? customRecordToAgentConfig(custom) : null;
         }),
+
+      customSpecialists: (tenantId) =>
+        customAgents.listForTenant(tenantId).pipe(
+          Effect.catchAll(() => Effect.succeed([])),
+          Effect.map((records) =>
+            records.map((r) => ({
+              id: r.agentId,
+              name: r.name,
+              description: r.description,
+              whenToUse: r.whenToUse,
+              callableFrom: r.callableFrom,
+            })),
+          ),
+        ),
     });
   }),
 );

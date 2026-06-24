@@ -314,4 +314,113 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.actions).toContain("case.escalated_to_human");
   });
+
+  // ---- Phase C: inbound routing via callableFrom (NOT static handoffs) ----
+  const router: AgentConfig = {
+    id: AgentId("router-agent"),
+    name: "Router",
+    description: "Routes inbound tickets.",
+    mode: "primary",
+    provider: "openrouter",
+    model: "google/gemini-3.5-flash",
+    promptTemplate: "Route the ticket to the right specialist.",
+    tools: ["agent.handoff"],
+    permissionOverrides: {},
+    handoffs: [], // NO static targets — reachability comes from callableFrom
+    maxTurnsPerTick: 4,
+    temperature: 0,
+  };
+  const inboundSpecialist: AgentConfig = {
+    ...customReturns,
+    tools: ["case.update_context"],
+    permissionOverrides: {},
+  };
+
+  const runRouter = async (callableFrom: ReadonlyArray<string>) => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "h0",
+        tool: "agent.handoff",
+        input: { targetAgent: "custom:returns", reason: "returns" },
+      },
+      {
+        type: "tool_call",
+        callId: "u0",
+        tool: "case.update_context",
+        input: { notes: "handled by inbound custom specialist" },
+      },
+      { type: "final_message", text: "done" },
+    ];
+    const env = baseEnv(
+      AgentResolverTest([router], [
+        {
+          tenantId: TENANT,
+          config: inboundSpecialist,
+          callableFrom,
+          whenToUse: "Use for returns.",
+        },
+      ]),
+      LLMServiceScripted(script),
+    );
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TENANT,
+            channel: "email",
+            currentAgentId: router.id,
+            subject: "Return",
+            threadId: "thread-c" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-c" as never,
+              messageId: "msg-c",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Return",
+              bodyText: "Return please.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        withRuntime(env),
+      ),
+    );
+  };
+
+  it("allows a handoff to a custom agent that opted in via callableFrom", async () => {
+    const out = await runRouter(["router-agent"]);
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.currentAgentId).toBe(AgentId("custom:returns"));
+    expect(out.fetched.context["notes"]).toBe(
+      "handled by inbound custom specialist",
+    );
+  });
+
+  it("blocks a handoff to a custom agent that did NOT opt in", async () => {
+    const out = await runRouter([]);
+    // Handoff rejected → case stays on the router; the block is audited.
+    expect(out.fetched.currentAgentId).toBe(AgentId("router-agent"));
+    const handoffErrors = out.entries.filter(
+      (e) =>
+        e.action === "tool.invoked" &&
+        (e.details as { error?: string } | null)?.error ===
+          "target_not_in_handoffs",
+    );
+    expect(handoffErrors.length).toBe(1);
+  });
 });

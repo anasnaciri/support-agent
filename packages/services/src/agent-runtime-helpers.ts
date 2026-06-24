@@ -104,10 +104,66 @@ export const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
  * Pure helper — exported so a tiny unit test can pin the formatting
  * without spinning up the full runtime.
  */
+/** One merchant-defined specialist the current agent may hand off to. */
+export interface HandoffSpecialist {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly whenToUse: string | null;
+}
+
+/**
+ * The custom specialists (loaded once per tick) that opted to be callable from
+ * `agentId`. Pure — drives both the prompt roster and the handoff allowlist so
+ * the two never disagree.
+ */
+export const specialistsCallableFrom = (
+  all: ReadonlyArray<{
+    readonly id: AgentConfig["id"];
+    readonly name: string;
+    readonly description: string;
+    readonly whenToUse: string | null;
+    readonly callableFrom: ReadonlyArray<AgentConfig["id"]>;
+  }>,
+  agentId: string,
+): ReadonlyArray<HandoffSpecialist> =>
+  all
+    .filter((s) =>
+      s.callableFrom.some((c) => (c as string) === agentId),
+    )
+    .map((s) => ({
+      id: s.id as string,
+      name: s.name,
+      description: s.description,
+      whenToUse: s.whenToUse,
+    }));
+
+/**
+ * The agent's effective handoff target ids: its static `handoffs` ∪ the custom
+ * specialists that opted to be callable from it. The runtime validates a
+ * handoff against this set so a merchant-defined inbound route is allowed.
+ */
+export const effectiveHandoffIds = (
+  agent: Pick<AgentConfig, "id" | "handoffs">,
+  all: ReadonlyArray<{
+    readonly id: AgentConfig["id"];
+    readonly callableFrom: ReadonlyArray<AgentConfig["id"]>;
+  }>,
+): ReadonlySet<string> => {
+  const ids = new Set<string>(agent.handoffs.map((h) => h as string));
+  for (const s of all) {
+    if (s.callableFrom.some((c) => (c as string) === (agent.id as string))) {
+      ids.add(s.id as string);
+    }
+  }
+  return ids;
+};
+
 export const buildSystemPrompt = (
   agent: Pick<AgentConfig, "tools" | "promptTemplate">,
   tenantSettings: TenantSettings | null,
   knowledgeTitles: ReadonlyArray<string> = [],
+  specialists: ReadonlyArray<HandoffSpecialist> = [],
 ): string => {
   const headers: string[] = [];
 
@@ -132,6 +188,25 @@ export const buildSystemPrompt = (
     const titles = knowledgeTitles.map((t) => `"${t}"`).join(", ");
     headers.push(
       `[Store knowledge base — call knowledge.search to read: ${titles}]`,
+    );
+  }
+
+  // Merchant-defined specialists that opted to be callable from THIS agent
+  // (Phase C inbound routing). Listed as a trusted bracketed header — same
+  // out-of-fence discipline as the supplier/knowledge headers — so the model
+  // knows the custom targets exist (the runtime separately allows them). The
+  // built-in routing prose is untouched; this is purely additive.
+  if (specialists.length > 0) {
+    const lines = specialists.map(
+      (s) =>
+        `- ${s.id} — "${s.name}": ${s.whenToUse?.trim() || s.description}`,
+    );
+    headers.push(
+      [
+        "[Additional specialists you can hand off to with agent.handoff (set targetAgent to the id):",
+        ...lines,
+        "]",
+      ].join("\n"),
     );
   }
 

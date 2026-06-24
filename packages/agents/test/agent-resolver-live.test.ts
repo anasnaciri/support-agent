@@ -126,6 +126,31 @@ describe("AgentResolverLive", () => {
     expect(cfg).toBeNull();
   });
 
+  it("customSpecialists maps active custom agents incl. callableFrom", async () => {
+    const layer = CustomAgentServiceTest([
+      {
+        tenantId: tenantA,
+        record: record({
+          callableFrom: [AgentId("support-triage")],
+          whenToUse: "Use for returns.",
+        }),
+      },
+    ]);
+    const specialists = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const r = yield* AgentResolver;
+          return yield* r.customSpecialists(tenantA);
+        }),
+        liveLayer(layer),
+      ),
+    );
+    expect(specialists).toHaveLength(1);
+    expect(specialists[0]!.id).toBe(AgentId("custom:x"));
+    expect(specialists[0]!.whenToUse).toBe("Use for returns.");
+    expect(specialists[0]!.callableFrom).toEqual([AgentId("support-triage")]);
+  });
+
   it("fail-safe: a custom-store DB error resolves to null, not a failure", async () => {
     const failing = Layer.succeed(
       CustomAgentService,

@@ -9,7 +9,9 @@ import {
   applyOverride,
   buildSystemPrompt,
   defaultRefundPolicy,
+  effectiveHandoffIds,
   inboundReplyCandidateIds,
+  specialistsCallableFrom,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
   toolFailureAuditDetail,
@@ -181,6 +183,101 @@ describe("buildSystemPrompt", () => {
     expect(got).toContain(
       '[Store knowledge base — call knowledge.search to read: "Shipping policy"]',
     );
+  });
+
+  it("omits the specialists roster when none are callable", () => {
+    const agent = baseAgent({ tools: ["conversation.reply"] });
+    expect(buildSystemPrompt(agent, null, [], [])).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+  });
+
+  it("appends the specialists roster (trusted, outside the untrusted fence)", () => {
+    const agent = baseAgent({ tools: ["agent.handoff"] });
+    const got = buildSystemPrompt(agent, null, [], [
+      {
+        id: "custom:abc",
+        name: "Returns Concierge",
+        description: "Handles returns.",
+        whenToUse: "When the customer wants a return.",
+      },
+    ]);
+    expect(got).toContain("Additional specialists you can hand off to");
+    expect(got).toContain("custom:abc");
+    expect(got).toContain('"Returns Concierge"');
+    expect(got).toContain("When the customer wants a return.");
+    // The roster sits in the trusted prompt body, not inside an untrusted fence.
+    expect(got.indexOf("custom:abc")).toBeGreaterThan(
+      got.indexOf(UNTRUSTED_PREAMBLE),
+    );
+  });
+
+  it("falls back to the description when whenToUse is null", () => {
+    const agent = baseAgent({ tools: ["agent.handoff"] });
+    const got = buildSystemPrompt(agent, null, [], [
+      {
+        id: "custom:abc",
+        name: "Returns",
+        description: "Handles returns.",
+        whenToUse: null,
+      },
+    ]);
+    expect(got).toContain("Handles returns.");
+  });
+});
+
+describe("specialistsCallableFrom", () => {
+  const all = [
+    {
+      id: AgentId("custom:a"),
+      name: "A",
+      description: "da",
+      whenToUse: null,
+      callableFrom: [AgentId("support-triage")],
+    },
+    {
+      id: AgentId("custom:b"),
+      name: "B",
+      description: "db",
+      whenToUse: "use b",
+      callableFrom: [AgentId("order-status-agent")],
+    },
+  ];
+
+  it("returns only the specialists callable from the given agent", () => {
+    const got = specialistsCallableFrom(all, "support-triage");
+    expect(got.map((s) => s.id)).toEqual(["custom:a"]);
+  });
+
+  it("returns an empty list when none opted in", () => {
+    expect(specialistsCallableFrom(all, "refund-review-agent")).toEqual([]);
+  });
+});
+
+describe("effectiveHandoffIds", () => {
+  const specialists = [
+    {
+      id: AgentId("custom:a"),
+      callableFrom: [AgentId("support-triage")],
+    },
+    {
+      id: AgentId("custom:b"),
+      callableFrom: [AgentId("order-status-agent")],
+    },
+  ];
+
+  it("unions static handoffs with custom inbound opt-ins", () => {
+    const agent = {
+      id: AgentId("support-triage"),
+      handoffs: [AgentId("order-status-agent")],
+    };
+    const got = effectiveHandoffIds(agent, specialists);
+    expect([...got].sort()).toEqual(["custom:a", "order-status-agent"]);
+  });
+
+  it("omits custom agents that didn't opt into this caller", () => {
+    const agent = { id: AgentId("refund-review-agent"), handoffs: [] };
+    expect([...effectiveHandoffIds(agent, specialists)]).toEqual([]);
   });
 });
 
