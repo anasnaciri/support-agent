@@ -252,6 +252,9 @@ importers:
       '@support-agent/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@support-agent/services':
+        specifier: workspace:*
+        version: link:../services
       effect:
         specifier: ^3.10.0
         version: 3.21.2

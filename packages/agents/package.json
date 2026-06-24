@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@support-agent/agent-core": "workspace:*",
+    "@support-agent/services": "workspace:*",
     "effect": "^3.10.0"
   }
 }

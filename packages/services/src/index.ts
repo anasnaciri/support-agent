@@ -15,6 +15,7 @@ export * from "./llm-config.js";
 export * from "./llm-credential-resolver.js";
 export * from "./tenant-agent-overrides.js";
 export * from "./custom-agent-service.js";
+export * from "./agent-resolver.js";
 export * from "./knowledge-base.js";
 export * from "./knowledge-search.js";
 export * from "./url-fetch.js";
