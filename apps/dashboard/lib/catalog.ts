@@ -119,6 +119,28 @@ const humanizeToolName = (name: string): string => {
   return base.charAt(0).toUpperCase() + base.slice(1);
 };
 
+// Mirrors INTERNAL_TOOL_NAMES in @support-agent/tools (which the Worker bundle
+// can't import). The api's validateCustomAgentInput is the real gate — this
+// only shapes the custom-agent picker, so a drift here is cosmetic, not a hole.
+const INTERNAL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "agent.handoff",
+  "case.update_context",
+  "case.update_status",
+]);
+
+/** Tools a merchant may assign to a custom agent (catalog minus internal). */
+export const assignableTools = (
+  catalog: CatalogResponse,
+): ReadonlyArray<ToolDto> =>
+  catalog.tools.filter((t) => !INTERNAL_TOOL_NAMES.has(t.name));
+
+/** A merchant-facing label for a tool: its displayName, else a humanized name. */
+export const toolDisplayLabel = (tool: ToolDto): string =>
+  tool.displayName ?? humanizeToolName(tool.name);
+
+/** A gated tool needs an approval choice; read-only tools are always automatic. */
+export const isGatedTool = (tool: ToolDto): boolean => tool.risk !== "read";
+
 /**
  * One friendly capability per catalog tool that declares
  * `requiredConnectorScopes` for the named provider. Sorted by label so the list

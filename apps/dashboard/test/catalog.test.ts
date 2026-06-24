@@ -67,6 +67,7 @@ const agent = (over: Partial<AgentDto> = {}): AgentDto => ({
   permissionOverrides: {},
   handoffs: [],
   maxTurnsPerTick: 7,
+  isCustom: false,
   ...over,
 });
 

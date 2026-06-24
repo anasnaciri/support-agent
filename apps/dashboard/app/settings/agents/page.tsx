@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { Plus } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { requirePermission } from "@/lib/require-permission";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
@@ -28,12 +30,20 @@ export default async function AgentsListPage() {
   return (
     <div className="space-y-6">
       <SettingsBreadcrumb current="Agents" />
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {agents.length} support agent{agents.length === 1 ? "" : "s"} working
-          your cases.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {agents.length} support agent{agents.length === 1 ? "" : "s"} working
+            your cases.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/settings/agents/new">
+            <Plus className="size-4" aria-hidden />
+            New agent
+          </Link>
+        </Button>
       </div>
 
       <Card>
@@ -53,12 +63,17 @@ export default async function AgentsListPage() {
               return (
                 <TableRow key={a.id}>
                   <TableCell>
-                    <Link
-                      href={`/settings/agents/${a.id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {a.name}
-                    </Link>
+                    <span className="inline-flex items-center gap-2">
+                      <Link
+                        href={`/settings/agents/${a.id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {a.name}
+                      </Link>
+                      {a.isCustom ? (
+                        <Badge variant="secondary">custom</Badge>
+                      ) : null}
+                    </span>
                     <div className="mt-0.5 font-mono text-xs text-muted-foreground">
                       {a.id}
                     </div>

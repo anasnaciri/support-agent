@@ -50,6 +50,31 @@ export const toolActionLabel = (tool: string): string => {
   return humanizeSlug(dot === -1 ? tool : tool.slice(dot + 1));
 };
 
+// Friendly copy for the custom-agent save error codes the api returns. The
+// `detail` (a tool name / provider:scope) is appended by the caller when set.
+const CUSTOM_AGENT_ERROR_LABELS: Readonly<Record<string, string>> = {
+  name_required: "Give your agent a name.",
+  name_too_long: "That name is too long.",
+  description_required: "Add a short description.",
+  description_too_long: "That description is too long.",
+  instructions_required: "Add instructions for your agent.",
+  instructions_too_long: "Those instructions are too long.",
+  model_required: "Pick a model.",
+  invalid_tool: "One of the selected actions can't be assigned.",
+  invalid_handoff: "One of the handoff targets isn't a valid agent.",
+  self_handoff: "An agent can't hand off to itself.",
+  invalid_callable_from: "One of the routing sources isn't a valid agent.",
+  missing_connector_scope:
+    "An action needs a connection you haven't set up yet.",
+  invalid_permission: "An approval setting is invalid.",
+  invalid_status: "That status isn't allowed.",
+  duplicate_name: "You already have an agent with that name.",
+  not_found: "That agent no longer exists.",
+};
+
+export const customAgentErrorLabel = (code: string): string =>
+  CUSTOM_AGENT_ERROR_LABELS[code] ?? "Couldn't save the agent. Check the fields and try again.";
+
 const AUDIT_ACTION_LABELS: Readonly<Record<string, string>> = {
   "event.received": "Message received",
   "tool.invoked": "Action taken",

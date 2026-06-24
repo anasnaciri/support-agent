@@ -8,7 +8,9 @@ import {
   findAgent,
   tenantConfigurableActions,
   currentToolPermission,
+  assignableTools,
 } from "@/lib/catalog";
+import { AgentForm } from "../_components/agent-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,6 +79,46 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
   if (!agent) notFound();
 
   const sp = (await searchParams) ?? {};
+
+  // Custom (merchant-authored) agents render the editable form, not the
+  // read-only built-in cards. GET-by-id returns the raw instructions to prefill.
+  if (agent.isCustom) {
+    const view = await api.getCustomAgent(ctx, id);
+    if (!view) notFound();
+    const err = Array.isArray(sp["error"]) ? sp["error"][0] : sp["error"];
+    const saved = sp["saved"] === "1" || sp["created"] === "1";
+    const handoffOptions = catalogResp.agents
+      .filter((a) => a.id !== id)
+      .map((a) => ({ label: a.name, value: a.id }));
+    return (
+      <div className="space-y-6">
+        <SettingsBreadcrumb
+          items={[{ href: "/settings/agents", label: "Agents" }]}
+          current={view.name}
+        />
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{view.name}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Custom agent</p>
+        </div>
+        {saved ? (
+          <Alert variant="success">
+            <AlertDescription>Agent saved.</AlertDescription>
+          </Alert>
+        ) : null}
+        <AgentForm
+          mode="edit"
+          agent={view}
+          assignable={assignableTools(catalogResp)}
+          handoffOptions={handoffOptions}
+          models={models.entries}
+          defaultModel={view.model || "google/gemini-3.5-flash"}
+          providerConnected={models.connected}
+          error={err ?? null}
+        />
+      </div>
+    );
+  }
+
   const modelBanner = Array.isArray(sp["model"]) ? sp["model"][0] : sp["model"];
   const promptBanner = Array.isArray(sp["prompt"])
     ? sp["prompt"][0]
