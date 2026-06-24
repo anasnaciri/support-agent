@@ -3,7 +3,7 @@ import {
   AgentRegistryWith,
   ToolRegistryWith,
 } from "@support-agent/agent-core";
-import { ALL_AGENTS } from "@support-agent/agents";
+import { ALL_AGENTS, AgentResolverLive } from "@support-agent/agents";
 import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntimeDefault,
@@ -45,6 +45,7 @@ import {
   AuditLogServiceLiveRedacted,
   CaseRepositoryLive,
   ConnectorCredentialStoreLive,
+  CustomAgentServiceLive,
   DbClient,
   DbClientLive,
   SupplierEscalationServiceLive,
@@ -607,8 +608,22 @@ export const buildWorker = async (
   // from `ALL_AGENTS` / `ALL_TOOLS`: single source of truth, shared
   // with the dashboard's settings catalog. New agent? Add it to
   // `packages/agents/src/index.ts:ALL_AGENTS` exactly once.
+  // Tenant-aware agent resolution: AgentResolverLive consumes the in-memory
+  // built-in registry plus the DbClient-backed custom-agent store, so the
+  // runtime resolves built-ins first and the tenant's custom agents second.
+  // The built-in AgentRegistry is no longer exposed at the top level — only
+  // the resolver consumes it. CustomAgentServiceLive needs DbClient, which the
+  // envWithDb provide below satisfies.
+  const agentResolver = AgentResolverLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.orDie(AgentRegistryWith(ALL_AGENTS)),
+        CustomAgentServiceLive,
+      ),
+    ),
+  );
   const registry = Layer.mergeAll(
-    Layer.orDie(AgentRegistryWith(ALL_AGENTS)),
+    agentResolver,
     Layer.orDie(ToolRegistryWith(ALL_TOOLS)),
     permissions,
   );

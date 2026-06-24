@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
-  AgentRegistryWith,
   PermissionServiceDefault,
   TenantId,
   ToolRegistryWith,
@@ -25,6 +24,7 @@ import {
   ShopifyServiceTest,
   TenantAgentOverridesServiceTest,
   TransactionRunnerPassthrough,
+  AgentResolverTest,
 } from "@support-agent/services";
 import {
   ApprovalServiceLive,
@@ -62,7 +62,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
   );
   const env = Layer.mergeAll(
     repos,
-    AgentRegistryWith([terminalSupportTriage]),
+    AgentResolverTest([terminalSupportTriage]),
     ToolRegistryWith([
       caseUpdateContext as never,
       caseUpdateStatus as never,

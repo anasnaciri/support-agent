@@ -2,7 +2,6 @@ import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  AgentRegistryWith,
   ContextTooLarge,
   PermissionServiceDefault,
   ProviderUnavailable,
@@ -39,6 +38,7 @@ import {
   ToolExecutionStore,
   ToolExecutionStoreTest,
   TransactionRunnerPassthrough,
+  AgentResolverTest,
 } from "@support-agent/services";
 
 // ------------------------------------------------------------
@@ -126,7 +126,7 @@ const buildLayer = (
     CaseRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
-    AgentRegistryWith(agents as never),
+    AgentResolverTest(agents as never),
     ToolRegistryWith(toolList as never),
     PermissionServiceDefault,
     llm as never,

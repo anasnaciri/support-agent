@@ -2,7 +2,6 @@ import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  AgentRegistryWith,
   PermissionServiceDefault,
   TenantId,
   ToolOutputInvalid,
@@ -34,6 +33,7 @@ import {
   TransactionRunnerPassthrough,
   defaultRefundPolicy,
   makeReplyDeliveryServiceTest,
+  AgentResolverTest,
 } from "@support-agent/services";
 
 // A failed customer-reply send must NEVER silently resolve the case, in either
@@ -108,7 +108,7 @@ const buildLayer = (
     CaseRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
-    AgentRegistryWith(agents as never),
+    AgentResolverTest(agents as never),
     ToolRegistryWith([failingReply] as never),
     PermissionServiceDefault,
     llm as never,

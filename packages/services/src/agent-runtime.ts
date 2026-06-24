@@ -1,6 +1,5 @@
 import { Context, Effect, Either, Layer, Option, Schema } from "effect";
 import {
-  AgentRegistry,
   PermissionService,
   ToolRegistry,
   type AgentConfig,
@@ -43,6 +42,7 @@ import {
   TenantAgentOverridesService,
   type AgentOverride,
 } from "./tenant-agent-overrides.js";
+import { AgentResolver } from "./agent-resolver.js";
 import {
   TenantRepository,
   type TenantSettings,
@@ -115,7 +115,10 @@ const AgentRuntimeLayer = Layer.effect(
   Effect.gen(function* () {
     const cases = yield* CaseRepository;
     const audit = yield* AuditLogService;
-    const registry = yield* AgentRegistry;
+    // Tenant-aware resolution: built-in agents first, then the tenant's
+    // merchant-authored custom agents. Replaces direct AgentRegistry lookups so
+    // a custom agent runs (and a deleted/disabled one fails safe to takeover).
+    const resolver = yield* AgentResolver;
     const tools = yield* ToolRegistry;
     const perms = yield* PermissionService;
     const approvals = yield* ApprovalService;
@@ -518,9 +521,9 @@ const AgentRuntimeLayer = Layer.effect(
                   ),
                 ),
               );
-            const resumeAgent = yield* registry
-              .resolve(approval.agentId)
-              .pipe(Effect.option);
+            const resumeAgent = Option.fromNullable(
+              yield* resolver.tryResolve(working.tenantId, approval.agentId),
+            );
             if (Option.isSome(resumeAgent)) {
               const recheck = yield* perms.check({
                 tenantId: working.tenantId,
@@ -1033,10 +1036,25 @@ const AgentRuntimeLayer = Layer.effect(
                   ),
                 )
             : [];
-          let agent: AgentConfig = applyOverride(
-            yield* registry.resolve(working.currentAgentId),
-            overrideMap,
+          // Resolve the case's current agent (built-in or custom). A miss means
+          // the agent was deleted/disabled (or the id is otherwise unknown):
+          // park the case for a human rather than letting an UnknownAgent crash
+          // bubble to the outer classifier as a retryable Failed — that would
+          // loop forever in pg-boss (audit C1 / L4).
+          const resolved = yield* resolver.tryResolve(
+            working.tenantId,
+            working.currentAgentId,
           );
+          if (!resolved) {
+            yield* escalateToHuman(working.id, "agent_unresolvable", {
+              agentId: working.currentAgentId,
+            });
+            return {
+              type: "HumanTakeoverRequired",
+              reason: "agent_unresolvable",
+            } as const;
+          }
+          let agent: AgentConfig = applyOverride(resolved, overrideMap);
           const messages: ChatMessage[] = buildInitialMessages(event, {
             subject: working.subject,
             threadId: working.threadId,
@@ -1288,10 +1306,43 @@ const AgentRuntimeLayer = Layer.effect(
                 }
 
                 const targetAgentId = makeAgentId(target as string);
-                const targetAgent = applyOverride(
-                  yield* registry.resolve(targetAgentId),
-                  overrideMap,
+                const resolvedTarget = yield* resolver.tryResolve(
+                  current.tenantId,
+                  targetAgentId,
                 );
+                if (!resolvedTarget) {
+                  // The target passed the handoffs allowlist but no longer
+                  // resolves (a custom agent deleted between check and resolve,
+                  // or a built-in id typo). Keep the tick alive — surface the
+                  // error so the current agent can recover — rather than crash.
+                  yield* tx.run(
+                    audit.record({
+                      tenantId: current.tenantId,
+                      caseId: current.id,
+                      actor: { type: "agent", id: agent.id },
+                      action: "tool.invoked",
+                      details: {
+                        tool: "agent.handoff",
+                        callId: decision.callId,
+                        ok: false,
+                        error: "handoff_target_unresolvable",
+                        target,
+                        turn,
+                      },
+                    }),
+                  );
+                  messages.push({
+                    role: "tool",
+                    toolCallId: decision.callId,
+                    toolName: "agent.handoff",
+                    content: {
+                      error: "handoff_target_unresolvable",
+                      target,
+                    },
+                  });
+                  return { agent, current, done: null };
+                }
+                const targetAgent = applyOverride(resolvedTarget, overrideMap);
                 current = yield* tx.run(
                   Effect.gen(function* () {
                     const updated = yield* cases.update(current.id, {
@@ -1807,10 +1858,30 @@ const AgentRuntimeLayer = Layer.effect(
                 );
                 continue;
               }
-              const nextAgent = applyOverride(
-                yield* registry.resolve(decision.targetAgent),
-                overrideMap,
+              const resolvedNext = yield* resolver.tryResolve(
+                current.tenantId,
+                decision.targetAgent,
               );
+              if (!resolvedNext) {
+                // Allowlisted but unresolvable (deleted custom agent / bad id):
+                // audit and continue with the current agent rather than crash.
+                yield* tx.run(
+                  audit.record({
+                    tenantId: current.tenantId,
+                    caseId: current.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "agent.handoff_blocked",
+                    details: {
+                      target: decision.targetAgent,
+                      reason: decision.reason,
+                      error: "handoff_target_unresolvable",
+                      turn,
+                    },
+                  }),
+                );
+                continue;
+              }
+              const nextAgent = applyOverride(resolvedNext, overrideMap);
               current = yield* tx.run(
                 Effect.gen(function* () {
                   const updated = yield* cases.update(current.id, {
