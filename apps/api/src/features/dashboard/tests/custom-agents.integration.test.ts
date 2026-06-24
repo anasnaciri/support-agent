@@ -181,6 +181,23 @@ describeIfDb("apps/api — /dashboard custom-agents (integration)", () => {
     );
   });
 
+  it("rejects a duplicate name in the same workspace (409 duplicate_name)", async () => {
+    if (!raw) return;
+    const first = await post(
+      "/dashboard/custom-agents",
+      validBody({ name: "Concierge" }),
+    );
+    expect(first.status).toBe(200);
+    const dup = await post(
+      "/dashboard/custom-agents",
+      validBody({ name: "concierge" }),
+    );
+    expect(dup.status).toBe(409);
+    expect(((await dup.json()) as { error: string }).error).toBe(
+      "duplicate_name",
+    );
+  });
+
   it("isolates tenants: B cannot read A's custom agent (404)", async () => {
     if (!raw) return;
     const created = (await (

@@ -73,7 +73,18 @@ export class CustomAgentNotFound extends Data.TaggedError(
   readonly agentId: AgentId;
 }> {}
 
-export type CustomAgentError = CustomAgentNotFound;
+// A custom agent with this name (case-insensitive) already exists in the
+// workspace — raised by the DB unique index on create/update.
+export class DuplicateCustomAgentName extends Data.TaggedError(
+  "DuplicateCustomAgentName",
+)<{
+  readonly tenantId: TenantId;
+  readonly name: string;
+}> {}
+
+export type CustomAgentError =
+  | CustomAgentNotFound
+  | DuplicateCustomAgentName;
 
 // The reserved id prefix that namespaces every merchant-authored agent so a
 // custom id can never collide with a bare built-in id.
@@ -116,11 +127,17 @@ export class CustomAgentService extends Context.Tag("CustomAgentService")<
       agentId: AgentId,
     ) => Effect.Effect<CustomAgentRecord | null, ConnectorStoreDbError>;
 
-    /** Insert a new custom agent; the service assigns the `custom:` id. */
+    /**
+     * Insert a new custom agent; the service assigns the `custom:` id. Fails
+     * `DuplicateCustomAgentName` when the name is already taken in the workspace.
+     */
     readonly create: (
       tenantId: TenantId,
       input: CustomAgentInput,
-    ) => Effect.Effect<CustomAgentRecord, ConnectorStoreDbError>;
+    ) => Effect.Effect<
+      CustomAgentRecord,
+      DuplicateCustomAgentName | ConnectorStoreDbError
+    >;
 
     /** Replace the editable fields of an existing custom agent. */
     readonly update: (
@@ -188,6 +205,22 @@ export const CustomAgentServiceTest = (
     }
     let counter = 0;
 
+    // Case-insensitive name collision within a tenant, ignoring `exceptId`
+    // (the row being updated). Mirrors the DB unique index.
+    const nameTaken = (
+      tenantId: TenantId,
+      name: string,
+      exceptId: AgentId | null,
+    ): boolean => {
+      const needle = name.trim().toLowerCase();
+      for (const entry of store.values()) {
+        if (entry.tenantId !== tenantId) continue;
+        if (exceptId !== null && entry.record.agentId === exceptId) continue;
+        if (entry.record.name.trim().toLowerCase() === needle) return true;
+      }
+      return false;
+    };
+
     return CustomAgentService.of({
       tryResolve: (tenantId, agentId) =>
         Effect.sync(() => {
@@ -214,7 +247,12 @@ export const CustomAgentServiceTest = (
         }),
 
       create: (tenantId, input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          if (nameTaken(tenantId, input.name, null)) {
+            return yield* Effect.fail(
+              new DuplicateCustomAgentName({ tenantId, name: input.name }),
+            );
+          }
           counter += 1;
           const agentId = makeAgentId(
             `${CUSTOM_AGENT_ID_PREFIX}test-${counter}`,
@@ -231,6 +269,11 @@ export const CustomAgentServiceTest = (
           if (!hit || hit.tenantId !== tenantId) {
             return yield* Effect.fail(
               new CustomAgentNotFound({ tenantId, agentId }),
+            );
+          }
+          if (nameTaken(tenantId, input.name, agentId)) {
+            return yield* Effect.fail(
+              new DuplicateCustomAgentName({ tenantId, name: input.name }),
             );
           }
           const record = recordFromInput(

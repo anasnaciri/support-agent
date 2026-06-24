@@ -148,8 +148,13 @@ export const handleDashboardCustomAgentCreate = async (
           buildContext(connections, customs, null),
         );
         if (!verdict.ok) return { kind: "invalid", verdict } as const;
-        const created = yield* svc.create(tenantId, input);
-        return { kind: "ok", record: created } as const;
+        const created = yield* svc.create(tenantId, input).pipe(Effect.either);
+        if (created._tag === "Left") {
+          return created.left._tag === "DuplicateCustomAgentName"
+            ? ({ kind: "duplicate" } as const)
+            : ({ kind: "db_error" } as const);
+        }
+        return { kind: "ok", record: created.right } as const;
       }),
       layer,
     ),
@@ -163,6 +168,10 @@ export const handleDashboardCustomAgentCreate = async (
         : {}),
     });
   }
+  if (outcome.kind === "duplicate")
+    return sendJson(res, 409, { error: "duplicate_name" });
+  if (outcome.kind === "db_error")
+    return sendJson(res, 500, { error: "internal_error" });
   return sendJson(res, 200, toView(outcome.record));
 };
 
@@ -224,9 +233,11 @@ export const handleDashboardCustomAgentUpdate = async (
           .update(tenantId, AgentId(id), input)
           .pipe(Effect.either);
         if (updated._tag === "Left") {
-          return updated.left._tag === "CustomAgentNotFound"
-            ? ({ kind: "not_found" } as const)
-            : ({ kind: "db_error" } as const);
+          if (updated.left._tag === "CustomAgentNotFound")
+            return { kind: "not_found" } as const;
+          if (updated.left._tag === "DuplicateCustomAgentName")
+            return { kind: "duplicate" } as const;
+          return { kind: "db_error" } as const;
         }
         return { kind: "ok", record: updated.right } as const;
       }),
@@ -244,6 +255,8 @@ export const handleDashboardCustomAgentUpdate = async (
   }
   if (outcome.kind === "not_found")
     return sendJson(res, 404, { error: "not_found" });
+  if (outcome.kind === "duplicate")
+    return sendJson(res, 409, { error: "duplicate_name" });
   if (outcome.kind === "db_error")
     return sendJson(res, 500, { error: "internal_error" });
   return sendJson(res, 200, toView(outcome.record));

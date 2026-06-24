@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import {
   CustomAgentNotFound,
   CustomAgentService,
+  DuplicateCustomAgentName,
   CUSTOM_AGENT_ID_PREFIX,
   type CustomAgentInput,
   type CustomAgentRecord,
@@ -27,6 +28,32 @@ const wrap = <A>(
   Effect.tryPromise({
     try: () => promise,
     catch: (cause) => new ConnectorStoreDbError({ cause }),
+  });
+
+// Postgres unique-violation (the per-workspace name index). The `postgres`
+// driver surfaces the SQLSTATE on `.code`; drizzle may wrap it, so walk `.cause`.
+const pgErrorCode = (e: unknown): string | undefined => {
+  if (typeof e !== "object" || e === null) return undefined;
+  const code = (e as { code?: unknown }).code;
+  if (typeof code === "string") return code;
+  return pgErrorCode((e as { cause?: unknown }).cause);
+};
+
+const isUniqueViolation = (cause: unknown): boolean =>
+  pgErrorCode(cause) === "23505";
+
+// Like `wrap`, but maps a name-unique violation to DuplicateCustomAgentName.
+const wrapWrite = <A>(
+  tenantId: TenantId,
+  name: string,
+  promise: Promise<A>,
+): Effect.Effect<A, DuplicateCustomAgentName | ConnectorStoreDbError> =>
+  Effect.tryPromise({
+    try: () => promise,
+    catch: (cause) =>
+      isUniqueViolation(cause)
+        ? new DuplicateCustomAgentName({ tenantId, name })
+        : new ConnectorStoreDbError({ cause }),
   });
 
 const rowToRecord = (r: TenantCustomAgentRow): CustomAgentRecord => ({
@@ -124,7 +151,9 @@ export const CustomAgentServiceLive = Layer.effect(
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
           const agentId = `${CUSTOM_AGENT_ID_PREFIX}${randomUUID()}`;
-          const rows = yield* wrap(
+          const rows = yield* wrapWrite(
+            tenantId,
+            input.name,
             db
               .insert(tenantCustomAgents)
               .values({ tenantId, agentId, ...editableColumns(input) })
@@ -136,7 +165,9 @@ export const CustomAgentServiceLive = Layer.effect(
       update: (tenantId: TenantId, agentId: AgentId, input: CustomAgentInput) =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
-          const rows = yield* wrap(
+          const rows = yield* wrapWrite(
+            tenantId,
+            input.name,
             db
               .update(tenantCustomAgents)
               .set({ ...editableColumns(input), updatedAt: new Date() })

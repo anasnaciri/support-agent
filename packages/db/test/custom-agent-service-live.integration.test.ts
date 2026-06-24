@@ -6,6 +6,7 @@ import { AgentId, TenantId } from "@support-agent/agent-core";
 import {
   CustomAgentNotFound,
   CustomAgentService,
+  DuplicateCustomAgentName,
   type CustomAgentInput,
   isCustomAgentId,
 } from "@support-agent/services";
@@ -142,6 +143,20 @@ describeIfDb("CustomAgentServiceLive", () => {
       }),
     );
     expect(err).toBeInstanceOf(CustomAgentNotFound);
+  });
+
+  it("create maps the name unique-violation to DuplicateCustomAgentName (case-insensitive)", async () => {
+    const tenantId = await seedTenant();
+    const err = await run(
+      Effect.gen(function* () {
+        const svc = yield* CustomAgentService;
+        yield* svc.create(tenantId, input({ name: "Returns Desk" }));
+        return yield* svc
+          .create(tenantId, input({ name: "returns desk" }))
+          .pipe(Effect.flip);
+      }),
+    );
+    expect(err).toBeInstanceOf(DuplicateCustomAgentName);
   });
 
   it("tenant isolation: A's agent never resolves for B", async () => {

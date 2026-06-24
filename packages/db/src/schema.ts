@@ -571,6 +571,13 @@ export const tenantCustomAgents = pgTable(
       sql`${t.status} IN ('draft','active','disabled')`,
     ),
     index("tenant_custom_agents_tenant_idx").on(t.tenantId),
+    // Names are unique per workspace, case-insensitively (across all statuses),
+    // so a merchant can't create two agents that read the same in the UI. The
+    // service maps the violation to a friendly `duplicate_name` error.
+    uniqueIndex("tenant_custom_agents_tenant_name_unique").on(
+      t.tenantId,
+      sql`lower(${t.name})`,
+    ),
   ],
 );
 

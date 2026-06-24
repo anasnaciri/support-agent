@@ -5,6 +5,7 @@ import {
   CustomAgentNotFound,
   CustomAgentService,
   CustomAgentServiceTest,
+  DuplicateCustomAgentName,
   type CustomAgentInput,
   type CustomAgentRecord,
   CUSTOM_AGENT_ID_PREFIX,
@@ -171,6 +172,53 @@ describe("CustomAgentServiceTest", () => {
       }),
     );
     expect(err).toBeInstanceOf(CustomAgentNotFound);
+  });
+
+  it("create rejects a duplicate name (case-insensitive)", async () => {
+    const err = await run(
+      Effect.gen(function* () {
+        const svc = yield* CustomAgentService;
+        yield* svc.create(tenantA, input({ name: "Returns Desk" }));
+        return yield* svc
+          .create(tenantA, input({ name: "returns DESK" }))
+          .pipe(Effect.flip);
+      }),
+    );
+    expect(err).toBeInstanceOf(DuplicateCustomAgentName);
+  });
+
+  it("create allows the same name in a different tenant", async () => {
+    const ok = await run(
+      Effect.gen(function* () {
+        const svc = yield* CustomAgentService;
+        yield* svc.create(tenantA, input({ name: "Returns Desk" }));
+        return yield* svc.create(tenantB, input({ name: "Returns Desk" }));
+      }),
+    );
+    expect(ok.name).toBe("Returns Desk");
+  });
+
+  it("update rejects renaming onto another agent's name but allows its own", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const svc = yield* CustomAgentService;
+        const a = yield* svc.create(tenantA, input({ name: "Alpha" }));
+        yield* svc.create(tenantA, input({ name: "Beta" }));
+        // Renaming Alpha → Beta collides.
+        const collide = yield* svc
+          .update(tenantA, a.agentId, input({ name: "Beta" }))
+          .pipe(Effect.flip);
+        // Re-saving Alpha with its own name is fine.
+        const same = yield* svc.update(
+          tenantA,
+          a.agentId,
+          input({ name: "Alpha", description: "edited" }),
+        );
+        return { collide, same };
+      }),
+    );
+    expect(result.collide).toBeInstanceOf(DuplicateCustomAgentName);
+    expect(result.same.description).toBe("edited");
   });
 
   it("delete removes the agent so tryResolve misses", async () => {
