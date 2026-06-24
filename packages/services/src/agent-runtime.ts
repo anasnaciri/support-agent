@@ -56,9 +56,12 @@ import { parseThreadId } from "./conversation-thread-id.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
 import {
   REPLY_DELIVERY_FAILED_FLAG,
-  ReplyDeliveryService,
   isReplyDeliverySendFailure,
 } from "./reply-delivery.js";
+import {
+  CaseLifecycleWriter,
+  CaseLifecycleWriterLive,
+} from "./case-lifecycle-writer.js";
 
 
 // ------------------------------------------------------------
@@ -107,7 +110,7 @@ export class AgentRuntime extends Context.Tag("AgentRuntime")<
 // Default layer
 // ============================================================
 
-export const AgentRuntimeDefault = Layer.effect(
+const AgentRuntimeLayer = Layer.effect(
   AgentRuntime,
   Effect.gen(function* () {
     const cases = yield* CaseRepository;
@@ -119,6 +122,7 @@ export const AgentRuntimeDefault = Layer.effect(
     const llm = yield* LLMService;
     const shopify = yield* ShopifyService;
     const tx = yield* TransactionRunner;
+    const lifecycle = yield* CaseLifecycleWriter;
     const mail = yield* PlatformMailService;
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
@@ -143,11 +147,6 @@ export const AgentRuntimeDefault = Layer.effect(
     const maybeNotifications = yield* Effect.serviceOption(
       MerchantNotificationService,
     );
-    // Optional durable outbox for FAILED customer-reply sends — present in the
-    // worker (ReplyDeliveryServiceLive). Absent in lean test layers, in which
-    // case the case is still flagged + parked, just not durably re-sent.
-    const maybeReplyDelivery = yield* Effect.serviceOption(ReplyDeliveryService);
-
     // Best-effort merchant ping. Swallows every failure and runs OUTSIDE
     // any SQL transaction (audit D6 — external HTTP never shares a tx).
     const notifyMerchant = (
@@ -289,23 +288,13 @@ export const AgentRuntimeDefault = Layer.effect(
           details: Record<string, unknown> = {},
         ) =>
           Effect.gen(function* () {
-            const updated = yield* tx.run(
-              Effect.gen(function* () {
-                const row = yield* cases.transitionStatus(
-                  caseId,
-                  "human_takeover",
-                  { reason, tenantId: working.tenantId },
-                );
-                yield* audit.record({
-                  tenantId: row.tenantId,
-                  caseId: row.id,
-                  actor: { type: "system", id: "agent-runtime" },
-                  action: "case.escalated_to_human",
-                  details: { reason, ...details },
-                });
-                return row;
-              }),
-            );
+            const updated = yield* lifecycle.escalateToHuman({
+              caseId,
+              tenantId: working.tenantId,
+              actor: { type: "system", id: "agent-runtime" },
+              reason,
+              details,
+            });
             // Ping the merchant AFTER the park committed (and outside the
             // tx): the case just became theirs.
             yield* notifyMerchant(
@@ -385,77 +374,15 @@ export const AgentRuntimeDefault = Layer.effect(
           executionKey: string,
         ) =>
           Effect.gen(function* () {
-            const issues = (errLeft as { readonly issues?: unknown }).issues;
-            const errTag = (errLeft as { readonly _tag?: unknown })._tag;
-            const errorLabel =
-              Array.isArray(issues) && issues.length > 0
-                ? issues.filter((i) => typeof i === "string").join(",")
-                : typeof errTag === "string"
-                  ? errTag
-                  : "ConversationSendFailed";
-            const rawDraftId = (draftInput as { readonly draftId?: unknown })
-              .draftId;
-            const draftId =
-              typeof rawDraftId === "string" && rawDraftId.length > 0
-                ? rawDraftId
-                : `${caseRow.id}:${toolName}`;
-            const updated = yield* tx.run(
-              Effect.gen(function* () {
-                const replyDelivery = Option.getOrUndefined(maybeReplyDelivery);
-                if (!replyDelivery) {
-                  yield* Effect.dieMessage("ReplyDeliveryService unavailable");
-                } else {
-                  yield* replyDelivery.enqueue({
-                    tenantId: caseRow.tenantId,
-                    caseId: caseRow.id,
-                    agentId,
-                    tool: toolName,
-                    mailbox: caseRow.mailbox ?? null,
-                    draftId,
-                    draft: draftInput,
-                    error: errorLabel,
-                  });
-                }
-                const existing = readRiskFlags(caseRow.context);
-                if (!existing.includes(REPLY_DELIVERY_FAILED_FLAG)) {
-                  yield* cases.update(caseRow.id, {
-                    context: {
-                      ...caseRow.context,
-                      riskFlags: [...existing, REPLY_DELIVERY_FAILED_FLAG],
-                    } as never,
-                  });
-                }
-                const row = yield* cases.transitionStatus(
-                  caseRow.id,
-                  "human_takeover",
-                  {
-                    reason: REPLY_DELIVERY_FAILED_FLAG,
-                    tenantId: caseRow.tenantId,
-                  },
-                );
-                yield* audit.record({
-                  tenantId: row.tenantId,
-                  caseId: row.id,
-                  actor: { type: "system", id: "agent-runtime" },
-                  action: "case.escalated_to_human",
-                  details: {
-                    reason: REPLY_DELIVERY_FAILED_FLAG,
-                    tool: toolName,
-                    error: errorLabel,
-                  },
-                });
-                if (Option.isSome(maybeExecutions)) {
-                  yield* maybeExecutions.value.record({
-                    tenantId: caseRow.tenantId,
-                    caseId: caseRow.id,
-                    callId: executionKey,
-                    tool: toolName,
-                    resultOk: false,
-                  });
-                }
-                return row;
-              }),
-            );
+            const updated = yield* lifecycle.parkForReplyDeliveryFailure({
+              caseId: caseRow.id,
+              tenantId: caseRow.tenantId,
+              agentId,
+              tool: toolName,
+              draftInput,
+              error: errLeft,
+              executionKey,
+            });
             yield* notifyMerchant(
               updated.tenantId,
               humanTakeoverNotification({
@@ -757,26 +684,16 @@ export const AgentRuntimeDefault = Layer.effect(
             // The approved reply went out — index its Message-ID for correlation
             // of the customer's eventual reply (best-effort, no-op otherwise).
             yield* recordOutboundReplyId(working, approval.tool, exec.right);
-            working = yield* tx.run(
-              Effect.gen(function* () {
-                const resolved = yield* cases.transitionStatus(
-                  working.id,
-                  "resolved",
-                  { reason: `approved tool ${approval.tool}` },
-                );
-                yield* audit.record({
-                  tenantId: resolved.tenantId,
-                  caseId: resolved.id,
-                  actor: { type: "user", id: event.managerId },
-                  action: "case.resolved",
-                  details: {
-                    viaApprovalId: approval.id,
-                    tool: approval.tool,
-                  },
-                });
-                return resolved;
-              }),
-            );
+            working = yield* lifecycle.resolve({
+              caseId: working.id,
+              tenantId: working.tenantId,
+              actor: { type: "user", id: event.managerId },
+              reason: `approved tool ${approval.tool}`,
+              details: {
+                viaApprovalId: approval.id,
+                tool: approval.tool,
+              },
+            });
             return { type: "Completed" } as const;
         });
 
@@ -784,26 +701,16 @@ export const AgentRuntimeDefault = Layer.effect(
           event: Extract<DomainEvent, { type: "approval.rejected" }>,
         ) =>
           Effect.gen(function* () {
-            working = yield* tx.run(
-              Effect.gen(function* () {
-                const updated = yield* cases.transitionStatus(
-                  working.id,
-                  "human_takeover",
-                  { reason: "approval rejected" },
-                );
-                yield* audit.record({
-                  tenantId: updated.tenantId,
-                  caseId: updated.id,
-                  actor: { type: "user", id: event.managerId },
-                  action: "case.escalated_to_human",
-                  details: {
-                    approvalId: event.approvalId,
-                    reason: event.reason ?? null,
-                  },
-                });
-                return updated;
-              }),
-            );
+            working = yield* lifecycle.escalateToHuman({
+              caseId: working.id,
+              tenantId: working.tenantId,
+              actor: { type: "user", id: event.managerId },
+              reason: "approval rejected",
+              details: {
+                approvalId: event.approvalId,
+                reason: event.reason ?? null,
+              },
+            });
             // Confirmation ping: rejecting the draft makes the case theirs.
             yield* notifyMerchant(
               working.tenantId,
@@ -1081,23 +988,11 @@ export const AgentRuntimeDefault = Layer.effect(
               event.type === "customer.replied") &&
             working.status === "resolved"
           ) {
-            working = yield* tx.run(
-              Effect.gen(function* () {
-                const row = yield* cases.transitionStatus(
-                  working.id,
-                  "in_progress",
-                  { reason: `reopened by ${event.type}` },
-                );
-                yield* audit.record({
-                  tenantId: row.tenantId,
-                  caseId: row.id,
-                  actor: { type: "system", id: "runtime" },
-                  action: "case.reopened",
-                  details: { eventType: event.type },
-                });
-                return row;
-              }),
-            );
+            working = yield* lifecycle.reopenForCustomerReply({
+              caseId: working.id,
+              tenantId: working.tenantId,
+              eventType: event.type,
+            });
           }
         });
 
@@ -1171,28 +1066,16 @@ export const AgentRuntimeDefault = Layer.effect(
                   err._tag === "LLMCredentialMissing"
                     ? "llm_credential_missing"
                     : "llm_credential_revoked";
-                current = yield* tx.run(
-                  Effect.gen(function* () {
-                    const updated = yield* cases.transitionStatus(
-                      current.id,
-                      "human_takeover",
-                      { reason },
-                    );
-                    yield* audit.record({
-                      tenantId: updated.tenantId,
-                      caseId: updated.id,
-                      actor: { type: "system", id: "agent-runtime" },
-                      action: "case.escalated_to_human",
-                      details: {
-                        reason,
-                        ...(err._tag === "LLMCredentialRevoked"
-                          ? { provider: err.provider }
-                          : {}),
-                      },
-                    });
-                    return updated;
-                  }),
-                );
+                current = yield* lifecycle.escalateToHuman({
+                  caseId: current.id,
+                  tenantId: current.tenantId,
+                  actor: { type: "system", id: "agent-runtime" },
+                  reason,
+                  details:
+                    err._tag === "LLMCredentialRevoked"
+                      ? { provider: err.provider }
+                      : {},
+                });
                 yield* notifyMerchant(
                   current.tenantId,
                   humanTakeoverNotification({
@@ -1249,39 +1132,19 @@ export const AgentRuntimeDefault = Layer.effect(
               // on an un-parked case, so the agent could keep acting and a
               // second approval could be created. master-plan §4: the audit
               // write shares the transaction with the state change.
-              const parked = yield* tx.run(
-                Effect.gen(function* () {
-                  const approval = yield* approvals.create({
-                    tenantId: current.tenantId,
-                    caseId: current.id,
-                    agentId: agent.id,
-                    tool: tool.name,
-                    proposedInput: callInput,
-                    reasoning: reasoning,
-                    riskLevel: riskFor(tool),
-                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-                  });
-                  const row = yield* cases.transitionStatus(
-                    current.id,
-                    "waiting_for_approval",
-                    { reason: `tool ${tool.name} pending approval` },
-                  );
-                  yield* audit.record({
-                    tenantId: row.tenantId,
-                    caseId: row.id,
-                    actor: { type: "agent", id: agent.id },
-                    action: "case.waiting_for_approval",
-                    details: {
-                      approvalId: approval.id,
-                      tool: tool.name,
-                      turn,
-                    },
-                  });
-                  return { approval, row };
-                }),
-              );
+              const parked = yield* lifecycle.parkForApproval({
+                caseId: current.id,
+                tenantId: current.tenantId,
+                agentId: agent.id,
+                tool: tool.name,
+                proposedInput: callInput,
+                reasoning,
+                riskLevel: riskFor(tool),
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                turn,
+              });
               const approval = parked.approval;
-              current = parked.row;
+              current = parked.case_;
 
               // Fire the approval-link email. Best-effort: a Resend outage,
               // a tenant without `notificationEmail` configured, or any other
@@ -1596,7 +1459,7 @@ export const AgentRuntimeDefault = Layer.effect(
               // then commit together in one tx (master-plan §4: the audit write
               // shares the transaction with the state change — the external
               // effect itself was never transactional). Tools that mutate case
-              // state (case.update_status) keep their own atomic writes.
+              // state route those writes through their own lifecycle services.
               const ctx: ToolContext = {
                 tenantId: current.tenantId,
                 caseId: current.id,
@@ -1694,23 +1557,13 @@ export const AgentRuntimeDefault = Layer.effect(
                 // tools).
                 yield* recordOutboundReplyId(current, tool.name, exec.right);
                 if (tool.name === "conversation.ask_customer") {
-                  current = yield* tx.run(
-                    Effect.gen(function* () {
-                      const updated = yield* cases.transitionStatus(
-                        current.id,
-                        "waiting_for_customer",
-                        { reason: "conversation.ask_customer" },
-                      );
-                      yield* audit.record({
-                        tenantId: updated.tenantId,
-                        caseId: updated.id,
-                        actor: { type: "agent", id: agent.id },
-                        action: "case.waiting_for_customer",
-                        details: { tool: tool.name, callId: decision.callId },
-                      });
-                      return updated;
-                    }),
-                  );
+                  current = yield* lifecycle.parkWaitingForCustomer({
+                    caseId: current.id,
+                    tenantId: current.tenantId,
+                    agentId: agent.id,
+                    tool: tool.name,
+                    callId: decision.callId,
+                  });
                   return { agent, current, done: { type: "PausedWaitingForCustomer" } as const };
                 }
                 if (
@@ -1727,23 +1580,13 @@ export const AgentRuntimeDefault = Layer.effect(
                   // `supplier.updated` (the consumer). Runs only when escalate
                   // resolved to `allow` (per-agent) — under the default `ask`, the
                   // permission gate above parks in waiting_for_approval instead.
-                  current = yield* tx.run(
-                    Effect.gen(function* () {
-                      const updated = yield* cases.transitionStatus(
-                        current.id,
-                        "waiting_for_supplier",
-                        { reason: "supplier.escalate" },
-                      );
-                      yield* audit.record({
-                        tenantId: updated.tenantId,
-                        caseId: updated.id,
-                        actor: { type: "agent", id: agent.id },
-                        action: "case.waiting_for_supplier",
-                        details: { tool: tool.name, callId: decision.callId },
-                      });
-                      return updated;
-                    }),
-                  );
+                  current = yield* lifecycle.parkWaitingForSupplier({
+                    caseId: current.id,
+                    tenantId: current.tenantId,
+                    agentId: agent.id,
+                    tool: tool.name,
+                    callId: decision.callId,
+                  });
                   return { agent, current, done: { type: "PausedWaitingForSupplier" } as const };
                 }
                 messages.push({
@@ -1887,27 +1730,16 @@ export const AgentRuntimeDefault = Layer.effect(
 
             if (decision.type === "final_message") {
               if (current.status !== "resolved") {
-                // Wrap the final transition + a "case.resolved" audit in one
-                // tx — keeps the resolved status and its audit row atomically
-                // consistent (master-plan §4).
-                const resolveExit = yield* tx
-                  .run(
-                    Effect.gen(function* () {
-                      const row = yield* cases.transitionStatus(
-                        current.id,
-                        "resolved",
-                        { reason: "runtime: final_message" },
-                      );
-                      yield* audit.record({
-                        tenantId: row.tenantId,
-                        caseId: row.id,
-                        actor: { type: "agent", id: agent.id },
-                        action: "case.resolved",
-                        details: { turn, finalMessage: decision.text },
-                      });
-                      return row;
-                    }),
-                  )
+                // The lifecycle writer wraps the final transition +
+                // "case.resolved" audit in one tx (master-plan §4).
+                const resolveExit = yield* lifecycle
+                  .resolve({
+                    caseId: current.id,
+                    tenantId: current.tenantId,
+                    actor: { type: "agent", id: agent.id },
+                    reason: "runtime: final_message",
+                    details: { turn, finalMessage: decision.text },
+                  })
                   .pipe(Effect.either);
                 if (resolveExit._tag === "Left") {
                   // The transition matrix blocked the resolve (audit L1):
@@ -2115,4 +1947,9 @@ export const AgentRuntimeDefault = Layer.effect(
       handleEvent: tick,
     });
   }),
+);
+
+export const AgentRuntimeDefault = Layer.provideMerge(
+  AgentRuntimeLayer,
+  CaseLifecycleWriterLive,
 );

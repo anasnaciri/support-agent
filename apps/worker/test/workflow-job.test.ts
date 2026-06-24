@@ -7,8 +7,10 @@ import {
   type WorkflowResult,
 } from "@support-agent/agent-core";
 import {
+  ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
+  CaseLifecycleWriterLive,
   CaseRepository,
   CaseRepositoryTest,
   TransactionRunnerPassthrough,
@@ -61,11 +63,13 @@ describe("settleWorkflowResult", () => {
 });
 
 describe("escalateDeadLetteredEvent", () => {
-  const layer = Layer.mergeAll(
+  const deps = Layer.mergeAll(
+    ApprovalServiceTest,
     CaseRepositoryTest,
     AuditLogServiceTest,
     TransactionRunnerPassthrough,
   );
+  const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
 
   it("parks the dead-lettered event's case in human_takeover with an audit row", async () => {
     const out = await Effect.runPromise(
@@ -221,12 +225,14 @@ describe("escalateDeadLetteredEvent", () => {
 describe("escalateDeadLetteredEvent — merchant notification", () => {
   it("pings the merchant after parking the case (best-effort)", async () => {
     const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
-    const layer = Layer.mergeAll(
+    const deps = Layer.mergeAll(
+      ApprovalServiceTest,
       CaseRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
       notifLayer,
     );
+    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -267,12 +273,14 @@ describe("escalateDeadLetteredEvent — merchant notification", () => {
 
   it("does not ping when the case is already parked or resolved", async () => {
     const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
-    const layer = Layer.mergeAll(
+    const deps = Layer.mergeAll(
+      ApprovalServiceTest,
       CaseRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
       notifLayer,
     );
+    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {

@@ -1,7 +1,10 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   isMerchantSettableStatus,
   isStatusTransitionAllowed,
+  type AgentId,
+  type Approval,
+  type ApprovalRiskLevel,
   type Case,
   type CaseContext,
   type CaseId,
@@ -22,6 +25,15 @@ import {
   CaseRepository,
   type CaseRepositoryError,
 } from "./case-repository.js";
+import {
+  REPLY_DELIVERY_FAILED_FLAG,
+  ReplyDeliveryService,
+  type ReplyDeliveryError,
+} from "./reply-delivery.js";
+import {
+  ToolExecutionStore,
+  type IdempotencyStoreDbError,
+} from "./idempotency-store.js";
 import { TransactionRunner } from "./transaction-runner.js";
 
 type LifecycleDetails = Readonly<Record<string, unknown>>;
@@ -46,6 +58,58 @@ export interface ResolveCaseInput {
   readonly clearRiskFlags?: ReadonlyArray<string>;
   readonly bridgeFromHumanTakeover?: boolean;
   readonly action?: string;
+}
+
+export interface ParkForApprovalInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId;
+  readonly tool: string;
+  readonly proposedInput: unknown;
+  readonly reasoning: string;
+  readonly riskLevel: ApprovalRiskLevel;
+  readonly expiresAt: Date;
+  readonly turn: number;
+}
+
+export interface ParkForApprovalResult {
+  readonly approval: Approval;
+  readonly case_: Case;
+}
+
+export interface ParkForWaitInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId;
+  readonly tool: string;
+  readonly callId: string;
+}
+
+export interface ReopenForCustomerReplyInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly eventType: string;
+}
+
+export interface ParkForReplyDeliveryFailureInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId | string;
+  readonly tool: string;
+  readonly draftInput: unknown;
+  readonly error: unknown;
+  readonly executionKey: string;
+}
+
+export interface ApplyAgentStatusUpdateInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId | string;
+  readonly toStatus: CaseStatus;
+  readonly reason?: string;
+  readonly expectedFromStatus?: CaseStatus;
+  readonly tool: string;
+  readonly callId: string;
 }
 
 export type TakeOverCaseOutcome =
@@ -101,7 +165,9 @@ export interface SetMerchantStatusInput {
 export type CaseLifecycleWriterError =
   | ApprovalServiceError
   | CaseRepositoryError
-  | AuditLogError;
+  | AuditLogError
+  | IdempotencyStoreDbError
+  | ReplyDeliveryError;
 
 export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
   CaseLifecycleWriter,
@@ -112,6 +178,30 @@ export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
 
     readonly resolve: (
       input: ResolveCaseInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly parkForApproval: (
+      input: ParkForApprovalInput,
+    ) => Effect.Effect<ParkForApprovalResult, CaseLifecycleWriterError>;
+
+    readonly parkWaitingForCustomer: (
+      input: ParkForWaitInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly parkWaitingForSupplier: (
+      input: ParkForWaitInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly reopenForCustomerReply: (
+      input: ReopenForCustomerReplyInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly parkForReplyDeliveryFailure: (
+      input: ParkForReplyDeliveryFailureInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly applyAgentStatusUpdate: (
+      input: ApplyAgentStatusUpdateInput,
     ) => Effect.Effect<Case, CaseLifecycleWriterError>;
 
     readonly takeOver: (
@@ -161,6 +251,28 @@ const withoutRiskFlags = (
   return { ...context, riskFlags: next };
 };
 
+const replyDeliveryErrorLabel = (error: unknown): string => {
+  const issues = (error as { readonly issues?: unknown } | null)?.issues;
+  const errTag = (error as { readonly _tag?: unknown } | null)?._tag;
+  return Array.isArray(issues) && issues.length > 0
+    ? issues.filter((i): i is string => typeof i === "string").join(",")
+    : typeof errTag === "string"
+      ? errTag
+      : "ConversationSendFailed";
+};
+
+const replyDeliveryDraftId = (
+  caseId: CaseId,
+  tool: string,
+  draftInput: unknown,
+): string => {
+  const rawDraftId = (draftInput as { readonly draftId?: unknown } | null)
+    ?.draftId;
+  return typeof rawDraftId === "string" && rawDraftId.length > 0
+    ? rawDraftId
+    : `${caseId}:${tool}`;
+};
+
 const RESUME_TO_STATUS = "in_progress" satisfies CaseStatus;
 
 const TERMINAL_TAKEOVER_STATUSES: ReadonlySet<CaseStatus> = new Set([
@@ -176,6 +288,8 @@ export const CaseLifecycleWriterLive = Layer.effect(
     const cases = yield* CaseRepository;
     const audit = yield* AuditLogService;
     const tx = yield* TransactionRunner;
+    const maybeReplyDelivery = yield* Effect.serviceOption(ReplyDeliveryService);
+    const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
 
     return CaseLifecycleWriter.of({
       escalateToHuman: (input) =>
@@ -271,6 +385,226 @@ export const CaseLifecycleWriterLive = Layer.effect(
               details: auditDetails(input.reason, input.details),
             });
             return resolved;
+          }),
+        ),
+
+      parkForApproval: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const approval = yield* approvals.create({
+              tenantId: input.tenantId,
+              caseId: input.caseId,
+              agentId: input.agentId,
+              tool: input.tool,
+              proposedInput: input.proposedInput,
+              reasoning: input.reasoning,
+              riskLevel: input.riskLevel,
+              expiresAt: input.expiresAt,
+            });
+            const row = yield* cases.transitionStatus(
+              input.caseId,
+              "waiting_for_approval",
+              {
+                tenantId: input.tenantId,
+                reason: `tool ${input.tool} pending approval`,
+              },
+            );
+            yield* audit.record({
+              tenantId: row.tenantId,
+              caseId: row.id,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.waiting_for_approval",
+              details: {
+                approvalId: approval.id,
+                tool: input.tool,
+                turn: input.turn,
+              },
+            });
+            return { approval, case_: row };
+          }),
+        ),
+
+      parkWaitingForCustomer: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const updated = yield* cases.transitionStatus(
+              input.caseId,
+              "waiting_for_customer",
+              {
+                tenantId: input.tenantId,
+                reason: input.tool,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.waiting_for_customer",
+              details: { tool: input.tool, callId: input.callId },
+            });
+            return updated;
+          }),
+        ),
+
+      parkWaitingForSupplier: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const updated = yield* cases.transitionStatus(
+              input.caseId,
+              "waiting_for_supplier",
+              {
+                tenantId: input.tenantId,
+                reason: input.tool,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.waiting_for_supplier",
+              details: { tool: input.tool, callId: input.callId },
+            });
+            return updated;
+          }),
+        ),
+
+      reopenForCustomerReply: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases.getById(
+              input.caseId,
+              input.tenantId,
+            );
+            if (current.status !== "resolved") return current;
+            const row = yield* cases.transitionStatus(
+              current.id,
+              "in_progress",
+              {
+                tenantId: current.tenantId,
+                reason: `reopened by ${input.eventType}`,
+              },
+            );
+            yield* audit.record({
+              tenantId: row.tenantId,
+              caseId: row.id,
+              actor: { type: "system", id: "runtime" },
+              action: "case.reopened",
+              details: { eventType: input.eventType },
+            });
+            return row;
+          }),
+        ),
+
+      parkForReplyDeliveryFailure: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases.getById(
+              input.caseId,
+              input.tenantId,
+            );
+            const errorLabel = replyDeliveryErrorLabel(input.error);
+            const draftId = replyDeliveryDraftId(
+              current.id,
+              input.tool,
+              input.draftInput,
+            );
+
+            const replyDelivery = Option.getOrUndefined(maybeReplyDelivery);
+            if (!replyDelivery) {
+              yield* Effect.dieMessage("ReplyDeliveryService unavailable");
+            } else {
+              yield* replyDelivery.enqueue({
+                tenantId: current.tenantId,
+                caseId: current.id,
+                agentId: input.agentId,
+                tool: input.tool,
+                mailbox: current.mailbox ?? null,
+                draftId,
+                draft: input.draftInput,
+                error: errorLabel,
+              });
+            }
+
+            const patchedContext = withRiskFlag(
+              current.context,
+              REPLY_DELIVERY_FAILED_FLAG,
+            );
+            if (patchedContext) {
+              yield* cases.update(
+                current.id,
+                { context: patchedContext },
+                current.tenantId,
+              );
+            }
+            const row = yield* cases.transitionStatus(
+              current.id,
+              "human_takeover",
+              {
+                tenantId: current.tenantId,
+                reason: REPLY_DELIVERY_FAILED_FLAG,
+              },
+            );
+            yield* audit.record({
+              tenantId: row.tenantId,
+              caseId: row.id,
+              actor: { type: "system", id: "agent-runtime" },
+              action: "case.escalated_to_human",
+              details: {
+                reason: REPLY_DELIVERY_FAILED_FLAG,
+                tool: input.tool,
+                error: errorLabel,
+              },
+            });
+            if (Option.isSome(maybeExecutions)) {
+              yield* maybeExecutions.value.record({
+                tenantId: current.tenantId,
+                caseId: current.id,
+                callId: input.executionKey,
+                tool: input.tool,
+                resultOk: false,
+              });
+            }
+            return row;
+          }),
+        ),
+
+      applyAgentStatusUpdate: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases.getById(
+              input.caseId,
+              input.tenantId,
+            );
+            const transitionOpts: {
+              readonly tenantId: TenantId;
+              readonly reason?: string;
+              readonly expectedFromStatus?: CaseStatus;
+            } = {
+              tenantId: current.tenantId,
+              ...(input.reason !== undefined ? { reason: input.reason } : {}),
+              ...(input.expectedFromStatus !== undefined
+                ? { expectedFromStatus: input.expectedFromStatus }
+                : {}),
+            };
+            const updated = yield* cases.transitionStatus(
+              current.id,
+              input.toStatus,
+              transitionOpts,
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.status_changed",
+              details: {
+                reason: input.reason ?? null,
+                fromStatus: current.status,
+                toStatus: input.toStatus,
+                tool: input.tool,
+                callId: input.callId,
+              },
+            });
+            return updated;
           }),
         ),
 

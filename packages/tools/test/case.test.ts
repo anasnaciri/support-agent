@@ -15,8 +15,13 @@ import {
 // vitest-friendly re-imports below are direct from services to be explicit.
 
 import {
+  ApprovalServiceTest,
+  AuditLogService,
+  AuditLogServiceTest,
+  CaseLifecycleWriterLive,
   CaseRepository as RepoTag,
   CaseRepositoryTest as RepoTestLayer,
+  TransactionRunnerPassthrough,
 } from "@support-agent/services";
 
 import { caseUpdateStatus, caseUpdateContext } from "../src/index.js";
@@ -32,8 +37,15 @@ const baseCtx = (caseId: string): ToolContext => ({
 // Layer for running tool executions: provides both the Test CaseRepository
 // and a ToolRegistry pre-loaded with both case tools (so consumers can also
 // resolve them by name through the registry if they want).
-const toolEnv = Layer.merge(
+const serviceDeps = Layer.mergeAll(
+  ApprovalServiceTest,
   RepoTestLayer,
+  AuditLogServiceTest,
+  TransactionRunnerPassthrough,
+);
+
+const toolEnv = Layer.merge(
+  Layer.provideMerge(CaseLifecycleWriterLive, serviceDeps),
   ToolRegistryWith([caseUpdateStatus as never, caseUpdateContext as never]),
 );
 
@@ -52,12 +64,27 @@ describe("case.update_status tool", () => {
             { status: "resolved", reason: "test" },
             baseCtx(created.id),
           );
-          return out;
+          const audit = yield* AuditLogService;
+          const entries = yield* audit.forCase(created.id, {
+            tenantId: TenantId("t1"),
+          });
+          return { out, entries };
         }),
         toolEnv,
       ),
     );
-    expect(result.status).toBe("resolved");
+    expect(result.out.status).toBe("resolved");
+    expect(result.entries[0]).toMatchObject({
+      actor: { type: "agent", id: "support-triage" },
+      action: "case.status_changed",
+      details: {
+        reason: "test",
+        fromStatus: "new",
+        toStatus: "resolved",
+        tool: "case.update_status",
+        callId: "call_1",
+      },
+    });
   });
 
   it("returns ToolOutputInvalid when the optimistic expectedFromStatus mismatches", async () => {

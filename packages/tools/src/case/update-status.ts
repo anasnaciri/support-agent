@@ -4,7 +4,7 @@ import {
   ToolOutputInvalid,
   type CaseStatus,
 } from "@support-agent/agent-core";
-import { CaseRepository } from "@support-agent/services";
+import { CaseLifecycleWriter } from "@support-agent/services";
 
 const StatusLiteral = Schema.Literal(
   "new",
@@ -41,7 +41,7 @@ export const caseUpdateStatus = defineTool({
   sideEffectClass: "external_state",
   execute: (input, ctx) =>
     Effect.gen(function* () {
-      const repo = yield* CaseRepository;
+      const lifecycle = yield* CaseLifecycleWriter;
       const opts: {
         reason?: string;
         expectedFromStatus?: CaseStatus;
@@ -50,8 +50,16 @@ export const caseUpdateStatus = defineTool({
       if (input.expectedFromStatus !== undefined)
         opts.expectedFromStatus = input.expectedFromStatus;
 
-      const updated = yield* repo
-        .transitionStatus(ctx.caseId, input.status, opts)
+      const updated = yield* lifecycle
+        .applyAgentStatusUpdate({
+          caseId: ctx.caseId,
+          tenantId: ctx.tenantId,
+          agentId: ctx.agentId,
+          toStatus: input.status,
+          tool: "case.update_status",
+          callId: ctx.callId,
+          ...opts,
+        })
         .pipe(
           Effect.mapError(
             (e) =>

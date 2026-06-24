@@ -272,7 +272,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.fetched.context["classification"]).toBe("where_is_order");
     expect(out.fetched.context["identifiedOrderId"]).toBe("ord_42");
 
-    // Audit trail shape: event.received + 3 llm.decision + 2 tool.invoked.
+    // Audit trail shape: event.received + 3 llm.decision + 2 tool.invoked
+    // + the lifecycle audit emitted by case.update_status.
     // No trailing `case.resolved` here because the case was already
     // resolved by the second tool call before the final_message turn — the
     // runtime's transition-on-final-message branch is a no-op when status
@@ -283,6 +284,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
+      "case.status_changed",
       "tool.invoked",
       "llm.decision",
     ]);

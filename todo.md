@@ -29,19 +29,21 @@ and a fresh `rg` audit on 2026-06-23:
 
 LATER: ability to create custom agents: asign tools, asign who they can call or who can call them, asign a system prompt, a description and configure the other settings like permissions
 
-- [ ] Move remaining `packages/services/src/agent-runtime.ts` case lifecycle write choreography into
+- [x] Move remaining `packages/services/src/agent-runtime.ts` case lifecycle write choreography into
       `CaseLifecycleWriter` without adding a generic arbitrary-transition method. Remaining production
       paths include runtime human escalations, approved-tool success/failure outcomes, approval rejection,
       resolved-case reopen, approval/customer/supplier parking, LLM credential/safety/context escalation,
       reply-delivery-failure parking, and final-message resolution.
-- [ ] Route approval expiry escalation in `apps/worker/src/approval-maintenance-schedule.ts` through
+- [x] Route approval expiry escalation in `apps/worker/src/approval-maintenance-schedule.ts` through
       `CaseLifecycleWriter`.
-- [ ] Route workflow dead-letter escalation in `apps/worker/src/workflow-dead-letter.ts` through
+- [x] Route workflow dead-letter escalation in `apps/worker/src/workflow-dead-letter.ts` through
       `CaseLifecycleWriter`.
-- [ ] Decide whether `packages/tools/src/case/update-status.ts` remains a deliberately low-level
+- [x] Decide whether `packages/tools/src/case/update-status.ts` remains a deliberately low-level
       agent tool over `CaseRepository.transitionStatus`, or gets a lifecycle-writer operation so every
-      agent-initiated status change owns its audit shape at the service boundary.
-- [ ] After the above, rerun
+      agent-initiated status change owns its audit shape at the service boundary. Decision: route it
+      through `CaseLifecycleWriter.applyAgentStatusUpdate`, preserving the tool contract while keeping
+      transition + `case.status_changed` audit ownership in the service boundary.
+- [x] After the above, rerun
       `rg "transitionStatus\\(|case\\.taken_over|case\\.resumed|case\\.status_changed|case\\.resolved|case\\.escalated_to_human" packages apps -n`
       and confirm production hits are limited to `CaseLifecycleWriter` plus intentional low-level
       repository/tool/test/seed code.
@@ -218,6 +220,18 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-24 — Completed the remaining lifecycle-refactor backlog from the handoff (TDD).**
+  `CaseLifecycleWriter` now owns the remaining production case lifecycle writes in the agent/worker path:
+  runtime escalations/resolutions/parking/reopen/reply-delivery-failure outcomes, approval-expiry
+  escalation, workflow dead-letter escalation, and agent-initiated `case.update_status` transitions. The
+  writer gained specific operations (`parkForApproval`, `parkWaitingForCustomer`, `parkWaitingForSupplier`,
+  `reopenForCustomerReply`, `parkForReplyDeliveryFailure`, and `applyAgentStatusUpdate`) rather than a
+  generic arbitrary-transition escape hatch. `case.update_status` now records `case.status_changed` at the
+  service boundary inside the same transaction as the guarded transition. Verified with focused lifecycle,
+  worker, tool, runtime e2e, and transaction tests; `pnpm build` green; `pnpm ci:local` green against the
+  local Postgres test DB (**1973 passing / 5 skipped / 0 failing**). Final `rg "transitionStatus\\(" packages apps -n`
+  shows production direct status transitions only inside `packages/services/src/case-lifecycle-writer.ts`;
+  the other hits are tests or repository comments.
 - **2026-06-23 — Refreshed `CAPABILITIES.md` to cover everything landed since the 2026-06-12 snapshot.**
   Regenerated the capability inventory from shipped code at `e191ac4` (109 commits past the old `11f24b2`
   snapshot). Verified each area against the code before documenting. Added: a new **Team Members And

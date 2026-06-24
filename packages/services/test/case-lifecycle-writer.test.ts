@@ -17,6 +17,14 @@ import {
   CaseLifecycleWriter,
   CaseLifecycleWriterLive,
 } from "../src/case-lifecycle-writer.js";
+import {
+  makeReplyDeliveryServiceTest,
+  REPLY_DELIVERY_FAILED_FLAG,
+} from "../src/reply-delivery.js";
+import {
+  ToolExecutionStore,
+  ToolExecutionStoreTest,
+} from "../src/idempotency-store.js";
 import { TransactionRunnerPassthrough } from "../src/transaction-runner.js";
 
 const deps = Layer.mergeAll(
@@ -169,6 +177,259 @@ describe("CaseLifecycleWriter", () => {
       actor: { type: "system", id: "reply-delivery-retry" },
       action: "case.resolved",
       details: { reason: "reply_delivered_on_retry" },
+    });
+  });
+
+  it("parks a case for approval with approval row, transition, and audit", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const approvals = yield* ApprovalService;
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "in_progress",
+        });
+
+        const parked = yield* lifecycle.parkForApproval({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          agentId: AgentId("order-status-agent"),
+          tool: "conversation.reply",
+          proposedInput: { bodyText: "draft" },
+          reasoning: "customer-facing reply",
+          riskLevel: "medium",
+          expiresAt: new Date("2026-06-23T12:00:00.000Z"),
+          turn: 2,
+        });
+
+        return {
+          parked,
+          approval: yield* approvals.getById(
+            parked.approval.id,
+            TenantId("tenant-a"),
+          ),
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(created.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.parked.case_.status).toBe("waiting_for_approval");
+    expect(out.approval).toMatchObject({
+      agentId: AgentId("order-status-agent"),
+      tool: "conversation.reply",
+      proposedInput: { bodyText: "draft" },
+      reasoning: "customer-facing reply",
+      riskLevel: "medium",
+      status: "pending",
+    });
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.entries[0]).toMatchObject({
+      actor: { type: "agent", id: "order-status-agent" },
+      action: "case.waiting_for_approval",
+      details: {
+        approvalId: out.approval.id,
+        tool: "conversation.reply",
+        turn: 2,
+      },
+    });
+  });
+
+  it("parks cases for customer and supplier waits with domain audit rows", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const customerCase = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "in_progress",
+        });
+        const supplierCase = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("missing-package-agent"),
+          status: "in_progress",
+        });
+
+        const customer = yield* lifecycle.parkWaitingForCustomer({
+          caseId: customerCase.id,
+          tenantId: TenantId("tenant-a"),
+          agentId: AgentId("order-status-agent"),
+          tool: "conversation.ask_customer",
+          callId: "call-customer",
+        });
+        const supplier = yield* lifecycle.parkWaitingForSupplier({
+          caseId: supplierCase.id,
+          tenantId: TenantId("tenant-a"),
+          agentId: AgentId("missing-package-agent"),
+          tool: "supplier.escalate",
+          callId: "call-supplier",
+        });
+
+        return {
+          customer,
+          supplier,
+          customerEntries: yield* audit.forCase(customerCase.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+          supplierEntries: yield* audit.forCase(supplierCase.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.customer.status).toBe("waiting_for_customer");
+    expect(out.supplier.status).toBe("waiting_for_supplier");
+    expect(out.customerEntries[0]).toMatchObject({
+      actor: { type: "agent", id: "order-status-agent" },
+      action: "case.waiting_for_customer",
+      details: { tool: "conversation.ask_customer", callId: "call-customer" },
+    });
+    expect(out.supplierEntries[0]).toMatchObject({
+      actor: { type: "agent", id: "missing-package-agent" },
+      action: "case.waiting_for_supplier",
+      details: { tool: "supplier.escalate", callId: "call-supplier" },
+    });
+  });
+
+  it("reopens a resolved case for an inbound customer event", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "resolved",
+        });
+
+        const reopened = yield* lifecycle.reopenForCustomerReply({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          eventType: "customer.replied",
+        });
+
+        return {
+          reopened,
+          entries: yield* audit.forCase(created.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.reopened.status).toBe("in_progress");
+    expect(out.entries[0]).toMatchObject({
+      actor: { type: "system", id: "runtime" },
+      action: "case.reopened",
+      details: { eventType: "customer.replied" },
+    });
+  });
+
+  it("parks reply delivery failures with durable retry data, risk flag, audit, and execution marker", async () => {
+    const replyDelivery = makeReplyDeliveryServiceTest();
+    const layerWithReplyFailureDeps = Layer.provideMerge(
+      CaseLifecycleWriterLive,
+      Layer.mergeAll(deps, replyDelivery.layer, ToolExecutionStoreTest),
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const cases = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const executions = yield* ToolExecutionStore;
+          const lifecycle = yield* CaseLifecycleWriter;
+          const created = yield* cases.create({
+            tenantId: TenantId("tenant-a"),
+            channel: "email",
+            currentAgentId: AgentId("order-status-agent"),
+            status: "in_progress",
+            mailbox: "support@store.test",
+            context: { riskFlags: ["existing"] },
+          });
+
+          const parked = yield* lifecycle.parkForReplyDeliveryFailure({
+            caseId: created.id,
+            tenantId: TenantId("tenant-a"),
+            agentId: AgentId("order-status-agent"),
+            tool: "conversation.reply",
+            draftInput: { draftId: "draft-1", bodyText: "Hi" },
+            error: { _tag: "ConnectorUnavailable" },
+            executionKey: "exec-1",
+          });
+
+          return {
+            parked,
+            fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+            entries: yield* audit.forCase(created.id, {
+              tenantId: TenantId("tenant-a"),
+            }),
+            marker: yield* executions.find(created.id, "exec-1"),
+          };
+        }),
+        layerWithReplyFailureDeps,
+      ) as Effect.Effect<
+        {
+          readonly parked: { readonly status: string };
+          readonly fetched: {
+            readonly status: string;
+            readonly context: Readonly<Record<string, unknown>>;
+          };
+          readonly entries: ReadonlyArray<{
+            readonly action: string;
+            readonly details: Readonly<Record<string, unknown>>;
+          }>;
+          readonly marker: {
+            readonly tool: string;
+            readonly resultOk: boolean | null;
+          } | null;
+        },
+        never,
+        never
+      >,
+    );
+
+    expect(out.parked.status).toBe("human_takeover");
+    expect(out.fetched.context["riskFlags"]).toEqual([
+      "existing",
+      REPLY_DELIVERY_FAILED_FLAG,
+    ]);
+    expect(replyDelivery.handle.enqueued).toEqual([
+      {
+        tenantId: TenantId("tenant-a"),
+        caseId: expect.any(String),
+        agentId: AgentId("order-status-agent"),
+        tool: "conversation.reply",
+        mailbox: "support@store.test",
+        draftId: "draft-1",
+        draft: { draftId: "draft-1", bodyText: "Hi" },
+        error: "ConnectorUnavailable",
+      },
+    ]);
+    expect(out.entries[0]).toMatchObject({
+      action: "case.escalated_to_human",
+      details: {
+        reason: REPLY_DELIVERY_FAILED_FLAG,
+        tool: "conversation.reply",
+        error: "ConnectorUnavailable",
+      },
+    });
+    expect(out.marker).toMatchObject({
+      tool: "conversation.reply",
+      resultOk: false,
     });
   });
 

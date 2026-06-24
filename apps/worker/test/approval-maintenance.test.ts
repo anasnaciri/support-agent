@@ -11,6 +11,7 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
+  CaseLifecycleWriterLive,
   CaseRepository,
   CaseRepositoryTest,
   TransactionRunnerPassthrough,
@@ -24,12 +25,14 @@ import { runApprovalMaintenanceOnce } from "../src/approval-maintenance-schedule
 //   - decided approvals whose case never resumed (the workflow event was
 //     lost between decision-commit and publish) are re-published
 
-const layer = Layer.mergeAll(
+const deps = Layer.mergeAll(
   ApprovalServiceTest,
   CaseRepositoryTest,
   AuditLogServiceTest,
   TransactionRunnerPassthrough,
 );
+
+const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
 
 const tenantId = TenantId("tenant-acme");
 

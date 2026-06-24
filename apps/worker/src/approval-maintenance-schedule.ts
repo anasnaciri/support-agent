@@ -25,9 +25,8 @@ import {
 } from "@support-agent/agent-core";
 import {
   ApprovalService,
-  AuditLogService,
+  CaseLifecycleWriter,
   CaseRepository,
-  TransactionRunner,
   makeEnqueuedWorkflowEvent,
 } from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
@@ -62,13 +61,12 @@ export const runApprovalMaintenanceOnce = (
 ): Effect.Effect<
   ApprovalMaintenanceResult,
   never,
-  ApprovalService | CaseRepository | AuditLogService | TransactionRunner
+  ApprovalService | CaseRepository | CaseLifecycleWriter
 > =>
   Effect.gen(function* () {
     const approvals = yield* ApprovalService;
     const cases = yield* CaseRepository;
-    const audit = yield* AuditLogService;
-    const tx = yield* TransactionRunner;
+    const lifecycle = yield* CaseLifecycleWriter;
     const now = opts.now ?? new Date();
     const limit = opts.limit ?? DEFAULT_LIMIT;
 
@@ -81,32 +79,18 @@ export const runApprovalMaintenanceOnce = (
       expired += 1;
       // Park the case for a human — but only when it is still waiting on
       // this approval; anything else means the case moved on already.
-      yield* tx
-        .run(
-          Effect.gen(function* () {
-            const row = yield* cases.getById(
-              approval.caseId,
-              approval.tenantId,
-            );
-            if (row.status !== "waiting_for_approval") return;
-            const updated = yield* cases.transitionStatus(
-              row.id,
-              "human_takeover",
-              { reason: "approval_expired", tenantId: approval.tenantId },
-            );
-            yield* audit.record({
-              tenantId: updated.tenantId,
-              caseId: updated.id,
-              actor: { type: "system", id: "approval-maintenance" },
-              action: "case.escalated_to_human",
-              details: {
-                reason: "approval_expired",
-                approvalId: approval.id,
-                expiresAt: approval.expiresAt.toISOString(),
-              },
-            });
-          }),
-        )
+      yield* lifecycle
+        .escalateToHuman({
+          caseId: approval.caseId,
+          tenantId: approval.tenantId,
+          actor: { type: "system", id: "approval-maintenance" },
+          reason: "approval_expired",
+          onlyFromStatus: "waiting_for_approval",
+          details: {
+            approvalId: approval.id,
+            expiresAt: approval.expiresAt.toISOString(),
+          },
+        })
         .pipe(
           Effect.catchAllCause((cause) =>
             Effect.logError(
