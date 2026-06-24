@@ -24,10 +24,69 @@ agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by
 `suggest ignore domain: true` to the case context, which the owner approves on the case page.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
+### DIAGNOSED, not yet built — automated/marketing email gets a drafted (and human-approved!) reply
+
+Production incident (case `ba2880a0-2b3a-4db4-8e93-f1085b9c9a1e`, 2026-06-24): an automated Shopify
+marketing email from `email@email.shopify.com` ("give it another try") was **misread by triage as a real
+customer question**, handed off to general-inquiry, which **drafted a `conversation.reply` — a human then
+approved it and it SENT** to the no-reply address. Only the *later* bounce messages got correctly
+classified "Out of scope: Automated delivery status notification" and resolved without replying.
+
+Root cause: there is **no deterministic filter for automated/bulk/no-reply/bounce mail** — the entire
+defense is two cheap-model (gemini-3.5-flash) scope judgments (triage + general-inquiry's out-of-scope path)
+plus a human approval, and all three failed on this message. General-inquiry's spam/offer decline is a
+prompt judgment, NOT a guarantee (`general-inquiry-agent.ts:51-54,88`). No `Auto-Submitted` / `Precedence`
+/ `no-reply` / DSN handling exists anywhere; headers ARE available at the Gmail webhook
+(`gmail-http.ts` `payload.headers[]`) but are dropped before `InboundMessage` (`agent-core/src/payloads.ts`);
+Outlook/IMAP don't retain them.
+
+Proposed fix (deterministic, two layers — design recorded, user said diagnose-only for now):
+1. **Pre-triage skip** before any LLM runs: detect automated mail (sender patterns `no-reply@`/`noreply@`/
+   `mailer-daemon@`/`postmaster@`/`bounce@`/`*.email.shopify.com` — connector-agnostic since `from.email`
+   is on every message — plus RFC headers `Auto-Submitted: auto-*`, `Precedence: bulk`, `List-Unsubscribe`,
+   `multipart/report` DSN where the connector has them). Create the case but DON'T run the agent (no tokens,
+   no reply, marked so the merchant still sees it). Natural choke point: `agent-runtime.ts` ~170 (covers all
+   connectors) and/or the Gmail webhook (earliest, no case at all).
+2. **Hard reply-recipient guard** at the send/approval-execute layer: NEVER send a customer reply to a
+   no-reply/automated/bounce address, even if an agent drafted it and a human approved it. This is the
+   belt-and-suspenders that would have stopped this exact case.
+
+Related to (and partly subsumes) the merchant skip-domains NEXT item above — but this layer is automatic
+(email standards), not manual per-domain.
+
 Current lifecycle refactor backlog from `/private/tmp/support-agent-handoff-20260623-lifecycle-refactors.md`
 and a fresh `rg` audit on 2026-06-23:
 
-LATER: ability to create custom agents: asign tools, asign who they can call or who can call them, asign a system prompt, a description and configure the other settings like permissions
+## ✅ LANDED — Merchant-authored custom agents (2026-06-24, branch `feat/custom-agents`, NOT merged)
+
+Merchants can build their own agents from `/settings/agents` — assign tools, set who-can-call-whom
+(handoffs out + `callableFrom` in), write a name/description/system prompt, pick a model, and configure
+per-tool ask/auto permissions. Shipped in 3 TDD phases (each `ci:local`-green; 2040 tests):
+
+- **Phase A — data + runtime.** New `tenant_custom_agents` table (migration `0029`; whole AgentConfig per
+  workspace, `custom:` id prefix, status CHECK, cascade). `CustomAgentService` (Tag in services, Live in db).
+  Shared prompt scaffold (`buildCustomAgentPromptTemplate` in agents) wraps raw merchant instructions with
+  safety/approval rules at resolve time. New **`AgentResolver`** seam (Tag in services, Live in agents):
+  built-ins first, then the tenant's active customs. The runtime resolves all 4 agent-lookup sites through
+  it; an initial-load miss now **fails safe to `human_takeover` (`agent_unresolvable`)** instead of an
+  infinite pg-boss retry (latent bug fixed). v1 customs are always `mode:subagent` (triage stays the entry).
+- **Phase B — dashboard CRUD.** `AgentDto.isCustom` + `CustomAgentView`/`CustomAgentWriteBody` contracts;
+  `GET /dashboard/catalog` switched to **workspace scope** and unions customs. Pure
+  `validateCustomAgentInput` (services) + `ASSIGNABLE_TOOLS` (tools, = ALL_TOOLS minus
+  `agent.handoff`/`case.update_context`/`case.update_status`; **money tools assignable, gated**). Save-time
+  scope check vs `connector_connections` (runtime PermissionService deny is the backstop). New
+  `POST/GET /dashboard/custom-agents[/:id][/delete]` gated on existing RBAC `settings.agents`. Dashboard:
+  New-agent button + custom badge, create/edit `AgentForm`, server actions.
+- **Phase C — inbound routing.** `customSpecialists` on AgentResolver (loaded once per tick);
+  `effectiveHandoffIds` = static handoffs ∪ customs whose `callableFrom` includes the caller, used for both
+  handoff allow-checks AND a trusted `[Additional specialists …]` roster injected into `buildSystemPrompt`.
+  Form gains a Routing card (reachable-from + when-to-use).
+
+Invariants kept: PermissionService gates every custom-agent tool; turn budget shared across handoff; park
+guards agent-agnostic; tenant isolation (resolver always passes tenantId); dependency rule holds (new edge
+is `agents → services` Tags only — services never imports agents). **NOT verified live** (needs a tenant LLM
+credential + a real triage→custom handoff). Follow-ups: a custom agent is only reachable from agents that
+already hold `agent.handoff` (triage); name-uniqueness not enforced; `callableFrom` self-route not special-cased.
 
 - [x] Move remaining `packages/services/src/agent-runtime.ts` case lifecycle write choreography into
       `CaseLifecycleWriter` without adding a generic arbitrary-transition method. Remaining production
