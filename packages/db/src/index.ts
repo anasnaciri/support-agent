@@ -10,6 +10,7 @@ export * from "./account-openrouter-credential-store-live.js";
 export * from "./shopify-app-provisioning-live.js";
 export * from "./llm-credential-resolver-live.js";
 export * from "./tenant-agent-overrides-live.js";
+export * from "./custom-agent-service-live.js";
 export * from "./knowledge-base-live.js";
 export * from "./tenant-repository-live.js";
 export * from "./timer-service-live.js";
