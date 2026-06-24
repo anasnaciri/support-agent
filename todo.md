@@ -24,6 +24,124 @@ agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by
 `suggest ignore domain: true` to the case context, which the owner approves on the case page.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
+Current lifecycle refactor backlog from `/private/tmp/support-agent-handoff-20260623-lifecycle-refactors.md`
+and a fresh `rg` audit on 2026-06-23:
+
+LATER: ability to create custom agents: asign tools, asign who they can call or who can call them, asign a system prompt, a description and configure the other settings like permissions
+
+- [ ] Move remaining `packages/services/src/agent-runtime.ts` case lifecycle write choreography into
+      `CaseLifecycleWriter` without adding a generic arbitrary-transition method. Remaining production
+      paths include runtime human escalations, approved-tool success/failure outcomes, approval rejection,
+      resolved-case reopen, approval/customer/supplier parking, LLM credential/safety/context escalation,
+      reply-delivery-failure parking, and final-message resolution.
+- [ ] Route approval expiry escalation in `apps/worker/src/approval-maintenance-schedule.ts` through
+      `CaseLifecycleWriter`.
+- [ ] Route workflow dead-letter escalation in `apps/worker/src/workflow-dead-letter.ts` through
+      `CaseLifecycleWriter`.
+- [ ] Decide whether `packages/tools/src/case/update-status.ts` remains a deliberately low-level
+      agent tool over `CaseRepository.transitionStatus`, or gets a lifecycle-writer operation so every
+      agent-initiated status change owns its audit shape at the service boundary.
+- [ ] After the above, rerun
+      `rg "transitionStatus\\(|case\\.taken_over|case\\.resumed|case\\.status_changed|case\\.resolved|case\\.escalated_to_human" packages apps -n`
+      and confirm production hits are limited to `CaseLifecycleWriter` plus intentional low-level
+      repository/tool/test/seed code.
+
+## ✅ LANDED — "Issue refund" button for agent-recommended refunds (2026-06-24)
+
+Closes a real gap found while diagnosing prod case `914baed3-…`: the refund-review agent took
+PATH B (read-only `refund.recommend` + a drafted `conversation.reply`), the merchant approved the
+reply — which **promised the customer a refund** ("I have submitted this refund request… you should
+see the confirmation shortly") — but **no `refund.create` ever ran**, so no money moved and the
+dashboard offered no button to issue it (a recommendation is purely informational: a badge on the
+reply approval + a timeline item, no action). Operators' only path was Shopify admin.
+
+New operator action: on a case whose latest `refund.recommend` carries a concrete amount and where no
+refund has been issued, the case page shows an **"Issue refund"** card (visible regardless of case
+status, incl. `resolved`). Clicking it (confirm dialog) issues the recommended refund via
+`ShopifyService.refundOrder` (notifyCustomer: true, stable idempotency key over case+order+amount),
+records a `case.refund_issued` audit row, and retires the button. Gated on the existing
+**`refunds.issue`** RBAC permission (route-level; open-mode/owner pass via `decideAuthz`). Does NOT
+change case status. TDD: pure DI core `apps/api/.../case-refund.ts` (`issueCaseRefund`, outcomes
+`issued | invalid_amount | order_not_found | already_refunded | currency_mismatch | refund_failed`)
++ pure `issuableRefund`/`refundAlreadyIssued` helpers in `refund-recommendation.ts`; 13 new unit
+tests; `tsc -b` + dashboard `tsc --noEmit` green; 330 dashboard/contracts + 20 api-unit tests green.
+Files: `apps/api/.../case-refund.ts` (+test), `case-handlers.ts` (`handleDashboardIssueRefund`),
+`routes.ts` (`POST /dashboard/cases/:id/refund`), `apps/dashboard/lib/api-client.ts` (`issueRefund`),
+`app/cases/[id]/{actions.ts,page.tsx,refund-recommendation.ts}`, `lib/labels.ts`,
+`packages/dashboard-contracts/.../rbac-permissions.ts` (broadened `refunds.issue` description).
+**NOT committed.**
+
+FOLLOW-UPS (deliberately out of scope — user scoped this to the button only):
+- [ ] **Prompt fix (recurrence):** the PATH B reply over-promised — it claimed a refund was "submitted
+      for approval" when PATH B submits nothing. Tighten `refund-review-agent` so PATH B replies only
+      say "pending confirmation" (its own example already does), and/or prefer PATH A (`refund.create`,
+      which creates a real approvable refund) when the customer clearly wants money back on a
+      refundable order. The mid-zone $24.92 here WOULD have resolved to "ask" → a real approval+button.
+- [ ] Manual remediation: issue Christine's ($24.92, order #3108) refund — promised in the sent reply,
+      never issued. Once this ships, the new button does it; until deployed, do it in Shopify admin.
+- [ ] Consider de-duping the Shopify refund-confirmation email vs. an approved reply that also mentions
+      the refund (both can go out if the operator issues the refund AND approves a pending reply).
+- [ ] Amount is fixed to the recommendation (no partial-amount editing in v1).
+
+## ✅ LANDED — Order lookup by confirmation number (2026-06-23)
+
+Customers often quote the Shopify **confirmation number** (random alphanumeric, e.g. `XPAV284CT`) from
+their order-confirmation email instead of the `#1001` order name. `shopify.get_order` now resolves it:
+the tool tries `findOrderByName` first and, on a miss, falls back to a new
+`ShopifyService.findOrderByConfirmationNumber` (Shopify `orders(query: "confirmation_number:<code>")`,
+code stripped to alphanumerics, `first: 1`). `confirmationNumber` is also added to `ShopifyOrder`
+(`ORDER_FIELDS` selection + `mapOrder`) and surfaced on the tool output so the agent can quote it back.
+Triage + order-status prompts updated to treat a confirmation code as an order identifier and pass it
+through verbatim. The dashboard case panel (`resolveOrderForContext`) mirrors the same fallback so the
+operator view resolves confirmation-only cases too. **Confirmation numbers are NOT unique** — a match is
+never proof of identity; the existing order-email identity gate (`order_customer_mismatch`) still gates
+disclosure. TDD; `pnpm build` green; tools/providers/api shopify suites green (90 tests in the 3 touched
+files). Files: `agent-core/src/shopify.ts`, `services/src/shopify-service.ts` (+`ordersByConfirmationNumber`
+test fixture), `providers/src/shopify-service-live.ts`, `tools/src/shopify/get-order.ts`,
+`agents/src/{support-triage,order-status-agent}.ts`, `api .../dashboard/shopify-panels.ts`; 13 e2e order
+fixtures got `confirmationNumber: null`. **NOT committed** (working tree holds unrelated lifecycle-refactor WIP).
+
+## ✅ LANDED — Triage no longer silently resolves; single-order inference (2026-06-24)
+
+Diagnosed from a real audit trail (case `e6206180-…`): `support-triage` classified an
+order-requiring case, found **no order id**, emitted a bare `final_message`, and the runtime
+**auto-resolved the case with nothing done** — no reply, no handoff. Root cause was structural, two
+layers:
+
+1. **Triage prompt fallback** told the agent to "respond with plain text only" when an order-requiring
+   category had no `identifiedOrderId`. That plain text is a `final_message`, which the runtime resolves.
+2. **Runtime** auto-resolves on *any* `final_message`, with no notion that a router must never be terminal.
+
+Fix:
+
+- **Triage always hands off** — removed the terminal plain-text branch; every order-requiring category
+  routes to its specialist even without an order id (`packages/agents/src/support-triage.ts`).
+- **Runtime guard (new invariant):** a routing agent (`handoffs.length > 0`, i.e. triage) that reaches
+  `final_message` no longer resolves — it parks `human_takeover` via `escalateToHuman`
+  (`reason: "router_final_message_no_handoff"`). Keyed on `handoffs`, NOT `mode` (a terminal
+  `mode: "primary"` agent with no handoffs is a legitimate resolver). `agent-runtime.ts` final_message block.
+- **Single-order inference (user ask: "if the customer has only one order, infer it; don't ask for the
+  number"):** new `ShopifyService.findOrdersByEmail` (Live: `orders(query: "email:…", sortKey CREATED_AT,
+  reverse)`) + new read-only tool `shopify.find_customer_order` (returns `single` w/ the order | `none` |
+  `multiple`). The four order specialists share `ORDER_RESOLUTION_LINES`
+  (`packages/agents/src/order-resolution.ts`): use `identifiedOrderId` if present, else look the customer
+  up by email — exactly one order → use it silently; zero/many → `conversation.ask_customer`. Added
+  `conversation.ask_customer` to refund-review + missing-package (they lacked it) and the new tool to all
+  four; bumped their `maxTurnsPerTick`.
+- `shopify.get_order` refactored to export `ShopifyOrderOutput` + `projectShopifyOrder` (shared projection).
+
+TDD; `pnpm build` green. New/updated tests green (182 across touched areas): tool unit
+(`tools/test/shopify.test.ts`, single/none/multiple + read-only surface), Live query
+(`providers/test/shopify-service-live.test.ts`, `findOrdersByEmail`), agent config shapes, and two worker
+e2e regressions — the silent-resolve repro (triage→`human_takeover`, not resolved) and the
+no-order-id→single-order-inference flow (drafts a reply, parks for approval, never asks). The e2e file's
+per-test `ToolRegistryWith([…])` subsets were switched to `ToolRegistryWith(ALL_TOOLS)` so a test no longer
+breaks merely because an agent gained a tool. **NOT committed** (working tree holds the user's unrelated
+lifecycle-refactor WIP in `case-lifecycle-writer.ts`, `agent-runtime.ts`, `approval-maintenance-schedule.ts`,
+`workflow-dead-letter.ts`, `update-status.ts` + their tests). **Known follow-up:** the
+no-order-id + zero/multiple-orders edge in damaged-product shares the single `ask_customer` budget with the
+photo request — fine on the common single-order path; revisit if it bites.
+
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
@@ -100,6 +218,21 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-23 — Refreshed `CAPABILITIES.md` to cover everything landed since the 2026-06-12 snapshot.**
+  Regenerated the capability inventory from shipped code at `e191ac4` (109 commits past the old `11f24b2`
+  snapshot). Verified each area against the code before documenting. Added: a new **Team Members And
+  Roles** (RBAC) section; the **Durable Supplier Portal** (`supplier.escalate`, `waiting_for_supplier`
+  park + `supplier.updated` re-engagement, walled `/supplier` surface, supplier role + isolation guard,
+  durable notify sweep); the order-status **customer-identity disclosure gate**; **reply-delivery retry**
+  (outbox, retry sweep, "Retry sending email", failed-send never resolves); **manual reply composer +
+  Rephrase with AI** (configurable rephrase model); **manual case status change**; IMAP **message-id
+  correlation** + send-reliability; **email HTML rendering**; the **apps/api feature-first** composition
+  root; **WorkOS-JWT dashboard auth (S14)**; **operational credential-key rotation (S15)**; **connector
+  health on integrations**; **Shopify workspace connect gate**; admin **OpenRouter key by account/
+  workspace** + org-name display; **Guidezilla** rebrand; **Fly.io** deploy target. Removed the four
+  now-resolved boundary items (per-workspace RBAC, forwarded-JWT verification, connector-health
+  rendering, previous-encryption-key wiring) and added residual ones (`x-user-email` low-trust, supplier
+  loop unverified live, thread tab renders by root, supplier-loop live verification).
 - **2026-06-23 — Architecture review follow-up: dashboard lifecycle writes now use `CaseLifecycleWriter` (TDD).**
   Completed the next migration target from the review: `packages/db/src/dashboard-writes.ts` no longer
   hand-rolls the case lifecycle transaction recipe for take-over, resume, or manual status changes.
@@ -155,14 +288,14 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   resolved, reopen a resolved/failed case, or park it waiting on the customer. **No schema change**
   (reuses `cases` + `case_state_transitions` + `audit_log` + `approvals`). Build:
   - **agent-core** (`case.ts`): `MERCHANT_SETTABLE_STATUSES` = `{in_progress, waiting_for_customer,
-    resolved, failed}` (curated — agent-internal/parked states like `triaging`/`waiting_for_supplier`/
+resolved, failed}` (curated — agent-internal/parked states like `triaging`/`waiting_for_supplier`/
     `waiting_for_approval`/`human_takeover` are NOT hand-settable) + `isMerchantSettableStatus` +
     `allowedManualStatusTargets(from)` = settable ∩ `isStatusTransitionAllowed(from,·)` − `{from}`. The
     manual control is re-checked against the §10 matrix, so it never bypasses the state machine.
   - **packages/db** (`dashboard-writes.ts`): `setCaseStatus` mirrors `takeOverCase` — load (tenant-scoped)
     → validate settable + matrix → update `cases` (+ `resolvedAt` when→resolved) + `case_state_transitions`
-    + `audit_log` (`case.status_changed`) + cancel pending approvals, all ONE tx. Outcomes:
-    `updated | unchanged | invalid_status | transition_not_allowed | case_not_found`.
+    - `audit_log` (`case.status_changed`) + cancel pending approvals, all ONE tx. Outcomes:
+      `updated | unchanged | invalid_status | transition_not_allowed | case_not_found`.
   - **contracts**: new `cases.set_status` RBAC permission (implies `cases.view`; Owner auto-has it).
   - **apps/api**: `handleDashboardSetCaseStatus` + `POST /dashboard/cases/:id/status` gated on
     `cases.set_status`. Pure DB transition (does NOT tick the agent — "Retry now" is for that).
@@ -176,7 +309,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
     (the explicitly-tested L17/takeover-race guard), so a taken-over case can be hand-set to `in_progress`
     or `failed` but not directly `resolved`. **Follow-up:** if merchants need "I handled this takeover,
     mark it resolved," that needs an explicit invariant decision (the runtime's 2.95 park guard already
-    prevents the *agent* from auto-resolving, so loosening the matrix for an explicit human action would
+    prevents the _agent_ from auto-resolving, so loosening the matrix for an explicit human action would
     be safe) — deferred, not done here.
 - **2026-06-23 — Maintenance: verified `733a213`, cleaned tree + polluted dev DB, definitive green `ci:local`.**
   Follow-up to the background agent that committed the install-link feature with `--no-verify`. (a) Confirmed
@@ -235,7 +368,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
     composer; selecting persists via `setRephraseModelAction`. The picker only renders when the catalog
     is readable — the case page fetches it via a 403-tolerant `api.replyModels` so a reply-only member
     (no `settings.agents`) still gets the composer, just without the picker, instead of being bounced.
-  - **Permission model**: rephrase + send stay on `cases.reply`; *changing the model* needs
+  - **Permission model**: rephrase + send stay on `cases.reply`; _changing the model_ needs
     `settings.agents` (it's a workspace setting). Verified: `pnpm build` green; unit + the new DB
     integration test pass; dashboard `typecheck` clean.
 
@@ -372,10 +505,10 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   failure exits, worker settlement/dead-letter handling, reply-delivery retry path, supplier notification
   sweep, approval maintenance, and merchant dashboard surfacing. Verified the focused recovery suites:
   `pnpm test -- --run apps/worker/test/workflow-job.test.ts apps/worker/test/reply-delivery-failure.test.ts
-  apps/worker/test/reply-delivery-retry.test.ts apps/worker/test/supplier-notify.test.ts
-  apps/worker/test/approval-maintenance.test.ts apps/dashboard/test/risk-flag-label.test.ts
-  apps/dashboard/test/case-timeline.test.ts apps/dashboard/test/labels.test.ts
-  apps/dashboard/test/status-variants.test.ts` (58 passed). `case-retry-send.integration.test.ts` was
+apps/worker/test/reply-delivery-retry.test.ts apps/worker/test/supplier-notify.test.ts
+apps/worker/test/approval-maintenance.test.ts apps/dashboard/test/risk-flag-label.test.ts
+apps/dashboard/test/case-timeline.test.ts apps/dashboard/test/labels.test.ts
+apps/dashboard/test/status-variants.test.ts` (58 passed). `case-retry-send.integration.test.ts` was
   invoked but skipped because `DATABASE_URL` is not set. Covered paths: LLM credential/safety/context
   failures, max-turn exhaustion, approved-tool failures, expired approvals, retry-exhausted workflow jobs,
   and customer-reply send failures all park or surface as intended in normal conditions. Follow-ups found:
@@ -517,9 +650,9 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
     from "Retry now" = re-run agent) + a result banner + the risk chip. Only **retriable transport**
     failures (`ConversationSendFailed`/`ProviderUnavailable`/`Auth*`) enqueue — a recipient/mailbox
     validation reject still surfaces to the agent as before. **New invariant:** a failed customer-reply
-    delivery must NEVER resolve the case — it parks (human_takeover) + persists to the `reply_deliveries`
+    delivery must NEVER resolve the case — it parks (human*takeover) + persists to the `reply_deliveries`
     outbox for retry. See [[project_reply_delivery_retry]].
-    _Follow-ups:_ (a) cancel/skip the pending outbox row when a human hands the case back so a stale
+    \_Follow-ups:* (a) cancel/skip the pending outbox row when a human hands the case back so a stale
     draft can't auto-send later (partly covered by the human_takeover guard) — NOT built;
     (b) make the manual retry trigger an immediate sweep pass (today it waits ≤60s for the cron) —
     NOT built; (c) ✅ DONE — the failed `tool.invoked` audit row now carries `error: <tag>` via
@@ -552,7 +685,7 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   DEPLOYED stack, per the user): Fly api (`support-agent-backend`, VERSION 4) returned **200 for
   every** `/dashboard/cases/:id` + `/shopify` request — no backend 5xx — so the throw was a
   render-time exception in the dashboard's Next server (CF Worker `support-agent-dashboard`) while
-  rendering a *successful* 200. `wrangler tail` was too flaky to capture it, so root-caused
+  rendering a _successful_ 200. `wrangler tail` was too flaky to capture it, so root-caused
   statically. **Root cause:** Path B reads orders over JSON, and `JSON.parse` has no Date type, so
   `ShopifyFulfillment.{updatedAt,estimatedDeliveryAt,deliveredAt}` (typed `Date` in
   `agent-core/shopify.ts`) are ISO **strings** at runtime. `OrderPanel.tsx` called real Date methods

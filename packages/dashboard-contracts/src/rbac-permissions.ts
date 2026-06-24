@@ -125,7 +125,7 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     id: "refunds.issue",
     label: "Issue refunds",
     description:
-      "Approve refund actions. Required in addition to “Approve or reject” for any approval that issues a refund.",
+      "Issue refunds — both approving a refund the agent proposed (required in addition to “Approve or reject”) and issuing a refund the agent only recommended, directly from the case.",
     category: "Approvals",
   },
   // ---- Knowledge ----

@@ -74,6 +74,30 @@ export const extractRefundRecommendation = (
   return null;
 };
 
+/**
+ * True once the operator has issued a refund on this case (an
+ * operator-initiated `refund.create` lands a `case.refund_issued` audit row).
+ * Used to retire the "Issue refund" button so a refund can't be double-issued
+ * from the dashboard.
+ */
+export const refundAlreadyIssued = (
+  entries: ReadonlyArray<RecommendationAuditEntry>,
+): boolean => entries.some((e) => e.action === "case.refund_issued");
+
+/**
+ * The recommendation the "Issue refund" button should act on, or `null` when no
+ * button should show. Requires (a) a latest recommendation that carries a
+ * concrete `amount` — `deny` and amount-less `investigate` are advisory only and
+ * have nothing to issue — and (b) no refund already issued on the case.
+ */
+export const issuableRefund = (
+  entries: ReadonlyArray<RecommendationAuditEntry>,
+): RefundRecommendationSummary | null => {
+  if (refundAlreadyIssued(entries)) return null;
+  const summary = extractRefundRecommendation(entries);
+  return summary && summary.amount ? summary : null;
+};
+
 export const RECOMMENDATION_LABEL: Readonly<
   Record<RefundRecommendationSummary["recommendation"], string>
 > = {

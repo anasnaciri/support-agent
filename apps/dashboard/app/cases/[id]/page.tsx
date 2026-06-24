@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
@@ -33,6 +34,7 @@ import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { ReplyComposer } from "./ReplyComposer";
 import {
+  issueRefundAction,
   resumeAction,
   retryAction,
   retrySendAction,
@@ -51,6 +53,7 @@ import {
 import {
   RECOMMENDATION_LABEL,
   extractRefundRecommendation,
+  issuableRefund,
   recommendationVariant,
   refundRecommendationFromEntry,
   type RefundRecommendationSummary,
@@ -74,6 +77,7 @@ interface Params {
     readonly retrySend?: string;
     readonly replied?: string;
     readonly statusChanged?: string;
+    readonly refundIssued?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -214,6 +218,44 @@ const statusChangedBanner = (kind: string | undefined): Banner | null => {
       tone: "warn",
       text: "That status change isn't allowed from where this case is now.",
     };
+  }
+  return null;
+};
+
+const refundIssuedBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "issued") {
+    return {
+      tone: "success",
+      text: "Refund issued. The customer is notified by Shopify and the refund is recorded on the case.",
+    };
+  }
+  if (kind === "already_refunded") {
+    return {
+      tone: "info",
+      text: "That order is already fully refunded — nothing more to issue.",
+    };
+  }
+  if (kind === "order_not_found") {
+    return {
+      tone: "warn",
+      text: "Couldn't find the order to refund. Open it in Shopify to issue the refund there.",
+    };
+  }
+  if (kind === "currency_mismatch") {
+    return {
+      tone: "warn",
+      text: "The refund currency doesn't match the order's — issue this refund in Shopify instead.",
+    };
+  }
+  if (kind === "refund_failed") {
+    return {
+      tone: "warn",
+      text: "Shopify rejected the refund. No money moved — try again or issue it in Shopify.",
+    };
+  }
+  if (kind === "invalid_amount") {
+    return { tone: "warn", text: "That refund amount isn't valid." };
   }
   return null;
 };
@@ -524,6 +566,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     retrySendBanner(sp.retrySend) ??
     replyBanner(sp.replied) ??
     statusChangedBanner(sp.statusChanged) ??
+    refundIssuedBanner(sp.refundIssued) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread] = await Promise.all([
@@ -589,6 +632,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     .slice()
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const tokenRollup = sumCaseTokens(entries);
+  // The agent only *recommended* a refund (PATH B) and never issued one — offer
+  // the operator a button to issue it directly. `issuableRefund` returns null
+  // once a refund's been issued, or when the recommendation has no amount.
+  const refundToIssue = issuableRefund(entries);
   const summaryText =
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
@@ -764,6 +811,55 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           ) : null}
         </div>
       </div>
+
+      {refundToIssue ? (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold">
+                  Agent recommended a refund
+                </span>
+                <Badge
+                  variant={recommendationVariant(refundToIssue.recommendation)}
+                  className="text-xs"
+                >
+                  {RECOMMENDATION_LABEL[refundToIssue.recommendation]}
+                </Badge>
+                <span className="font-mono text-sm">
+                  {refundToIssue.amount!.amount}{" "}
+                  {refundToIssue.amount!.currencyCode}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {refundToIssue.reasoning
+                  ? refundToIssue.reasoning
+                  : "Issue this refund on the customer's order. Shopify emails them the confirmation."}
+              </p>
+            </div>
+            <form action={issueRefundAction}>
+              <input type="hidden" name="caseId" value={caseRow.id} />
+              <input
+                type="hidden"
+                name="amount"
+                value={refundToIssue.amount!.amount}
+              />
+              <input
+                type="hidden"
+                name="currencyCode"
+                value={refundToIssue.amount!.currencyCode}
+              />
+              <ConfirmSubmitButton
+                title="Issue this refund?"
+                description={`This moves real money: ${refundToIssue.amount!.amount} ${refundToIssue.amount!.currencyCode} is refunded to the customer's original payment method and Shopify emails them the confirmation. This can't be undone from here.`}
+                confirmLabel="Issue refund"
+              >
+                Issue refund
+              </ConfirmSubmitButton>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {pendingApprovals.map((a) => (
         <ApprovalCard

@@ -12,6 +12,7 @@ import {
   handleDashboardCaseDetail,
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
+  handleDashboardIssueRefund,
   handleDashboardRephrase,
   handleDashboardCaseShopify,
   handleDashboardCases,
@@ -241,6 +242,12 @@ export const registerDashboardRoutes = (
     "Send a human-drafted customer reply while driving a taken-over case",
     handleDashboardCaseReply,
     "cases.reply",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/refund",
+    "Issue an agent-recommended refund on a case (manager)",
+    handleDashboardIssueRefund,
+    "refunds.issue",
   );
   dashboardPost(
     "/dashboard/rephrase",

@@ -371,6 +371,15 @@ export interface SetCaseStatusOutcomeView {
   readonly status?: string;
   readonly canceledApprovals?: number;
 }
+export interface IssueRefundOutcomeView {
+  readonly kind: string;
+  readonly refundId?: string;
+  readonly amount?: { readonly amount: string; readonly currencyCode: string };
+  readonly createdAt?: string;
+  readonly orderCurrency?: string;
+  readonly requestedCurrency?: string;
+  readonly error?: string;
+}
 
 export interface CaseShopifyPanels {
   readonly customer: ShopifyCustomer | null;
@@ -952,6 +961,25 @@ export const api = {
       ctx,
     });
     return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Issue an agent-recommended refund directly on a case. The agent only
+  // *recommended* the refund (read-only), so there's no approval to approve;
+  // this runs the equivalent of refund.create under the operator's authority
+  // (gated on the refunds.issue permission). Returns the discriminated outcome
+  // (issued | order_not_found | invalid_amount | already_refunded |
+  // currency_mismatch | refund_failed | case_not_found).
+  issueRefund: async (
+    ctx: CallCtx,
+    caseId: string,
+    amount: { readonly amount: string; readonly currencyCode: string },
+  ): Promise<IssueRefundOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/refund`, {
+      method: "POST",
+      body: { amount },
+      ctx,
+    });
+    return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
   },
 
   // Resume + an immediate `case.resumed` tick — the agent retries now

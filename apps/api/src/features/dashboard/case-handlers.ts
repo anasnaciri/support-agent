@@ -8,12 +8,19 @@ import {
   ConversationService,
   decisionToEvent,
   LLMService,
+  ShopifyService,
   TenantRepository,
   parseThreadId,
   namespaceThreadId,
   ShopifyAppProvisioningStore,
 } from "@support-agent/services";
-import { CaseId, TenantId, ThreadId, UserId } from "@support-agent/agent-core";
+import {
+  CaseId,
+  OrderId,
+  TenantId,
+  ThreadId,
+  UserId,
+} from "@support-agent/agent-core";
 import { randomUUID } from "node:crypto";
 import {
   activeShopifyShopDomain,
@@ -44,6 +51,7 @@ import {
   sendManualReply,
   type ManualReplyCaseView,
 } from "./case-reply.js";
+import { issueCaseRefund } from "./case-refund.js";
 import {
   buildRephraseMessages,
   rephraseDraft,
@@ -847,6 +855,139 @@ export const handleDashboardCaseReply = async (
           : outcome.kind === "send_failed"
             ? 502
             : 409; // not_in_takeover | no_thread
+  return sendJson(res, status, outcome);
+};
+
+// POST /dashboard/cases/:id/refund — operator issues an agent-recommended
+// refund directly. Route-gated on `refunds.issue` (moving money is its own
+// permission, not implied by any `cases.*`). The agent took PATH B and only
+// *recommended* a refund (read-only `refund.recommend`), so there's no approval
+// to approve — this runs the equivalent of `refund.create` under operator
+// authorization. The orchestration + guards live in the unit-tested
+// `issueCaseRefund` core; this handler wires it to the live services: resolve
+// the case's order (same resolver the panel uses), issue via ShopifyService, and
+// record a `case.refund_issued` audit row. Works regardless of case status, so a
+// resolved case whose reply already promised the refund can still be paid.
+export const handleDashboardIssueRefund = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const amountRaw =
+    body["amount"] && typeof body["amount"] === "object"
+      ? (body["amount"] as Record<string, unknown>)
+      : {};
+  const amount = {
+    amount: typeof amountRaw["amount"] === "string" ? amountRaw["amount"] : "",
+    currencyCode:
+      typeof amountRaw["currencyCode"] === "string"
+        ? amountRaw["currencyCode"]
+        : "",
+  };
+  const tenantId = TenantId(auth.tenantId);
+  const caseId = CaseId(id);
+  const userId = auth.userId;
+
+  // Tenant-scoped case load → context (null = case missing / another tenant).
+  const caseRow = await runWithDb(layer, (db) =>
+    caseContextForTenant(db, auth.tenantId, id),
+  );
+  if (!caseRow) return sendJson(res, 404, { kind: "case_not_found" });
+  const context = (caseRow.context ?? {}) as Record<string, unknown>;
+
+  const outcome = await issueCaseRefund({
+    amount,
+    loadOrder: () =>
+      Effect.runPromise(
+        Effect.provide(
+          resolveOrderForContext(tenantId, context).pipe(
+            Effect.map((order) =>
+              order
+                ? {
+                    orderId: String(order.id),
+                    currencyCode: order.totalPrice.currencyCode,
+                    financialStatus: order.financialStatus,
+                  }
+                : null,
+            ),
+          ),
+          layer,
+        ),
+      ),
+    refund: async ({ orderId, amount: money }) => {
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const shopify = yield* ShopifyService;
+            return yield* shopify
+              .refundOrder(tenantId, {
+                orderId: OrderId(orderId),
+                amount: {
+                  amount: money.amount,
+                  currencyCode: money.currencyCode,
+                },
+                note: `Refund issued from dashboard (agent recommendation) — case ${id}`,
+                notifyCustomer: true,
+                // Stable over (case, order, amount) so a double-click / retry
+                // can't double-refund (mirrors refund.create's idempotencyKey).
+                idempotencyKey: `dash-refund:${id}:${orderId}:${money.amount}:${money.currencyCode}`,
+              })
+              .pipe(Effect.either);
+          }),
+          layer,
+        ),
+      );
+      if (result._tag === "Left") throw new Error(result.left._tag);
+      return {
+        id: result.right.id,
+        amount: {
+          amount: result.right.amount.amount,
+          currencyCode: result.right.amount.currencyCode,
+        },
+        createdAt: result.right.createdAt.toISOString(),
+      };
+    },
+    recordIssued: (refund) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const audit = yield* AuditLogService;
+            yield* audit
+              .record({
+                tenantId,
+                caseId,
+                actor: { type: "user", id: userId },
+                action: "case.refund_issued",
+                details: {
+                  refundId: refund.id,
+                  amount: refund.amount.amount,
+                  currencyCode: refund.amount.currencyCode,
+                  via: "dashboard_recommendation",
+                },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+          }),
+          layer,
+        ),
+      ),
+  });
+
+  const status =
+    outcome.kind === "issued"
+      ? 200
+      : outcome.kind === "order_not_found"
+        ? 404
+        : outcome.kind === "invalid_amount"
+          ? 400
+          : outcome.kind === "refund_failed"
+            ? 502
+            : 409; // already_refunded | currency_mismatch
   return sendJson(res, status, outcome);
 };
 

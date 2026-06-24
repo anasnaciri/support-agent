@@ -65,6 +65,26 @@ export const setStatusAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?statusChanged=${result.kind}`);
 };
 
+// Issue an agent-recommended refund directly from the case page. The agent took
+// PATH B (recommend + draft a reply) so there's no approval to approve — this
+// runs the equivalent of refund.create under the operator's authority. The
+// amount + currency are the recommended values carried on the form.
+export const issueRefundAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const amount = formData.get("amount");
+  const currencyCode = formData.get("currencyCode");
+  const ctx = await getDashboardContext();
+
+  const result = await api.issueRefund(ctx, caseId, {
+    amount: typeof amount === "string" ? amount : "",
+    currencyCode: typeof currencyCode === "string" ? currencyCode : "",
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?refundIssued=${result.kind}`);
+};
+
 // Send a human-drafted customer reply while driving a taken-over case. Goes
 // out on the same email thread the agent uses; the case stays in human_takeover.
 export const sendReplyAction = async (formData: FormData): Promise<void> => {
