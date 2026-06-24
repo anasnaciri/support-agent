@@ -503,6 +503,80 @@ export type TenantAgentOverrideRow =
 export type TenantAgentOverrideInsert =
   typeof tenantAgentOverrides.$inferInsert;
 
+// Merchant-authored custom agents (vs `tenant_agent_overrides`, which only
+// patches the in-code built-ins). A row here is a WHOLE agent config the
+// merchant built from the dashboard: its own instructions, tool set, handoff
+// graph, and per-tool permissions. The runtime resolves it through the
+// `AgentResolver` seam (built-ins first, then this table) and projects it to a
+// full `AgentConfig` at read time — `instructions` stays RAW so the shared
+// prompt scaffold can be re-applied on every read without a backfill.
+//
+// `agent_id` carries the reserved `custom:` prefix (e.g. `custom:V1StGXR8`) so a
+// custom id can never shadow a bare built-in id, and it is text (no FK) for the
+// same reason built-in ids are: agent ids are runtime identifiers, not rows in
+// another table. Composite PK on (tenant_id, agent_id) keeps the same slug in
+// two workspaces independent and makes upserts race-safe; the table is
+// cascade-deleted with its tenant. `status` gates resolvability:
+// `active` runs, `draft`/`disabled` are kept but never resolved (soft-delete).
+// `mode`/`provider` are intentionally absent — every v1 custom agent is a
+// `subagent` on the tenant BYOK `openrouter` path, so the resolver pins both.
+export const tenantCustomAgents = pgTable(
+  "tenant_custom_agents",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    agentId: text("agent_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    // Merchant-authored RAW instructions — NOT the composed prompt. The
+    // resolver wraps these in the shared scaffold at read time.
+    instructions: text("instructions").notNull(),
+    model: text("model").notNull(),
+    // Tool NAMES (e.g. "shopify.get_order"). `agent.handoff` is implicit and
+    // never stored here; the runtime always grants it.
+    tools: jsonb("tools").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Outbound handoff targets (built-in or other custom ids in this workspace).
+    handoffs: jsonb("handoffs")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Inbound opt-in (Phase C): agent ids this agent agrees to be callable FROM.
+    callableFrom: jsonb("callable_from")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Per-tool "ask first" vs "auto" choices, same shape + semantics as
+    // `tenant_agent_overrides.tool_permissions`. Overlays the resolved config's
+    // permissionOverrides.
+    permissionOverrides: jsonb("permission_overrides")
+      .$type<Record<string, Permission>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // One sentence the Phase C handoff roster shows a calling agent.
+    whenToUse: text("when_to_use"),
+    maxTurnsPerTick: integer("max_turns_per_tick").notNull().default(6),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.agentId] }),
+    check(
+      "tenant_custom_agents_status_check",
+      sql`${t.status} IN ('draft','active','disabled')`,
+    ),
+    index("tenant_custom_agents_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export type TenantCustomAgentRow = typeof tenantCustomAgents.$inferSelect;
+export type TenantCustomAgentInsert = typeof tenantCustomAgents.$inferInsert;
+
 // Tenant-authored knowledge base: store policy / reference documents (shipping
 // policy, returns policy, FAQs, …) the support agents consult at runtime via
 // the `knowledge.search` tool. Dedicated table (NOT the `tenants.settings`
