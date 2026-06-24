@@ -1,4 +1,5 @@
 import { AgentId, type AgentConfig } from "@support-agent/agent-core";
+import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
 
 /**
  * Specialist for the `where_is_order` category. Activated by the
@@ -30,7 +31,7 @@ export const orderStatusAgent: AgentConfig = {
   provider: "openrouter",
   model: "google/gemini-3.5-flash",
   promptTemplate: [
-    "You are the order-status agent. The case has already been triaged as `where_is_order` and an order id has been identified on the case context (look for `identifiedOrderId` in the prior `case.update_context` tool result, and double-check the original customer message).",
+    "You are the order-status agent. The case has been triaged as `where_is_order`. There may or may not be an order id on the case context — follow the order-resolution steps below to land on the order.",
     "",
     "Your job: fetch the order from Shopify, then draft a single customer-facing reply with the current status. You do NOT auto-send the reply — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft.",
     "",
@@ -38,10 +39,11 @@ export const orderStatusAgent: AgentConfig = {
     "",
     "DECISION RULE — read this carefully each turn:",
     "",
-    "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the value of `identifiedOrderId` from the case context. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, an order name like `#1001`, or a confirmation number like `XPAV284CT` (the alphanumeric code from the customer's confirmation email) — pass it through unchanged; the tool resolves all of these.",
+    ...ORDER_RESOLUTION_LINES,
     "",
     "IDENTITY GATE — check this every time BEFORE you reveal any order detail:",
     "  Order details are private. Only share them with the person who placed the order.",
+    "  0. If you obtained the order via `shopify.find_customer_order` (status `single`), identity is already established — it was looked up by the customer's own email — so skip this gate and proceed normally.",
     "  1. If the latest message contains an `[Identity check PASSED ...]` directive, the system has already verified the customer — skip the rest of this gate and proceed normally.",
     "  2. Otherwise compare the `email` on the `shopify.get_order` result with the address the customer is writing from (the `from=` value in the `[Thread context: ...]` header), case-insensitively. If they MATCH, proceed normally.",
     "  3. If they DIFFER, do NOT reveal any order details (no status, tracking, items, dates, or addresses). Instead, unless you have already asked this case (an `[Identity check REQUIRED ...]` directive plus a customer reply that still doesn't match means they failed — see below), call `conversation.ask_customer` ONCE to verify identity:",
@@ -76,8 +78,8 @@ export const orderStatusAgent: AgentConfig = {
     "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
-    "- Never call `shopify.get_order` more than once per case.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.find_customer_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call `shopify.get_order` or `shopify.find_customer_order` more than once each per case.",
     "- Never call `tracking.lookup` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `conversation.ask_customer` more than once per case — the identity check is asked at most once; if it fails, decline via `conversation.reply`.",
@@ -87,6 +89,7 @@ export const orderStatusAgent: AgentConfig = {
   ].join("\n"),
   tools: [
     "shopify.get_order",
+    "shopify.find_customer_order",
     "tracking.lookup",
     "case.update_context",
     "conversation.reply",
@@ -101,7 +104,8 @@ export const orderStatusAgent: AgentConfig = {
   // conversation.reply) before the final plain-text turn, plus an optional
   // merchant.notify heads-up. The identity gate adds at most one extra call
   // (conversation.ask_customer instead of reply, or a get_order on the verified
-  // resume). Give slack on top of the shared-with-triage budget.
-  maxTurnsPerTick: 11,
+  // resume), and the no-order-id path adds a `shopify.find_customer_order`
+  // lookup. Give slack on top of the shared-with-triage budget.
+  maxTurnsPerTick: 13,
   temperature: 0,
 };

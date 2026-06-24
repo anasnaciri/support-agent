@@ -16,12 +16,14 @@ describe("missing-package-agent config", () => {
     // through refund-review-agent after the customer confirms.
     expect(missingPackageAgent.tools).toEqual([
       "shopify.get_order",
+      "shopify.find_customer_order",
       "shopify.get_customer",
       "case.update_context",
       "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
       "supplier.escalate",
       "conversation.reply",
+      "conversation.ask_customer",
       "knowledge.search",
       "merchant.notify",
     ]);

@@ -3,6 +3,7 @@ import {
   defineTool,
   OrderId,
   ToolOutputInvalid,
+  type ShopifyOrder,
 } from "@support-agent/agent-core";
 import { ShopifyService } from "@support-agent/services";
 
@@ -29,7 +30,13 @@ const Fulfillment = Schema.Struct({
   deliveredAt: Schema.NullOr(Schema.String),
 });
 
-const Output = Schema.Struct({
+/**
+ * The flattened, LLM-facing order shape returned by `shopify.get_order`.
+ * Exported so sibling tools that surface an order (e.g.
+ * `shopify.find_customer_order`) project the order identically — one
+ * shape the specialists learn once.
+ */
+export const ShopifyOrderOutput = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   confirmationNumber: Schema.NullOr(Schema.String),
@@ -57,6 +64,55 @@ const Output = Schema.Struct({
     }),
   ),
   fulfillments: Schema.Array(Fulfillment),
+});
+
+const Output = ShopifyOrderOutput;
+
+/**
+ * Flatten a domain `ShopifyOrder` into the LLM-facing `ShopifyOrderOutput`
+ * shape (ISO-string dates, nested tracking object). Shared by every tool
+ * that returns an order so the projection stays in one place.
+ */
+export const projectShopifyOrder = (
+  order: ShopifyOrder,
+): Schema.Schema.Type<typeof ShopifyOrderOutput> => ({
+  id: order.id,
+  name: order.name,
+  confirmationNumber: order.confirmationNumber,
+  email: order.email,
+  fulfillmentStatus: order.fulfillmentStatus,
+  financialStatus: order.financialStatus,
+  totalPrice: order.totalPrice,
+  shippingAddress: order.shippingAddress
+    ? {
+        name: order.shippingAddress.name,
+        address1: order.shippingAddress.address1,
+        city: order.shippingAddress.city,
+        province: order.shippingAddress.province,
+        country: order.shippingAddress.country,
+        zip: order.shippingAddress.zip,
+      }
+    : null,
+  lineItems: order.lineItems.map((li) => ({
+    id: li.id,
+    title: li.title,
+    quantity: li.quantity,
+    sku: li.sku,
+    productId: li.productId,
+  })),
+  fulfillments: order.fulfillments.map((f) => ({
+    id: f.id,
+    status: f.status,
+    tracking: {
+      company: f.trackingCompany,
+      numbers: f.trackingNumbers,
+      urls: f.trackingUrls,
+    },
+    estimatedDeliveryAt: f.estimatedDeliveryAt
+      ? f.estimatedDeliveryAt.toISOString()
+      : null,
+    deliveredAt: f.deliveredAt ? f.deliveredAt.toISOString() : null,
+  })),
 });
 
 export const shopifyGetOrder = defineTool({
@@ -115,44 +171,6 @@ export const shopifyGetOrder = defineTool({
             Effect.mapError(wrapErr),
             Effect.flatMap((o) => (o ? Effect.succeed(o) : notFound)),
           );
-      return {
-        id: order.id,
-        name: order.name,
-        confirmationNumber: order.confirmationNumber,
-        email: order.email,
-        fulfillmentStatus: order.fulfillmentStatus,
-        financialStatus: order.financialStatus,
-        totalPrice: order.totalPrice,
-        shippingAddress: order.shippingAddress
-          ? {
-              name: order.shippingAddress.name,
-              address1: order.shippingAddress.address1,
-              city: order.shippingAddress.city,
-              province: order.shippingAddress.province,
-              country: order.shippingAddress.country,
-              zip: order.shippingAddress.zip,
-            }
-          : null,
-        lineItems: order.lineItems.map((li) => ({
-          id: li.id,
-          title: li.title,
-          quantity: li.quantity,
-          sku: li.sku,
-          productId: li.productId,
-        })),
-        fulfillments: order.fulfillments.map((f) => ({
-          id: f.id,
-          status: f.status,
-          tracking: {
-            company: f.trackingCompany,
-            numbers: f.trackingNumbers,
-            urls: f.trackingUrls,
-          },
-          estimatedDeliveryAt: f.estimatedDeliveryAt
-            ? f.estimatedDeliveryAt.toISOString()
-            : null,
-          deliveredAt: f.deliveredAt ? f.deliveredAt.toISOString() : null,
-        })),
-      };
+      return projectShopifyOrder(order);
     }),
 });

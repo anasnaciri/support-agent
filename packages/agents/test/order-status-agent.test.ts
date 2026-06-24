@@ -17,6 +17,7 @@ describe("order-status-agent config", () => {
     // transition status directly.
     expect(orderStatusAgent.tools).toEqual([
       "shopify.get_order",
+      "shopify.find_customer_order",
       "tracking.lookup",
       "case.update_context",
       "conversation.reply",

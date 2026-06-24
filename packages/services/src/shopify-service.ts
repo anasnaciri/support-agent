@@ -170,6 +170,24 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       confirmationNumber: string,
     ) => Effect.Effect<ShopifyOrder | null, ShopifyError>;
 
+    /**
+     * List a customer's orders by the email they placed them under, most
+     * recent first. Backs `shopify.find_customer_order`, which a specialist
+     * calls when the case carries no identified order id: if the customer
+     * has exactly one order we infer that's the one they're writing about
+     * (no need to ask for an order number); zero or many means we still
+     * have to ask. Looking up BY the customer's own address is the
+     * identity-safe path — every order returned belongs to that email.
+     * `limit` caps the result (small — we only need to tell "one" from
+     * "many"). Returns an empty array when the email matches no orders;
+     * a miss isn't an error (like `findOrderByName`).
+     */
+    readonly findOrdersByEmail: (
+      tenantId: TenantId,
+      email: string,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<ShopifyOrder>, ShopifyError>;
+
     readonly getFulfillment: (
       tenantId: TenantId,
       orderId: OrderId,
@@ -367,6 +385,14 @@ export interface ShopifyTestFixtures {
    * exact code the caller will pass.
    */
   readonly ordersByConfirmationNumber?: ReadonlyMap<string, ShopifyOrder>;
+  /**
+   * Map from a customer *email* to that customer's orders (most recent
+   * first), backing `findOrdersByEmail`. Tests seed this to exercise the
+   * single-order inference path (one order in the list) vs. the
+   * ask-the-customer paths (zero or many). When the email isn't in the
+   * map the default Test impl returns an empty list.
+   */
+  readonly ordersByEmail?: ReadonlyMap<string, ReadonlyArray<ShopifyOrder>>;
   readonly fulfillments?: ReadonlyMap<
     OrderId,
     ReadonlyArray<ShopifyFulfillment>
@@ -491,6 +517,13 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           fixtures.ordersByConfirmationNumber?.get(confirmationNumber.trim()) ??
             fixtures.ordersByConfirmationNumber?.get(confirmationNumber) ??
             null,
+        ),
+      findOrdersByEmail: (_tenantId, email, limit) =>
+        Effect.succeed(
+          (fixtures.ordersByEmail?.get(email) ?? []).slice(
+            0,
+            Math.max(0, limit),
+          ),
         ),
       getFulfillment: (_tenantId, orderId) =>
         Effect.succeed(fixtures.fulfillments?.get(orderId) ?? []),

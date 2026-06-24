@@ -872,6 +872,73 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
     expect(fulfillments[0]!.status).toBe("in_transit");
     expect(fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
   });
+
+  // Backs `shopify.find_customer_order` — list a customer's orders by the
+  // email they ordered under, most recent first, so a specialist can infer
+  // the order when the case carries no order id.
+  it("findOrdersByEmail issues an email search and maps every result", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () =>
+          respond(200, {
+            data: {
+              orders: {
+                nodes: [ORDER_PAYLOAD.data.order, ORDER_PAYLOAD.data.order],
+              },
+            },
+          }),
+      ]),
+    );
+    const orders = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrdersByEmail(tenantId, "customer@example.com", 10),
+        ),
+        layer,
+      ),
+    );
+    expect(orders).toHaveLength(2);
+    expect(orders[0]!.name).toBe("#1001");
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { q: string; n: number };
+    };
+    expect(body.variables.q).toBe("email:customer@example.com");
+    expect(body.variables.n).toBe(10);
+  });
+
+  it("findOrdersByEmail returns an empty array on no match", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, { data: { orders: { nodes: [] } } }),
+      ]),
+    );
+    const orders = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrdersByEmail(tenantId, "nobody@example.com", 10),
+        ),
+        layer,
+      ),
+    );
+    expect(orders).toEqual([]);
+  });
+
+  it("findOrdersByEmail short-circuits to [] without an HTTP call when the email is blank", async () => {
+    reset();
+    const layer = buildLayer(httpFromSequence([]));
+    const orders = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.findOrdersByEmail(tenantId, "   ", 10),
+        ),
+        layer,
+      ),
+    );
+    expect(orders).toEqual([]);
+    expect(captures).toHaveLength(0);
+  });
 });
 
 describe("ShopifyServiceLive — getProduct", () => {

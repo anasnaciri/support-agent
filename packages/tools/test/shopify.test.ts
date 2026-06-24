@@ -20,6 +20,7 @@ import { ShopifyServiceTest } from "@support-agent/services";
 import {
   shopifyGetCustomer,
   shopifyGetOrder,
+  shopifyFindCustomerOrder,
   shopifyGetProduct,
   shopifyGetStoreInfo,
   shopifyListPickupLocations,
@@ -1222,5 +1223,86 @@ describe("refund.recommend — tool wire-up", () => {
     expect(shopifyRefundRecommend.defaultPermission).toBe("allow");
     expect(shopifyRefundRecommend.sideEffectClass).toBe("none");
     expect(shopifyRefundRecommend.requiredConnectorScopes).toBeUndefined();
+  });
+});
+
+describe("shopify.find_customer_order tool", () => {
+  const run = (email: string, env: ReturnType<typeof ShopifyServiceTest>) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        shopifyFindCustomerOrder.execute(
+          { email } as never,
+          baseCtx("c-fco"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+  it("infers the single order when the customer has exactly one", async () => {
+    const orderId = OrderId("gid://shopify/Order/900");
+    const env = ShopifyServiceTest({
+      ordersByEmail: new Map([
+        ["solo@example.com", [buildOrder(orderId)]],
+      ]),
+    });
+
+    const exit = await run("solo@example.com", env);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["status"]).toBe("single");
+    expect(result["orderCount"]).toBe(1);
+    expect((result["order"] as Record<string, unknown>)["id"]).toBe(orderId);
+    expect((result["order"] as Record<string, unknown>)["name"]).toBe("#1001");
+  });
+
+  it("returns `none` when no orders match the email", async () => {
+    const env = ShopifyServiceTest({ ordersByEmail: new Map() });
+    const exit = await run("nobody@example.com", env);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["status"]).toBe("none");
+    expect(result["orderCount"]).toBe(0);
+    expect(result["order"]).toBeNull();
+  });
+
+  it("returns `multiple` (and no order) when the customer has more than one", async () => {
+    const env = ShopifyServiceTest({
+      ordersByEmail: new Map([
+        [
+          "repeat@example.com",
+          [
+            buildOrder(OrderId("gid://shopify/Order/1")),
+            buildOrder(OrderId("gid://shopify/Order/2")),
+          ],
+        ],
+      ]),
+    });
+
+    const exit = await run("repeat@example.com", env);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["status"]).toBe("multiple");
+    expect(result["orderCount"]).toBe(2);
+    expect(result["order"]).toBeNull();
+  });
+
+  it("fails with ToolOutputInvalid when the email is blank", async () => {
+    const env = ShopifyServiceTest({});
+    const exit = await run("   ", env);
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("declares the read-only surface (read_orders / risk read / allow)", () => {
+    expect(shopifyFindCustomerOrder.name).toBe("shopify.find_customer_order");
+    expect(shopifyFindCustomerOrder.risk).toBe("read");
+    expect(shopifyFindCustomerOrder.defaultPermission).toBe("allow");
+    expect(shopifyFindCustomerOrder.sideEffectClass).toBe("none");
+    expect(shopifyFindCustomerOrder.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["read_orders"],
+    });
   });
 });

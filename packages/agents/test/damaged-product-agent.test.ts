@@ -18,6 +18,7 @@ describe("damaged-product-agent config", () => {
     // confirms.
     expect(damagedProductAgent.tools).toEqual([
       "shopify.get_order",
+      "shopify.find_customer_order",
       "shopify.get_product",
       "shopify.get_customer",
       "case.update_context",

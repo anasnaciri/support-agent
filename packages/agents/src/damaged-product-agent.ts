@@ -1,4 +1,5 @@
 import { AgentId, type AgentConfig } from "@support-agent/agent-core";
+import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
 
 /**
  * Specialist for the `damaged_product` category — the customer received
@@ -58,7 +59,7 @@ export const damagedProductAgent: AgentConfig = {
   // shape on the wire. Vision is the whole point of this agent.
   model: "google/gemini-3.5-flash",
   promptTemplate: [
-    "You are the damaged-product agent. The case has been triaged as `damaged_product` and an order id has been identified on the case context (look for `identifiedOrderId` in the prior `case.update_context` tool result).",
+    "You are the damaged-product agent. The case has been triaged as `damaged_product`. There may or may not be an order id on the case context — in BRANCH A you resolve the order via the ORDER RESOLUTION steps.",
     "",
     "Your job: decide whether the customer has already attached photo evidence of the damage. If they have, look at the photos, fetch the order, and draft a customer reply proposing the right resolution (replacement or refund). If they haven't, ask them for photos. You do NOT auto-send a resolution — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft. You do NOT issue refunds yourself — even when a damaged item warrants one, the actual `refund.create` happens through the refund-review-agent after the customer confirms they want the refund.",
     "",
@@ -68,7 +69,9 @@ export const damagedProductAgent: AgentConfig = {
     "",
     "Turn 1 (no successful tool result yet): decide the branch.",
     "",
-    "  BRANCH A — Photos PRESENT. The customer's message contains one or more image attachments (you can see them as image content parts). Call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged. (After this you'll verify the photos actually depict the ordered item before drafting a reply — see Turns 2–4.)",
+    "  BRANCH A — Photos PRESENT. The customer's message contains one or more image attachments (you can see them as image content parts). First obtain the order using the ORDER RESOLUTION steps below; after that you'll verify the photos actually depict the ordered item before drafting a reply (see Turns 2–4).",
+    ...ORDER_RESOLUTION_LINES,
+    '(In Turns 2–4 below, "the order" means whichever order you obtained here — a `shopify.find_customer_order` result with `status: "single"` carries the same order fields under its `order` key.)',
     "",
     "  BRANCH B — Photos ABSENT. The customer's message is text-only. Call `conversation.ask_customer` ONCE asking for clear photos showing the damage from at least two angles, plus a photo of the outer packaging if available. Fields:",
     "    - `threadId`: from the `[Thread context: ...]` header in the original customer message.",
@@ -110,8 +113,8 @@ export const damagedProductAgent: AgentConfig = {
     "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
-    "- Never call `shopify.get_order` more than once per case.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.find_customer_order`, `shopify.get_product`, `shopify.get_customer`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call `shopify.get_order` or `shopify.find_customer_order` more than once each per case.",
     "- Never call `shopify.get_product` more than once per case — check only the single most-relevant line item.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `conversation.ask_customer` more than once per case.",
@@ -124,6 +127,7 @@ export const damagedProductAgent: AgentConfig = {
   ].join("\n"),
   tools: [
     "shopify.get_order",
+    "shopify.find_customer_order",
     "shopify.get_product",
     "shopify.get_customer",
     "case.update_context",
@@ -141,6 +145,7 @@ export const damagedProductAgent: AgentConfig = {
   // `case.update_context`(productMatch) + `knowledge.search` +
   // `conversation.reply` + the terminal plain-text turn = 8, leaving slack
   // for one stray turn. The ask-customer branch (BRANCH B) only needs 3.
-  maxTurnsPerTick: 11,
+  // The no-order-id path adds a `shopify.find_customer_order` lookup.
+  maxTurnsPerTick: 13,
   temperature: 0,
 };

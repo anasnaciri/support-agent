@@ -1730,6 +1730,29 @@ const AgentRuntimeLayer = Layer.effect(
 
             if (decision.type === "final_message") {
               if (current.status !== "resolved") {
+                // GUARD: a routing agent (one with handoff targets, e.g.
+                // triage) must never resolve a case with a bare final
+                // message. Its only legitimate terminal move is
+                // `agent.handoff` — after a successful handoff `agent` is the
+                // specialist (handoffs: []), so this check no longer trips.
+                // A still-routing agent that reaches final_message has failed
+                // to route; silently resolving here would close the case with
+                // nothing done (a triage classify → no order id → "done"
+                // message used to leave customers with no reply). Park for a
+                // human instead of swallowing the case. Keyed on `handoffs`,
+                // not `mode`: a terminal `mode: "primary"` agent with no
+                // handoffs is a legitimate resolver, not a router.
+                if (agent.handoffs.length > 0) {
+                  yield* escalateToHuman(
+                    current.id,
+                    "router_final_message_no_handoff",
+                    { turn, finalMessage: decision.text },
+                  );
+                  return {
+                    type: "HumanTakeoverRequired",
+                    reason: "routing agent finished without handing off",
+                  } as const;
+                }
                 // The lifecycle writer wraps the final transition +
                 // "case.resolved" audit in one tx (master-plan §4).
                 const resolveExit = yield* lifecycle

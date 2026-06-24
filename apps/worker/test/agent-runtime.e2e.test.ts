@@ -21,24 +21,11 @@ import {
   refundReviewAgent,
   supportTriage,
 } from "@support-agent/agents";
-import {
-  agentHandoff,
-  caseUpdateContext,
-  caseUpdateStatus,
-  conversationAskCustomer,
-  conversationReply,
-  knowledgeSearch,
-  merchantNotify,
-  shopifyRefundCreate,
-  shopifyRefundRecommend,
-  shopifyGetCustomer,
-  shopifyGetOrder,
-  shopifyGetProduct,
-  supplierAddSheetRow,
-  supplierEscalate,
-  supplierReadSheetColumns,
-  trackingLookup,
-} from "@support-agent/tools";
+// Tests register the full platform tool set (`ALL_TOOLS`) rather than a
+// hand-picked subset: the scripted LLM drives which tools actually execute,
+// so registering everything is behavior-neutral and means a test no longer
+// breaks merely because an agent started declaring a new tool.
+import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntime,
   AgentRuntimeDefault,
@@ -139,15 +126,7 @@ const tickEnv = Layer.mergeAll(
   AuditLogServiceTest,
   ApprovalServiceTest,
   AgentRegistryWith([supportTriage, orderStatusAgent]),
-  ToolRegistryWith([
-        merchantNotify as never,
-    caseUpdateStatus as never,
-    caseUpdateContext as never,
-    agentHandoff as never,
-    shopifyGetOrder as never,
-    trackingLookup as never,
-    knowledgeSearch as never,
-  ]),
+  ToolRegistryWith(ALL_TOOLS),
   PermissionServiceDefault,
   LLMServiceScripted(triageScript),
   TransactionRunnerPassthrough,
@@ -388,17 +367,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(handoffScript),
       TransactionRunnerPassthrough,
@@ -591,8 +560,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([askingAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,conversationAskCustomer as never]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -730,7 +698,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([escalatingAgent]),
-      ToolRegistryWith([supplierEscalate as never]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -838,7 +806,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([escalatingAgent]),
-      ToolRegistryWith([supplierEscalate as never]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -927,7 +895,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([parkedAgent]),
-      ToolRegistryWith([]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       // Empty script — if the guard fails and the loop runs, there's no
       // decision to serve, so a green run proves the LLM was never consulted.
@@ -1021,7 +989,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([reengageAgent]),
-      ToolRegistryWith([]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -1192,17 +1160,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -1354,17 +1312,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -1445,15 +1393,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(rejectedScript),
       TransactionRunnerPassthrough,
@@ -1506,9 +1446,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    expect(out.result.type).toBe("Completed");
+    // The handoff was rejected, so triage (a routing agent) ends the tick on
+    // a bare final_message without ever routing — the runtime guard parks it
+    // for a human rather than silently resolving a case nothing handled.
+    expect(out.result.type).toBe("HumanTakeoverRequired");
     // Agent did NOT swap because the target wasn't in handoffs.
     expect(out.fetched.currentAgentId).toBe(supportTriage.id);
+    expect(out.fetched.status).toBe("human_takeover");
 
     const handoffEntry = out.entries.find(
       (e) =>
@@ -1522,6 +1466,261 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect((handoffEntry?.details as Record<string, unknown>)["error"]).toBe(
       "target_not_in_handoffs",
     );
+  });
+
+  // ----------------------------------------------------------------
+  // Regression for the silent-resolve bug (case e6206180-…): triage
+  // classified an order-requiring case, found no order id, emitted a bare
+  // final_message, and the runtime resolved the case with NOTHING done —
+  // no reply, no handoff. Triage is a router: it must hand off, and if it
+  // finishes without routing the runtime parks the case for a human
+  // instead of silently resolving it.
+  // ----------------------------------------------------------------
+  it("parks for human takeover when triage finishes without handing off (no silent resolve)", async () => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "where_is_order",
+          notes: "customer asks where their order is; no order id given",
+        },
+      },
+      {
+        type: "final_message",
+        text: "Triaged as where_is_order — no order id identified yet.",
+      },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is my order?",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-silent" as never,
+              messageId: "msg-silent",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Where is my order?? It's been forever.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    // The case is parked for a human — NOT silently resolved.
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.fetched.status).not.toBe("resolved");
+    // Triage never routed away, and the case was never resolved.
+    expect(out.fetched.currentAgentId).toBe(supportTriage.id);
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.resolved");
+  });
+
+  // ----------------------------------------------------------------
+  // Single-order inference: triage hands off WITHOUT an order id, and the
+  // specialist resolves the order by looking the customer up by email. A
+  // customer with exactly one order means we know which order they mean —
+  // the specialist proceeds to a reply rather than asking for an order
+  // number. Proves the `shopify.find_customer_order` wiring end-to-end.
+  // ----------------------------------------------------------------
+  it("infers the customer's only order on a no-order-id handoff (does not ask, does not silently resolve)", async () => {
+    const orderId = OrderId("gid://shopify/Order/55501");
+    const onlyOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#5501",
+      confirmationNumber: null,
+      email: "solo@example.com",
+      customerId: CustomerId("gid://shopify/Customer/9001"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "42.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Notebook",
+          quantity: 1,
+          sku: "NB-01",
+          variantTitle: null,
+          productId: null,
+        },
+      ],
+      fulfillments: [],
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-02T00:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "where_is_order",
+          notes: "where is my order; no number given",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "order-status-agent",
+          reason: "where_is_order specialist",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.find_customer_order",
+        input: { email: "solo@example.com" },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-solo",
+          to: [{ name: null, email: "solo@example.com" }],
+          subject: null,
+          bodyText:
+            "Your order #5501 is paid and currently in transit. We'll keep you posted.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "order-status-reply-solo",
+        },
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentRegistryWith([supportTriage, orderStatusAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        ordersByEmail: new Map([["solo@example.com", [onlyOrder]]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const approvalsSvc = yield* ApprovalService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is my order?",
+            threadId: "thread-solo" as never,
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-solo" as never,
+              messageId: "msg-solo",
+              from: { name: null, email: "solo@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Where is my order?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, entries, pending };
+        }),
+        layer,
+      ),
+    );
+
+    // The reply is drafted and parked for approval — not silently resolved,
+    // not handed back to a human, and the customer was never asked for an
+    // order number.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.currentAgentId).toBe(orderStatusAgent.id);
+    expect(out.fetched.status).toBe("waiting_for_approval");
+
+    // The single-order lookup actually ran through the runtime and succeeded.
+    const findEntry = out.entries.find(
+      (e) =>
+        e.action === "tool.invoked" &&
+        (e.details as Record<string, unknown>)["tool"] ===
+          "shopify.find_customer_order",
+    );
+    expect(findEntry).toBeDefined();
+    expect((findEntry?.details as Record<string, unknown>)["ok"]).toBe(true);
+
+    // The customer was NOT asked for an order number.
+    const askedCustomer = out.entries.some(
+      (e) =>
+        e.action === "tool.invoked" &&
+        (e.details as Record<string, unknown>)["tool"] ===
+          "conversation.ask_customer",
+    );
+    expect(askedCustomer).toBe(false);
+
+    // A reply approval is pending for the specialist.
+    expect(out.pending).toHaveLength(1);
+    expect(out.pending[0]!.tool).toBe("conversation.reply");
+    expect(out.pending[0]!.agentId).toBe(orderStatusAgent.id);
   });
 
   // Regression test for the conversation-history bug surfaced by the
@@ -1578,12 +1777,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       llmFn,
       TransactionRunnerPassthrough,
@@ -1605,7 +1799,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    expect(result.type).toBe("Completed");
+    // Triage (a primary/router agent) emitting a bare `final_message`
+    // without handing off no longer silently resolves — the runtime guard
+    // parks it for a human instead. This test is about conversation-history
+    // threading; the two LLM calls (and their message shapes) still happen
+    // before the guard trips, so the threading assertions below hold.
+    expect(result.type).toBe("HumanTakeoverRequired");
     // Two LLM calls: turn 0 (no prior assistant), turn 1 (sees prior
     // assistant tool-call → finishes).
     expect(seenMessagesByTurn).toHaveLength(2);
@@ -1638,12 +1837,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(loopScript),
       TransactionRunnerPassthrough,
@@ -1749,15 +1943,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(continueScript),
       TransactionRunnerPassthrough,
@@ -1819,15 +2005,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted([...triageScript, ...triageScript]),
       TransactionRunnerPassthrough,
@@ -1901,15 +2079,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted([]), // must never be consulted
       TransactionRunnerPassthrough,
@@ -1982,15 +2152,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(triageScript),
       TransactionRunnerPassthrough,
@@ -2075,12 +2237,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       llmFn,
       TransactionRunnerPassthrough,
@@ -2196,12 +2353,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       llmFn,
       TransactionRunnerPassthrough,
@@ -2365,19 +2517,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(refundScript),
       TransactionRunnerPassthrough,
@@ -2572,19 +2712,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -2756,19 +2884,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -2917,26 +3033,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, missingPackageAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        conversationReply as never,
-        // missing-package-agent declares supplier.read_sheet_columns +
-        // supplier.add_sheet_row in its tools array (BRANCH A optionally
-        // calls them). The runtime's `schemasFor` validates every
-        // declared tool is registered, so we register both here even
-        // though this script's BRANCH-A flow skips them (no
-        // supplierEscalationSheet configured in this test).
-        supplierReadSheetColumns as never,
-        supplierAddSheetRow as never,
-        supplierEscalate as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(missingPackageScript),
       TransactionRunnerPassthrough,
@@ -3155,20 +3252,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, missingPackageAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        conversationReply as never,
-        supplierReadSheetColumns as never,
-        supplierAddSheetRow as never,
-        supplierEscalate as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -3371,18 +3455,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, damagedProductAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        shopifyGetProduct as never,
-        shopifyGetCustomer as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -3569,18 +3642,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, damagedProductAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        shopifyGetProduct as never,
-        shopifyGetCustomer as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,
@@ -3735,19 +3797,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(refundScript),
       TransactionRunnerPassthrough,
@@ -3948,19 +3998,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(refundScript),
       TransactionRunnerPassthrough,
@@ -4125,19 +4163,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(refundScript),
       TransactionRunnerPassthrough,
@@ -4254,12 +4280,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([parkedAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       llmFn,
       TransactionRunnerPassthrough,
@@ -4365,15 +4386,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       llmCredentialMissingLayer,
       TransactionRunnerPassthrough,
@@ -4468,15 +4481,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       captureLlm,
       TransactionRunnerPassthrough,
@@ -4532,15 +4537,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       captureLlm,
       TransactionRunnerPassthrough,
@@ -4589,15 +4586,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       captureLlm,
       TransactionRunnerPassthrough,
@@ -4750,19 +4739,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceLive.pipe(
         Layer.provide(Layer.mergeAll(tenants, connectors)),
       ),
@@ -4885,19 +4862,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([refundReviewAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        shopifyGetCustomer as never,
-        shopifyRefundCreate as never,
-        shopifyRefundRecommend as never,
-        conversationReply as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceLive.pipe(
         Layer.provide(Layer.mergeAll(tenants, connectors)),
       ),
@@ -4971,17 +4936,7 @@ describe("AgentRuntime — merchant notifications", () => {
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentRegistryWith([supportTriage, orderStatusAgent]),
-      ToolRegistryWith([
-        merchantNotify as never,
-        caseUpdateStatus as never,
-        caseUpdateContext as never,
-        agentHandoff as never,
-        shopifyGetOrder as never,
-        knowledgeSearch as never,
-        trackingLookup as never,
-        conversationReply as never,
-        conversationAskCustomer as never,
-      ]),
+      ToolRegistryWith(ALL_TOOLS),
       PermissionServiceDefault,
       LLMServiceScripted(script),
       TransactionRunnerPassthrough,

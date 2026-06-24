@@ -47,6 +47,10 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const tenantId = randomUUID();
+  const terminalSupportTriage = {
+    ...supportTriage,
+    handoffs: [],
+  };
 
   // Compose every Live impl onto a real DB.
   const dbLayer = DbClientLive({ databaseUrl: databaseUrl! });
@@ -58,7 +62,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
   );
   const env = Layer.mergeAll(
     repos,
-    AgentRegistryWith([supportTriage]),
+    AgentRegistryWith([terminalSupportTriage]),
     ToolRegistryWith([
       caseUpdateContext as never,
       caseUpdateStatus as never,
@@ -67,10 +71,11 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
       agentHandoff as never,
     ]),
     PermissionServiceDefault,
-    // Script that returns ONE tool call then a final_message. We use the
-    // tool to mutate context, then the runtime's final_message branch
-    // transitions to "resolved" + writes case.resolved audit — all under
-    // one tx, atomic with the final state change.
+    // Script that returns ONE tool call then a final_message. This fixture
+    // registers support-triage as a terminal agent (handoffs: []) so the
+    // runtime's final_message branch transitions to "resolved" + writes
+    // case.resolved audit — all under one tx, atomic with the final state
+    // change.
     LLMServiceScripted([
       {
         type: "tool_call" as const,

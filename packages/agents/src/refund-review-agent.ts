@@ -1,4 +1,5 @@
 import { AgentId, type AgentConfig } from "@support-agent/agent-core";
+import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
 
 /**
  * Specialist for the `refund_request` category. Activated by the
@@ -37,7 +38,7 @@ export const refundReviewAgent: AgentConfig = {
   provider: "openrouter",
   model: "google/gemini-3.5-flash",
   promptTemplate: [
-    "You are the refund-review agent. The case has been triaged as `refund_request` and an order id has been identified on the case context (look for `identifiedOrderId` in the prior `case.update_context` tool result).",
+    "You are the refund-review agent. The case has been triaged as `refund_request`. There may or may not be an order id on the case context — follow the order-resolution steps below to land on the order.",
     "",
     "You can either issue a refund directly (`refund.create`) or draft a customer reply (`conversation.reply`). Pick ONE path per case based on the order state.",
     "",
@@ -50,9 +51,10 @@ export const refundReviewAgent: AgentConfig = {
     "",
     "DECISION RULE — follow these steps in order:",
     "",
-    "Turn 1 (no successful `shopify.get_order` tool result yet): call `shopify.get_order` ONCE with `orderId` set to the `identifiedOrderId` from the prior `case.update_context` tool result. The id may be a numeric Shopify id, a `gid://shopify/Order/...` GID, or an order name like `#1001` — pass it through unchanged.",
+    ...ORDER_RESOLUTION_LINES,
+    '(Below, "the order" means whichever order you obtained above — a `shopify.find_customer_order` result with `status: "single"` carries the same fields under its `order` key as a `shopify.get_order` result.)',
     "",
-    "Turn 2 (the conversation now has a successful `shopify.get_order` tool result): decide which path to take based on the order:",
+    "Once you have the order: decide which path to take based on the order:",
     "",
     "  PATH A — Issue refund directly via `refund.create`. Use this ONLY when ALL of the following hold:",
     "    • The order's `financialStatus` is `paid` (not `partially_refunded`, not `refunded`, not `pending`).",
@@ -89,8 +91,9 @@ export const refundReviewAgent: AgentConfig = {
     "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, `knowledge.search`, or `merchant.notify`.",
-    "- Never call `shopify.get_order` more than once per case.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.find_customer_order`, `shopify.get_customer`, `case.update_context`, `refund.create`, `refund.recommend`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call `shopify.get_order` or `shopify.find_customer_order` more than once each per case.",
+    "- Only use `conversation.ask_customer` for order resolution (the `multiple`/`none` paths above), at most once, and call nothing else on that turn.",
     "- Make at most ONE RETURN CAPTURE `case.update_context` call yourself (ignore triage's earlier classification call already in the history) — and only when the message is a return.",
     "- Never call `refund.create` more than once per case.",
     "- Never call `refund.recommend` more than once per case. Only inside PATH B.",
@@ -109,9 +112,11 @@ export const refundReviewAgent: AgentConfig = {
   // it in the tool list avoids a re-deploy when that branch shows up.
   tools: [
     "shopify.get_order",
+    "shopify.find_customer_order",
     "shopify.get_customer",
     "case.update_context",
     "conversation.reply",
+    "conversation.ask_customer",
     "refund.create",
     "refund.recommend",
     "knowledge.search",
@@ -122,7 +127,8 @@ export const refundReviewAgent: AgentConfig = {
   // PATH B may emit several tool calls before the reply (knowledge.search +
   // the RETURN CAPTURE case.update_context + refund.recommend), and the turn
   // budget is shared across the triage handoff (the counter doesn't reset), so
-  // give the agent room to keep tail slack on the longest return path.
-  maxTurnsPerTick: 10,
+  // give the agent room to keep tail slack on the longest return path. The
+  // no-order-id path adds a `shopify.find_customer_order` lookup on top.
+  maxTurnsPerTick: 12,
   temperature: 0,
 };

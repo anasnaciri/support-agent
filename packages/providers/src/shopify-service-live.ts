@@ -679,6 +679,18 @@ const SEARCH_ORDER_BY_CONFIRMATION_QUERY = `
   }
 `;
 
+// List a customer's orders by the email they ordered under, most recent
+// first. Backs `findOrdersByEmail` / `shopify.find_customer_order`: the
+// caller only needs enough rows to tell "exactly one" from "many", so the
+// service caps `$n` low. Same `email:` filter the customer search uses.
+const LIST_ORDERS_BY_EMAIL_QUERY = `
+  query ListOrdersByEmail($q: String!, $n: Int!) {
+    orders(first: $n, query: $q, sortKey: CREATED_AT, reverse: true) {
+      nodes { ${ORDER_FIELDS} }
+    }
+  }
+`;
+
 // PCD probe: pull the most recent orders and inspect the Level-2 PII
 // fields most reliably present on a real order — `email` and the
 // `shippingAddress`. A custom-distribution app that hasn't declared its
@@ -1081,6 +1093,22 @@ export const ShopifyServiceLive = Layer.effect(
               return first ? mapOrder(first) : null;
             }),
           );
+        }),
+
+      findOrdersByEmail: (tenantId, email, limit) =>
+        withCreds(tenantId, (creds) => {
+          const normalized = email.trim();
+          if (normalized.length === 0) return Effect.succeed([]);
+          // Cap defensively: the caller only needs to distinguish one
+          // order from many, and a single GraphQL page is plenty.
+          const n = Math.max(1, Math.min(limit, 50));
+          return runQuery<{ orders: { nodes: ReadonlyArray<GqlOrder> } }>(
+            http,
+            creds,
+            tenantId,
+            LIST_ORDERS_BY_EMAIL_QUERY,
+            { q: `email:${normalized}`, n },
+          ).pipe(Effect.map((data) => data.orders.nodes.map(mapOrder)));
         }),
 
       getFulfillment: (tenantId, orderId) =>

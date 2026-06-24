@@ -2,6 +2,7 @@ import type { AnyTool } from "@support-agent/agent-core";
 import { caseUpdateStatus } from "./case/update-status.js";
 import { caseUpdateContext } from "./case/update-context.js";
 import { shopifyGetOrder } from "./shopify/get-order.js";
+import { shopifyFindCustomerOrder } from "./shopify/find-customer-order.js";
 import { shopifyGetCustomer } from "./shopify/get-customer.js";
 import { shopifyGetProduct } from "./shopify/get-product.js";
 import { shopifyGetStoreInfo } from "./shopify/get-store-info.js";
@@ -23,6 +24,7 @@ import { merchantNotify } from "./merchant/notify.js";
 export * from "./case/update-status.js";
 export * from "./case/update-context.js";
 export * from "./shopify/get-order.js";
+export * from "./shopify/find-customer-order.js";
 export * from "./shopify/get-customer.js";
 export * from "./shopify/get-product.js";
 export * from "./shopify/get-store-info.js";
@@ -65,6 +67,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   conversationReply as AnyTool,
   conversationAskCustomer as AnyTool,
   shopifyGetOrder as AnyTool,
+  shopifyFindCustomerOrder as AnyTool,
   shopifyGetCustomer as AnyTool,
   shopifyGetProduct as AnyTool,
   shopifyGetStoreInfo as AnyTool,
