@@ -48,6 +48,12 @@ import {
   handleDashboardWorkspaces,
 } from "./settings-handlers.js";
 import {
+  handleDashboardCustomAgentCreate,
+  handleDashboardCustomAgentDelete,
+  handleDashboardCustomAgentGet,
+  handleDashboardCustomAgentUpdate,
+} from "./custom-agent-handlers.js";
+import {
   handleDashboardKnowledgeCreate,
   handleDashboardKnowledgeDelete,
   handleDashboardKnowledgeGet,
@@ -154,6 +160,12 @@ export const registerDashboardRoutes = (
     "/dashboard/catalog",
     "Agent + tool inventory",
     handleDashboardCatalog,
+    "settings.agents",
+  );
+  dashboardGet(
+    "/dashboard/custom-agents/:id",
+    "One custom agent (editable view)",
+    handleDashboardCustomAgentGet,
     "settings.agents",
   );
   dashboardGet(
@@ -324,6 +336,24 @@ export const registerDashboardRoutes = (
     "/dashboard/agents/:id/tool-permission/clear",
     "Clear a per-agent tool permission override",
     handleDashboardAgentToolPermissionClear,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/custom-agents",
+    "Create a merchant-authored custom agent",
+    handleDashboardCustomAgentCreate,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/custom-agents/:id",
+    "Update a custom agent's editable fields",
+    handleDashboardCustomAgentUpdate,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/custom-agents/:id/delete",
+    "Delete a custom agent",
+    handleDashboardCustomAgentDelete,
     "settings.agents",
   );
   dashboardPost(
