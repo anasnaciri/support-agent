@@ -32,6 +32,99 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### DESIGNED, not yet built — merchant-configurable Resolution Policy (per-scenario playbooks)
+
+**Problem (felt firsthand 2026-06-25):** the Delivery Issues agent (`missing-package-agent.ts`) hardcodes
+ONE merchant's policy as `B1/B2/B3` prompt branches (verify carrier → return-for-refund / escalate-and-wait).
+That doesn't generalize. Different merchants want different resolutions for the SAME situation: one
+auto-refunds, one offers a coupon, one asks for a return, one escalates to a supplier and waits, one notifies
+the supplier but acts immediately, one has no supplier at all. Merchants must be able to **define their own
+rules, not have them hardcoded into the agent** — and this must apply to **every scenario**, not just
+refund/returns, while **tools stay hard-gated**.
+
+**Core principle — three layers, each choice goes in the layer that can enforce it:**
+- **Guardrails** (hard, already exists): spending caps + auto-vs-ask via `PermissionService` +
+  `RefundPolicy`/`DiscountPolicy` modes (thresholds/always_ask/always_deny). Never let the LLM exceed a cap.
+- **Capabilities** (hard, mostly exists): which tools/channels exist — supplier configured? coupon program?
+- **Playbook** (NEW, the configurable piece): per-scenario, which remedy to prefer + how to phrase it.
+  Currently hardcoded in specialist prompts; must become merchant-authored DATA injected at tick time.
+
+**Key insight — tools are the universal currency.** No refund-specific or coupon-specific fields. Every
+capability (refund, coupon, return-first, replace, share-tracking, escalate, notify, update-address) is
+already a `defineTool`. So "generalize to every scenario" = one uniform model where each scenario declares
+**which tools the agent may use**, and that allow-list IS the hard gate. Refund/return is just one instance.
+
+**Storage** — in `tenants.settings` JSONB, defaults-on-read, NO migration (exactly like `RefundPolicy`):
+```ts
+interface ScenarioAction { tool: string; permission: "allow" | "ask"; } // absent from list = denied
+interface ScenarioPolicy {
+  key: string;            // "delivery_issue" … (fixed built-in) OR merchant-defined
+  label: string;          // merchant-facing name
+  recognition?: string;   // "when this applies" — fed to triage; REQUIRED for custom scenarios
+  builtin: boolean;       // seeded + tuned specialist, vs merchant-defined + generic agent
+  enabledActions: ScenarioAction[];
+  supplierMode: "escalate_and_wait" | "notify_and_proceed" | "none";
+  notes?: string;         // free-text nuance, injected verbatim into the prompt (SOFT layer)
+}
+interface ResolutionPolicy { scenarios: ScenarioPolicy[]; }
+```
+
+**How tools stay gated (3 stacked layers, none trust the prompt), per scenario at tick time:**
+1. **Tool visibility:** `presentedTools = specialist.tools ∩ scenario.enabledActions[].tool` — the LLM is
+   only handed the intersection; it can't call a tool it can't see.
+2. **Permission backstop:** disabled tools → `permissionOverrides[tool] = "deny"`; enabled tools carry the
+   merchant's `allow`/`ask` choice. Even a hallucinated call dies at `PermissionService`.
+3. **Spending caps still apply:** enabling `refund.create` ≠ uncapping it — `RefundPolicy`/`DiscountPolicy`
+   ceilings still gate the enabled money tools on top (UI shows "up to $X — edit in Refund policy").
+
+**Same machinery covers all 5 categories** (where_is_order / delivery_issue / damaged_product /
+refund_request / general_inquiry) — each gets its own `enabledActions` + `supplierMode` + `notes`; the
+specialists become GENERIC skill providers (delete the hardcoded B1/B2/B3 branches; inject policy via the
+same `buildSystemPrompt` seam that already adds the supplier sheet + knowledge roster).
+
+**Merchant-facing input** — a card per scenario (`/settings/resolution-policy`), NO jargon/tool-ids:
+- a **checklist of plain-language actions** ("Issue a refund", "Offer a discount coupon", "Ask the customer
+  to return it first", "Send a replacement", "Escalate to my supplier") = the hard gate
+- per checked action, an **Auto / Ask-me-first dropdown** = `enabledActions[].permission`
+- **supplier handling** radio (wait / notify-and-proceed / no supplier) = `supplierMode`
+- **Notes** free-text = the only SOFT, LLM-interpreted field
+- baseline actions (look up order, reply, search knowledge) are "Always on", never toggles
+- built-ins ship PRE-FILLED with defaults matching today's behavior (do-nothing keeps working)
+
+**The cards are DATA, not hardcoded.** Built-in cards are a fixed *seeded* starting set (5, because they
+have hand-tuned specialists + reliable curated classification); merchants can ALSO **add their own** cards.
+A custom card = the same card + one extra field "when should the agent treat a message as this?"
+(`recognition`). Two engine changes enable custom scenarios:
+1. **Triage classifies into the scenario list, not a hardcoded enum** — inject each scenario's
+   `label` + `recognition` into triage's prompt (built-ins + custom are just entries).
+2. **A generic, policy-driven resolution agent** handles any scenario with no bespoke specialist — tools =
+   union of remedy tools gated down by `enabledActions`; behavior = the injected playbook. Built-ins keep
+   their tuned specialists; everything custom routes here.
+
+Relationship to existing features: a custom *scenario* is the lightweight middle tier (merchant answers
+when/what/supplier/notes); a custom *agent* (`tenant_custom_agents`, already shipped) stays the escape hatch
+for genuinely bespoke multi-step flows. Honest tradeoff: custom-scenario classification leans on the
+merchant's `recognition` wording (softer than a curated enum) and the generic agent lacks domain-tuned
+multi-step skills (e.g. the careful tracking-verify flow) — hence built-ins stay tuned.
+
+**One new primitive needed:** `supplier.notify` — non-blocking, mirrors `merchant.notify` but to the
+supplier channel (for `notify_and_proceed`). Everything else reuses existing tools. Today only the BLOCKING
+`supplier.escalate` (parks `waiting_for_supplier`) exists.
+
+**Proposed build sequence** (TDD red→green each slice):
+1. [ ] `supplier.notify` tool (non-blocking supplier heads-up).
+2. [ ] `ResolutionPolicy` in `tenants.settings` + defaults-on-read + dashboard contract.
+3. [ ] Runtime: classification → policy lookup → `presentedTools` intersection + derived
+       `permissionOverrides` + supplier-mode control flow + `buildSystemPrompt` policy header.
+4. [ ] Strip hardcoded branches from specialists → generic + policy-driven (Delivery Issues first).
+5. [ ] `/settings/resolution-policy` dashboard page (5 seeded built-in cards).
+6. [ ] Generic resolution agent + triage reads-the-scenario-list → enable "Add scenario" (custom scenarios).
+
+**Open decision (user to make on return):** ship "Add scenario" (custom scenarios, steps 6) in v1, or start
+with the 5 editable built-ins and turn on custom right after? Lean: build the engine GENERIC from day one
+(scenarios are data + generic agent exists) but seed only the 5 built-ins in the first UI, then flip on
+"Add scenario" — so nothing gets hardcoded that has to be unwound. User said "save this, I'll get back to it."
+
 ### DIAGNOSED, not yet built — automated/marketing email gets a drafted (and human-approved!) reply
 
 Production incident (case `ba2880a0-2b3a-4db4-8e93-f1085b9c9a1e`, 2026-06-24): an automated Shopify
