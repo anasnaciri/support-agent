@@ -48,6 +48,11 @@ export interface ResumeInput {
   readonly managerId: string;
   /** Free-text reason saved into the transition + audit details. */
   readonly reason?: string | undefined;
+  /**
+   * Full retry: also rebind the case to support-triage so the next tick
+   * re-classifies + re-routes (default = re-run the bound specialist).
+   */
+  readonly restartFromTriage?: boolean | undefined;
 }
 
 const caseLifecycleLayer = (db: DrizzleDb) => {
@@ -118,6 +123,7 @@ export const resumeCase = async (
         tenantId: TenantId(input.tenantId),
         actor: { type: "user", id: input.managerId },
         reason,
+        restartFromTriage: input.restartFromTriage === true,
       });
     }),
   );

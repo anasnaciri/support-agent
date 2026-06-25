@@ -7,13 +7,20 @@ describe("caseActionMenuItems", () => {
     expect(caseActionMenuItems({ canResume: false })).toEqual([]);
   });
 
-  it("offers Retry now while under human takeover (canResume)", () => {
+  it("offers both retry shapes while under human takeover (canResume)", () => {
     const items = caseActionMenuItems({ canResume: true });
-    expect(items.map((i) => i.key)).toEqual(["retryNow"]);
+    // Retry the bound specialist's last step, OR restart from triage so the
+    // agent re-classifies + re-routes from scratch.
+    expect(items.map((i) => i.key)).toEqual(["retryNow", "retryFromTriage"]);
     expect(items[0]).toMatchObject({
       key: "retryNow",
-      label: "Retry now",
+      label: "Retry last step",
       pendingLabel: "Retrying…",
+    });
+    expect(items[1]).toMatchObject({
+      key: "retryFromTriage",
+      label: "Restart from triage",
+      pendingLabel: "Restarting…",
     });
   });
 });

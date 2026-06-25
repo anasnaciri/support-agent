@@ -33,6 +33,27 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     });
   });
 
+  it("publishes the full-retry trigger when fromTriage is set", async () => {
+    const { events, publish } = recorder();
+    const outcome = await retryCaseNow({
+      caseId: "c-2",
+      fromTriage: true,
+      resume: async (): Promise<ResumeOutcome> => ({
+        kind: "resumed",
+        toStatus: "in_progress",
+      }),
+      publish,
+    });
+    expect(outcome).toEqual({ kind: "retried", toStatus: "in_progress" });
+    expect(events[0]).toMatchObject({
+      type: "case.resumed",
+      caseId: "c-2",
+      // Distinct trigger so the runtime + audit can tell a from-triage
+      // restart apart from a resume-the-bound-agent retry.
+      trigger: "dashboard_full_retry",
+    });
+  });
+
   it("passes case_not_found through without publishing", async () => {
     const { events, publish } = recorder();
     const outcome = await retryCaseNow({

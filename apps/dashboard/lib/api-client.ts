@@ -1036,11 +1036,18 @@ export const api = {
   },
 
   // Resume + an immediate `case.resumed` tick — the agent retries now
-  // instead of waiting for the customer's next reply.
-  retry: async (ctx: CallCtx, caseId: string): Promise<ResumeOutcomeView> => {
+  // instead of waiting for the customer's next reply. `fromTriage` does a FULL
+  // retry: it rebinds the case to triage so the tick re-classifies + re-routes
+  // (default re-runs the bound specialist's last step).
+  retry: async (
+    ctx: CallCtx,
+    caseId: string,
+    opts: { readonly fromTriage?: boolean } = {},
+  ): Promise<ResumeOutcomeView> => {
     const { body } = await call(`/cases/${encodeURIComponent(caseId)}/retry`, {
       method: "POST",
       ctx,
+      ...(opts.fromTriage ? { body: { fromTriage: true } } : {}),
     });
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },

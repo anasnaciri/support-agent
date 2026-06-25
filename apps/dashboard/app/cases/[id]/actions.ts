@@ -46,6 +46,22 @@ export const retryAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?retried=${result.kind}`);
 };
 
+// Full retry: rebind the case to triage so the agent re-classifies and
+// re-routes from scratch (vs `retryAction`, which re-runs the bound
+// specialist's last step). Use when the routing itself was wrong.
+export const retryFromTriageAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  const result = await api.retry(ctx, caseId, { fromTriage: true });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?retried=${result.kind}`);
+};
+
 // Manually set the case status from the case-page dropdown (mark resolved,
 // reopen, park waiting on the customer …). The api re-validates the move
 // against the case state machine; the redirect surfaces the outcome banner.

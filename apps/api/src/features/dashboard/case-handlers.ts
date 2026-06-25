@@ -625,15 +625,23 @@ export const handleDashboardRetry = async (
   if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
   const { id } = req.params as { id: string };
   const managerId = auth.userId;
+  // `fromTriage: true` → full retry: rebind to triage so the tick re-classifies
+  // and re-routes. Default (absent/false) → re-run the bound specialist.
+  const body = parseJsonBody(req);
+  const fromTriage = body["fromTriage"] === true;
   const outcome = await retryCaseNow({
     caseId: id,
+    fromTriage,
     resume: () =>
       runWithDb(layer, (db) =>
         resumeCase(db, {
           caseId: id,
           tenantId: auth.tenantId,
           managerId,
-          reason: "manager asked the agent to retry from the dashboard",
+          reason: fromTriage
+            ? "manager asked the agent to restart from triage (full retry)"
+            : "manager asked the agent to retry from the dashboard",
+          restartFromTriage: fromTriage,
         }),
       ),
     publish: makePgBossApprovalPublisher(() =>

@@ -583,6 +583,63 @@ describe("CaseLifecycleWriter", () => {
     });
   });
 
+  it("restartFromTriage resume rebinds the case to support-triage and clears the stale classification", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        // A case already routed to a specialist (refund-review) and
+        // classified — exactly the shape that won't re-route on a plain
+        // resume (the runtime re-runs current_agent_id).
+        const takeover = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("refund-review-agent"),
+          status: "human_takeover",
+          context: {
+            classification: "refund_request",
+            notes: "courier won't deliver; wants a refund",
+            customerEmail: "c@example.com",
+          } as never,
+        });
+
+        const resumed = yield* lifecycle.resume({
+          caseId: takeover.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          reason: "full retry from triage",
+          restartFromTriage: true,
+        });
+
+        return {
+          resumed,
+          after: yield* cases.getById(takeover.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(takeover.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.resumed).toEqual({ kind: "resumed", toStatus: "in_progress" });
+    expect(out.after.status).toBe("in_progress");
+    // Rebound to triage so the next tick re-classifies + re-routes.
+    expect(out.after.currentAgentId).toBe("support-triage");
+    // Stale routing key cleared so triage re-derives it...
+    expect(out.after.context["classification"]).toBeUndefined();
+    // ...but enrichment + the customer's reason are preserved (triage has
+    // no message-replay, so it re-classifies from notes).
+    expect(out.after.context["notes"]).toBe(
+      "courier won't deliver; wants a refund",
+    );
+    expect(out.after.context["customerEmail"]).toBe("c@example.com");
+    expect(out.entries[0]).toMatchObject({
+      action: "case.resumed",
+      details: { restartFromTriage: true },
+    });
+  });
+
   it("sets a merchant status through the state machine and cancels approvals", async () => {
     const out = await run(
       Effect.gen(function* () {

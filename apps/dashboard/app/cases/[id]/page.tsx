@@ -42,6 +42,7 @@ import {
   issueRefundAction,
   resumeAction,
   retryAction,
+  retryFromTriageAction,
   retrySendAction,
   setStatusAction,
   takeOverAction,
@@ -300,6 +301,7 @@ const CASE_MENU_ACTIONS: Record<
   (formData: FormData) => Promise<void>
 > = {
   retryNow: retryAction,
+  retryFromTriage: retryFromTriageAction,
 };
 
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);

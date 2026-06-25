@@ -135,6 +135,16 @@ export interface ResumeCaseInput {
   readonly tenantId: TenantId;
   readonly actor: AuditActor;
   readonly reason: string;
+  /**
+   * Full retry from triage. The runtime always re-runs `current_agent_id`, so a
+   * plain resume re-runs the already-bound specialist and never re-routes. When
+   * set, the resume ALSO rebinds the case to support-triage and clears the
+   * stale `classification` (in the same tx) so the next tick re-classifies and
+   * re-routes — the only way a deployed routing change reaches an in-flight,
+   * already-routed case. Enrichment + the customer's reason (`notes`) are kept,
+   * since triage has no message-replay and re-classifies from context.
+   */
+  readonly restartFromTriage?: boolean;
 }
 
 export type SetMerchantStatusOutcome =
@@ -274,6 +284,10 @@ const replyDeliveryDraftId = (
 };
 
 const RESUME_TO_STATUS = "in_progress" satisfies CaseStatus;
+// The primary/triage agent every case is born on. A `restartFromTriage` resume
+// rebinds here so the next tick re-classifies + re-routes. Mirrors the runtime's
+// hardcoded create-time agent id.
+const PRIMARY_AGENT_ID = "support-triage" as AgentId;
 
 const TERMINAL_TAKEOVER_STATUSES: ReadonlySet<CaseStatus> = new Set([
   "resolved",
@@ -682,6 +696,17 @@ export const CaseLifecycleWriterLive = Layer.effect(
                 reason: input.reason,
               },
             );
+            // Full retry from triage: rebind to the primary agent and drop the
+            // stale routing key so the tick re-classifies + re-routes. Same tx
+            // as the status flip — the rebind must be atomic with the resume.
+            if (input.restartFromTriage) {
+              const { classification: _drop, ...keptContext } =
+                case_.context as Record<string, unknown>;
+              yield* cases.update(case_.id, {
+                currentAgentId: PRIMARY_AGENT_ID,
+                context: keptContext as never,
+              });
+            }
             yield* audit.record({
               tenantId: updated.tenantId,
               caseId: updated.id,
@@ -690,6 +715,7 @@ export const CaseLifecycleWriterLive = Layer.effect(
               details: {
                 reason: input.reason,
                 fromStatus: case_.status,
+                restartFromTriage: input.restartFromTriage === true,
               },
             });
             return { kind: "resumed", toStatus: RESUME_TO_STATUS };

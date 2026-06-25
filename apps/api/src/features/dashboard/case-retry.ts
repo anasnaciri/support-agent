@@ -27,6 +27,14 @@ export type RetryOutcome =
 
 export interface RetryCaseNowOptions {
   readonly caseId: string;
+  /**
+   * Full retry: the `resume` step also rebinds the case to support-triage so
+   * the tick re-classifies + re-routes (vs the default, which re-runs the
+   * already-bound specialist). Only changes the published `trigger` here — the
+   * actual rebind happens in the `resume` closure (dashboard-writes
+   * `resumeCase` with `restartFromTriage`). Kept in lockstep by the handler.
+   */
+  readonly fromTriage?: boolean;
   /** Runs the status flip (dashboard-writes `resumeCase`) and reports how it went. */
   readonly resume: () => Promise<ResumeOutcome>;
   /** Publishes a workflow event onto `workflow.events`. */
@@ -42,7 +50,7 @@ export const retryCaseNow = async (
     await opts.publish({
       type: "case.resumed",
       caseId: CaseId(opts.caseId),
-      trigger: "dashboard_retry",
+      trigger: opts.fromTriage ? "dashboard_full_retry" : "dashboard_retry",
     });
     return { kind: "retried", toStatus: resumed.toStatus };
   } catch (cause) {
