@@ -331,6 +331,23 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
   Decision direction: no wholesale swap; tools remain the deterministic data-fetch primitive, while a
   bounded `agent.delegate`/structured-report pattern may be worth testing for token-heavy LLM judgment or
   multi-intent synthesis. Recorded the follow-up above. Verified `pnpm build` green.
+- **2026-06-25 — Case-page header cleanup: status fires on select; "Retry now" moved to a ⋮ menu.**
+  Removed the separate "Update status" submit button — picking a different status in the dropdown now
+  fires `setStatusAction` immediately (re-picking the current value is a no-op). Added a kebab (⋮)
+  overflow menu as the home for actions that don't warrant a header button; its first item is "Retry
+  now" (agent hand-back + immediate tick), moved out of the header row. More actions will be added to
+  this menu later. No api/contract/schema change — same `setStatusAction`/`retryAction` server actions.
+  Build (all in `apps/dashboard/app/cases/[id]/`):
+  - `case-actions-menu.ts` — pure `caseActionMenuItems({ canResume })` deciding the menu's contents
+    (today: `retryNow` only, while under human takeover). Page maps each key → its server action via a
+    `CaseActionKey`-typed `CASE_MENU_ACTIONS` record (a new key won't type-check until it's wired).
+  - `StatusSelect.tsx` (client) — auto-submits on change via `form.requestSubmit()`; disables the select
+    while pending (`useFormStatus`). Labels computed server-side and passed in (no client `labels` import).
+  - `CaseActionsMenu.tsx` (client) — ⋮ popover following the `MultiSelect` pattern (click-outside +
+    Escape-refocus); each item is its own server-action `<form>` so behavior matches the header buttons.
+    Renders nothing when there are no actions.
+  - **TDD**: new `case-actions-menu.test.ts` (2 tests, red → green). Dashboard `typecheck` green; dashboard
+    suite **334 passing**; root `tsc -b` green; `next build` green. Not committed.
 - **2026-06-24 — Completed the remaining lifecycle-refactor backlog from the handoff (TDD).**
   `CaseLifecycleWriter` now owns the remaining production case lifecycle writes in the agent/worker path:
   runtime escalations/resolutions/parking/reopen/reply-delivery-failure outcomes, approval-expiry

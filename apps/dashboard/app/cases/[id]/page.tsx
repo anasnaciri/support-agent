@@ -25,7 +25,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { NativeSelect } from "@/components/ui/native-select";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 import CaseLiveBoundary from "./CaseLiveBoundary";
@@ -33,6 +32,12 @@ import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { ReplyComposer } from "./ReplyComposer";
+import { StatusSelect } from "./StatusSelect";
+import { CaseActionsMenu } from "./CaseActionsMenu";
+import {
+  caseActionMenuItems,
+  type CaseActionKey,
+} from "./case-actions-menu";
 import {
   issueRefundAction,
   resumeAction,
@@ -285,6 +290,16 @@ const approvalBanner = (sp: {
     return { tone: "warn", text: "Approval not found." };
   }
   return null;
+};
+
+// Maps each overflow-menu action key (decided by `caseActionMenuItems`) to the
+// server action it submits. Keyed by `CaseActionKey` so a new menu item won't
+// type-check until it's wired to an action here.
+const CASE_MENU_ACTIONS: Record<
+  CaseActionKey,
+  (formData: FormData) => Promise<void>
+> = {
+  retryNow: retryAction,
 };
 
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
@@ -616,6 +631,17 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   // Shown as the "Change status" dropdown — works from any state, including
   // reopening a resolved/failed case.
   const statusTargets = allowedManualStatusTargets(caseRow.status as CaseStatus);
+  const statusOptions = statusTargets.map((s) => ({
+    value: s,
+    label: caseStatusLabel(s),
+  }));
+  // Overflow (⋮) menu actions for the header. The item set is pure-derived from
+  // case state; each item is paired with its server action here.
+  const menuActions = caseActionMenuItems({ canResume }).map((item) => ({
+    ...item,
+    caseId: caseRow.id,
+    action: CASE_MENU_ACTIONS[item.key],
+  }));
   // Reply composer's model picker: only fetched when the composer renders (the
   // case is taken over), and tolerantly (null when the member can't read the
   // catalog) so a reply-only member still gets the composer without the picker.
@@ -701,34 +727,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           />
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {statusTargets.length > 0 ? (
-              <form
+              <StatusSelect
+                caseId={caseRow.id}
+                currentValue={caseRow.status}
+                currentLabel={`${caseStatusLabel(caseRow.status)} (current)`}
+                options={statusOptions}
                 action={setStatusAction}
-                className="flex items-center gap-2"
-                title="Manually set this case's status"
-              >
-                <input type="hidden" name="caseId" value={caseRow.id} />
-                <NativeSelect
-                  name="status"
-                  defaultValue={caseRow.status}
-                  aria-label="Change case status"
-                  className="h-9 w-auto min-w-[10rem]"
-                >
-                  <option value={caseRow.status}>
-                    {caseStatusLabel(caseRow.status)} (current)
-                  </option>
-                  {statusTargets.map((s) => (
-                    <option key={s} value={s}>
-                      {caseStatusLabel(s)}
-                    </option>
-                  ))}
-                </NativeSelect>
-                <SubmitButton
-                  variant="outline"
-                  pendingLabel="Updating…"
-                >
-                  Update status
-                </SubmitButton>
-              </form>
+              />
             ) : null}
             {canTakeOver ? (
               <form action={takeOverAction}>
@@ -765,18 +770,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                     Hand back to agent
                   </SubmitButton>
                 </form>
-                <form action={retryAction}>
-                  <input type="hidden" name="caseId" value={caseRow.id} />
-                  <SubmitButton
-                    variant={showRetrySend ? "outline" : "default"}
-                    pendingLabel="Retrying…"
-                    title="Hand the case back and have the agent try again right now"
-                  >
-                    Retry now
-                  </SubmitButton>
-                </form>
               </>
             ) : null}
+            <CaseActionsMenu actions={menuActions} />
           </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
