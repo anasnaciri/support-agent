@@ -22,6 +22,7 @@ describe("damaged-product-agent config", () => {
       "shopify.get_product",
       "shopify.get_customer",
       "case.update_context",
+      "supplier.escalate",
       "conversation.reply",
       "conversation.ask_customer",
       "knowledge.search",
@@ -32,6 +33,21 @@ describe("damaged-product-agent config", () => {
     expect(damagedProductAgent.tools).not.toContain("agent.handoff");
     expect(damagedProductAgent.handoffs).toEqual([]);
     expect(damagedProductAgent.maxTurnsPerTick).toBeGreaterThan(1);
+    // A verified damaged item that warrants a REPLACEMENT escalates to the
+    // warehouse/supplier (they ship it + log the defect), which parks the
+    // case in waiting_for_supplier. It must be auto-allowed so it parks
+    // instead of creating an approval — mirroring missing-package-agent.
+    expect(damagedProductAgent.tools).toContain("supplier.escalate");
+    expect(damagedProductAgent.permissionOverrides["supplier.escalate"]).toBe(
+      "allow",
+    );
+    expect(damagedProductAgent.promptTemplate).toContain("supplier.escalate");
+    // The replacement path escalates only when the damage is verified
+    // (productMatch === "match"); refunds + mismatch/uncertain still reply.
+    expect(damagedProductAgent.promptTemplate).toContain("PATH REPLACEMENT");
+    // When the supplier answers, the case re-engages here to draft the
+    // customer reply — the SUPPLIER-RESPONDED flow must be in the prompt.
+    expect(damagedProductAgent.promptTemplate).toContain("SUPPLIER-RESPONDED");
     // The prompt must describe the two decision branches so the model
     // picks the right one based on whether images are present in the
     // customer's message.

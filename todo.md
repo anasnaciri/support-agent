@@ -389,6 +389,39 @@ merged to `main`, and deployed to Fly prod 2026-06-25.** Note: only helps NEW ca
 surfaced this (`e161d86e`) is already parked at `waiting_for_approval` with no `identifiedOrderId`; needs a
 one-off backfill to show its order.
 
+## ✅ LANDED — Damaged-product agent escalates verified replacements to the supplier (2026-06-25)
+
+The damaged-product agent (`damaged-product-agent.ts`) could only draft a customer reply (replacement/refund)
+or ask for photos. A verified-damage REPLACEMENT needs the warehouse/supplier to physically ship the new
+item — so it now escalates, mirroring `missing-package-agent`'s supplier loop.
+
+- **New tool + override:** `supplier.escalate` added to its tools; `permissionOverrides["supplier.escalate"]
+  = "allow"` so the escalation PARKS the case in `waiting_for_supplier` (the runtime producer) instead of
+  creating an approval. The runtime parking on `supplier.escalate` (→ `escalated:true` + resolved `allow`)
+  and the `supplier.updated` re-engage are agent-agnostic — no runtime change was needed.
+- **BRANCH A rework** — Turn 4 became a resolution decision with two paths:
+  - **PATH REPLACEMENT** (only when `productMatch === "match"`): `supplier.escalate` (PII-free `problem` /
+    `orderRef` / `shipCity` / `shipCountry`; `trackingNumber` omitted — a defect isn't a delivery problem) →
+    park → DONE (no customer reply this tick). On `{ escalated: false }` (no supplier) → fall back to PATH
+    REPLY and promise the replacement directly. Transient error → retry once, then fall back.
+  - **PATH REPLY**: REFUND resolution, OR a `mismatch`/`uncertain` verdict (soften + ask to confirm the
+    item), OR the no-supplier replacement fallback. Unchanged reply behavior.
+- **SUPPLIER-RESPONDED flow** added: a `(system event: supplier.updated)` wake re-enters here and drafts the
+  customer reply in the agent's own words (never quote/reveal the supplier). FIRST-line gate mirrors
+  missing-package. `maxTurnsPerTick` 13→14 for the escalate-then-fallback chain.
+- **Refunds still never auto-issued here** — a refund goes through `refund-review-agent` after the customer
+  confirms; only the replacement path touches the supplier.
+
+Possible follow-ups (NOT done — kept tight to the ask): supplier-escalation-SHEET logging for damaged
+products (missing-package has it); folding this into the merchant-configurable resolution-policy machinery
+above (§ at top) so supplier mode is a setting, not a hardcoded branch.
+
+TDD: damaged-product config test updated (tools incl. `supplier.escalate`, `allow` override, `PATH
+REPLACEMENT` + `SUPPLIER-RESPONDED` prompt assertions); `+1` worker e2e (verified match → escalate → parks
+`waiting_for_supplier`, no `conversation.reply`, PII-free projection captured). `pnpm build` green; agents +
+worker e2e suites green (85). Files: `damaged-product-agent.ts`, `damaged-product-agent.test.ts`,
+`agent-runtime.e2e.test.ts`. NOT committed.
+
 ## ✅ LANDED — Delivery-issue refund handling (verify → return-for-refund | escalate) (2026-06-25)
 
 Follow-on from the `e161d86e` diagnosis: a refund request that cites a DELIVERY problem (courier won't

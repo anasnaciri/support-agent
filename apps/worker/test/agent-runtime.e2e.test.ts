@@ -4037,6 +4037,226 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // Damaged-product BRANCH A → PATH REPLACEMENT: the photos confirm the
+  // damage (productMatch=match) and the fix is a replacement, so the
+  // agent escalates to the warehouse/supplier instead of replying. The
+  // runtime records the escalation (via SupplierEscalationService), parks
+  // the case in waiting_for_supplier, and ends the tick (no customer
+  // reply yet — that happens later, on supplier.updated).
+  // ----------------------------------------------------------------
+  it("hands off to damaged-product-agent BRANCH A and escalates a verified replacement to the supplier", async () => {
+    const orderId = OrderId("gid://shopify/Order/55556");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#9002",
+      confirmationNumber: null,
+      email: "buyer3@example.com",
+      customerId: CustomerId("gid://shopify/Customer/912"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "60.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Ceramic Mug",
+          quantity: 1,
+          sku: "MUG-01",
+          variantTitle: null,
+          productId: "gid://shopify/Product/778",
+        },
+      ],
+      fulfillments: [],
+      createdAt: new Date("2026-05-23T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-26T18:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      // turn 0 — triage classifies
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "case.update_context",
+        input: {
+          classification: "damaged_product",
+          identifiedOrderId: orderId,
+          notes: "mug arrived cracked",
+        },
+      },
+      // turn 1 — triage hands off
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "damaged-product-agent",
+          reason: "specialist owns damaged_product",
+        },
+      },
+      // turn 2 — specialist BRANCH A: fetch order
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "shopify.get_order",
+        input: { orderId },
+      },
+      // turn 3 — cross-check the photos against the product's images
+      {
+        type: "tool_call",
+        callId: "c3a",
+        tool: "shopify.get_product",
+        input: { productId: "gid://shopify/Product/778" },
+      },
+      // turn 4 — record the match verdict
+      {
+        type: "tool_call",
+        callId: "c3b",
+        tool: "case.update_context",
+        input: { productMatch: "match" },
+      },
+      // turn 5 — PATH REPLACEMENT: escalate to the supplier (parks the
+      // case; no customer reply on this tick)
+      {
+        type: "tool_call",
+        callId: "c4",
+        tool: "supplier.escalate",
+        input: {
+          problem:
+            "Order #9002 — customer received Ceramic Mug damaged (photos confirm a cracked rim); please ship a replacement and check for a batch/packaging defect.",
+          orderRef: "#9002",
+          shipCity: "Berlin",
+          shipCountry: "DE",
+        },
+      },
+    ];
+
+    let captured: Record<string, unknown> | undefined;
+    const supplierLayer = SupplierEscalationServiceTest({
+      escalate: (input) => {
+        captured = input as unknown as Record<string, unknown>;
+        return Effect.succeed({
+          kind: "escalated" as const,
+          escalationId: "esc-dp1",
+          supplierId: "sup-1",
+          supplierEmail: "wh@x.com",
+        });
+      },
+    });
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, damagedProductAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({
+        orders: new Map([[orderId, fixtureOrder]]),
+        productsById: new Map([
+          [
+            "gid://shopify/Product/778",
+            {
+              id: "gid://shopify/Product/778",
+              title: "Ceramic Mug",
+              productType: "Home",
+              vendor: "Acme",
+              images: [
+                {
+                  url: "https://cdn.shopify.com/mug.jpg",
+                  altText: "Ceramic Mug",
+                },
+              ],
+            },
+          ],
+        ]),
+      }),
+      ConversationServiceTest({}),
+      supplierLayer,
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Mug arrived cracked",
+            threadId: "thread-damage-3" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-damage-3" as never,
+              messageId: "msg-dp3",
+              from: { name: null, email: "buyer3@example.com" },
+              to: [],
+              subject: "Re: Mug arrived cracked",
+              bodyText: `My order ${orderId} arrived cracked — photo attached.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [
+                {
+                  filename: "front.jpg",
+                  contentType: "image/jpeg",
+                  storageKey: "test/mug-front.jpg",
+                  sizeBytes: 1234,
+                },
+              ],
+            },
+          });
+
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    // A verified-match replacement parks the case for the supplier instead
+    // of drafting a customer reply.
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.fetched.currentAgentId).toBe(damagedProductAgent.id);
+    expect(out.fetched.context["productMatch"]).toBe("match");
+
+    // The escalation carried the agent's PII-free projection — order ref +
+    // ship-to city/country, never the customer's email.
+    expect(captured).toMatchObject({
+      orderRef: "#9002",
+      shipCity: "Berlin",
+      shipCountry: "DE",
+    });
+
+    const tools = out.entries
+      .filter((e) => e.action === "tool.invoked")
+      .map((e) => (e.details as { tool?: string }).tool);
+    expect(tools).toContain("supplier.escalate");
+    // The replacement path escalates instead of drafting a customer reply
+    // on this tick.
+    expect(tools).not.toContain("conversation.reply");
+  });
+
+  // ----------------------------------------------------------------
   // Closed-loop: triage → handoff → draft → ask-approval → manager
   // approves via approval.approved event → runtime executes the gated
   // conversation.reply → case resolves. This is the slice that proves
