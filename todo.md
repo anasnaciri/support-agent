@@ -233,6 +233,38 @@ merged to `main`, and deployed to Fly prod 2026-06-25.** Note: only helps NEW ca
 surfaced this (`e161d86e`) is already parked at `waiting_for_approval` with no `identifiedOrderId`; needs a
 one-off backfill to show its order.
 
+## ✅ LANDED — Delivery-issue refund handling (verify → return-for-refund | escalate) (2026-06-25)
+
+Follow-on from the `e161d86e` diagnosis: a refund request that cites a DELIVERY problem (courier won't
+deliver, never arrived) used to go to `refund-review` and just get a refund recommendation — no check of
+whether the parcel was actually stuck, on its way, or never shipped. New policy (decided with the user):
+verify the claim against the carrier, then branch.
+
+- **Triage** (`support-triage.ts`): a refund/cancellation request whose REASON is a delivery problem now
+  classifies as `missing_package` (the delivery specialist), NOT `refund_request`. `refund_request` is
+  scoped to NON-delivery reasons. (+1 config test.)
+- **Delivery specialist** — expanded `missing-package-agent` (AgentId kept for DB stability; display name →
+  "Delivery Issues"; `tracking.lookup` added to its tools; `maxTurnsPerTick` 13→16). New BRANCH B with a
+  VERIFY step:
+  - **B1 real problem** (tracking `status: exception` / failed-delivery scan) → `supplier.escalate` → park
+    `waiting_for_supplier` → respond on `supplier.updated`.
+  - **B2 moving normally** (live in_transit/out_for_delivery/pending, no exception) → reply: shipped, can't
+    cancel, **return it to us after arrival for a refund** (terms via `knowledge.search`). No escalation.
+  - **B3 can't verify** (no tracking provider / unknown / no tracking #) → `merchant.notify` (Telegram
+    heads-up) **then** `supplier.escalate`; fall back to a reply if no supplier configured.
+  - BRANCH C (unfulfilled) now leads with **cancel + refund** for refund-intent. BRANCH A (delivered) adds a
+    return-for-refund alternative.
+- **Consequence to remember:** "is it shipped?" comes from Shopify (always), but "is there a real delivery
+  EXCEPTION?" needs a tracking provider. Stores with NO tracking provider connected land every delivery-
+  reason refund claim in B3 (merchant ping + supplier escalate) — the B2 auto return-for-refund reply only
+  fires where tracking is wired up. (User chose "when unsure, ask merchant + escalate.")
+
+TDD: `+1` triage config test, missing-package config test updated (tools + B1/B2/B3 + VERIFY + return-for-
+refund assertions), `+2` worker e2e (B3 unverifiable → merchant.notify + escalate → parks; B2 normal →
+return-for-refund reply, no escalation). `pnpm build` green; runtime + agent suites green (110). Files:
+`support-triage.ts`, `missing-package-agent.ts`, their config tests, `agent-runtime.e2e.test.ts`. **NOT
+committed.**
+
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
