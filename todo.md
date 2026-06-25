@@ -228,7 +228,10 @@ wins, never overwritten). Value = new pure helper `orderContextRef(order)`: pref
 avoids the non-numeric-name → confirmation-number misroute). Safe for the identity gate: `find_customer_order`
 keys on the customer's own sender email so the order already belongs to them. `agent-runtime.ts` tool-result
 block + `agent-runtime-helpers.ts`; `+5` unit (`order-identity.test.ts`) + e2e assertion folded into the
-existing single-order-inference test. `pnpm build` green; runtime suites green (127). **NOT committed.**
+existing single-order-inference test. `pnpm build` green; full suite green (2084). **Committed `dc9bdfd`,
+merged to `main`, and deployed to Fly prod 2026-06-25.** Note: only helps NEW cases — the case that
+surfaced this (`e161d86e`) is already parked at `waiting_for_approval` with no `identifiedOrderId`; needs a
+one-off backfill to show its order.
 
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
