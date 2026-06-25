@@ -262,10 +262,29 @@ verify the claim against the carrier, then branch.
 TDD: `+1` triage config test, missing-package config test updated (tools + B1/B2/B3 + VERIFY + return-for-
 refund assertions), `+2` worker e2e (B3 unverifiable → merchant.notify + escalate → parks; B2 normal →
 return-for-refund reply, no escalation). `pnpm build` green; runtime + agent suites green (110). Files:
-`support-triage.ts`, `missing-package-agent.ts`, their config tests, `agent-runtime.e2e.test.ts`. **NOT
-committed.**
+`support-triage.ts`, `missing-package-agent.ts`, their config tests, `agent-runtime.e2e.test.ts`. Committed
+`971d1ff`, merged to `main`, deployed to Fly prod (v14) 2026-06-25.
 
-## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
+## ✅ LANDED — Two retry modes: "Retry last step" vs "Restart from triage" (2026-06-25)
+
+Surfaced by prod case `e161d86e`: a manager "Retry now" on an already-routed case re-ran the BOUND agent
+(refund-review), so the deployed delivery-routing change never applied — the runtime always re-runs
+`current_agent_id`, and a plain resume doesn't touch it, so routing changes only reach NEW cases that pass
+through triage. Fix: two retry shapes on a `human_takeover` case.
+
+- **Retry last step** (existing `/retry`, `trigger: dashboard_retry`) — re-runs the bound specialist.
+- **Restart from triage** (`/retry` body `{ fromTriage: true }`, `trigger: dashboard_full_retry`) — the
+  resume ALSO rebinds the case to `support-triage` and clears the stale `context.classification` (same tx as
+  the status flip), so the next tick re-classifies + re-routes. Enrichment + `notes` are preserved (triage
+  has no message-replay, so it re-classifies from `notes`).
+
+Layers: `CaseLifecycleWriter.resume` gains `restartFromTriage` (rebind to `PRIMARY_AGENT_ID = support-triage`
++ drop classification + audit detail); `dashboard-writes.resumeCase` + `case-retry.retryCaseNow` (trigger) +
+`handleDashboardRetry` (reads `fromTriage` from body) thread it through; api-client `retry({fromTriage})`;
+dashboard overflow menu now offers both items (`retryNow` "Retry last step" + `retryFromTriage` "Restart from
+triage"), new `retryFromTriageAction`. TDD: `+1` case-retry unit (full-retry trigger), `+1` lifecycle-writer
+(rebind + classification-clear + audit), `case-actions-menu` test updated. `pnpm build` green; full suite
+green (1748). **Backend NOT committed/deployed; dashboard UI needs its own Cloudflare deploy for the buttons.**
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
