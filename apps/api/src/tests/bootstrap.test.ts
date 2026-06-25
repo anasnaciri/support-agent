@@ -14,6 +14,7 @@ describe("DEFAULT_SHOPIFY_SCOPES", () => {
       "read_customers", // shopify.get_customer / searchByEmail
       "read_products", // shopify.get_product / search_products
       "write_orders", // refund.create
+      "write_discounts", // discount.create
       "read_locations", // shopify.list_pickup_locations
     ]) {
       expect(DEFAULT_SHOPIFY_SCOPES).toContain(scope);

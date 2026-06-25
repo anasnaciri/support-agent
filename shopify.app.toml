@@ -47,6 +47,8 @@ embedded = false
 # read_customers  → shopify.get_customer / searchByEmail       (PCD: Level 2)
 # read_products   → shopify.get_product (damaged-product photo cross-check)
 # write_orders    → refund.create
+# write_discounts → discount.create (goodwill coupon codes). Not protected
+#                   customer data; gated per-tenant by the discount policy.
 #
 # read_orders + read_customers expose protected customer data (Level 2 PII:
 # customer name, email, address). On a Custom-distribution app these need NO
@@ -71,7 +73,7 @@ embedded = false
 # the general-inquiry agent. The service filters to pickup-ENABLED locations
 # only — private warehouses / 3PLs / dropship origins never surface. Not
 # protected customer data.
-scopes = "read_orders,read_customers,read_products,write_orders,read_legal_policies,read_online_store_pages,read_locations"
+scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations"
 
 [auth]
 redirect_urls = [

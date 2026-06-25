@@ -579,7 +579,12 @@ export const buildWorker = async (
                 refreshToken: null,
                 tokenExpiresAt: null,
                 metadata: {},
-                scopes: ["read_orders", "read_customers", "write_orders"],
+                scopes: [
+                  "read_orders",
+                  "read_customers",
+                  "write_orders",
+                  "write_discounts",
+                ],
                 apiVersion: null,
                 installedAt: new Date(),
                 status: "active",

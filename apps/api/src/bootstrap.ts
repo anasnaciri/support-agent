@@ -89,6 +89,7 @@ export interface ShopifyAppConfig {
  *      - `read_products`    → shopify.get_product (damaged-product photo
  *                             cross-check)
  *      - `write_orders`     → refund.create (and future order-edit tools)
+ *      - `write_discounts`  → discount.create (goodwill coupon codes)
  *      - `read_locations`   → shopify.list_pickup_locations (general-inquiry
  *                             pickup answers; the service filters to
  *                             pickup-enabled locations only)
@@ -112,6 +113,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_customers",
   "read_products",
   "write_orders",
+  "write_discounts",
   "read_legal_policies",
   "read_online_store_pages",
   "read_locations",
