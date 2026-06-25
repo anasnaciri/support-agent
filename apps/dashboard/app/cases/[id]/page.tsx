@@ -609,7 +609,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const orderHint =
     typeof context["identifiedOrderId"] === "string"
       ? (context["identifiedOrderId"] as string)
-      : null;
+      : typeof context["quotedOrderRef"] === "string"
+        ? (context["quotedOrderRef"] as string)
+        : null;
   const productMatch =
     context["productMatch"] === "match" ||
     context["productMatch"] === "mismatch" ||

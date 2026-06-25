@@ -1701,17 +1701,22 @@ const AgentRuntimeLayer = Layer.effect(
                     }
                   }
                 }
-                // Bind the resolved order to the case context so the operator's
-                // view (order panel + Issue-refund button) re-resolves the SAME
-                // order the agent acted on. Both order tools surface a concrete
-                // order the dashboard otherwise can't see: get_order returns it
-                // directly; find_customer_order returns it under `order` when the
-                // sender's email matches exactly one (`status: "single"`). We
-                // stamp `identifiedOrderId` ONLY when it is not already set —
-                // triage's customer-quoted id wins and is never overwritten.
-                // find_customer_order is keyed on the customer's own sender
-                // email, so its order already belongs to them (no identity-gate
-                // concern). Best-effort: a write failure leaves the case alone.
+                // Bind the resolved order's canonical GID to the case context as
+                // the single source of truth: the operator's view (order panel +
+                // Issue-refund button) and the agent's `boundOrderDirective`
+                // re-resolve it EXACTLY via getOrder(gid) — never a fuzzy
+                // name/confirmation search that can diverge. Both order tools
+                // surface a concrete order: get_order returns it directly;
+                // find_customer_order returns it under `order` when the sender's
+                // email matches exactly one (`status: "single"`). We stamp
+                // whenever `identifiedOrderId` is NOT already a canonical GID —
+                // i.e. a concretely-resolved order PROMOTES an empty field or a
+                // legacy fuzzy value (a customer-quoted name/confirmation code
+                // that lived here before this became GID-only). A GID already
+                // bound is never rebound (first concrete order wins, preserving
+                // the identity-gate intent). find_customer_order is keyed on the
+                // customer's own sender email, so its order already belongs to
+                // them. Best-effort: a write failure leaves the case alone.
                 const resolvedOrder =
                   tool.name === "shopify.get_order" &&
                   exec.right &&
@@ -1731,13 +1736,10 @@ const AgentRuntimeLayer = Layer.effect(
                         ] as Record<string, unknown>)
                       : null;
                 const existingOrderRef = current.context["identifiedOrderId"];
-                if (
-                  resolvedOrder &&
-                  !(
-                    typeof existingOrderRef === "string" &&
-                    existingOrderRef.length > 0
-                  )
-                ) {
+                const existingIsGid =
+                  typeof existingOrderRef === "string" &&
+                  existingOrderRef.startsWith("gid://shopify/Order/");
+                if (resolvedOrder && !existingIsGid) {
                   const ref = orderContextRef(resolvedOrder);
                   if (ref) {
                     current = yield* cases

@@ -107,7 +107,7 @@ const triageScript: ReadonlyArray<LLMDecision> = [
     tool: "case.update_context",
     input: {
       classification: "where_is_order",
-      identifiedOrderId: "ord_42",
+      quotedOrderRef: "ord_42",
       notes: "customer wants tracking",
     },
   },
@@ -251,7 +251,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.result.type).toBe("Completed");
     expect(out.fetched.status).toBe("resolved");
     expect(out.fetched.context["classification"]).toBe("where_is_order");
-    expect(out.fetched.context["identifiedOrderId"]).toBe("ord_42");
+    // Triage records the customer's QUOTED ref (untrusted hint). The canonical
+    // `identifiedOrderId` GID is stamped only once an order tool resolves the
+    // order — this flow never calls one, so it stays unset.
+    expect(out.fetched.context["quotedOrderRef"]).toBe("ord_42");
+    expect(out.fetched.context["identifiedOrderId"]).toBeUndefined();
 
     // Audit trail shape: event.received + 3 llm.decision + 2 tool.invoked
     // + the lifecycle audit emitted by case.update_status.
@@ -328,7 +332,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "where_is_order",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "tracking question",
         },
       },
@@ -1408,7 +1412,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "where_is_order",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
         },
       },
       {
@@ -1580,7 +1584,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "where_is_order",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
         },
       },
       {
@@ -2031,11 +2035,15 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
     // The runtime BINDS the inferred order to the case context so the
     // operator's order panel + Issue-refund button surface the SAME order the
-    // agent acted on. Regression: find_customer_order resolved the order for
-    // the LLM but never stamped `identifiedOrderId`, so the dashboard showed
-    // "no order found" even though the agent drafted a correct order-aware
-    // reply (prod case e161d86e).
-    expect(out.fetched.context["identifiedOrderId"]).toBe("#5501");
+    // agent acted on. The bound value is the order's stable GID (the single
+    // source of truth) — never the fuzzy name — so every consumer re-resolves
+    // it exactly. Regression: find_customer_order resolved the order for the LLM
+    // but never stamped `identifiedOrderId`, so the dashboard showed "no order
+    // found" even though the agent drafted a correct order-aware reply (prod
+    // case e161d86e).
+    expect(out.fetched.context["identifiedOrderId"]).toBe(
+      "gid://shopify/Order/55501",
+    );
   });
 
   // Regression test for the conversation-history bug surfaced by the
@@ -2791,7 +2799,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "refund_request",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "customer wants a refund",
         },
       },
@@ -2981,7 +2989,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "refund_request",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
         },
       },
       {
@@ -3151,7 +3159,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         type: "tool_call",
         callId: "c0",
         tool: "case.update_context",
-        input: { classification: "refund_request", identifiedOrderId: orderId },
+        input: { classification: "refund_request", quotedOrderRef: orderId },
       },
       {
         type: "tool_call",
@@ -3307,7 +3315,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "missing_package",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "customer says package never arrived",
         },
       },
@@ -3478,7 +3486,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "missing_package",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
         },
       },
       {
@@ -3713,7 +3721,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "damaged_product",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "vase arrived broken",
         },
       },
@@ -3899,7 +3907,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "damaged_product",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "customer reports damage, no photos yet",
         },
       },
@@ -4073,7 +4081,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "refund_request",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
           notes: "refund please",
         },
       },
@@ -4279,7 +4287,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         type: "tool_call",
         callId: "c0",
         tool: "case.update_context",
-        input: { classification: "refund_request", identifiedOrderId: orderId },
+        input: { classification: "refund_request", quotedOrderRef: orderId },
       },
       {
         type: "tool_call",
@@ -4443,7 +4451,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "case.update_context",
         input: {
           classification: "refund_request",
-          identifiedOrderId: orderId,
+          quotedOrderRef: orderId,
         },
       },
       {
@@ -4976,7 +4984,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       type: "tool_call",
       callId: "c0",
       tool: "case.update_context",
-      input: { classification: "refund_request", identifiedOrderId: refundOrderId },
+      input: { classification: "refund_request", quotedOrderRef: refundOrderId },
     },
     {
       type: "tool_call",

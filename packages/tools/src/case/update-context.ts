@@ -13,7 +13,16 @@ import { CaseRepository } from "@support-agent/services";
  */
 const Input = Schema.Struct({
   classification: Schema.optional(Schema.String),
-  identifiedOrderId: Schema.optional(Schema.String),
+  /**
+   * The customer's QUOTED order reference, verbatim — an order name (`#1001`)
+   * or a confirmation code (`XPAV284CT`). This is an UNTRUSTED hint that drives
+   * the specialist's first `shopify.get_order` lookup; it is deliberately NOT
+   * the canonical `identifiedOrderId`. That field holds the stable Shopify GID
+   * and is stamped by the runtime only after an order tool actually resolves the
+   * order — agents cannot write it, so a mistyped/forged code can never
+   * masquerade as a verified order binding (the single source of truth).
+   */
+  quotedOrderRef: Schema.optional(Schema.String),
   identifiedCustomerId: Schema.optional(Schema.String),
   notes: Schema.optional(Schema.String),
   /**
@@ -133,8 +142,8 @@ export const caseUpdateContext = defineTool({
       const patch: Record<string, unknown> = { ...current.context };
       if (input.classification !== undefined)
         patch["classification"] = input.classification;
-      if (input.identifiedOrderId !== undefined)
-        patch["identifiedOrderId"] = input.identifiedOrderId;
+      if (input.quotedOrderRef !== undefined)
+        patch["quotedOrderRef"] = input.quotedOrderRef;
       if (input.identifiedCustomerId !== undefined)
         patch["identifiedCustomerId"] = input.identifiedCustomerId;
       if (input.notes !== undefined) patch["notes"] = input.notes;

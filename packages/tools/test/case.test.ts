@@ -139,7 +139,11 @@ describe("case.update_context tool", () => {
           yield* caseUpdateContext.execute(
             {
               classification: "where_is_order",
-              identifiedOrderId: "ord_123",
+              // The customer's QUOTED order reference (untrusted hint) — a name
+              // or confirmation code, verbatim. It is NOT the canonical
+              // `identifiedOrderId`: that is a stable GID the runtime stamps only
+              // after an order tool actually resolves the order.
+              quotedOrderRef: "Q537JR5JA",
               notes: "asked twice",
             },
             baseCtx(created.id),
@@ -151,7 +155,9 @@ describe("case.update_context tool", () => {
     );
     expect(result.context["initial"]).toBe("value"); // pre-existing keys preserved
     expect(result.context["classification"]).toBe("where_is_order");
-    expect(result.context["identifiedOrderId"]).toBe("ord_123");
+    expect(result.context["quotedOrderRef"]).toBe("Q537JR5JA");
+    // The tool must NOT let an agent write the canonical order pointer.
+    expect(result.context).not.toHaveProperty("identifiedOrderId");
     expect(result.context["notes"]).toBe("asked twice");
   });
 

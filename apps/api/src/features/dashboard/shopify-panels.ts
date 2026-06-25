@@ -25,19 +25,28 @@ export const looksLikeGid = (s: string): boolean =>
 type CaseContext = Readonly<Record<string, unknown>>;
 
 /**
- * Best-effort order for a case's stamped `identifiedOrderId` (a Shopify GID,
- * a customer-facing name like "#1001", or a confirmation number like
- * "XPAV284CT"). Errors map to null. Mirrors `shopify.get_order`'s
- * resolution so the operator's case view shows the same order the agent
- * resolved — a name like `#1001` goes through `findOrderByName`; an
- * alphanumeric code goes through `findOrderByConfirmationNumber`.
+ * Best-effort order for the case's bound order. The single source of truth is
+ * the canonical `identifiedOrderId` — a stable Shopify GID the runtime stamps
+ * once an order tool resolves the order — which we resolve EXACTLY via
+ * `getOrder(gid)`. Before that has happened (an in-flight case) we fall back to
+ * the customer's `quotedOrderRef` hint so the panel isn't blank; legacy cases
+ * whose `identifiedOrderId` still holds a fuzzy name/confirmation code resolve
+ * through the same `shopify.get_order`-style heuristics (`findOrderByName` for a
+ * `#1001`, `findOrderByConfirmationNumber` for an alphanumeric code). Errors map
+ * to null so the panel renders a graceful fallback.
  */
 export const resolveOrderForContext = (
   tenantId: TenantId,
   context: CaseContext,
 ): Effect.Effect<ShopifyOrder | null, never, ShopifyService> =>
   Effect.gen(function* () {
-    const raw = context["identifiedOrderId"];
+    const canonical = context["identifiedOrderId"];
+    const quoted = context["quotedOrderRef"];
+    const raw = isNonEmptyString(canonical)
+      ? canonical
+      : isNonEmptyString(quoted)
+        ? quoted
+        : null;
     if (!isNonEmptyString(raw)) return null;
     const shopify = yield* ShopifyService;
     const lookup = looksLikeGid(raw)

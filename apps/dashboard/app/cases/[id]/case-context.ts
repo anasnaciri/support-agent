@@ -114,6 +114,7 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "classification",
   "customerEmail",
   "identifiedOrderId",
+  "quotedOrderRef",
   "identifiedCustomerId",
   "returnReason",
   "requestedResolution",
@@ -144,6 +145,15 @@ export const buildContextRows = (
   const orderId = asString(context["identifiedOrderId"]);
   if (orderId)
     rows.push({ key: "identifiedOrderId", label: "Order", text: orderId, mono: true });
+
+  const quotedOrderRef = asString(context["quotedOrderRef"]);
+  if (quotedOrderRef)
+    rows.push({
+      key: "quotedOrderRef",
+      label: "Customer-quoted order",
+      text: quotedOrderRef,
+      mono: true,
+    });
 
   const customerId = asString(context["identifiedCustomerId"]);
   if (customerId)

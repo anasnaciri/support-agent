@@ -32,6 +32,20 @@ describe("buildContextRows", () => {
     expect(byKey(rows, "identifiedCustomerId")).toMatchObject({ mono: true });
   });
 
+  it("renders the customer-quoted order reference as its own labeled row", () => {
+    // The untrusted hint, shown distinctly from the canonical resolved Order so
+    // an operator can see what the customer said vs. what the system resolved.
+    const row = byKey(
+      buildContextRows({ quotedOrderRef: "Q537JR5JA" }),
+      "quotedOrderRef",
+    );
+    expect(row).toMatchObject({
+      label: "Customer-quoted order",
+      text: "Q537JR5JA",
+      mono: true,
+    });
+  });
+
   it("maps the closed enums to friendly badges", () => {
     const rows = buildContextRows({
       returnReason: "wrong_item",

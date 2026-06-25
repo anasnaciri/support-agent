@@ -114,7 +114,21 @@ export type CaseChannel = "email" | "form" | "chat" | "api";
 
 export interface CaseContext {
   readonly identifiedCustomerId?: CustomerId;
+  /**
+   * Canonical "which order is this case about" pointer — ALWAYS a stable Shopify
+   * GID, stamped by the runtime only after an order tool resolves the order.
+   * Every consumer (agent bound-order directive, dashboard order panel, refund
+   * button) re-resolves it exactly via `getOrder(gid)`. Never holds a fuzzy
+   * name/confirmation code — that lives in {@link quotedOrderRef}.
+   */
   readonly identifiedOrderId?: OrderId;
+  /**
+   * The customer's QUOTED order reference (untrusted hint) — a name like `#1001`
+   * or a confirmation code like `XPAV284CT`, recorded verbatim by triage. Drives
+   * a specialist's first `shopify.get_order` lookup; superseded by the resolved
+   * GID in {@link identifiedOrderId} once an order tool actually finds the order.
+   */
+  readonly quotedOrderRef?: string;
   readonly classification?: string;
   readonly evidenceIds?: ReadonlyArray<string>;
   readonly proposedActions?: ReadonlyArray<ProposedAction>;

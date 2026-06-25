@@ -31,6 +31,45 @@ const buildOrder = (id: string): ShopifyOrder => ({
 });
 
 describe("resolveOrderForContext", () => {
+  it("resolves the canonical GID identifiedOrderId exactly via getOrder, ignoring a stale quoted ref", async () => {
+    // The single source of truth: once the runtime has stamped a GID, the panel
+    // resolves THAT order exactly — never a fuzzy re-search that could diverge.
+    const order = buildOrder("gid://shopify/Order/12345");
+    const env = ShopifyServiceTest({
+      orders: new Map([[OrderId("gid://shopify/Order/12345"), order]]),
+      // A leftover quoted ref pointing at a DIFFERENT order must be ignored.
+      ordersByConfirmationNumber: new Map([
+        ["WRONG", buildOrder("gid://shopify/Order/99999")],
+      ]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveOrderForContext(TenantId("t1"), {
+          identifiedOrderId: "gid://shopify/Order/12345",
+          quotedOrderRef: "WRONG",
+        }),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Order/12345");
+  });
+
+  it("falls back to the customer's quotedOrderRef before the order has resolved", async () => {
+    // In-flight case: no canonical GID yet, but triage recorded what the
+    // customer quoted — show that so the panel isn't blank pre-resolution.
+    const order = buildOrder("gid://shopify/Order/12345");
+    const env = ShopifyServiceTest({
+      ordersByName: new Map([["#1001", order]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveOrderForContext(TenantId("t1"), { quotedOrderRef: "#1001" }),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Order/12345");
+  });
+
   it("resolves a confirmation-number identifiedOrderId via the confirmation fallback", async () => {
     const order = buildOrder("gid://shopify/Order/12345");
     const env = ShopifyServiceTest({

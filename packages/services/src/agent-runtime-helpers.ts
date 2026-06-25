@@ -305,7 +305,12 @@ export const buildInitialMessages = (
     ];
   }
   if (event.type === "customer.replied") {
-    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
+    // The identity gate (unverified order/customer mismatch) takes precedence;
+    // otherwise hand the agent the canonical bound order so it answers from the
+    // single source of truth instead of re-searching the customer's quoted code.
+    const directive =
+      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
+      boundOrderDirective(caseRow.context);
     const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
     return [
       buildUserMessageFromInbound(
@@ -327,7 +332,9 @@ export const buildInitialMessages = (
     // the fence so the agent can still wire conversation.* tools from it. The
     // customer-authored subject + body go INSIDE the untrusted fence.
     const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
-    const directive = orderIdentityDirective(caseRow.context, caseRow.threadId);
+    const directive =
+      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
+      boundOrderDirective(caseRow.context);
     const customerBlock = wrapUntrusted(
       `Subject: ${subject}\n\n${event.payload.bodyText}`,
     );
@@ -364,6 +371,12 @@ export const buildInitialMessages = (
           JSON.stringify(caseRow.context, null, 2),
         )}`,
       );
+    }
+    // Trusted (outside the fenced context blob): if the case already resolved a
+    // canonical order, tell the agent to load it by GID rather than re-search.
+    const boundOrder = boundOrderDirective(caseRow.context);
+    if (boundOrder) {
+      parts.push(boundOrder);
     }
     if (caseRow.threadId) {
       parts.push(
@@ -700,29 +713,48 @@ export const normalizeEmailForMatch = (value: unknown): string | null => {
   return v === "" ? null : v;
 };
 
+/** A canonical Shopify order GID (`gid://shopify/Order/<n>`). */
+const isOrderGid = (v: unknown): v is string =>
+  typeof v === "string" && v.startsWith("gid://shopify/Order/");
+
 /**
  * The value to stamp into `case.context.identifiedOrderId` after the runtime
  * resolves a concrete order through an order tool (`shopify.get_order` /
- * `shopify.find_customer_order`). Binding it is what lets the operator's case
- * view re-resolve and show the SAME order the agent acted on (the dashboard's
- * `resolveOrderForContext` reads this field).
+ * `shopify.find_customer_order`). This is the case's single source of truth for
+ * "which order is this about": every consumer (the agent's `boundOrderDirective`,
+ * the dashboard order panel, the Issue-refund button) re-resolves it EXACTLY via
+ * `getOrder(gid)` — never a fuzzy name/confirmation search that can diverge.
  *
- * Prefer the customer-facing order *name* (`#1001`) when it's the numeric form
- * the dashboard resolves via `findOrderByName` — it renders cleanly in the
- * order/context panels and the where_is_order directive. Fall back to the GID
- * (always resolved via `getOrder`) when the name is missing or non-numeric: a
- * custom order-name prefix (`EN-5501`) fails the dashboard's `looksLikeOrderName`
- * (`/^#?\d+$/`) and would otherwise misroute to the confirmation-number lookup
- * and miss. Returns null when neither a usable name nor id is present.
+ * We bind only the stable Shopify GID. The customer-facing name (`#1001`) and the
+ * confirmation number (`XPAV284CT`) are fuzzy human references that each consumer
+ * would re-search differently (and some, like a mistyped confirmation code, miss
+ * entirely) — so they are kept as the untrusted `quotedOrderRef` hint and never
+ * promoted to the canonical field. Returns null when the order carries no GID
+ * (nothing stable to bind).
  */
 export const orderContextRef = (order: {
   readonly id?: unknown;
   readonly name?: unknown;
 }): string | null => {
-  const name = typeof order.name === "string" ? order.name.trim() : "";
-  if (name.length > 0 && /^#?\d+$/.test(name)) return name;
   const id = typeof order.id === "string" ? order.id.trim() : "";
   return id.length > 0 ? id : null;
+};
+
+/**
+ * Trusted directive that hands the agent the order already bound to the case so
+ * it answers from the single source of truth instead of re-searching by the
+ * customer's quoted (and possibly wrong) order number / confirmation code — the
+ * scatter that let a case with a real order still draft "I can't find your
+ * order". Fires only once `identifiedOrderId` holds a canonical GID; a legacy
+ * fuzzy value or an unresolved case yields "" (the agent resolves normally).
+ * Stays OUTSIDE the untrusted fence — runtime-authored, not customer text.
+ */
+export const boundOrderDirective = (
+  context: Record<string, unknown>,
+): string => {
+  const gid = context["identifiedOrderId"];
+  if (!isOrderGid(gid)) return "";
+  return `[This case already has an identified order: ${gid}. Load it with shopify.get_order using exactly that id; do NOT search for the order again by any name or confirmation code the customer quoted.]`;
 };
 
 /** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boundOrderDirective,
   orderContextRef,
   orderCustomerMismatchFlag,
   replyProvesOrderIdentity,
@@ -7,36 +8,55 @@ import {
 } from "../src/agent-runtime.js";
 
 describe("orderContextRef", () => {
-  it("prefers a numeric order name (dashboard resolves it via findOrderByName and it reads cleanly)", () => {
+  // The canonical binding is the stable Shopify GID — the single source of
+  // truth every consumer (agent prompt, dashboard panel, refund button)
+  // re-resolves exactly via getOrder(gid). Names and confirmation numbers are
+  // fuzzy and re-search differently per consumer, so they are NEVER bound.
+  it("binds the stable GID, ignoring the customer-facing name", () => {
     expect(
       orderContextRef({ id: "gid://shopify/Order/55501", name: "#5501" }),
-    ).toBe("#5501");
+    ).toBe("gid://shopify/Order/55501");
   });
 
-  it("accepts a bare numeric name without the leading #", () => {
-    expect(
-      orderContextRef({ id: "gid://shopify/Order/55501", name: "5501" }),
-    ).toBe("5501");
-  });
-
-  it("falls back to the GID when the name is non-numeric (a custom name would misroute to the confirmation-number lookup)", () => {
+  it("binds the GID even for a custom (non-numeric) order name", () => {
     expect(
       orderContextRef({ id: "gid://shopify/Order/55501", name: "EN-5501" }),
     ).toBe("gid://shopify/Order/55501");
   });
 
-  it("falls back to the GID when the name is missing or blank", () => {
+  it("binds the GID when no name is present", () => {
     expect(orderContextRef({ id: "gid://shopify/Order/55501" })).toBe(
       "gid://shopify/Order/55501",
     );
-    expect(
-      orderContextRef({ id: "gid://shopify/Order/55501", name: "  " }),
-    ).toBe("gid://shopify/Order/55501");
   });
 
-  it("returns null when neither a usable name nor id is present", () => {
+  it("returns null when there is no GID to bind, even if a name exists", () => {
+    // A name alone is not a stable pointer — refuse to bind it.
+    expect(orderContextRef({ name: "#5501" })).toBeNull();
+    expect(orderContextRef({ id: "", name: "#5501" })).toBeNull();
     expect(orderContextRef({})).toBeNull();
-    expect(orderContextRef({ id: "", name: "" })).toBeNull();
+  });
+});
+
+describe("boundOrderDirective", () => {
+  const gid = "gid://shopify/Order/55501";
+
+  it("tells the agent to load the already-identified order by its GID", () => {
+    const d = boundOrderDirective({ identifiedOrderId: gid });
+    expect(d).toContain(gid);
+    expect(d.toLowerCase()).toContain("do not search");
+  });
+
+  it("is empty when no canonical order is bound yet", () => {
+    expect(boundOrderDirective({})).toBe("");
+    expect(boundOrderDirective({ quotedOrderRef: "Q537JR5JA" })).toBe("");
+  });
+
+  it("is empty when identifiedOrderId is a legacy fuzzy string, not a GID", () => {
+    // Old cases may carry a name/confirmation in this field — don't tell the
+    // agent to load a non-GID by id (get_order would re-search and could miss).
+    expect(boundOrderDirective({ identifiedOrderId: "Q537JR5JA" })).toBe("");
+    expect(boundOrderDirective({ identifiedOrderId: "#5501" })).toBe("");
   });
 });
 

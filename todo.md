@@ -158,6 +158,45 @@ Related to (and partly subsumes) the merchant skip-domains NEXT item above — b
 Current lifecycle refactor backlog from `/private/tmp/support-agent-handoff-20260623-lifecycle-refactors.md`
 and a fresh `rg` audit on 2026-06-23:
 
+## ✅ LANDED — Canonical order binding: one source of truth for "which order" (2026-06-25, NOT committed)
+
+Prod case `3428f154` (Elva Labs) drafted "I cannot locate an order under #Q537JR5JA … please double-check"
+to a customer **whose case already had an order bound**. Root cause = the scatter the user flagged: the case
+stored a *fuzzy reference string* in `identifiedOrderId` (whatever was first written — triage's verbatim
+customer-quoted confirmation code), and every consumer (the agent's `get_order`, the dashboard panel's
+`resolveOrderForContext`, the Issue-refund button) **re-searched that string independently**. A mistyped /
+non-matching confirmation code missed in the agent's `get_order` while the case was bound another way → the
+agent contradicted the system. Plus a precedence bug: triage's unverified string was stamped first and
+"won forever" (`stamp only when absent`), so a concretely-resolved order never superseded it.
+
+Fix (full canonical binding, TDD):
+- **`identifiedOrderId` is now always the stable Shopify GID** (single source of truth). `orderContextRef`
+  returns the GID only — never a fuzzy name (supersedes the dc9bdfd "prefer name" choice below).
+- **`quotedOrderRef`** = NEW untrusted hint field on `CaseContext`. Triage's `case.update_context` writes
+  THIS (renamed from `identifiedOrderId`, which agents can no longer set — closed-schema mitigation intact);
+  it drives the specialist's *first* `get_order` only.
+- **Precedence inverted**: a concretely-resolved order PROMOTES an empty/legacy non-GID value; a bound GID is
+  never rebound (first concrete order wins; identity-gate intent preserved). `agent-runtime.ts` stamping block.
+- **Agent stops re-searching**: new `boundOrderDirective` injects `[This case already has an identified
+  order: <GID> … do NOT search again]` on `customer.replied` / `message.received` / `case.resumed` (after the
+  identity directive, which still wins). `ORDER_RESOLUTION_LINES` rewritten: load the bound GID if present;
+  else try `quotedOrderRef`; **on a `get_order` miss, fall back to `find_customer_order` by email** before
+  ever telling the customer "can't find it" (this is what actually recovers Susan's case).
+- **Dashboard** `resolveOrderForContext` prefers the GID (exact `getOrder`), falls back to `quotedOrderRef`
+  for in-flight/legacy cases; context panel shows a "Customer-quoted order" row; `orderHint` falls back too.
+
+Files: `agent-runtime-helpers.ts` (orderContextRef GID-only, boundOrderDirective, buildInitialMessages),
+`agent-runtime.ts` (stamping precedence), `tools/case/update-context.ts` (quotedOrderRef), `agent-core/case.ts`
+(CaseContext), `agents/{support-triage,order-resolution}.ts`, `api/.../shopify-panels.ts`,
+`dashboard/.../{case-context.ts,page.tsx}`, `worker/scripts/seed-mock-cases.ts`. Tests (red→green): order-identity
+(+boundOrderDirective, orderContextRef GID), order-resolution (new), case.test (quotedOrderRef + "can't write
+identifiedOrderId"), shopify-panels (+GID precedence/fallback), case-context (+row); worker e2e/recovery
+assertions updated (GID, quotedOrderRef). `pnpm build` green; all touched suites green.
+
+Follow-ups: (1) NOT committed; api/worker → Fly, **dashboard changes need their own CF/OpenNext deploy**.
+(2) Helps NEW cases only — `3428f154` / `e161d86e` still need a one-off backfill (stamp the GID). (3) Not
+verified live.
+
 ## ✅ LANDED — Sonner toasts for transient feedback (2026-06-25, NOT committed)
 
 Replaced the **transient** post-action result banners with `sonner` toasts; **persistent** state
