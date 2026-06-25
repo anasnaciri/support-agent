@@ -747,6 +747,79 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     ).toBe(400);
   });
 
+  // ---- Discount policy ----
+
+  it("POST /dashboard/discount-policy writes the tenant setting; GET surfaces it", async () => {
+    if (!raw) return;
+    const res = await post("/dashboard/discount-policy", {
+      currencyCode: "usd",
+      askAbovePercentage: 12,
+      maxPercentage: 25,
+      askAboveFixedAmountMinorUnits: 0,
+      maxFixedAmountMinorUnits: 8000,
+      maxValidityDays: 14,
+      mode: "thresholds",
+    });
+    expect(res.status).toBe(200);
+    const [row] = await raw.db
+      .select({ settings: tenants.settings })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+    const policy = (
+      row?.settings as {
+        discountPolicy?: {
+          currencyCode?: string;
+          maxPercentage?: number;
+          maxValidityDays?: number;
+        };
+      }
+    )?.discountPolicy;
+    expect(policy?.currencyCode).toBe("USD");
+    expect(policy?.maxPercentage).toBe(25);
+    expect(policy?.maxValidityDays).toBe(14);
+
+    // GET /dashboard/settings resolves it back.
+    const got = await get("/dashboard/settings");
+    const body = (await got.json()) as {
+      discountPolicy: { maxPercentage: number; maxValidityDays: number };
+    };
+    expect(body.discountPolicy.maxPercentage).toBe(25);
+    expect(body.discountPolicy.maxValidityDays).toBe(14);
+  });
+
+  it("POST /dashboard/discount-policy 400s on bad percentage / validity / ordering", async () => {
+    const base = {
+      currencyCode: "USD",
+      askAbovePercentage: 10,
+      maxPercentage: 20,
+      askAboveFixedAmountMinorUnits: 0,
+      maxFixedAmountMinorUnits: 5000,
+      maxValidityDays: 30,
+      mode: "thresholds",
+    };
+    // percentage out of range
+    expect(
+      (await post("/dashboard/discount-policy", { ...base, maxPercentage: 150 }))
+        .status,
+    ).toBe(400);
+    // validity out of range
+    expect(
+      (await post("/dashboard/discount-policy", { ...base, maxValidityDays: 0 }))
+        .status,
+    ).toBe(400);
+    // ask above max (percentage axis)
+    expect(
+      (
+        await post("/dashboard/discount-policy", {
+          ...base,
+          askAbovePercentage: 30,
+          maxPercentage: 20,
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   // ---- Supplier-escalation sheet ----
 
   it("POST /dashboard/supplier-sheet sets then clears the sheet", async () => {

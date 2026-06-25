@@ -70,6 +70,7 @@ import {
   handleDashboardLlmConnect,
   handleDashboardLlmRevoke,
   handleDashboardRefundPolicy,
+  handleDashboardDiscountPolicy,
   handleDashboardSupplierSheet,
   handleDashboardSupplierSheetClear,
 } from "./connect-handlers.js";
@@ -396,6 +397,12 @@ export const registerDashboardRoutes = (
     "/dashboard/refund-policy",
     "Set the conditional refund policy",
     handleDashboardRefundPolicy,
+    "settings.refund_policy",
+  );
+  dashboardPost(
+    "/dashboard/discount-policy",
+    "Set the goodwill-coupon (discount) policy",
+    handleDashboardDiscountPolicy,
     "settings.refund_policy",
   );
   dashboardPost(

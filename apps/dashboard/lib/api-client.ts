@@ -9,6 +9,7 @@ import type {
   ApprovalDetail,
   ApprovalsFilter,
   RefundPolicyMode,
+  DiscountPolicyMode,
   ApprovalsListResult,
   AuditEntry,
   AuditFilter,
@@ -826,6 +827,20 @@ export const api = {
     },
   ): Promise<CallResult> =>
     call("/refund-policy", { method: "POST", body: input, ctx }),
+
+  setDiscountPolicy: (
+    ctx: CallCtx,
+    input: {
+      readonly currencyCode: string;
+      readonly askAbovePercentage: number;
+      readonly maxPercentage: number;
+      readonly askAboveFixedAmountMinorUnits: number;
+      readonly maxFixedAmountMinorUnits: number;
+      readonly maxValidityDays: number;
+      readonly mode: DiscountPolicyMode;
+    },
+  ): Promise<CallResult> =>
+    call("/discount-policy", { method: "POST", body: input, ctx }),
 
   setSupplierSheet: (
     ctx: CallCtx,

@@ -24,6 +24,14 @@ agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by
 `suggest ignore domain: true` to the case context, which the owner approves on the case page.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
+Architecture follow-up discussed 2026-06-25:
+- [ ] Evaluate a supervisor/reporting subagent pattern for read-only research and bounded specialist
+      analysis, without moving final side-effect decisions out of the runtime permission/audit/state
+      machine. Candidate shape: `agent.delegate` creates an audited bounded subtask; the child returns a
+      structured report with evidence/tool-call refs; the supervising agent decides the next customer or
+      money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
+      such as order-status data gathering or refund eligibility analysis.
+
 ### DIAGNOSED, not yet built — automated/marketing email gets a drafted (and human-approved!) reply
 
 Production incident (case `ba2880a0-2b3a-4db4-8e93-f1085b9c9a1e`, 2026-06-24): an automated Shopify
@@ -279,6 +287,28 @@ Dependency rule (`agent-core` imports nothing downstream); `PermissionService` c
 
 ### Session history (summarized)
 
+- **2026-06-25 — Shipped `discount.create` goodwill-coupon tool (bounded by per-tenant DiscountPolicy).**
+  The refund-review agent (and any custom agent, since it's assignable) can issue a single-use coupon
+  code as a service-recovery gesture. The agent chooses ONLY `valueType` (percentage|fixed_amount) +
+  `value`; the tool forces every other parameter as a guardrail: single-use (`usageLimit=1`,
+  `appliesOncePerCustomer`), locked to the ORDER's customer (resolved server-side — agent can't redirect;
+  a leaked code is worthless), non-combinable, whole-order, and `endsAt = now + policy.maxValidityDays`.
+  The code string is auto-generated (`THANKS-XXXXXX`, deterministic from callId). PermissionService gains
+  a `discount.create` branch mirroring refunds (`applyDiscountPolicy`): ≤ask% allow, ask–max ask, >max
+  deny; fixed_amount gates on minor-unit zones + currency. `DiscountPolicy` lives in the `tenants.settings`
+  JSONB (defaults on read — no migration), tunable at `/settings/discount-policy`. New Shopify scope:
+  `write_discounts`. Two commits on `feat/discount-coupons` (backend `223ffef` + dashboard); full
+  `ci:local` green (2067 tests). NOT merged to main; NOT verified live (needs the app's write_discounts
+  scope granted on a real store).
+  Follow-ups: (a) no per-CASE cumulative discount aggregation yet (refunds have audit-L9 summing) — v1
+  gates per-call, bounded by single-use + locked-to-customer; (b) `applies_to` (specific products/
+  collections) and `minimum_requirement` are forced defaults (whole-order / none), not yet agent- or
+  merchant-configurable; (c) verify the live `discountCodeBasicCreate` mutation against a real store.
+- **2026-06-25 — Discussed supervisor/reporting subagent architecture (no production code edits).**
+  Compared the current durable peer-handoff runtime with a Claude Code-style lead-agent/subagent model.
+  Decision direction: no wholesale swap; tools remain the deterministic data-fetch primitive, while a
+  bounded `agent.delegate`/structured-report pattern may be worth testing for token-heavy LLM judgment or
+  multi-intent synthesis. Recorded the follow-up above. Verified `pnpm build` green.
 - **2026-06-24 — Completed the remaining lifecycle-refactor backlog from the handoff (TDD).**
   `CaseLifecycleWriter` now owns the remaining production case lifecycle writes in the agent/worker path:
   runtime escalations/resolutions/parking/reopen/reply-delivery-failure outcomes, approval-expiry

@@ -133,6 +133,7 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
   // Internal plumbing tools are filtered out by `tenantConfigurableActions`.
   const actions = tenantConfigurableActions(agent, catalogResp);
   const refundPolicy = settings.refundPolicy;
+  const discountPolicy = settings.discountPolicy;
 
   // The api resolves the tenant's LLM credential server-side and returns the
   // model list (the decrypted key never reaches the browser).
@@ -367,6 +368,22 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
                           className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
                         >
                           Manage refund limits →
+                        </Link>
+                      </div>
+                    ) : tool.tenantControl === "discount-threshold" ? (
+                      <div className="sm:text-right">
+                        <p className="text-xs text-muted-foreground">
+                          {discountPolicy.mode === "always_deny"
+                            ? "Coupons blocked"
+                            : discountPolicy.mode === "always_ask"
+                              ? "Every coupon asks"
+                              : `Auto up to ${discountPolicy.askAbovePercentage}% · blocked above ${discountPolicy.maxPercentage}%`}
+                        </p>
+                        <Link
+                          href="/settings/discount-policy"
+                          className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+                        >
+                          Manage discount limits →
                         </Link>
                       </div>
                     ) : (

@@ -64,6 +64,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "settings.refund_policy",
       },
       {
+        href: "/settings/discount-policy",
+        label: "Discount policy",
+        match: prefix("/settings/discount-policy"),
+        requires: "settings.refund_policy",
+      },
+      {
         href: "/settings/knowledge",
         label: "Knowledge base",
         match: prefix("/settings/knowledge"),

@@ -4,6 +4,7 @@ import {
   DEFAULT_RETENTION_DAYS,
   CustomAgentService,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   legalAcceptanceIsCurrent,
   TenantAgentOverridesService,
   TenantRepository,
@@ -361,6 +362,7 @@ export const handleDashboardSettings = async (
           Effect.succeed({
             notificationEmail: null,
             refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
             legalAcceptance: null,
@@ -373,6 +375,7 @@ export const handleDashboardSettings = async (
   return sendJson(res, 200, {
     notificationEmail: settings.notificationEmail,
     refundPolicy: settings.refundPolicy,
+    discountPolicy: settings.discountPolicy,
     retentionDays: settings.retentionDays,
     supplierEscalationSheet: settings.supplierEscalationSheet,
     legalAcceptance: settings.legalAcceptance,

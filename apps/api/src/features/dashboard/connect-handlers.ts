@@ -9,6 +9,7 @@ import {
   TenantRepository,
   type LLMProvider,
   type RefundPolicyMode,
+  type DiscountPolicyMode,
 } from "@support-agent/services";
 import {
   ConnectorNotFound,
@@ -208,6 +209,74 @@ export const handleDashboardRefundPolicy = async (
           askAboveMinorUnits: ask,
           denyAboveMinorUnits: deny,
           currencyCode: currency,
+          mode,
+        });
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/discount-policy — set the goodwill-coupon policy.
+export const handleDashboardDiscountPolicy = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const currency =
+    typeof body["currencyCode"] === "string"
+      ? body["currencyCode"].trim().toUpperCase()
+      : "";
+  const askPct = body["askAbovePercentage"];
+  const maxPct = body["maxPercentage"];
+  const askAmt = body["askAboveFixedAmountMinorUnits"];
+  const maxAmt = body["maxFixedAmountMinorUnits"];
+  const days = body["maxValidityDays"];
+  const modeRaw = body["mode"];
+  const mode: DiscountPolicyMode =
+    modeRaw === "always_ask" || modeRaw === "always_deny"
+      ? modeRaw
+      : "thresholds";
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return sendJson(res, 400, { error: "bad_currency" });
+  }
+  const isPct = (n: unknown): n is number =>
+    typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 100;
+  const isMinor = (n: unknown): n is number =>
+    typeof n === "number" && Number.isInteger(n) && n >= 0;
+  if (!isPct(askPct) || !isPct(maxPct)) {
+    return sendJson(res, 400, { error: "bad_percentage" });
+  }
+  if (!isMinor(askAmt) || !isMinor(maxAmt)) {
+    return sendJson(res, 400, { error: "bad_amount" });
+  }
+  if (
+    typeof days !== "number" ||
+    !Number.isInteger(days) ||
+    days < 1 ||
+    days > 365
+  ) {
+    return sendJson(res, 400, { error: "bad_validity" });
+  }
+  if (askPct > maxPct || askAmt > maxAmt) {
+    return sendJson(res, 400, { error: "bad_order" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setDiscountPolicy(TenantId(auth.tenantId), {
+          askAbovePercentage: askPct,
+          maxPercentage: maxPct,
+          askAboveFixedAmountMinorUnits: askAmt,
+          maxFixedAmountMinorUnits: maxAmt,
+          currencyCode: currency,
+          maxValidityDays: days,
           mode,
         });
       }),

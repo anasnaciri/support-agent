@@ -7,6 +7,7 @@ import {
   KeyRound,
   Plug,
   ShieldCheck,
+  TicketPercent,
   Trash2,
 } from "lucide-react";
 
@@ -63,6 +64,13 @@ const TILES = [
       "Set refund limits — small refunds run automatically, mid-range ask you first, large ones are blocked.",
   },
   {
+    href: "/settings/discount-policy",
+    icon: TicketPercent,
+    title: "Discount policy",
+    description:
+      "Set limits for goodwill coupon codes — small ones auto-issue, larger ones ask you first or are blocked.",
+  },
+  {
     href: "/settings/usage",
     icon: BarChart3,
     title: "Usage",
@@ -86,6 +94,7 @@ export default async function SettingsLanding() {
     if (href === "/settings/llm") return "Key";
     if (href === "/settings/legal") return "Terms";
     if (href === "/settings/refund-policy") return "$";
+    if (href === "/settings/discount-policy") return "%";
     if (href === "/settings/usage") return "AI";
     return null;
   };

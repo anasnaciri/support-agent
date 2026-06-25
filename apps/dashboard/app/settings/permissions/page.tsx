@@ -96,6 +96,18 @@ export default async function PermissionsMatrixPage() {
                       </TableCell>
                     );
                   }
+                  if (t.tenantControl === "discount-threshold") {
+                    return (
+                      <TableCell key={a.id}>
+                        <Link
+                          href="/settings/discount-policy"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          discount policy
+                        </Link>
+                      </TableCell>
+                    );
+                  }
                   const eff = currentToolPermission(
                     a,
                     catalog,

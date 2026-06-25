@@ -661,6 +661,23 @@ export interface RefundPolicyView {
   readonly mode: RefundPolicyMode;
 }
 
+export type DiscountPolicyMode = "thresholds" | "always_ask" | "always_deny";
+
+export interface DiscountPolicyView {
+  readonly askAbovePercentage: number;
+  readonly maxPercentage: number;
+  readonly askAboveFixedAmountMinorUnits: number;
+  readonly maxFixedAmountMinorUnits: number;
+  readonly currencyCode: string;
+  readonly maxValidityDays: number;
+  /**
+   * How the policy behaves: percentage/amount `thresholds`, `always_ask`
+   * (every coupon waits for approval), or `always_deny` (the agent never
+   * issues a coupon).
+   */
+  readonly mode: DiscountPolicyMode;
+}
+
 export interface SupplierEscalationSheetView {
   readonly spreadsheetId: string;
   readonly range: string;
@@ -677,6 +694,7 @@ export interface LegalAcceptanceView {
 export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
+  readonly discountPolicy: DiscountPolicyView;
   readonly retentionDays: number;
   readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
   readonly legalAcceptance: LegalAcceptanceView | null;
