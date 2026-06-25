@@ -29,6 +29,7 @@ import {
   TransactionRunnerPassthrough,
   ShopifyServiceTest,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
 } from "@support-agent/services";
 
 // Phase A: custom (merchant-authored) agents run through the AgentResolver.
@@ -50,6 +51,7 @@ const tenantOverridesEmpty = TenantAgentOverridesServiceTest();
 const defaultTenantSettings = new TenantSettings({
   notificationEmail: null,
   refundPolicy: defaultRefundPolicy,
+  discountPolicy: defaultDiscountPolicy,
   retentionDays: 730,
   supplierEscalationSheet: null,
   legalAcceptance: null,

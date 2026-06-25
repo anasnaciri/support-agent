@@ -208,3 +208,39 @@ export type ShopifyRefund = {
   readonly note: string | null;
   readonly createdAt: Date;
 };
+
+/**
+ * How a discount code's value is expressed. `percentage` is a whole-or-
+ * decimal percent off the order (`value: "10"` ⇒ 10% off); `fixed_amount`
+ * is a flat money amount off (`value: "5.00"` in `currencyCode`). These are
+ * the only two shapes a basic code discount (`discountCodeBasicCreate`)
+ * carries — we deliberately don't model BXGY / free-shipping codes here.
+ */
+export type ShopifyDiscountValueType = "percentage" | "fixed_amount";
+
+/**
+ * Result of a successful `discountCodeBasicCreate` mutation — a single
+ * coupon code created as a goodwill / service-recovery gesture. The shape
+ * is intentionally narrow: just what the agent and dashboard need to
+ * confirm the code landed and surface it to the customer.
+ *
+ * Guardrails the platform always forces (never agent-chosen) are reflected
+ * here so callers can audit them: the code is single-use
+ * (`usageLimit: 1`), locked to one customer (`customerId`), non-combinable,
+ * and always carries an `endsAt` expiry. `value` is a decimal string —
+ * a percent when `valueType === "percentage"` (and `currencyCode` is
+ * `null`), or a money amount when `fixed_amount` (with `currencyCode`
+ * populated). We never invent a currency for a percentage discount.
+ */
+export type ShopifyDiscount = {
+  readonly id: string; // gid://shopify/DiscountCodeNode/...
+  readonly code: string; // the customer-facing code, e.g. "SORRY-7Q2K"
+  readonly title: string;
+  readonly valueType: ShopifyDiscountValueType;
+  readonly value: string; // decimal string: "10" (percent) or "5.00" (amount)
+  readonly currencyCode: string | null; // populated for fixed_amount; null for percentage
+  readonly customerId: CustomerId; // the single customer the code is locked to
+  readonly usageLimit: number; // always 1 in v1
+  readonly endsAt: Date;
+  readonly createdAt: Date;
+};

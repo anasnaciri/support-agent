@@ -3,6 +3,8 @@ import {
   type CustomerId,
   type OrderId,
   type ShopifyCustomer,
+  type ShopifyDiscount,
+  type ShopifyDiscountValueType,
   type ShopifyError,
   type ShopifyFulfillment,
   type ShopifyMoney,
@@ -34,6 +36,36 @@ export interface RefundOrderInput {
   readonly note: string | null;
   readonly notifyCustomer: boolean;
   readonly idempotencyKey: string | null;
+}
+
+/**
+ * Input for `ShopifyService.createDiscountCode`. Models a single-code
+ * "basic" discount (`discountCodeBasicCreate`) issued as a goodwill /
+ * service-recovery gesture.
+ *
+ * The guardrail fields (`usageLimit`, `appliesOncePerCustomer`,
+ * `customerId`, `endsAt`) are passed in fully resolved by the caller (the
+ * `discount.create` tool) — the service does NOT invent them. This keeps
+ * the policy decision (single-use, locked-to-customer, capped expiry) in
+ * one auditable place at the tool boundary and leaves the service a thin
+ * translator to the Admin API. The Live impl always sets
+ * `combinesWith` all-off (non-combinable) — never a caller choice.
+ *
+ * `value` is a decimal string. For `valueType: "percentage"` it's a
+ * percent (`"10"` ⇒ 10%) and `currencyCode` is `null`; for
+ * `"fixed_amount"` it's a money amount and `currencyCode` MUST be set to
+ * the order's currency.
+ */
+export interface CreateDiscountCodeInput {
+  readonly customerId: CustomerId;
+  readonly code: string;
+  readonly title: string;
+  readonly valueType: ShopifyDiscountValueType;
+  readonly value: string;
+  readonly currencyCode: string | null;
+  readonly endsAt: Date;
+  readonly usageLimit: number;
+  readonly appliesOncePerCustomer: boolean;
 }
 
 /**
@@ -206,6 +238,23 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       input: RefundOrderInput,
     ) => Effect.Effect<ShopifyRefund, ShopifyError>;
+
+    /**
+     * Create a single-use discount code locked to one customer. Money
+     * risk — every caller goes through `PermissionService` first (the
+     * `discount.create` tool is `defaultPermission: "ask"` and the runtime
+     * adds a per-tenant discount-policy decision on top). Maps
+     * `discountCodeBasicCreate.userErrors` → `DiscountFailed`; structural
+     * failures (auth, network, rate limit) reuse the existing
+     * `ShopifyError` tags so the tool boundary sees a consistent surface.
+     * The Live impl forces the code non-combinable and honors the caller's
+     * `usageLimit` / `appliesOncePerCustomer` / `endsAt` / `customerId`
+     * guardrails verbatim. Needs the `write_discounts` scope.
+     */
+    readonly createDiscountCode: (
+      tenantId: TenantId,
+      input: CreateDiscountCodeInput,
+    ) => Effect.Effect<ShopifyDiscount, ShopifyError>;
 
     /**
      * Aggregate refund history for a single customer. Used by
@@ -408,6 +457,17 @@ export interface ShopifyTestFixtures {
     input: RefundOrderInput,
   ) => Effect.Effect<ShopifyRefund, ShopifyError>;
   /**
+   * Optional override for `createDiscountCode`. When unset the default
+   * Test impl synthesises a `ShopifyDiscount` from the input — useful for
+   * happy-path tests where the exact code-node id doesn't matter. Tests
+   * that need to assert the input shape (that the tool forced
+   * `usageLimit: 1`, locked to the right customer, computed `endsAt`) or
+   * simulate a `DiscountFailed` override this and inspect / throw inside.
+   */
+  readonly createDiscountCode?: (
+    input: CreateDiscountCodeInput,
+  ) => Effect.Effect<ShopifyDiscount, ShopifyError>;
+  /**
    * Per-customer refund-history fixture. Tests that exercise
    * `refund.recommend` seed this with a known aggregate so the risk-flag
    * math is deterministic. When a customerId isn't in the map, the
@@ -542,6 +602,26 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           orderId: input.orderId,
           amount: input.amount,
           note: input.note,
+          createdAt: new Date(0),
+        });
+      },
+      createDiscountCode: (_tenantId, input) => {
+        if (fixtures.createDiscountCode) {
+          return fixtures.createDiscountCode(input);
+        }
+        // Default: echo the input back as a created discount. Tests that
+        // assert the forced guardrails (usageLimit, customerId, endsAt)
+        // read these fields straight off the synthesised result.
+        return Effect.succeed<ShopifyDiscount>({
+          id: `gid://shopify/DiscountCodeNode/test-${input.code}`,
+          code: input.code,
+          title: input.title,
+          valueType: input.valueType,
+          value: input.value,
+          currencyCode: input.currencyCode,
+          customerId: input.customerId,
+          usageLimit: input.usageLimit,
+          endsAt: input.endsAt,
           createdAt: new Date(0),
         });
       },

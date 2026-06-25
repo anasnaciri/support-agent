@@ -38,6 +38,7 @@ import {
   ConnectorCredentialStoreTest,
   ConversationServiceTest,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   ImageHashStore,
   ImageHashStoreTest,
   LLMServiceFromFn,
@@ -81,6 +82,7 @@ const tenantOverridesEmpty = TenantAgentOverridesServiceTest();
 const defaultTenantSettings = new TenantSettings({
   notificationEmail: null,
   refundPolicy: defaultRefundPolicy,
+  discountPolicy: defaultDiscountPolicy,
   retentionDays: 730,
   supplierEscalationSheet: null,
   legalAcceptance: null,
@@ -3233,6 +3235,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           new TenantSettings({
             notificationEmail: null,
             refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
             supplierEscalationSheet: {
               spreadsheetId: "sheet-warehouse",
@@ -4700,6 +4703,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         denyAboveMinorUnits: deny,
         currencyCode: "USD",
       },
+      discountPolicy: defaultDiscountPolicy,
       retentionDays: 730,
       supplierEscalationSheet: null,
       legalAcceptance: null,

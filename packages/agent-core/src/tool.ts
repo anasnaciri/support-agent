@@ -53,8 +53,14 @@ export interface ToolConnectorScopeRequirement {
  *   - `refund-threshold` — governed by the richer $-amount thresholds on the
  *     dedicated refund-policy page, not a binary toggle. The agent page shows
  *     it read-only with a link.
+ *   - `discount-threshold` — same idea as `refund-threshold` but for the
+ *     goodwill-coupon tool; governed by the discount-policy page. Shown
+ *     read-only with a link to that page.
  */
-export type TenantToolControl = "permission-toggle" | "refund-threshold";
+export type TenantToolControl =
+  | "permission-toggle"
+  | "refund-threshold"
+  | "discount-threshold";
 
 export interface Tool<I, O> {
   readonly name: string;

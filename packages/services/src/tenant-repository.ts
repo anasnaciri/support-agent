@@ -66,6 +66,73 @@ export const defaultRefundPolicy: RefundPolicy = {
 };
 
 /**
+ * Per-tenant policy for the `discount.create` tool (goodwill coupon
+ * codes). Same shape philosophy as {@link RefundPolicy}: the agent
+ * proposes a discount value and this policy gates it into
+ * allow / ask / deny — it never silently rewrites the value (a coupon
+ * that differs from what the agent told the customer would be worse than
+ * an escalation). The agent never sets the other coupon parameters: the
+ * `discount.create` tool forces single-use, locks the code to the case
+ * customer, makes it non-combinable, and caps the expiry at
+ * `maxValidityDays` — see the tool for the full guardrail list.
+ *
+ * Percentage discounts (the common service-recovery gesture) gate on the
+ * percentage zones; fixed-amount discounts gate on minor-unit zones in
+ * `currencyCode`, with a currency mismatch falling back to `ask`
+ * (mirrors the refund policy exactly).
+ *
+ * Zones (percentage):
+ *   - percentage ≤ askAbovePercentage              → allow (agent auto-runs)
+ *   - askAbovePercentage < percentage ≤ maxPercentage → ask
+ *   - percentage > maxPercentage                   → deny (escalate)
+ *
+ * Zones (fixed_amount), in `currencyCode`:
+ *   - amountMinorUnits ≤ askAboveFixedAmountMinorUnits        → allow
+ *   - askAbove… < amount ≤ maxFixedAmountMinorUnits           → ask
+ *   - amountMinorUnits > maxFixedAmountMinorUnits             → deny
+ *
+ * `maxValidityDays` is a hard forced cap on the coupon's expiry window —
+ * the tool always sets `endsAt = now + maxValidityDays`, never longer.
+ *
+ * `mode` sits above the zones, identical to refunds:
+ *   - `thresholds`  — the zones above (normal case)
+ *   - `always_ask`  — every coupon waits for human approval
+ *   - `always_deny` — the agent can never issue a coupon
+ *
+ * Absent/undefined `mode` ⇒ `thresholds`. Defaults are conservative —
+ * see `defaultDiscountPolicy`.
+ */
+export type DiscountPolicyMode = "thresholds" | "always_ask" | "always_deny";
+
+export interface DiscountPolicy {
+  readonly askAbovePercentage: number;
+  readonly maxPercentage: number;
+  readonly askAboveFixedAmountMinorUnits: number;
+  readonly maxFixedAmountMinorUnits: number;
+  readonly currencyCode: string;
+  readonly maxValidityDays: number;
+  /** How the policy behaves. Absent/undefined ⇒ `"thresholds"`. */
+  readonly mode?: DiscountPolicyMode;
+}
+
+/**
+ * Hard fallback used when a tenant has never configured a discount
+ * policy. Conservative on every axis: ≤10% auto-issues, 10–20% asks a
+ * human, >20% is denied; every fixed-amount coupon asks (askAbove = 0)
+ * up to a $50 hard cap; coupons expire in 30 days. Operators raise these
+ * to give the agent more autonomy.
+ */
+export const defaultDiscountPolicy: DiscountPolicy = {
+  askAbovePercentage: 10,
+  maxPercentage: 20,
+  askAboveFixedAmountMinorUnits: 0,
+  maxFixedAmountMinorUnits: 5_000, // $50 hard cap
+  currencyCode: "USD",
+  maxValidityDays: 30,
+  mode: "thresholds",
+};
+
+/**
  * Default retention for resolved cases. 24 months from `resolved_at`
  * matches the privacy-policy default in `docs/shopify-pcd.md` §7. The
  * retention sweep cron deletes resolved cases (and their cascaded
@@ -134,6 +201,13 @@ export class TenantSettings extends Data.Class<{
    */
   readonly refundPolicy: RefundPolicy;
   /**
+   * Conditional thresholds for `discount.create` (goodwill coupon codes).
+   * Configurable per-tenant via the dashboard `/settings/discount-policy`
+   * page. Always populated — we fall back to `defaultDiscountPolicy` when
+   * the JSONB column has no matching block (or has malformed values).
+   */
+  readonly discountPolicy: DiscountPolicy;
+  /**
    * Days of retention for resolved cases (counted from `resolved_at`).
    * The retention sweep cron deletes anything older. Defaults to
    * `DEFAULT_RETENTION_DAYS` when the tenant has no value set.
@@ -188,6 +262,15 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setRefundPolicy: (
       tenantId: TenantId,
       policy: RefundPolicy,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Replace the tenant's discount (coupon) policy. Same deep-merge
+     * semantics as `setRefundPolicy` — unrelated settings columns are
+     * preserved.
+     */
+    readonly setDiscountPolicy: (
+      tenantId: TenantId,
+      policy: DiscountPolicy,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
      * Set (or clear) the tenant's supplier-escalation sheet target.
@@ -255,6 +338,26 @@ export const TenantRepositoryTest = (
           new TenantSettings({
             notificationEmail: prev.notificationEmail,
             refundPolicy: policy,
+            discountPolicy: prev.discountPolicy,
+            retentionDays: prev.retentionDays,
+            supplierEscalationSheet: prev.supplierEscalationSheet,
+            legalAcceptance: prev.legalAcceptance,
+            rephraseModel: prev.rephraseModel ?? null,
+          }),
+        );
+        return Effect.void;
+      },
+      setDiscountPolicy: (tenantId, policy) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({
+            notificationEmail: prev.notificationEmail,
+            refundPolicy: prev.refundPolicy,
+            discountPolicy: policy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
             legalAcceptance: prev.legalAcceptance,
@@ -273,6 +376,7 @@ export const TenantRepositoryTest = (
           new TenantSettings({
             notificationEmail: prev.notificationEmail,
             refundPolicy: prev.refundPolicy,
+            discountPolicy: prev.discountPolicy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: sheet,
             legalAcceptance: prev.legalAcceptance,
@@ -291,6 +395,7 @@ export const TenantRepositoryTest = (
           new TenantSettings({
             notificationEmail: prev.notificationEmail,
             refundPolicy: prev.refundPolicy,
+            discountPolicy: prev.discountPolicy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
             legalAcceptance: acceptance,
@@ -309,6 +414,7 @@ export const TenantRepositoryTest = (
           new TenantSettings({
             notificationEmail: prev.notificationEmail,
             refundPolicy: prev.refundPolicy,
+            discountPolicy: prev.discountPolicy,
             retentionDays: prev.retentionDays,
             supplierEscalationSheet: prev.supplierEscalationSheet,
             legalAcceptance: prev.legalAcceptance,

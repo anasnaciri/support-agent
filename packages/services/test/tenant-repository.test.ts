@@ -9,6 +9,7 @@ import {
   TenantRepositoryTest,
   TenantSettings,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   type LegalAcceptance,
   type RefundPolicy,
 } from "../src/index.js";
@@ -28,6 +29,7 @@ const settings = (
   new TenantSettings({
     notificationEmail: "ops@example.com",
     refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
     retentionDays: 730,
     supplierEscalationSheet: null,
     legalAcceptance: null,

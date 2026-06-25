@@ -28,6 +28,20 @@ export class RefundFailed extends Data.TaggedError("RefundFailed")<{
   readonly message: string;
 }> {}
 
+/**
+ * Shopify refused to create the discount code. Common causes (from
+ * `discountCodeBasicCreate.userErrors[].code`): a duplicate code, an
+ * invalid value (e.g. percentage > 100), or a malformed customer
+ * selection. The `code` field is Shopify's machine-readable hint when
+ * present; `message` is always populated and surfaces to the operator
+ * via the audit log. Mirrors `RefundFailed`'s shape so the tool boundary
+ * handles both commercial-action failures the same way.
+ */
+export class DiscountFailed extends Data.TaggedError("DiscountFailed")<{
+  readonly code: string | null;
+  readonly message: string;
+}> {}
+
 export class ShopifyRateLimited extends Data.TaggedError("ShopifyRateLimited")<{
   readonly retryAfterMs: number;
 }> {}
@@ -100,6 +114,7 @@ export type ShopifyError =
   | CustomerNotFound
   | ProductNotFound
   | RefundFailed
+  | DiscountFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing

@@ -2,11 +2,14 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   DEFAULT_RETENTION_DAYS,
   TenantNotFound,
   TenantRepository,
   TenantRepositoryDbError,
   TenantSettings,
+  type DiscountPolicy,
+  type DiscountPolicyMode,
   type LegalAcceptance,
   type RefundPolicy,
   type RefundPolicyMode,
@@ -54,6 +57,62 @@ const decodeRefundPolicy = (raw: unknown): RefundPolicy => {
  * `mode` and fall through to `thresholds` (the safe default).
  */
 const decodeRefundMode = (raw: unknown): RefundPolicyMode => {
+  if (raw === "thresholds" || raw === "always_ask" || raw === "always_deny") {
+    return raw;
+  }
+  return "thresholds";
+};
+
+/**
+ * Decode the persisted JSONB `discountPolicy` block. Returns the fallback
+ * when the field is missing, malformed, or carries out-of-range numbers
+ * (defends against hand-edited rows). All numeric sub-fields are required
+ * — a partial block falls through to the default rather than blending.
+ */
+const decodeDiscountPolicy = (raw: unknown): DiscountPolicy => {
+  if (!raw || typeof raw !== "object") return defaultDiscountPolicy;
+  const r = raw as Record<string, unknown>;
+  const askPct = r["askAbovePercentage"];
+  const maxPct = r["maxPercentage"];
+  const askAmt = r["askAboveFixedAmountMinorUnits"];
+  const maxAmt = r["maxFixedAmountMinorUnits"];
+  const ccy = r["currencyCode"];
+  const days = r["maxValidityDays"];
+  if (
+    typeof askPct !== "number" ||
+    typeof maxPct !== "number" ||
+    typeof askAmt !== "number" ||
+    typeof maxAmt !== "number" ||
+    typeof days !== "number" ||
+    typeof ccy !== "string" ||
+    !Number.isFinite(askPct) ||
+    !Number.isFinite(maxPct) ||
+    !Number.isInteger(askAmt) ||
+    !Number.isInteger(maxAmt) ||
+    !Number.isInteger(days) ||
+    askPct < 0 ||
+    maxPct < 0 ||
+    maxPct > 100 ||
+    askAmt < 0 ||
+    maxAmt < 0 ||
+    days < 1 ||
+    ccy.length !== 3
+  ) {
+    return defaultDiscountPolicy;
+  }
+  return {
+    askAbovePercentage: askPct,
+    maxPercentage: maxPct,
+    askAboveFixedAmountMinorUnits: askAmt,
+    maxFixedAmountMinorUnits: maxAmt,
+    currencyCode: ccy.toUpperCase(),
+    maxValidityDays: days,
+    mode: decodeDiscountMode(r["mode"]),
+  };
+};
+
+/** Resolve the persisted discount `mode`; unknown/absent ⇒ `thresholds`. */
+const decodeDiscountMode = (raw: unknown): DiscountPolicyMode => {
   if (raw === "thresholds" || raw === "always_ask" || raw === "always_deny") {
     return raw;
   }
@@ -148,6 +207,7 @@ export const TenantRepositoryLive = Layer.effect(
             | {
                 readonly notificationEmail?: unknown;
                 readonly refundPolicy?: unknown;
+                readonly discountPolicy?: unknown;
                 readonly retentionDays?: unknown;
                 readonly supplierEscalationSheet?: unknown;
                 readonly legalAcceptance?: unknown;
@@ -159,6 +219,7 @@ export const TenantRepositoryLive = Layer.effect(
               ? settings.notificationEmail
               : null;
           const refundPolicy = decodeRefundPolicy(settings?.refundPolicy);
+          const discountPolicy = decodeDiscountPolicy(settings?.discountPolicy);
           // Defensive decode: must be a positive integer. Reject zero
           // (would delete every resolved case instantly) and negative
           // values (nonsensical).
@@ -183,6 +244,7 @@ export const TenantRepositoryLive = Layer.effect(
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
+            discountPolicy,
             retentionDays,
             supplierEscalationSheet,
             legalAcceptance,
@@ -210,6 +272,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setRefundPolicy",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setDiscountPolicy: (tenantId, policy) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy — replaces the
+          // `discountPolicy` block, leaves every sibling setting untouched.
+          const policyJson = JSON.stringify({ discountPolicy: policy });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${policyJson}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setDiscountPolicy",
                 cause,
               }),
           });

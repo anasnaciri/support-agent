@@ -7,6 +7,7 @@ import {
   supplierAddSheetRow,
   supplierEscalate,
   shopifyRefundCreate,
+  shopifyDiscountCreate,
 } from "../src/index.js";
 
 // The dashboard's tenant-facing "Actions" card is driven entirely by this
@@ -51,6 +52,12 @@ describe("tenant-facing tool metadata", () => {
       displayName: "Issue a refund",
       control: "refund-threshold",
     },
+    {
+      tool: shopifyDiscountCreate,
+      name: "discount.create",
+      displayName: "Issue a discount code",
+      control: "discount-threshold",
+    },
   ];
 
   for (const e of expected) {
@@ -73,6 +80,7 @@ describe("tenant-facing tool metadata", () => {
         "supplier.add_sheet_row",
         "supplier.escalate",
         "refund.create",
+        "discount.create",
       ].sort(),
     );
   });

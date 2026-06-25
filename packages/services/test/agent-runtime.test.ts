@@ -9,6 +9,7 @@ import {
   applyOverride,
   buildSystemPrompt,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   effectiveHandoffIds,
   inboundReplyCandidateIds,
   specialistsCallableFrom,
@@ -81,6 +82,7 @@ const makeSettings = (
   new TenantSettings({
     notificationEmail: null,
     refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
     retentionDays: DEFAULT_RETENTION_DAYS,
     supplierEscalationSheet: sheet,
     legalAcceptance: null,

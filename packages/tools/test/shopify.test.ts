@@ -33,6 +33,7 @@ import {
   TenantRepositoryTest,
   TenantSettings,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   type CustomerRefundHistory,
   type RefundPolicy,
 } from "@support-agent/services";
@@ -1159,6 +1160,7 @@ describe("refund.recommend — tool wire-up", () => {
           new TenantSettings({
             notificationEmail: null,
             refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
             retentionDays: 730,
             supplierEscalationSheet: null,
             legalAcceptance: null,

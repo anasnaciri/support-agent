@@ -32,6 +32,7 @@ import {
   ToolExecutionStoreTest,
   TransactionRunnerPassthrough,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   makeReplyDeliveryServiceTest,
   AgentResolverTest,
 } from "@support-agent/services";
@@ -48,6 +49,7 @@ import {
 const tenantSettings = new TenantSettings({
   notificationEmail: null,
   refundPolicy: defaultRefundPolicy,
+  discountPolicy: defaultDiscountPolicy,
   retentionDays: DEFAULT_RETENTION_DAYS,
   supplierEscalationSheet: null,
   legalAcceptance: null,

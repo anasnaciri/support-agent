@@ -13,6 +13,7 @@ import {
   TenantRepository,
   TenantSettings,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
 } from "@support-agent/services";
 import {
   PlatformMailServiceLive,
@@ -61,6 +62,7 @@ const tenantRepoWith = (
           new TenantSettings({
             notificationEmail,
             refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
             retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
             legalAcceptance: null,

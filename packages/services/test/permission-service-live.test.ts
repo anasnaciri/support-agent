@@ -11,18 +11,22 @@ import {
 import { Schema } from "effect";
 import {
   applyRefundPolicy,
+  applyDiscountPolicy,
   AuditLogService,
   AuditLogServiceTest,
   checkRequiredScopes,
   isConnectorScopeGranted,
   ConnectorCredentialStoreTest,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   parseRefundAmount,
+  parseDiscountProposal,
   PermissionServiceLive,
   TenantRepositoryTest,
   TenantSettings,
   type ConnectorConnection,
   type RefundPolicy,
+  type DiscountPolicy,
 } from "../src/index.js";
 
 // ============================================================
@@ -203,6 +207,177 @@ describe("applyRefundPolicy", () => {
 });
 
 // ============================================================
+// Pure-function tests — parseDiscountProposal + applyDiscountPolicy
+// ============================================================
+
+const discountPolicy: DiscountPolicy = {
+  askAbovePercentage: 10,
+  maxPercentage: 20,
+  askAboveFixedAmountMinorUnits: 0,
+  maxFixedAmountMinorUnits: 5000, // $50
+  currencyCode: "USD",
+  maxValidityDays: 30,
+};
+
+describe("parseDiscountProposal", () => {
+  it("parses a percentage proposal", () => {
+    expect(
+      parseDiscountProposal({ valueType: "percentage", value: "15" }),
+    ).toEqual({ type: "percentage", percentage: 15 });
+  });
+
+  it("parses a fixed_amount proposal into minor units + currency", () => {
+    expect(
+      parseDiscountProposal({
+        valueType: "fixed_amount",
+        value: "5.00",
+        currencyCode: "usd",
+      }),
+    ).toEqual({
+      type: "fixed_amount",
+      amountMinorUnits: 500,
+      currencyCode: "USD",
+    });
+  });
+
+  it("returns null on malformed / unsupported payloads", () => {
+    expect(parseDiscountProposal(null)).toBeNull();
+    expect(parseDiscountProposal({})).toBeNull();
+    // fixed_amount with no currency can't be gated against the cap.
+    expect(
+      parseDiscountProposal({ valueType: "fixed_amount", value: "5.00" }),
+    ).toBeNull();
+    // non-positive / non-numeric values.
+    expect(
+      parseDiscountProposal({ valueType: "percentage", value: "0" }),
+    ).toBeNull();
+    expect(
+      parseDiscountProposal({ valueType: "percentage", value: "abc" }),
+    ).toBeNull();
+    // unknown valueType.
+    expect(
+      parseDiscountProposal({ valueType: "bogus", value: "10" }),
+    ).toBeNull();
+  });
+});
+
+describe("applyDiscountPolicy", () => {
+  it("auto-allows a small percentage (at/under askAbove)", () => {
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "percentage",
+        percentage: 10,
+      }),
+    ).toBe("allow");
+  });
+
+  it("asks for a mid-range percentage (between askAbove and max)", () => {
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "percentage",
+        percentage: 15,
+      }),
+    ).toBe("ask");
+  });
+
+  it("denies a percentage above the hard cap", () => {
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "percentage",
+        percentage: 25,
+      }),
+    ).toBe("deny");
+    // Over-cap denies even when the static decision was allow.
+    expect(
+      applyDiscountPolicy("allow", discountPolicy, {
+        type: "percentage",
+        percentage: 25,
+      }),
+    ).toBe("deny");
+  });
+
+  it("never relaxes a static deny", () => {
+    expect(
+      applyDiscountPolicy("deny", discountPolicy, {
+        type: "percentage",
+        percentage: 5,
+      }),
+    ).toBe("deny");
+  });
+
+  it("gates fixed_amount on minor-unit zones", () => {
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "fixed_amount",
+        amountMinorUnits: 0,
+        currencyCode: "USD",
+      }),
+    ).toBe("allow");
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "fixed_amount",
+        amountMinorUnits: 2500,
+        currencyCode: "USD",
+      }),
+    ).toBe("ask");
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "fixed_amount",
+        amountMinorUnits: 6000,
+        currencyCode: "USD",
+      }),
+    ).toBe("deny");
+  });
+
+  it("asks (never auto-allows) on a fixed_amount currency mismatch", () => {
+    expect(
+      applyDiscountPolicy("ask", discountPolicy, {
+        type: "fixed_amount",
+        amountMinorUnits: 0,
+        currencyCode: "EUR",
+      }),
+    ).toBe("ask");
+  });
+
+  it("honors always_deny and always_ask modes above the zones", () => {
+    const denyAll: DiscountPolicy = { ...discountPolicy, mode: "always_deny" };
+    const askAll: DiscountPolicy = { ...discountPolicy, mode: "always_ask" };
+    expect(
+      applyDiscountPolicy("allow", denyAll, {
+        type: "percentage",
+        percentage: 5,
+      }),
+    ).toBe("deny");
+    expect(
+      applyDiscountPolicy("allow", askAll, {
+        type: "percentage",
+        percentage: 5,
+      }),
+    ).toBe("ask");
+  });
+
+  it("stays at the static decision when the proposal is malformed", () => {
+    expect(applyDiscountPolicy("ask", discountPolicy, null)).toBe("ask");
+    expect(applyDiscountPolicy("allow", discountPolicy, null)).toBe("allow");
+  });
+
+  it("uses defaultDiscountPolicy zones (≤10% allow, >20% deny)", () => {
+    expect(
+      applyDiscountPolicy("ask", defaultDiscountPolicy, {
+        type: "percentage",
+        percentage: 10,
+      }),
+    ).toBe("allow");
+    expect(
+      applyDiscountPolicy("ask", defaultDiscountPolicy, {
+        type: "percentage",
+        percentage: 21,
+      }),
+    ).toBe("deny");
+  });
+});
+
+// ============================================================
 // Layer integration — full PermissionServiceLive end-to-end
 // ============================================================
 
@@ -289,6 +464,7 @@ const runCheck = async (
         new TenantSettings({
           notificationEmail: null,
           refundPolicy: policyForTenant,
+          discountPolicy: defaultDiscountPolicy,
           retentionDays: 730,
           supplierEscalationSheet: null,
           legalAcceptance: null,
@@ -364,6 +540,7 @@ describe("PermissionServiceLive", () => {
             new TenantSettings({
               notificationEmail: null,
               refundPolicy: policy,
+              discountPolicy: defaultDiscountPolicy,
               retentionDays: 730,
               supplierEscalationSheet: null,
               legalAcceptance: null,
@@ -668,5 +845,121 @@ describe("isConnectorScopeGranted", () => {
     expect(
       isConnectorScopeGranted("shopify", "write_orders", ["read_orders"]),
     ).toBe(false);
+  });
+});
+
+// ============================================================
+// Layer integration — discount.create branch end-to-end
+// ============================================================
+
+const discountTool = defineTool({
+  name: "discount.create",
+  description: "stub",
+  inputSchema: Schema.Struct({
+    orderId: Schema.String,
+    valueType: Schema.Literal("percentage", "fixed_amount"),
+    value: Schema.String,
+    currencyCode: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+  outputSchema: Schema.Struct({}),
+  risk: "money",
+  defaultPermission: "ask",
+  sideEffectClass: "external_state",
+  requiredConnectorScopes: { provider: "shopify", scopes: ["write_discounts"] },
+  execute: () => Effect.succeed({}),
+});
+
+const shopifyConnectionWithDiscounts: ConnectorConnection = {
+  tenantId,
+  provider: "shopify",
+  shopDomain: "test-shop.myshopify.com",
+  accessToken: "shpat_test",
+  refreshToken: null,
+  tokenExpiresAt: null,
+  metadata: {},
+  scopes: ["read_orders", "write_discounts"],
+  apiVersion: "2026-04",
+  installedAt: new Date(),
+  status: "active",
+};
+
+const runDiscountCheck = async (
+  payload: unknown,
+  discountPolicyForTenant: DiscountPolicy = defaultDiscountPolicy,
+  connections: ReadonlyArray<ConnectorConnection> = [
+    shopifyConnectionWithDiscounts,
+  ],
+): Promise<string> => {
+  const tenants = TenantRepositoryTest({
+    settingsByTenant: new Map([
+      [
+        tenantId,
+        new TenantSettings({
+          notificationEmail: null,
+          refundPolicy: defaultRefundPolicy,
+          discountPolicy: discountPolicyForTenant,
+          retentionDays: 730,
+          supplierEscalationSheet: null,
+          legalAcceptance: null,
+        }),
+      ],
+    ]),
+  });
+  const connectors = ConnectorCredentialStoreTest(connections);
+  const layer = PermissionServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(tenants, connectors)),
+  );
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const svc = yield* PermissionService;
+        return yield* svc.check({ tenantId, agent, tool: discountTool, payload });
+      }),
+      layer,
+    ),
+  );
+};
+
+describe("PermissionServiceLive — discount.create branch", () => {
+  it("auto-allows a 10% coupon under the default ask threshold", async () => {
+    const result = await runDiscountCheck({
+      orderId: "gid://shopify/Order/1",
+      valueType: "percentage",
+      value: "10",
+    });
+    expect(result).toBe("allow");
+  });
+
+  it("asks on a mid-range 15% coupon", async () => {
+    const result = await runDiscountCheck({
+      orderId: "gid://shopify/Order/1",
+      valueType: "percentage",
+      value: "15",
+    });
+    expect(result).toBe("ask");
+  });
+
+  it("denies a 25% coupon over the hard cap", async () => {
+    const result = await runDiscountCheck({
+      orderId: "gid://shopify/Order/1",
+      valueType: "percentage",
+      value: "25",
+    });
+    expect(result).toBe("deny");
+  });
+
+  it("denies before execute when the write_discounts scope is missing", async () => {
+    const result = await runDiscountCheck(
+      { orderId: "gid://shopify/Order/1", valueType: "percentage", value: "5" },
+      defaultDiscountPolicy,
+      // Only read_orders granted → required write_discounts missing.
+      [
+        {
+          ...shopifyConnectionWithDiscounts,
+          scopes: ["read_orders"],
+        },
+      ],
+    );
+    expect(result).toBe("deny");
   });
 });

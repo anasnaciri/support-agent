@@ -15,9 +15,11 @@ import {
   type ShopifyProductImage,
   type ShopifyProductSearchResult,
   type ShopifyRefund,
+  type ShopifyDiscount,
   type TenantId,
   CustomerId as makeCustomerId,
   CustomerNotFound,
+  DiscountFailed,
   NetworkError,
   OrderId as makeOrderId,
   OrderNotFound,
@@ -29,6 +31,7 @@ import {
 import {
   ShopifyCredentialStore,
   ShopifyService,
+  type CreateDiscountCodeInput,
   type CustomerRefundHistory,
   type OrderPiiPresence,
   type ShopifyCredentials,
@@ -816,6 +819,62 @@ type RefundCreatePayload = {
   };
 };
 
+const DISCOUNT_CODE_CREATE_MUTATION = `
+  mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+    discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+      codeDiscountNode {
+        id
+        codeDiscount {
+          ... on DiscountCodeBasic {
+            title
+            startsAt
+            endsAt
+            usageLimit
+            appliesOncePerCustomer
+            codes(first: 1) { nodes { code } }
+            customerGets {
+              value {
+                ... on DiscountPercentage { percentage }
+                ... on DiscountAmount { amount { amount currencyCode } }
+              }
+            }
+          }
+        }
+      }
+      userErrors { field code message }
+    }
+  }
+`;
+
+type GqlDiscountCodeNode = {
+  readonly id: string;
+  readonly codeDiscount: {
+    readonly title: string;
+    readonly startsAt: string;
+    readonly endsAt: string | null;
+    readonly usageLimit: number | null;
+    readonly appliesOncePerCustomer: boolean;
+    readonly codes: { readonly nodes: ReadonlyArray<{ readonly code: string }> };
+    readonly customerGets: {
+      readonly value:
+        | { readonly percentage: number }
+        | { readonly amount: GqlMoney }
+        | Record<string, never>;
+    };
+  };
+};
+
+type DiscountCreatePayload = {
+  readonly discountCodeBasicCreate: {
+    readonly codeDiscountNode: GqlDiscountCodeNode | null;
+    readonly userErrors: ReadonlyArray<{
+      readonly field: ReadonlyArray<string> | null;
+      readonly message: string;
+      readonly code: string | null;
+    }>;
+  };
+};
+
 // Pick the transaction we'll refund against. Shopify refunds attach
 // to a parent SALE/CAPTURE that's in SUCCESS state. We pick the first
 // one and call it good — multi-transaction refund splits (e.g. gift
@@ -1239,6 +1298,95 @@ export const ShopifyServiceLive = Layer.effect(
               amount: mapMoney(refund.totalRefundedSet.shopMoney),
               note: refund.note,
               createdAt: new Date(refund.createdAt),
+            };
+            return result;
+          }),
+        ),
+
+      createDiscountCode: (tenantId, input) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            // Shopify's `DiscountPercentage.percentage` is a FRACTION in
+            // 0..1 (0.10 ⇒ 10%), not 0..100 — convert from our domain's
+            // whole-percent string. Fixed amounts pass through as a decimal
+            // string in the order currency.
+            const value =
+              input.valueType === "percentage"
+                ? { percentage: Number.parseFloat(input.value) / 100 }
+                : {
+                    discountAmount: {
+                      amount: input.value,
+                      appliesOnEachItem: false,
+                    },
+                  };
+
+            // Guardrails baked in here so the Admin API can never receive a
+            // combinable / multi-use / store-wide-eligible coupon even if a
+            // caller forgets: single customer, non-combinable, entire-order.
+            // `usageLimit` / `appliesOncePerCustomer` / `endsAt` come from
+            // the caller (the tool resolves them from policy).
+            const basicCodeDiscount = {
+              title: input.title,
+              code: input.code,
+              startsAt: new Date().toISOString(),
+              endsAt: input.endsAt.toISOString(),
+              usageLimit: input.usageLimit,
+              appliesOncePerCustomer: input.appliesOncePerCustomer,
+              customerSelection: {
+                customers: { add: [customerGid(input.customerId)] },
+              },
+              customerGets: { value, items: { all: true } },
+              combinesWith: {
+                orderDiscounts: false,
+                productDiscounts: false,
+                shippingDiscounts: false,
+              },
+            };
+
+            const data = yield* runQuery<DiscountCreatePayload>(
+              http,
+              creds,
+              tenantId,
+              DISCOUNT_CODE_CREATE_MUTATION,
+              { basicCodeDiscount },
+            );
+
+            const payload = data.discountCodeBasicCreate;
+            const firstError = payload.userErrors[0];
+            if (firstError) {
+              return yield* Effect.fail(
+                new DiscountFailed({
+                  code: firstError.code ?? null,
+                  message: firstError.message,
+                }),
+              );
+            }
+            const node = payload.codeDiscountNode;
+            if (!node) {
+              return yield* Effect.fail(
+                new DiscountFailed({
+                  code: null,
+                  message:
+                    "discountCodeBasicCreate returned no node and no userErrors",
+                }),
+              );
+            }
+            const cd = node.codeDiscount;
+            // The canonical value/type/currency are the INPUT (what we asked
+            // for) — we deliberately don't round-trip through Shopify's
+            // percentage float (0.15 * 100 drifts). Shopify's echo only
+            // confirms the code string + endsAt landed.
+            const result: ShopifyDiscount = {
+              id: node.id,
+              code: cd.codes.nodes[0]?.code ?? input.code,
+              title: cd.title,
+              valueType: input.valueType,
+              value: input.value,
+              currencyCode: input.currencyCode,
+              customerId: input.customerId,
+              usageLimit: cd.usageLimit ?? input.usageLimit,
+              endsAt: cd.endsAt ? new Date(cd.endsAt) : input.endsAt,
+              createdAt: new Date(),
             };
             return result;
           }),

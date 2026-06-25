@@ -9,7 +9,9 @@ import {
 import {
   TenantRepository,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   type RefundPolicy,
+  type DiscountPolicy,
 } from "./tenant-repository.js";
 import {
   ConnectorCredentialStore,
@@ -52,6 +54,7 @@ export { isConnectorScopeGranted };
  * provider-neutral.
  */
 const REFUND_TOOL = "refund.create";
+const DISCOUNT_TOOL = "discount.create";
 
 /**
  * Parse `amount` from a `refund.create` payload into minor units
@@ -127,6 +130,95 @@ export const applyRefundPolicy = (
 
   // Between thresholds → ask. If the static decision was `deny` we
   // keep `deny` (we never relax `deny`); otherwise `ask`.
+  return staticPermission === "deny" ? "deny" : "ask";
+};
+
+/**
+ * A discount value the agent proposed, normalized for policy comparison.
+ * Percentage discounts carry a `percentage` (10 ⇒ 10%); fixed-amount
+ * discounts carry minor units + currency (mirrors the refund shape).
+ */
+export type DiscountProposal =
+  | { readonly type: "percentage"; readonly percentage: number }
+  | {
+      readonly type: "fixed_amount";
+      readonly amountMinorUnits: number;
+      readonly currencyCode: string;
+    };
+
+/**
+ * Parse `valueType` + `value` (+ `currencyCode` for fixed amounts) from a
+ * `discount.create` payload. Returns null when the payload doesn't match
+ * the expected shape — defensive against malformed LLM output (the tool's
+ * input schema will reject the call anyway, but the permission check runs
+ * on the raw payload). A non-positive or non-finite value is rejected.
+ */
+export const parseDiscountProposal = (
+  payload: unknown,
+): DiscountProposal | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const valueType = p["valueType"];
+  const value = p["value"];
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  if (valueType === "percentage") {
+    return { type: "percentage", percentage: parsed };
+  }
+  if (valueType === "fixed_amount") {
+    const ccy = p["currencyCode"];
+    if (typeof ccy !== "string" || ccy.length === 0) return null;
+    return {
+      type: "fixed_amount",
+      amountMinorUnits: Math.round(parsed * 100),
+      currencyCode: ccy.toUpperCase(),
+    };
+  }
+  return null;
+};
+
+/**
+ * Apply the discount-policy decision to an already-statically-decided
+ * permission. Pure — exported for unit testing without an Effect runtime.
+ * Same shape as {@link applyRefundPolicy}: the policy can only soften
+ * (ask → allow for small discounts) or harden (ask → deny over the cap)
+ * the static decision; it never relaxes a `deny`. Percentage and
+ * fixed-amount proposals gate on their respective zones; a fixed-amount
+ * currency mismatch falls back to `ask` (we can't compare cleanly).
+ */
+export const applyDiscountPolicy = (
+  staticPermission: Permission,
+  policy: DiscountPolicy,
+  proposal: DiscountProposal | null,
+): Permission => {
+  const mode = policy.mode ?? "thresholds";
+  if (mode === "always_deny") return "deny";
+  if (mode === "always_ask")
+    return staticPermission === "deny" ? "deny" : "ask";
+
+  // Malformed payload: stay at the static decision (the tool's input
+  // schema rejects the call anyway).
+  if (!proposal) return staticPermission;
+
+  if (proposal.type === "percentage") {
+    if (proposal.percentage > policy.maxPercentage) return "deny";
+    if (proposal.percentage <= policy.askAbovePercentage) {
+      return staticPermission === "ask" ? "allow" : staticPermission;
+    }
+    return staticPermission === "deny" ? "deny" : "ask";
+  }
+
+  // fixed_amount: currency mismatch → ask (never auto-allow), same as refunds.
+  if (proposal.currencyCode !== policy.currencyCode.toUpperCase()) {
+    return staticPermission === "deny" ? "deny" : "ask";
+  }
+  if (proposal.amountMinorUnits > policy.maxFixedAmountMinorUnits) {
+    return "deny";
+  }
+  if (proposal.amountMinorUnits <= policy.askAboveFixedAmountMinorUnits) {
+    return staticPermission === "ask" ? "allow" : staticPermission;
+  }
   return staticPermission === "deny" ? "deny" : "ask";
 };
 
@@ -247,7 +339,27 @@ export const PermissionServiceLive = Layer.effect(
             }
           }
 
-          // Step 3: conditional refund-amount threshold. Other tools
+          // Step 3a: conditional discount-policy decision. Like the
+          // refund branch below, this overlays per-tenant thresholds on
+          // top of the tool's static `ask`. Gated per-call (no case-
+          // cumulative aggregation yet — coupons are single-use and
+          // locked to one customer, so the per-call cap bounds exposure).
+          if (tool.name === DISCOUNT_TOOL) {
+            const settings = yield* tenants.getSettings(tenantId).pipe(
+              Effect.catchAll(() =>
+                Effect.succeed({
+                  discountPolicy: defaultDiscountPolicy,
+                } as const),
+              ),
+            );
+            return applyDiscountPolicy(
+              staticPermission,
+              settings.discountPolicy,
+              parseDiscountProposal(payload),
+            );
+          }
+
+          // Step 3b: conditional refund-amount threshold. Other tools
           // short-circuit here so we don't pay the tenant-settings DB
           // hop on every permission check.
           if (tool.name !== REFUND_TOOL) return staticPermission;

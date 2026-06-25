@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CustomerId,
   CustomerNotFound,
+  DiscountFailed,
   NetworkError,
   OrderId,
   OrderNotFound,
@@ -1630,6 +1631,168 @@ describe("ShopifyServiceLive — refundOrder", () => {
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error: unknown }).error;
       expect(err).toBeInstanceOf(OrderNotFound);
+    }
+  });
+});
+
+// ============================================================
+// createDiscountCode
+// ============================================================
+
+describe("ShopifyServiceLive — createDiscountCode", () => {
+  const customerGid = "gid://shopify/Customer/777";
+  const endsAt = new Date("2026-07-25T00:00:00.000Z");
+
+  const okPayload = (code = "THANKS-AB23CD") => ({
+    data: {
+      discountCodeBasicCreate: {
+        codeDiscountNode: {
+          id: "gid://shopify/DiscountCodeNode/99",
+          codeDiscount: {
+            title: "Goodwill discount",
+            startsAt: "2026-06-25T00:00:00.000Z",
+            endsAt: endsAt.toISOString(),
+            usageLimit: 1,
+            appliesOncePerCustomer: true,
+            codes: { nodes: [{ code }] },
+            customerGets: { value: { percentage: 0.15 } },
+          },
+        },
+        userErrors: [],
+      },
+    },
+  });
+
+  const callCreate = (
+    layer: Layer.Layer<ShopifyService>,
+    overrides: Partial<{
+      valueType: "percentage" | "fixed_amount";
+      value: string;
+      currencyCode: string | null;
+    }> = {},
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.createDiscountCode(tenantId, {
+            customerId: CustomerId(customerGid),
+            code: "THANKS-AB23CD",
+            title: "Goodwill discount",
+            valueType: overrides.valueType ?? "percentage",
+            value: overrides.value ?? "15",
+            currencyCode:
+              overrides.currencyCode === undefined
+                ? null
+                : overrides.currencyCode,
+            endsAt,
+            usageLimit: 1,
+            appliesOncePerCustomer: true,
+          }),
+        ),
+        layer,
+      ),
+    );
+
+  it("converts whole-percent to Shopify's 0..1 fraction and forces the guardrails", async () => {
+    reset();
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload())]));
+    const exit = await callCreate(layer);
+    expect(Exit.isSuccess(exit)).toBe(true);
+
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { basicCodeDiscount: Record<string, unknown> };
+    };
+    const d = body.variables.basicCodeDiscount;
+    // 15% → 0.15 fraction.
+    const customerGets = d["customerGets"] as Record<string, unknown>;
+    expect((customerGets["value"] as Record<string, unknown>)["percentage"]).toBe(
+      0.15,
+    );
+    // Locked to exactly the one customer.
+    const sel = d["customerSelection"] as Record<string, unknown>;
+    expect((sel["customers"] as Record<string, unknown>)["add"]).toEqual([
+      customerGid,
+    ]);
+    // Forced guardrails.
+    expect(d["usageLimit"]).toBe(1);
+    expect(d["appliesOncePerCustomer"]).toBe(true);
+    expect(d["endsAt"]).toBe(endsAt.toISOString());
+    expect(d["combinesWith"]).toEqual({
+      orderDiscounts: false,
+      productDiscounts: false,
+      shippingDiscounts: false,
+    });
+    expect(customerGets["items"]).toEqual({ all: true });
+
+    if (Exit.isSuccess(exit)) {
+      // Canonical value is the input (no round-trip through the float).
+      expect(exit.value.value).toBe("15");
+      expect(exit.value.valueType).toBe("percentage");
+      expect(exit.value.code).toBe("THANKS-AB23CD");
+      expect(exit.value.usageLimit).toBe(1);
+    }
+  });
+
+  it("sends a fixed_amount as a discountAmount in the order currency", async () => {
+    reset();
+    const fixedPayload = {
+      data: {
+        discountCodeBasicCreate: {
+          codeDiscountNode: {
+            id: "gid://shopify/DiscountCodeNode/100",
+            codeDiscount: {
+              title: "Goodwill discount",
+              startsAt: "2026-06-25T00:00:00.000Z",
+              endsAt: endsAt.toISOString(),
+              usageLimit: 1,
+              appliesOncePerCustomer: true,
+              codes: { nodes: [{ code: "THANKS-AB23CD" }] },
+              customerGets: {
+                value: { amount: { amount: "5.00", currencyCode: "USD" } },
+              },
+            },
+          },
+          userErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, fixedPayload)]));
+    const exit = await callCreate(layer, {
+      valueType: "fixed_amount",
+      value: "5.00",
+      currencyCode: "USD",
+    });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { basicCodeDiscount: Record<string, unknown> };
+    };
+    const value = (
+      body.variables.basicCodeDiscount["customerGets"] as Record<string, unknown>
+    )["value"] as Record<string, unknown>;
+    expect(value["discountAmount"]).toEqual({
+      amount: "5.00",
+      appliesOnEachItem: false,
+    });
+  });
+
+  it("maps userErrors → DiscountFailed", async () => {
+    reset();
+    const errPayload = {
+      data: {
+        discountCodeBasicCreate: {
+          codeDiscountNode: null,
+          userErrors: [
+            { field: ["code"], code: "TAKEN", message: "Code already exists" },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, errPayload)]));
+    const exit = await callCreate(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(DiscountFailed);
     }
   });
 });

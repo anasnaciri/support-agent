@@ -26,6 +26,7 @@ import {
   CaseRepository,
   CaseRepositoryTest,
   defaultRefundPolicy,
+  defaultDiscountPolicy,
   DEFAULT_RETENTION_DAYS,
   LLMServiceFromFn,
   LLMServiceScripted,
@@ -62,6 +63,7 @@ const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
 const defaultTenantSettings = new TenantSettings({
   notificationEmail: null,
   refundPolicy: defaultRefundPolicy,
+  discountPolicy: defaultDiscountPolicy,
   retentionDays: DEFAULT_RETENTION_DAYS,
   supplierEscalationSheet: null,
   legalAcceptance: null,
