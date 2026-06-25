@@ -18,6 +18,7 @@ describe("missing-package-agent config", () => {
       "shopify.get_order",
       "shopify.find_customer_order",
       "shopify.get_customer",
+      "tracking.lookup",
       "case.update_context",
       "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
@@ -60,6 +61,19 @@ describe("missing-package-agent config", () => {
     expect(missingPackageAgent.promptTemplate).toContain(
       "[Supplier escalation sheet:",
     );
+    // Delivery-claim VERIFY: the agent checks live carrier status before it
+    // either escalates or tells the customer it's on its way.
+    expect(missingPackageAgent.tools).toContain("tracking.lookup");
+    expect(missingPackageAgent.promptTemplate).toContain("tracking.lookup");
+    expect(missingPackageAgent.promptTemplate).toContain("VERIFY");
+    // BRANCH B splits into: real problem -> escalate (B1); moving normally ->
+    // return-for-refund reply (B2); can't verify -> merchant ping + escalate (B3).
+    expect(missingPackageAgent.promptTemplate).toContain("B1");
+    expect(missingPackageAgent.promptTemplate).toContain("B2");
+    expect(missingPackageAgent.promptTemplate).toContain("B3");
+    // The shipped-and-moving reply offers a return-for-refund instead of a
+    // cancellation.
+    expect(missingPackageAgent.promptTemplate).toContain("return it to us");
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {

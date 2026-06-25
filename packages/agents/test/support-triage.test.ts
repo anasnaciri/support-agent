@@ -22,6 +22,19 @@ describe("support-triage agent config", () => {
     expect(supportTriage.promptTemplate.length).toBeGreaterThan(50);
   });
 
+  it("routes delivery-reason refund/cancel requests to the delivery specialist, not refund-review", () => {
+    // A refund/cancel request whose REASON is a delivery problem must be
+    // classified as `missing_package` (the delivery specialist verifies the
+    // claim), NOT `refund_request`. Otherwise refund-review just sizes a
+    // refund without checking the delivery state.
+    const p = supportTriage.promptTemplate.toLowerCase();
+    expect(p).toContain("delivery problem");
+    expect(p).toContain("non-delivery");
+    // The routing rule must name both buckets so the model can disambiguate.
+    expect(supportTriage.promptTemplate).toContain("missing_package");
+    expect(supportTriage.promptTemplate).toContain("refund_request");
+  });
+
   it("does not declare any tools outside the triage-allowed set", () => {
     // Defensive — keeps the agent's scope honest. Adding real tools
     // (Shopify, email) belongs on a specialist agent, reached via

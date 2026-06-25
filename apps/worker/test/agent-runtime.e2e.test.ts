@@ -1051,6 +1051,311 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // Delivery specialist (missing-package-agent), expanded for refund
+  // requests that cite a delivery problem. BRANCH B3 — the agent cannot
+  // verify the claim (the tracking number resolves to `no_provider`), so it
+  // pings the merchant (Telegram heads-up) AND escalates to the supplier,
+  // which parks the case in waiting_for_supplier. Exercises the REAL agent
+  // config end-to-end (tools must include tracking.lookup + merchant.notify;
+  // supplier.escalate must be auto-allowed; the turn budget must cover the
+  // get_order -> tracking.lookup -> merchant.notify -> supplier.escalate run).
+  // ----------------------------------------------------------------
+  it("missing-package: an unverifiable delivery claim pings the merchant and escalates to the supplier (parks)", async () => {
+    const orderId = OrderId("gid://shopify/Order/88001");
+    const order: ShopifyOrder = {
+      id: orderId,
+      name: "#8001",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/880"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "30.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Mug",
+          quantity: 1,
+          sku: "MUG-1",
+          variantTitle: null,
+          productId: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "in_transit",
+          trackingCompany: "DHL",
+          trackingNumbers: ["NOPROV-1"],
+          trackingUrls: [],
+          estimatedDeliveryAt: null,
+          deliveredAt: null,
+          createdAt: new Date("2026-06-20T00:00:00.000Z"),
+          updatedAt: new Date("2026-06-21T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-06-20T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-21T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "tool_call", callId: "c0", tool: "shopify.get_order", input: { orderId } },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "tracking.lookup",
+        input: { trackingNumber: "NOPROV-1", carrier: "DHL" },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "merchant.notify",
+        input: {
+          title: "Unverifiable delivery claim",
+          message:
+            "Order #8001: customer reports a delivery problem we couldn't auto-verify (no tracking provider).",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "c3",
+        tool: "supplier.escalate",
+        input: {
+          problem:
+            "Order #8001 to Lyon, FR — customer reports the courier won't deliver; please chase the carrier or reship.",
+          orderRef: "#8001",
+          shipCity: "Lyon",
+          shipCountry: "FR",
+          trackingNumber: "NOPROV-1",
+        },
+      },
+    ];
+    const mn = makeMerchantNotificationServiceTest({});
+    const supplierLayer = SupplierEscalationServiceTest({
+      escalate: () =>
+        Effect.succeed({
+          kind: "escalated" as const,
+          escalationId: "esc-9",
+          supplierId: "sup-9",
+          supplierEmail: "wh@x.com",
+        }),
+    });
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([missingPackageAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, order]]) }),
+      TrackingServiceTest({
+        lookupByNumber: new Map([
+          [
+            "NOPROV-1",
+            {
+              kind: "no_provider" as const,
+              carrier: "DHL",
+              trackingNumber: "NOPROV-1",
+              trackingUrl: "https://track.example/NOPROV-1",
+              reason: "no_api_key" as const,
+            },
+          ],
+        ]),
+      }),
+      ConversationServiceTest({}),
+      supplierLayer,
+      mn.layer,
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: missingPackageAgent.id,
+            subject: "Refund — courier won't deliver",
+            threadId: "thread-8001" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-8001" as never,
+              messageId: "m8",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Refund",
+              bodyText: "Courier won't deliver, I want a refund.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          return { result, fetched };
+        }),
+        layer,
+      ),
+    );
+
+    // Parked for the supplier — not auto-refunded, not resolved.
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    // The merchant got the Telegram heads-up before we escalated.
+    expect(mn.handle.sent).toHaveLength(1);
+  });
+
+  // ----------------------------------------------------------------
+  // Delivery specialist, BRANCH B2 — the parcel is moving normally (tracking
+  // resolves to a live `in_transit` status), so the agent does NOT escalate.
+  // It drafts a return-for-refund reply ("can't cancel; return it after it
+  // arrives and we'll refund") and parks for approval. Proves the agent can
+  // reach a reply with tracking.lookup in its loop, instead of escalating
+  // every in-transit order.
+  // ----------------------------------------------------------------
+  it("missing-package: a normally-moving parcel gets a return-for-refund reply, not a supplier escalation", async () => {
+    const orderId = OrderId("gid://shopify/Order/88002");
+    const order: ShopifyOrder = {
+      id: orderId,
+      name: "#8002",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/882"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "44.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Kettle",
+          quantity: 1,
+          sku: "KET-1",
+          variantTitle: null,
+          productId: null,
+        },
+      ],
+      fulfillments: [
+        {
+          id: "f-1",
+          status: "in_transit",
+          trackingCompany: "UPS",
+          trackingNumbers: ["1Z888"],
+          trackingUrls: ["https://track.example/1Z888"],
+          estimatedDeliveryAt: new Date("2026-06-28T00:00:00.000Z"),
+          deliveredAt: null,
+          createdAt: new Date("2026-06-22T00:00:00.000Z"),
+          updatedAt: new Date("2026-06-23T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-06-22T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-23T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "tool_call", callId: "c0", tool: "shopify.get_order", input: { orderId } },
+      {
+        type: "tool_call",
+        callId: "c1",
+        tool: "tracking.lookup",
+        input: { trackingNumber: "1Z888", carrier: "UPS" },
+      },
+      {
+        type: "tool_call",
+        callId: "c2",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-8002",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText:
+            "Your order #8002 has shipped and is in transit with UPS, so it can't be canceled now. If you'd still like a refund, return it to us after it arrives and we'll refund per our return policy.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "missing-package-reply-8002",
+        },
+      },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([missingPackageAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, order]]) }),
+      // Default TrackingServiceTest → live `in_transit` (normal progress).
+      TrackingServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvalsSvc = yield* ApprovalService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: missingPackageAgent.id,
+            subject: "Refund please",
+            threadId: "thread-8002" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-8002" as never,
+              messageId: "m82",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Refund",
+              bodyText: "It hasn't arrived yet and I'd like a refund.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const fetched = yield* repo.getById(created.id);
+          const pending = yield* approvalsSvc.listPending(
+            TenantId("tenant-acme"),
+          );
+          return { result, fetched, pending };
+        }),
+        layer,
+      ),
+    );
+
+    // A reply was drafted and parked for approval — NOT escalated to a supplier.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.fetched.status).not.toBe("waiting_for_supplier");
+    expect(out.pending).toHaveLength(1);
+    expect(out.pending[0]!.tool).toBe("conversation.reply");
+  });
+
+  // ----------------------------------------------------------------
   // order-status-agent with `tracking.lookup` in the chain. The agent
   // fetches the order, sees a tracking number, calls tracking.lookup
   // (which TrackingServiceTest returns a synthetic "live" status for),
