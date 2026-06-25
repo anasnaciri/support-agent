@@ -10,11 +10,13 @@ import {
   currentToolPermission,
   assignableTools,
 } from "@/lib/catalog";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
 import { AgentForm } from "../_components/agent-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 import {
   ModelCombobox,
@@ -66,6 +68,39 @@ const PROVIDER_LABEL: Readonly<Record<string, string>> = {
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
+const CUSTOM_AGENT_FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Agent saved." },
+  { param: "created", kind: "success", message: "Agent saved." },
+];
+
+const BUILTIN_AGENT_FEEDBACK: readonly FeedbackRule[] = [
+  { param: "model", match: "updated", kind: "success", message: "Model updated." },
+  {
+    param: "model",
+    match: "reset",
+    kind: "success",
+    message: "Model reset to the agent default.",
+  },
+  {
+    param: "prompt",
+    match: "updated",
+    kind: "success",
+    message: "System prompt saved.",
+  },
+  {
+    param: "prompt",
+    match: "reset",
+    kind: "success",
+    message: "System prompt reset to the built-in prompt.",
+  },
+  {
+    param: "perm",
+    match: "updated",
+    kind: "success",
+    message: "Action permission updated.",
+  },
+];
+
 export default async function AgentDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
   const ctx = await requirePermission("settings.agents");
@@ -86,7 +121,7 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
     const view = await api.getCustomAgent(ctx, id);
     if (!view) notFound();
     const err = Array.isArray(sp["error"]) ? sp["error"][0] : sp["error"];
-    const saved = sp["saved"] === "1" || sp["created"] === "1";
+    const customFeedback = resolveFeedback(sp, CUSTOM_AGENT_FEEDBACK);
     const handoffOptions = catalogResp.agents
       .filter((a) => a.id !== id)
       .map((a) => ({ label: a.name, value: a.id }));
@@ -100,11 +135,10 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
           <h1 className="text-3xl font-semibold tracking-tight">{view.name}</h1>
           <p className="mt-1 text-sm text-muted-foreground">Custom agent</p>
         </div>
-        {saved ? (
-          <Alert variant="success">
-            <AlertDescription>Agent saved.</AlertDescription>
-          </Alert>
-        ) : null}
+        <FeedbackToaster
+          toasts={customFeedback.toasts}
+          consume={customFeedback.consume}
+        />
         <AgentForm
           mode="edit"
           agent={view}
@@ -119,11 +153,7 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
     );
   }
 
-  const modelBanner = Array.isArray(sp["model"]) ? sp["model"][0] : sp["model"];
-  const promptBanner = Array.isArray(sp["prompt"])
-    ? sp["prompt"][0]
-    : sp["prompt"];
-  const permBanner = Array.isArray(sp["perm"]) ? sp["perm"][0] : sp["perm"];
+  const feedback = resolveFeedback(sp, BUILTIN_AGENT_FEEDBACK);
 
   const overrideRow = overrideRows.find((o) => o.agentId === agent.id) ?? null;
   const override = overrideRow?.model ?? null;
@@ -171,35 +201,7 @@ export default async function AgentDetailPage({ params, searchParams }: Props) {
         <p className="mt-3 text-sm">{agent.description}</p>
       </div>
 
-      {modelBanner === "updated" ? (
-        <Alert variant="success">
-          <AlertDescription>Model updated.</AlertDescription>
-        </Alert>
-      ) : null}
-      {modelBanner === "reset" ? (
-        <Alert variant="success">
-          <AlertDescription>
-            Model reset to the agent default.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {promptBanner === "updated" ? (
-        <Alert variant="success">
-          <AlertDescription>System prompt saved.</AlertDescription>
-        </Alert>
-      ) : null}
-      {promptBanner === "reset" ? (
-        <Alert variant="success">
-          <AlertDescription>
-            System prompt reset to the built-in prompt.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {permBanner === "updated" ? (
-        <Alert variant="success">
-          <AlertDescription>Action permission updated.</AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       <Card>
         <CardHeader className="pb-3">

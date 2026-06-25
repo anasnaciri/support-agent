@@ -1,13 +1,51 @@
 import { TicketPercent } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { DiscountPolicyForm } from "./discount-policy-form";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
+
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Discount policy saved." },
+  {
+    param: "error",
+    match: "bad_currency",
+    kind: "warning",
+    message: "Currency must be a 3-letter ISO code (USD, EUR, GBP, …).",
+  },
+  {
+    param: "error",
+    match: "bad_percentage",
+    kind: "warning",
+    message:
+      "Percentages must be between 0 and 100 with at most two decimals.",
+  },
+  {
+    param: "error",
+    match: "bad_amount",
+    kind: "warning",
+    message:
+      "Fixed amounts must be non-negative decimals with at most two digits after the decimal point.",
+  },
+  {
+    param: "error",
+    match: "bad_validity",
+    kind: "warning",
+    message:
+      "The expiry window must be a whole number of days between 1 and 365.",
+  },
+  {
+    param: "error",
+    match: "bad_order",
+    kind: "warning",
+    message: "The auto limit must not exceed the block limit.",
+  },
+];
 
 interface PageProps {
   readonly searchParams?: Promise<
@@ -18,14 +56,7 @@ interface PageProps {
 export default async function DiscountPolicyPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
   const { discountPolicy: policy } = await api.settings(ctx);
-  const params = (await searchParams) ?? {};
-
-  const savedBanner =
-    (Array.isArray(params["saved"]) ? params["saved"][0] : params["saved"]) ===
-    "1";
-  const errorRaw = Array.isArray(params["error"])
-    ? params["error"][0]
-    : params["error"];
+  const feedback = resolveFeedback((await searchParams) ?? {}, FEEDBACK);
 
   return (
     <div className="space-y-6">
@@ -47,47 +78,7 @@ export default async function DiscountPolicyPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {savedBanner ? (
-        <Alert variant="success">
-          <AlertDescription>Discount policy saved.</AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_currency" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Currency must be a 3-letter ISO code (USD, EUR, GBP, …).
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_percentage" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Percentages must be between 0 and 100 with at most two decimals.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_amount" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Fixed amounts must be non-negative decimals with at most two digits
-            after the decimal point.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_validity" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            The expiry window must be a whole number of days between 1 and 365.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_order" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            The auto limit must not exceed the block limit.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       <Card>
         <CardHeader className="pb-3">

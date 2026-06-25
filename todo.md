@@ -65,6 +65,30 @@ Related to (and partly subsumes) the merchant skip-domains NEXT item above — b
 Current lifecycle refactor backlog from `/private/tmp/support-agent-handoff-20260623-lifecycle-refactors.md`
 and a fresh `rg` audit on 2026-06-23:
 
+## ✅ LANDED — Sonner toasts for transient feedback (2026-06-25, NOT committed)
+
+Replaced the **transient** post-action result banners with `sonner` toasts; **persistent** state
+banners stay inline `<Alert>` (the user picked "transient feedback only" + "do it all at once").
+
+- New dep `sonner` in `apps/dashboard`; `<Toaster/>` (`components/ui/toaster.tsx`, light theme,
+  top-right, `richColors`) mounted once in the root `app/layout.tsx`.
+- Pure matcher `lib/toast-feedback.ts` → `resolveFeedback(params, rules)` returns `{toasts, consume}`
+  (flag `?saved=1`, exact `?error=bad_currency`, `match:"*"` fallback). 12 unit tests in
+  `test/toast-feedback.test.ts`.
+- Client bridge `components/ui/feedback-toaster.tsx` fires the toasts once on mount, then strips the
+  consumed params via `history.replaceState` (NOT `router.replace` — no RSC refetch) so a refresh
+  doesn't replay them. Server pages resolve toasts (reusing existing message maps —
+  `knowledgeErrorMessage`, account `ERROR_COPY`, notifications `ERROR_MESSAGES`, integrations
+  `connectedBanner`/`parseConnectError`) and pass `toasts`+`consume` down.
+- Converted pages: home (`/`), settings/{discount-policy, refund-policy, llm, legal, account,
+  notifications, knowledge, knowledge/[id], agents/[id], integrations, integrations/[provider]}.
+- KEPT inline (persistent): refund/LLM currency + model-mismatch warnings, "No AI provider connected",
+  connect-buttons-disabled, legal-acceptance-required, per-card "needs attention", and the
+  AgentForm "Couldn't save" form-validation error.
+- `pnpm build` (tsc -b) green; dashboard `next build` green (35/35 pages); helper tests green.
+- Follow-up: toast palette uses sonner `richColors`, not the exact brand tokens
+  (`--success`/`--warning`/etc.) — revisit if a closer match is wanted.
+
 ## ✅ LANDED — Merchant-authored custom agents (2026-06-24, branch `feat/custom-agents`, NOT merged)
 
 Merchants can build their own agents from `/settings/agents` — assign tools, set who-can-call-whom

@@ -5,6 +5,7 @@ import localFont from "next/font/local";
 import { getSession } from "@/lib/session";
 import { getShellWorkspaces } from "@/lib/api-client";
 import { parseSidebarWidth } from "@/lib/sidebar-width";
+import { Toaster } from "@/components/ui/toaster";
 import { AppShell } from "./AppShell";
 import "./globals.css";
 
@@ -59,6 +60,7 @@ export default async function RootLayout({
         >
           {children}
         </AppShell>
+        <Toaster />
       </body>
     </html>
   );

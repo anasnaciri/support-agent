@@ -2,13 +2,38 @@ import { Banknote } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { refundCurrencyMismatch } from "@/lib/refund-currency";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { RefundPolicyForm } from "./refund-policy-form";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
+
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Refund policy saved." },
+  {
+    param: "error",
+    match: "bad_currency",
+    kind: "warning",
+    message: "Currency must be a 3-letter ISO code (USD, EUR, GBP, …).",
+  },
+  {
+    param: "error",
+    match: "bad_amount",
+    kind: "warning",
+    message:
+      "Both thresholds must be non-negative decimals with at most two digits after the decimal point.",
+  },
+  {
+    param: "error",
+    match: "bad_order",
+    kind: "warning",
+    message: "The ask threshold must not exceed the deny threshold.",
+  },
+];
 
 interface PageProps {
   readonly searchParams?: Promise<
@@ -25,20 +50,13 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
       .shopCurrency(ctx)
       .catch(() => ({ currencyCode: null as string | null })),
   ]);
-  const params = (await searchParams) ?? {};
+  const feedback = resolveFeedback((await searchParams) ?? {}, FEEDBACK);
 
   const showCurrencyWarning = refundCurrencyMismatch(
     policy.currencyCode,
     shopCurrency.currencyCode,
     policy.mode,
   );
-
-  const savedBanner =
-    (Array.isArray(params["saved"]) ? params["saved"][0] : params["saved"]) ===
-    "1";
-  const errorRaw = Array.isArray(params["error"])
-    ? params["error"][0]
-    : params["error"];
 
   return (
     <div className="space-y-6">
@@ -57,11 +75,8 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {savedBanner ? (
-        <Alert variant="success">
-          <AlertDescription>Refund policy saved.</AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
+
       {showCurrencyWarning ? (
         <Alert variant="warning">
           <AlertDescription>
@@ -70,28 +85,6 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
             to <strong>{policy.currencyCode}</strong>. Refunds won&apos;t match
             your thresholds and will all pause for approval &mdash; set the
             currency to {shopCurrency.currencyCode} to fix this.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_currency" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Currency must be a 3-letter ISO code (USD, EUR, GBP, …).
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_amount" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Both thresholds must be non-negative decimals with at most two
-            digits after the decimal point.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "bad_order" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            The ask threshold must not exceed the deny threshold.
           </AlertDescription>
         </Alert>
       ) : null}

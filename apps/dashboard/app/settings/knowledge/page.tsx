@@ -1,7 +1,12 @@
 import { BookOpen, FileText, Link2, Pencil } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  resolveFeedback,
+  type FeedbackRule,
+  type ResolvedToast,
+} from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,14 +27,29 @@ const one = (
   v: string | string[] | undefined,
 ): string | undefined => (Array.isArray(v) ? v[0] : v);
 
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Document saved." },
+  { param: "deleted", kind: "success", message: "Document deleted." },
+];
+
 export default async function KnowledgePage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
   const documents = await api.knowledge(ctx);
   const params = (await searchParams) ?? {};
 
-  const saved = one(params["saved"]) === "1";
-  const deleted = one(params["deleted"]) === "1";
+  const { toasts, consume } = resolveFeedback(params, FEEDBACK);
+  // The `error` codes carry a compact reason (`fetch_failed:timeout`, …); the
+  // friendly text comes from the shared message map rather than an enumeration.
   const errorCode = one(params["error"]);
+  const feedbackToasts: ResolvedToast[] = [...toasts];
+  const feedbackConsume = [...consume];
+  if (errorCode) {
+    feedbackToasts.push({
+      kind: "warning",
+      message: knowledgeErrorMessage(errorCode),
+    });
+    feedbackConsume.push("error");
+  }
 
   return (
     <div className="space-y-6">
@@ -45,21 +65,7 @@ export default async function KnowledgePage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {saved ? (
-        <Alert variant="success">
-          <AlertDescription>Document saved.</AlertDescription>
-        </Alert>
-      ) : null}
-      {deleted ? (
-        <Alert variant="success">
-          <AlertDescription>Document deleted.</AlertDescription>
-        </Alert>
-      ) : null}
-      {errorCode ? (
-        <Alert variant="warning">
-          <AlertDescription>{knowledgeErrorMessage(errorCode)}</AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedbackToasts} consume={feedbackConsume} />
 
       <Card>
         <CardHeader className="pb-3">

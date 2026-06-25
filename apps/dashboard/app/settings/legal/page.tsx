@@ -4,7 +4,8 @@ import { FileText, ShieldCheck } from "lucide-react";
 import { api, getDashboardContext } from "@/lib/api-client";
 import { dataProcessingNoticeUrl } from "@/lib/legal";
 import { formatRelativeTime } from "@/lib/format";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,16 +19,19 @@ interface PageProps {
   >;
 }
 
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "accepted", kind: "success", message: "Legal terms accepted." },
+  {
+    param: "error",
+    match: "accept_failed",
+    kind: "warning",
+    message: "Could not record acceptance. Please try again.",
+  },
+];
+
 export default async function LegalSettingsPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
-  const params = (await searchParams) ?? {};
-  const acceptedBanner =
-    (Array.isArray(params["accepted"])
-      ? params["accepted"][0]
-      : params["accepted"]) === "1";
-  const errorRaw = Array.isArray(params["error"])
-    ? params["error"][0]
-    : params["error"];
+  const feedback = resolveFeedback((await searchParams) ?? {}, FEEDBACK);
   const [settings, noticeUrl] = await Promise.all([
     api.settings(ctx),
     Promise.resolve(dataProcessingNoticeUrl()),
@@ -46,18 +50,7 @@ export default async function LegalSettingsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {acceptedBanner ? (
-        <Alert variant="success">
-          <AlertDescription>Legal terms accepted.</AlertDescription>
-        </Alert>
-      ) : null}
-      {errorRaw === "accept_failed" ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            Could not record acceptance. Please try again.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       <Card>
         <CardHeader className="pb-3">

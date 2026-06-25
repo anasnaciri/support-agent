@@ -1,7 +1,8 @@
 import { Bell, ExternalLink, Send } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,10 +31,29 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   link_failed: "Couldn't generate a link right now. Please try again.",
 };
 
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "disconnected", kind: "success", message: "Telegram disconnected." },
+  ...Object.entries(ERROR_MESSAGES).map(
+    ([code, message]): FeedbackRule => ({
+      param: "error",
+      match: code,
+      kind: "warning",
+      message,
+    }),
+  ),
+  {
+    param: "error",
+    match: "*",
+    kind: "warning",
+    message: "Something went wrong. Please try again.",
+  },
+];
+
 export default async function NotificationsPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
   const connections = await api.connections(ctx);
   const params = (await searchParams) ?? {};
+  const feedback = resolveFeedback(params, FEEDBACK);
 
   const binding = connections.find(
     (c) => c.provider === "telegram" && c.status === "active",
@@ -52,8 +72,6 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
           : null;
 
   const link = one(params["link"]);
-  const disconnected = one(params["disconnected"]) === "1";
-  const errorCode = one(params["error"]);
 
   return (
     <div className="space-y-6">
@@ -68,18 +86,7 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {disconnected ? (
-        <Alert variant="success">
-          <AlertDescription>Telegram disconnected.</AlertDescription>
-        </Alert>
-      ) : null}
-      {errorCode ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            {ERROR_MESSAGES[errorCode] ?? "Something went wrong. Please try again."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       <Card>
         <CardHeader className="pb-3">

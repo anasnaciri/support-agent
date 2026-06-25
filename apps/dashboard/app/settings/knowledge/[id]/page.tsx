@@ -2,7 +2,12 @@ import { notFound } from "next/navigation";
 import { FileText, Link2, RefreshCw } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  resolveFeedback,
+  type FeedbackRule,
+  type ResolvedToast,
+} from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
@@ -30,6 +35,22 @@ const one = (
   v: string | string[] | undefined,
 ): string | undefined => (Array.isArray(v) ? v[0] : v);
 
+const FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Document saved." },
+  {
+    param: "resynced",
+    match: "changed",
+    kind: "success",
+    message: "Re-synced — the page content changed.",
+  },
+  {
+    param: "resynced",
+    match: "nochange",
+    kind: "info",
+    message: "Re-synced — the page content was unchanged.",
+  },
+];
+
 export default async function KnowledgeEditPage({
   params,
   searchParams,
@@ -40,9 +61,17 @@ export default async function KnowledgeEditPage({
   if (!doc) notFound();
 
   const sp = (await searchParams) ?? {};
-  const saved = one(sp["saved"]) === "1";
-  const resynced = one(sp["resynced"]);
+  const { toasts, consume } = resolveFeedback(sp, FEEDBACK);
   const errorCode = one(sp["error"]);
+  const feedbackToasts: ResolvedToast[] = [...toasts];
+  const feedbackConsume = [...consume];
+  if (errorCode) {
+    feedbackToasts.push({
+      kind: "warning",
+      message: knowledgeErrorMessage(errorCode),
+    });
+    feedbackConsume.push("error");
+  }
   const isUrl = doc.sourceType === "url";
 
   return (
@@ -64,28 +93,7 @@ export default async function KnowledgeEditPage({
         </Badge>
       </div>
 
-      {saved ? (
-        <Alert variant="success">
-          <AlertDescription>Document saved.</AlertDescription>
-        </Alert>
-      ) : null}
-      {resynced === "changed" ? (
-        <Alert variant="success">
-          <AlertDescription>Re-synced — the page content changed.</AlertDescription>
-        </Alert>
-      ) : null}
-      {resynced === "nochange" ? (
-        <Alert variant="info">
-          <AlertDescription>
-            Re-synced — the page content was unchanged.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {errorCode ? (
-        <Alert variant="warning">
-          <AlertDescription>{knowledgeErrorMessage(errorCode)}</AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedbackToasts} consume={feedbackConsume} />
 
       <Card>
         <CardHeader className="pb-3">

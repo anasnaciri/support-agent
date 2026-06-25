@@ -6,12 +6,12 @@ import {
   CheckCircle2,
   ClipboardCheck,
   HelpCircle,
-  Sprout,
 } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
 import { toolActionLabel } from "@/lib/labels";
+import { resolveFeedback } from "@/lib/toast-feedback";
 import {
   Card,
   CardContent,
@@ -19,7 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 
 const TOP_N = 5;
 
@@ -33,9 +33,6 @@ interface TodaySearchParams {
 
 export default async function TodayPage({ searchParams }: TodaySearchParams) {
   const sp = searchParams ? await searchParams : {};
-  const justOnboarded = sp.onboarded === "1";
-  const workspaceCreated = sp.workspace_created === "1";
-  const workspaceDeleted = sp.workspace_deleted === "1";
   const ctx = await getDashboardContext();
   // A supplier (constrained external role) has no merchant surface — send them
   // to their portal instead of a "Today" page whose data they can't read.
@@ -46,6 +43,31 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
     redirect("/supplier/cases");
   }
   const summary = await api.today(ctx);
+
+  const feedback = resolveFeedback(sp, [
+    {
+      param: "onboarded",
+      kind: "success",
+      message: "Your workspace is ready",
+      description:
+        "Connect Shopify or Gmail from Settings → Integrations to start receiving cases.",
+      action: { label: "Open Integrations", href: "/settings/integrations" },
+    },
+    {
+      param: "workspace_created",
+      kind: "success",
+      message: `Workspace created — you're now in ${ctx.tenantName}`,
+      description:
+        "Connect this workspace's store and mailbox from Settings → Integrations to start receiving cases.",
+      action: { label: "Open Integrations", href: "/settings/integrations" },
+    },
+    {
+      param: "workspace_deleted",
+      kind: "success",
+      message: "Workspace deleted",
+      description: `You're back in ${ctx.tenantName}. The deleted workspace's data and connections are being cleaned up.`,
+    },
+  ]);
 
   const { pendingApprovals, takeoverCases } = summary;
   const countOf = (status: string): number =>
@@ -62,48 +84,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
 
   return (
     <div className="space-y-6">
-      {justOnboarded ? (
-        <Alert variant="success">
-          <Sprout className="size-4" />
-          <AlertTitle>Your workspace is ready</AlertTitle>
-          <AlertDescription>
-            Connect Shopify or Gmail from{" "}
-            <Link
-              href="/settings/integrations"
-              className="font-medium underline underline-offset-2"
-            >
-              Settings → Integrations
-            </Link>{" "}
-            to start receiving cases.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {workspaceCreated ? (
-        <Alert variant="success">
-          <Sprout className="size-4" />
-          <AlertTitle>Workspace created — you&apos;re now in {ctx.tenantName}</AlertTitle>
-          <AlertDescription>
-            Connect this workspace&apos;s store and mailbox from{" "}
-            <Link
-              href="/settings/integrations"
-              className="font-medium underline underline-offset-2"
-            >
-              Settings → Integrations
-            </Link>{" "}
-            to start receiving cases.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {workspaceDeleted ? (
-        <Alert variant="success">
-          <Sprout className="size-4" />
-          <AlertTitle>Workspace deleted</AlertTitle>
-          <AlertDescription>
-            You&apos;re back in {ctx.tenantName}. The deleted workspace&apos;s
-            data and connections are being cleaned up.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Today</h1>

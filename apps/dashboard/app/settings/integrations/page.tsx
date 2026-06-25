@@ -8,10 +8,12 @@ import {
   connectorHealthReasonLabel,
 } from "@/lib/connector-health";
 import { integrationStatusVariant } from "@/lib/status-variants";
+import type { ResolvedToast } from "@/lib/toast-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
@@ -120,6 +122,51 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
     connectedValue ? byProvider.get(connectedValue)?.status : undefined,
   );
 
+  // Post-redirect feedback (disconnect, OAuth-callback connect outcome, connect
+  // refusals) is shown as toasts; the persistent state below (legal, no API
+  // origin, per-card "needs attention") stays inline.
+  const feedbackToasts: ResolvedToast[] = [];
+  const feedbackConsume: string[] = [];
+  if (disconnectedLabel) {
+    feedbackToasts.push({
+      kind: "success",
+      message: `${disconnectedLabel} disconnected.`,
+    });
+    feedbackConsume.push("disconnected");
+  }
+  if (connectedOutcome?.kind === "connected") {
+    feedbackToasts.push({
+      kind: "success",
+      message: `${connectedOutcome.label} connected.`,
+    });
+    feedbackConsume.push("connected");
+  } else if (connectedOutcome?.kind === "not_landed") {
+    feedbackToasts.push({
+      kind: "warning",
+      message: `${connectedOutcome.label} isn't connected in this workspace`,
+      description:
+        "The connection finished, but it didn't end up in this workspace. If you manage more than one workspace, check whether it landed in another one before trying again.",
+    });
+    feedbackConsume.push("connected");
+  }
+  if (connectError) {
+    feedbackToasts.push({
+      kind: "warning",
+      message: `${PROVIDER_LABELS[connectError.provider] ?? connectError.provider} wasn't connected`,
+      description: connectErrorMessage(connectError.code),
+    });
+    feedbackConsume.push("error");
+  } else if (alreadyConnected) {
+    feedbackToasts.push({
+      kind: "warning",
+      message: "A mailbox is already connected",
+      description: `Only one ${conflictLabel} mailbox can be connected at a time${
+        conflictMailbox ? ` (currently ${conflictMailbox})` : ""
+      }. Disconnect it below before connecting a different one.`,
+    });
+    feedbackConsume.push("error", "provider", "mailbox");
+  }
+
   return (
     <div className="space-y-6">
       <SettingsBreadcrumb current="Integrations" />
@@ -144,63 +191,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {disconnectedLabel ? (
-        <Alert variant="success">
-          <AlertDescription>{disconnectedLabel} disconnected.</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {connectedOutcome?.kind === "connected" ? (
-        <Alert variant="success">
-          <AlertDescription>
-            {connectedOutcome.label} connected.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {connectedOutcome?.kind === "not_landed" ? (
-        <Alert variant="warning">
-          <AlertTriangle className="size-4" />
-          <AlertTitle>
-            {connectedOutcome.label} isn&apos;t connected in this workspace
-          </AlertTitle>
-          <AlertDescription>
-            The connection finished, but it didn&apos;t end up in this
-            workspace. If you manage more than one workspace, check whether it
-            landed in another one before trying again.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {connectError ? (
-        <Alert variant="warning">
-          <AlertTriangle className="size-4" />
-          <AlertTitle>
-            {PROVIDER_LABELS[connectError.provider] ?? connectError.provider}{" "}
-            wasn&apos;t connected
-          </AlertTitle>
-          <AlertDescription>
-            {connectErrorMessage(connectError.code)}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {alreadyConnected ? (
-        <Alert variant="warning">
-          <AlertTriangle className="size-4" />
-          <AlertTitle>A mailbox is already connected</AlertTitle>
-          <AlertDescription>
-            Only one {conflictLabel} mailbox can be connected at a time
-            {conflictMailbox ? (
-              <>
-                {" "}
-                (currently <strong>{conflictMailbox}</strong>)
-              </>
-            ) : null}
-            . Disconnect it below before connecting a different one.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedbackToasts} consume={feedbackConsume} />
 
       {!legalAccepted ? (
         <Alert variant="warning">

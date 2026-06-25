@@ -1,7 +1,8 @@
 import { TriangleAlert } from "lucide-react";
 
 import { requirePermission } from "@/lib/require-permission";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
@@ -26,13 +27,23 @@ const ERROR_COPY: Record<string, string> = {
     "We couldn't delete the account. Please try again, or contact support if this keeps happening.",
 };
 
+// A failed delete is a hard error (red); a name-mismatch / last-workspace guard
+// is a softer warning — same split the inline banner drew.
+const FEEDBACK: readonly FeedbackRule[] = Object.entries(ERROR_COPY).map(
+  ([code, message]): FeedbackRule => ({
+    param: "error",
+    match: code,
+    kind:
+      code === "delete_failed" || code === "workspace_delete_failed"
+        ? "error"
+        : "warning",
+    message,
+  }),
+);
+
 export default async function AccountSettingsPage({ searchParams }: PageProps) {
   const ctx = await requirePermission("account.manage");
-  const params = (await searchParams) ?? {};
-  const errorRaw = Array.isArray(params["error"])
-    ? params["error"][0]
-    : params["error"];
-  const errorCopy = errorRaw ? ERROR_COPY[errorRaw] : undefined;
+  const feedback = resolveFeedback((await searchParams) ?? {}, FEEDBACK);
   const multiWorkspace = ctx.workspaces.length > 1;
 
   return (
@@ -48,17 +59,7 @@ export default async function AccountSettingsPage({ searchParams }: PageProps) {
         </p>
       </div>
 
-      {errorCopy ? (
-        <Alert
-          variant={
-            errorRaw === "delete_failed" || errorRaw === "workspace_delete_failed"
-              ? "destructive"
-              : "warning"
-          }
-        >
-          <AlertDescription>{errorCopy}</AlertDescription>
-        </Alert>
-      ) : null}
+      <FeedbackToaster toasts={feedback.toasts} consume={feedback.consume} />
 
       {multiWorkspace ? (
         <Card className="border-destructive/40">

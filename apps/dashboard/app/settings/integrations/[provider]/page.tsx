@@ -4,6 +4,8 @@ import { AlertTriangle, ClipboardList } from "lucide-react";
 import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
 import { api } from "@/lib/api-client";
 import { requirePermission } from "@/lib/require-permission";
+import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
+import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { capabilitiesForProvider } from "@/lib/catalog";
 import {
   connectorHealth,
@@ -48,9 +50,43 @@ interface Props {
   >;
 }
 
-const firstParam = (
-  value: string | string[] | undefined,
-): string | undefined => (Array.isArray(value) ? value[0] : value);
+// Transient feedback for the Google Sheets target form (the only connector
+// page that posts its own settings back here).
+const SHEETS_FEEDBACK: readonly FeedbackRule[] = [
+  { param: "saved", kind: "success", message: "Sheet target saved." },
+  {
+    param: "cleared",
+    kind: "message",
+    message:
+      "Sheet target cleared. The agent will skip the sheet write on future missing-package cases.",
+  },
+  {
+    param: "error",
+    match: "missing_sheet_url",
+    kind: "warning",
+    message: "Google Sheets URL is required.",
+  },
+  {
+    param: "error",
+    match: "missing_spreadsheet_id",
+    kind: "warning",
+    message: "Google Sheets URL is required.",
+  },
+  {
+    param: "error",
+    match: "bad_sheet_url",
+    kind: "warning",
+    message:
+      "Paste the URL from a Google Sheet, for example https://docs.google.com/spreadsheets/d/.../edit.",
+  },
+  {
+    param: "error",
+    match: "bad_range",
+    kind: "warning",
+    message:
+      "Range must be an A1 reference with a sheet name (e.g. Escalations!A:F).",
+  },
+];
 
 export default async function ConnectorManagePage({
   params,
@@ -126,9 +162,9 @@ export default async function ConnectorManagePage({
     ? googleSheetsUrlForSpreadsheetId(sheet.spreadsheetId)
     : "";
   const sp = (await searchParams) ?? {};
-  const savedBanner = isSheets && firstParam(sp["saved"]) === "1";
-  const clearedBanner = isSheets && firstParam(sp["cleared"]) === "1";
-  const sheetError = isSheets ? firstParam(sp["error"]) : undefined;
+  const feedback = isSheets
+    ? resolveFeedback(sp, SHEETS_FEEDBACK)
+    : { toasts: [], consume: [] };
 
   return (
     <div className="space-y-6">
@@ -351,47 +387,10 @@ export default async function ConnectorManagePage({
 
       {isSheets ? (
         <>
-          {savedBanner ? (
-            <Alert variant="success">
-              <AlertDescription>Sheet target saved.</AlertDescription>
-            </Alert>
-          ) : null}
-          {clearedBanner ? (
-            <Alert>
-              <AlertDescription>
-                Sheet target cleared. The agent will skip the sheet write on
-                future missing-package cases.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {sheetError === "missing_sheet_url" ||
-          sheetError === "missing_spreadsheet_id" ? (
-            <Alert variant="warning">
-              <AlertDescription>Google Sheets URL is required.</AlertDescription>
-            </Alert>
-          ) : null}
-          {sheetError === "bad_sheet_url" ? (
-            <Alert variant="warning">
-              <AlertDescription>
-                Paste the URL from a Google Sheet, for example{" "}
-                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  https://docs.google.com/spreadsheets/d/.../edit
-                </code>
-                .
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {sheetError === "bad_range" ? (
-            <Alert variant="warning">
-              <AlertDescription>
-                Range must be an A1 reference with a sheet name (e.g.{" "}
-                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  Escalations!A:F
-                </code>
-                ).
-              </AlertDescription>
-            </Alert>
-          ) : null}
+          <FeedbackToaster
+            toasts={feedback.toasts}
+            consume={feedback.consume}
+          />
 
           <Card>
             <CardHeader className="pb-3">
