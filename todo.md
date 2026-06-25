@@ -211,6 +211,25 @@ lifecycle-refactor WIP in `case-lifecycle-writer.ts`, `agent-runtime.ts`, `appro
 no-order-id + zero/multiple-orders edge in damaged-product shares the single `ask_customer` budget with the
 photo request — fine on the common single-order path; revisit if it bites.
 
+### ✅ FOLLOW-UP FIX — bind the inferred order to the case (2026-06-25)
+
+Prod case `e161d86e` (Elva Labs) exposed the gap the single-order patch left open: the agent *found* the
+order via `shopify.find_customer_order` (single match on the sender's email), recommended a correct
+`full_refund $24.92`, and parked for approval — but the **dashboard showed no order** and the **"Issue
+refund" button had nothing to act on**. Root cause: `find_customer_order` returns the order to the LLM but
+nothing wrote it back to `case.context.identifiedOrderId`, which is the ONLY field both the order panel and
+the Issue-refund `loadOrder` resolve from (`resolveOrderForContext`). It was only ever stamped by triage's
+`case.update_context` when the customer *quoted* an order number — which this customer didn't.
+
+Fix (runtime, TDD): after a successful `shopify.get_order` OR `shopify.find_customer_order` (`status:
+"single"`), the runtime stamps `identifiedOrderId` **only when absent** (triage's customer-quoted id still
+wins, never overwritten). Value = new pure helper `orderContextRef(order)`: prefer the numeric order name
+(`#5501`, resolves via `findOrderByName`, renders cleanly) else the GID (always resolves via `getOrder`,
+avoids the non-numeric-name → confirmation-number misroute). Safe for the identity gate: `find_customer_order`
+keys on the customer's own sender email so the order already belongs to them. `agent-runtime.ts` tool-result
+block + `agent-runtime-helpers.ts`; `+5` unit (`order-identity.test.ts`) + e2e assertion folded into the
+existing single-order-inference test. `pnpm build` green; runtime suites green (127). **NOT committed.**
+
 ## ✅ LANDED — Supplier portal (recurring login) that closes the escalation loop
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
