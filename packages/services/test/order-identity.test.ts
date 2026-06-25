@@ -1,9 +1,44 @@
 import { describe, expect, it } from "vitest";
 import {
+  orderContextRef,
   orderCustomerMismatchFlag,
   replyProvesOrderIdentity,
   shouldForceReplyApproval,
 } from "../src/agent-runtime.js";
+
+describe("orderContextRef", () => {
+  it("prefers a numeric order name (dashboard resolves it via findOrderByName and it reads cleanly)", () => {
+    expect(
+      orderContextRef({ id: "gid://shopify/Order/55501", name: "#5501" }),
+    ).toBe("#5501");
+  });
+
+  it("accepts a bare numeric name without the leading #", () => {
+    expect(
+      orderContextRef({ id: "gid://shopify/Order/55501", name: "5501" }),
+    ).toBe("5501");
+  });
+
+  it("falls back to the GID when the name is non-numeric (a custom name would misroute to the confirmation-number lookup)", () => {
+    expect(
+      orderContextRef({ id: "gid://shopify/Order/55501", name: "EN-5501" }),
+    ).toBe("gid://shopify/Order/55501");
+  });
+
+  it("falls back to the GID when the name is missing or blank", () => {
+    expect(orderContextRef({ id: "gid://shopify/Order/55501" })).toBe(
+      "gid://shopify/Order/55501",
+    );
+    expect(
+      orderContextRef({ id: "gid://shopify/Order/55501", name: "  " }),
+    ).toBe("gid://shopify/Order/55501");
+  });
+
+  it("returns null when neither a usable name nor id is present", () => {
+    expect(orderContextRef({})).toBeNull();
+    expect(orderContextRef({ id: "", name: "" })).toBeNull();
+  });
+});
 
 describe("orderCustomerMismatchFlag", () => {
   it("flags when the order's customer email differs from the case customer", () => {

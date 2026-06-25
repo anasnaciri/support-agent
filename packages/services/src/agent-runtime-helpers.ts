@@ -700,6 +700,31 @@ export const normalizeEmailForMatch = (value: unknown): string | null => {
   return v === "" ? null : v;
 };
 
+/**
+ * The value to stamp into `case.context.identifiedOrderId` after the runtime
+ * resolves a concrete order through an order tool (`shopify.get_order` /
+ * `shopify.find_customer_order`). Binding it is what lets the operator's case
+ * view re-resolve and show the SAME order the agent acted on (the dashboard's
+ * `resolveOrderForContext` reads this field).
+ *
+ * Prefer the customer-facing order *name* (`#1001`) when it's the numeric form
+ * the dashboard resolves via `findOrderByName` — it renders cleanly in the
+ * order/context panels and the where_is_order directive. Fall back to the GID
+ * (always resolved via `getOrder`) when the name is missing or non-numeric: a
+ * custom order-name prefix (`EN-5501`) fails the dashboard's `looksLikeOrderName`
+ * (`/^#?\d+$/`) and would otherwise misroute to the confirmation-number lookup
+ * and miss. Returns null when neither a usable name nor id is present.
+ */
+export const orderContextRef = (order: {
+  readonly id?: unknown;
+  readonly name?: unknown;
+}): string | null => {
+  const name = typeof order.name === "string" ? order.name.trim() : "";
+  if (name.length > 0 && /^#?\d+$/.test(name)) return name;
+  const id = typeof order.id === "string" ? order.id.trim() : "";
+  return id.length > 0 ? id : null;
+};
+
 /** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */
 export const readRiskFlags = (context: Record<string, unknown>): string[] =>
   Array.isArray(context["riskFlags"])

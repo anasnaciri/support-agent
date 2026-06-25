@@ -1723,6 +1723,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.pending).toHaveLength(1);
     expect(out.pending[0]!.tool).toBe("conversation.reply");
     expect(out.pending[0]!.agentId).toBe(orderStatusAgent.id);
+
+    // The runtime BINDS the inferred order to the case context so the
+    // operator's order panel + Issue-refund button surface the SAME order the
+    // agent acted on. Regression: find_customer_order resolved the order for
+    // the LLM but never stamped `identifiedOrderId`, so the dashboard showed
+    // "no order found" even though the agent drafted a correct order-aware
+    // reply (prod case e161d86e).
+    expect(out.fetched.context["identifiedOrderId"]).toBe("#5501");
   });
 
   // Regression test for the conversation-history bug surfaced by the

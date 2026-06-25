@@ -85,6 +85,7 @@ import {
   deriveTickLockKey,
   refundCustomerMismatchFlag,
   readRiskFlags,
+  orderContextRef,
   orderCustomerMismatchFlag,
   normalizeEmailForMatch,
   replyProvesOrderIdentity,
@@ -1698,6 +1699,55 @@ const AgentRuntimeLayer = Layer.effect(
                         .update(current.id, { context: patch as never })
                         .pipe(Effect.catchAll(() => Effect.succeed(current)));
                     }
+                  }
+                }
+                // Bind the resolved order to the case context so the operator's
+                // view (order panel + Issue-refund button) re-resolves the SAME
+                // order the agent acted on. Both order tools surface a concrete
+                // order the dashboard otherwise can't see: get_order returns it
+                // directly; find_customer_order returns it under `order` when the
+                // sender's email matches exactly one (`status: "single"`). We
+                // stamp `identifiedOrderId` ONLY when it is not already set —
+                // triage's customer-quoted id wins and is never overwritten.
+                // find_customer_order is keyed on the customer's own sender
+                // email, so its order already belongs to them (no identity-gate
+                // concern). Best-effort: a write failure leaves the case alone.
+                const resolvedOrder =
+                  tool.name === "shopify.get_order" &&
+                  exec.right &&
+                  typeof exec.right === "object"
+                    ? (exec.right as Record<string, unknown>)
+                    : tool.name === "shopify.find_customer_order" &&
+                        exec.right &&
+                        typeof exec.right === "object" &&
+                        (exec.right as Record<string, unknown>)["status"] ===
+                          "single" &&
+                        (exec.right as Record<string, unknown>)["order"] &&
+                        typeof (exec.right as Record<string, unknown>)[
+                          "order"
+                        ] === "object"
+                      ? ((exec.right as Record<string, unknown>)[
+                          "order"
+                        ] as Record<string, unknown>)
+                      : null;
+                const existingOrderRef = current.context["identifiedOrderId"];
+                if (
+                  resolvedOrder &&
+                  !(
+                    typeof existingOrderRef === "string" &&
+                    existingOrderRef.length > 0
+                  )
+                ) {
+                  const ref = orderContextRef(resolvedOrder);
+                  if (ref) {
+                    current = yield* cases
+                      .update(current.id, {
+                        context: {
+                          ...current.context,
+                          identifiedOrderId: ref,
+                        } as never,
+                      })
+                      .pipe(Effect.catchAll(() => Effect.succeed(current)));
                   }
                 }
                 // The tool may have mutated the case (e.g. transitioned status).
