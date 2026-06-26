@@ -422,6 +422,47 @@ describe("buildInitialMessages — case.resumed with an inlined thread transcrip
     expect(text).not.toContain("conversation.fetch_thread");
     // It is told to take prior work into account.
     expect(text.toLowerCase()).toContain("already");
+    // ...and to take a concrete tool action, not finish with a bare message
+    // (prod 3428f154: a resumed agent wrote a prose final_message instead of
+    // calling conversation.reply / ask_customer and the case silently resolved).
+    expect(text.toLowerCase()).toContain("plain message");
+  });
+
+  it("injects the identity-challenge directive on a resumed where_is_order mismatch", () => {
+    const text = textOf(
+      buildInitialMessages(resumed, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          riskFlags: ["order_customer_mismatch"],
+          identifiedOrderId: "gid://shopify/Order/1001",
+          customerEmail: "sue@example.com",
+        },
+        threadTranscript: null,
+      }),
+    );
+    // The resume path must carry the same disclosure gate the inbound path does.
+    expect(text).toContain("Identity check REQUIRED");
+    expect(text).toContain("conversation.ask_customer");
+  });
+
+  it("switches to the PASSED identity directive once verified on resume", () => {
+    const text = textOf(
+      buildInitialMessages(resumed, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          riskFlags: ["order_customer_mismatch"],
+          identityVerified: true,
+          identifiedOrderId: "gid://shopify/Order/1001",
+          customerEmail: "sue@example.com",
+        },
+        threadTranscript: null,
+      }),
+    );
+    expect(text).toContain("Identity check PASSED");
   });
 
   it("keeps the fetch_thread directive when no transcript was prefetched", () => {

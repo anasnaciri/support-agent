@@ -494,7 +494,32 @@ Runtime resolves `ConversationService` via `Effect.serviceOption` (optional, lik
 (`renderThreadTranscript` ×2, `buildInitialMessages` transcript present/absent) + `+1` worker e2e
 (`restart-from-triage … sees what was already done` — captures triage's turn-1 user message via
 `LLMServiceFromFn`, asserts both the customer message and our prior reply are present and the fetch directive is
-gone). `pnpm build` green; runtime + messages + e2e + lifecycle suites green. **NOT committed.**
+gone). `pnpm build` green; runtime + messages + e2e + lifecycle suites green. Commit `252bb9d`, deployed Fly v17.
+
+### 🔴 Incident + fix — silent auto-resolve on unverified identity mismatch (2026-06-26)
+
+Prod case `3428f154` (Susan Terranova): a `where_is_order` with an email typo on the ORDER (order email ≠ the
+customer's real email → `order_customer_mismatch` flag). On a *Restart from triage* (after a manager rejected the
+agent's earlier `ask_customer` identity challenge), the order-status-agent — on **v17** — gathered order +
+tracking (in transit) + knowledge, then emitted a **bare `final_message`** (7.8k output tokens; it wrote the
+answer as prose) and the runtime **auto-resolved a live case with NOTHING sent to the customer**. Two defects:
+
+- **A (primary, pre-existing):** the runtime auto-resolves a specialist's `final_message` even when an
+  **unverified `order_customer_mismatch`** is still standing. Fix: new guard in the `final_message` branch —
+  `hasUnverifiedOrderMismatch(context)` (flag set AND `identityVerified !== true`) ⇒ `escalateToHuman`
+  (`unverified_identity_mismatch_final_message`) instead of resolve. Sits right after the existing
+  `router_final_message_no_handoff` guard.
+- **B (resume regression aggravator):** `buildInitialMessages`'s `case.resumed` branch never injected
+  `orderIdentityDirective` (the inbound/reply paths do), and the new resume directive was weak on tool-priming.
+  Fix: inject the identity directive on resume (challenge-precedence over bound-order) + both resume directives
+  now say "take a concrete tool action … do NOT finish by writing your answer as a plain message".
+
+TDD: `+3` pure units (`hasUnverifiedOrderMismatch`), `+2` message units (resume identity directive
+REQUIRED/PASSED + tool-priming), `+1` worker e2e (unverified mismatch + `final_message` ⇒ `human_takeover`, no
+`case.resolved`). `pnpm build` green. **NEW INVARIANT: a where_is_order case with an unverified
+order_customer_mismatch must never auto-resolve on a bare final_message.** Follow-up (not done): the broader
+"specialist `final_message` that sent no `conversation.reply` shouldn't auto-resolve" guard; the manual
+"reopen → human takeover" affordance for resolved cases.
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 

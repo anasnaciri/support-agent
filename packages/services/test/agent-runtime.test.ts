@@ -11,6 +11,7 @@ import {
   defaultRefundPolicy,
   defaultDiscountPolicy,
   effectiveHandoffIds,
+  hasUnverifiedOrderMismatch,
   inboundReplyCandidateIds,
   specialistsCallableFrom,
   TenantSettings,
@@ -19,6 +20,30 @@ import {
   type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
+
+describe("hasUnverifiedOrderMismatch", () => {
+  it("is true when the mismatch flag is set and identity is not verified", () => {
+    expect(
+      hasUnverifiedOrderMismatch({ riskFlags: ["order_customer_mismatch"] }),
+    ).toBe(true);
+  });
+
+  it("is false once identity has been verified", () => {
+    expect(
+      hasUnverifiedOrderMismatch({
+        riskFlags: ["order_customer_mismatch"],
+        identityVerified: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when there is no mismatch flag", () => {
+    expect(hasUnverifiedOrderMismatch({ riskFlags: ["something_else"] })).toBe(
+      false,
+    );
+    expect(hasUnverifiedOrderMismatch({})).toBe(false);
+  });
+});
 
 // The message-id candidates the runtime looks up to correlate a reply to its
 // existing case (its In-Reply-To + full References chain, NOT its own id).

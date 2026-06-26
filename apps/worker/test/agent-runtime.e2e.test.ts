@@ -1174,6 +1174,93 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(firstUserMessage!).not.toContain("conversation.fetch_thread");
   });
 
+  it("never auto-resolves a where_is_order case with an UNVERIFIED order/customer mismatch (parks for a human)", async () => {
+    // Repro of prod 3428f154: order-status-agent, on resume, drafted a prose
+    // final_message (instead of conversation.reply / ask_customer) while the
+    // identity mismatch was still unverified — and the runtime silently
+    // resolved a live case. The guard must park it for a human instead.
+    const specialist: AgentConfig = {
+      id: AgentId("order-status-agent"),
+      name: "Order status",
+      description: "Looks up orders and replies.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Answer the order status question.",
+      tools: [],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "final_message", text: "Your order Q537JR5JA is on the way." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([specialist]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: specialist.id,
+            subject: "Where is my order?",
+            threadId: "gmail:mismatch-thread" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+            context: {
+              classification: "where_is_order",
+              riskFlags: ["order_customer_mismatch"],
+              identifiedOrderId: "gid://shopify/Order/7213253230783",
+              customerEmail: "sue@example.com",
+            },
+          });
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.resolved");
+    expect(actions).toContain("case.escalated_to_human");
+  });
+
   // ----------------------------------------------------------------
   // Delivery specialist (missing-package-agent), expanded for refund
   // requests that cite a delivery problem. BRANCH B3 — the agent cannot

@@ -87,6 +87,7 @@ import {
   deriveTickLockKey,
   refundCustomerMismatchFlag,
   readRiskFlags,
+  hasUnverifiedOrderMismatch,
   orderContextRef,
   orderCustomerMismatchFlag,
   normalizeEmailForMatch,
@@ -1903,6 +1904,25 @@ const AgentRuntimeLayer = Layer.effect(
                   return {
                     type: "HumanTakeoverRequired",
                     reason: "routing agent finished without handing off",
+                  } as const;
+                }
+                // GUARD: an UNVERIFIED order/customer identity mismatch means we
+                // never cleared the disclosure gate — we couldn't confirm we're
+                // talking to the right person. Auto-resolving on a bare
+                // final_message here closes a live case with nothing safely sent
+                // (prod 3428f154: order-status-agent drafted a prose answer
+                // instead of conversation.reply / ask_customer and the case
+                // silently resolved). Park for a human, who can verify identity
+                // and reply, instead of swallowing the case.
+                if (hasUnverifiedOrderMismatch(current.context)) {
+                  yield* escalateToHuman(
+                    current.id,
+                    "unverified_identity_mismatch_final_message",
+                    { turn, finalMessage: decision.text },
+                  );
+                  return {
+                    type: "HumanTakeoverRequired",
+                    reason: "unverified order/customer identity mismatch",
                   } as const;
                 }
                 // The lifecycle writer wraps the final transition +

@@ -409,11 +409,17 @@ export const buildInitialMessages = (
         )}`,
       );
     }
-    // Trusted (outside the fenced context blob): if the case already resolved a
-    // canonical order, tell the agent to load it by GID rather than re-search.
-    const boundOrder = boundOrderDirective(caseRow.context);
-    if (boundOrder) {
-      parts.push(boundOrder);
+    // Trusted (outside the fenced context blob): the identity-disclosure gate
+    // takes precedence (a resumed where_is_order with an unverified
+    // order/customer mismatch must be told to challenge, NOT answer — the
+    // inbound/reply paths already inject this, the resume path used to skip it);
+    // otherwise hand the agent the canonical bound order so it loads by GID
+    // rather than re-searching.
+    const directive =
+      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
+      boundOrderDirective(caseRow.context);
+    if (directive) {
+      parts.push(directive);
     }
     // If the runtime pre-fetched the thread, inline the whole conversation
     // (customer messages AND replies we already sent), fenced as untrusted.
@@ -429,10 +435,15 @@ export const buildInitialMessages = (
       );
     }
     if (caseRow.threadId) {
+      // Always steer toward a concrete TOOL action. A resumed agent that just
+      // writes its answer as a plain `final_message` neither sends anything to
+      // the customer nor parks correctly — the runtime would silently resolve a
+      // live case (prod 3428f154). Make "take an action" explicit for both the
+      // transcript-inlined and the self-fetch path.
       parts.push(
         transcript
-          ? "Re-read the full conversation above, take into account what has already been said and done, then complete the customer's request."
-          : "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then complete the customer's request.",
+          ? "Re-read the full conversation above and take into account what has already been said and done. Then take a concrete next action with your tools (reply to the customer, ask them a question, escalate, or hand off) — do NOT finish by writing your answer as a plain message."
+          : "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then take a concrete next action with your tools (reply, ask the customer, escalate, or hand off) — do NOT finish by writing your answer as a plain message.",
       );
     }
     return [{ role: "user", content: parts.join("\n\n") }];
@@ -816,6 +827,21 @@ export const readRiskFlags = (context: Record<string, unknown>): string[] =>
         (f): f is string => typeof f === "string",
       )
     : [];
+
+/**
+ * Whether the case carries an order/customer identity mismatch the runtime has
+ * NOT yet verified — i.e. the disclosure gate is still closed. The runtime uses
+ * this to refuse to auto-resolve such a case on a bare `final_message`: we never
+ * confirmed we're talking to the right person, so silently closing would leave a
+ * live case unanswered (prod 3428f154: a resumed order-status-agent drafted a
+ * prose answer instead of replying/challenging and the case auto-resolved).
+ * Pure + exported so the decision is unit-tested without the runtime.
+ */
+export const hasUnverifiedOrderMismatch = (
+  context: Record<string, unknown>,
+): boolean =>
+  readRiskFlags(context).includes("order_customer_mismatch") &&
+  context["identityVerified"] !== true;
 
 /**
  * Order-status identity guard (the `where_is_order` flow). Returns
