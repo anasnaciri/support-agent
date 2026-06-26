@@ -70,6 +70,15 @@ export type DomainEvent =
       readonly type: "case.resumed";
       readonly caseId: CaseId;
       readonly trigger: string;
+      /**
+       * Unique per manager-initiated restart, stable across pg-boss
+       * redeliveries of the SAME job. Scopes the tool-execution dedup
+       * (`deliveryScopeFor`) so a fresh retry re-runs the agent's tools — a
+       * stable-`draftId` reply/ask is no longer deduped against the PRIOR
+       * attempt — while a redelivery of one retry still can't double-send.
+       * Optional for back-compat (older events / non-retry resumes).
+       */
+      readonly resumeToken?: string;
     };
 
 export type DomainEventType = DomainEvent["type"];

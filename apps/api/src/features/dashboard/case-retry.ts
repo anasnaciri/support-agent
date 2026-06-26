@@ -35,6 +35,15 @@ export interface RetryCaseNowOptions {
    * `resumeCase` with `restartFromTriage`). Kept in lockstep by the handler.
    */
   readonly fromTriage?: boolean;
+  /**
+   * Unique per restart click. Carried on the `case.resumed` event so the
+   * tool-execution dedup (`deliveryScopeFor`) scopes this attempt distinctly
+   * from prior ones — the agent re-runs its tools (its stable-`draftId`
+   * reply/ask no longer cross-dedups against the previous attempt). pg-boss
+   * redeliveries of this job reuse the same token, so they still can't
+   * double-send.
+   */
+  readonly resumeToken: string;
   /** Runs the status flip (dashboard-writes `resumeCase`) and reports how it went. */
   readonly resume: () => Promise<ResumeOutcome>;
   /** Publishes a workflow event onto `workflow.events`. */
@@ -51,6 +60,7 @@ export const retryCaseNow = async (
       type: "case.resumed",
       caseId: CaseId(opts.caseId),
       trigger: opts.fromTriage ? "dashboard_full_retry" : "dashboard_retry",
+      resumeToken: opts.resumeToken,
     });
     return { kind: "retried", toStatus: resumed.toStatus };
   } catch (cause) {

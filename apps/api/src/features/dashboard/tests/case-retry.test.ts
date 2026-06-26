@@ -18,6 +18,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     const { events, publish } = recorder();
     const outcome = await retryCaseNow({
       caseId: "c-1",
+      resumeToken: "tok-1",
       resume: async (): Promise<ResumeOutcome> => ({
         kind: "resumed",
         toStatus: "in_progress",
@@ -30,6 +31,9 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
       type: "case.resumed",
       caseId: "c-1",
       trigger: "dashboard_retry",
+      // The per-retry token scopes the tool-execution dedup so a fresh restart
+      // re-runs the agent instead of deduping against the prior attempt.
+      resumeToken: "tok-1",
     });
   });
 
@@ -38,6 +42,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     const outcome = await retryCaseNow({
       caseId: "c-2",
       fromTriage: true,
+      resumeToken: "tok-2",
       resume: async (): Promise<ResumeOutcome> => ({
         kind: "resumed",
         toStatus: "in_progress",
@@ -51,6 +56,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
       // Distinct trigger so the runtime + audit can tell a from-triage
       // restart apart from a resume-the-bound-agent retry.
       trigger: "dashboard_full_retry",
+      resumeToken: "tok-2",
     });
   });
 
@@ -58,6 +64,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     const { events, publish } = recorder();
     const outcome = await retryCaseNow({
       caseId: "c-404",
+      resumeToken: "tok-404",
       resume: async (): Promise<ResumeOutcome> => ({ kind: "case_not_found" }),
       publish,
     });
@@ -69,6 +76,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     const { events, publish } = recorder();
     const outcome = await retryCaseNow({
       caseId: "c-1",
+      resumeToken: "tok-3",
       resume: async (): Promise<ResumeOutcome> => ({
         kind: "not_in_takeover",
         status: "resolved",
@@ -84,6 +92,7 @@ describe("retryCaseNow — resume + immediate case.resumed tick", () => {
     // happened, and must not claim a tick is coming either.
     const outcome = await retryCaseNow({
       caseId: "c-1",
+      resumeToken: "tok-5",
       resume: async (): Promise<ResumeOutcome> => ({
         kind: "resumed",
         toStatus: "in_progress",

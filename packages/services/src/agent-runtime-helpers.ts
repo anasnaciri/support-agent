@@ -592,10 +592,12 @@ export const executionKeyFor = (
  * new delivery re-invoke the tool. Inbound messages key by their provider
  * message id — stable across redeliveries, distinct per new message, and
  * already the unit `ProcessedMessageStore` claims on; resuming events key by
- * their own correlation id. (`supplier.updated` / `case.resumed` /
- * `manual.takeover` fall back to the case id: the event carries no
- * per-delivery id, so two of the same on one case could still cross-dedup —
- * rare, and a follow-up.)
+ * their own correlation id. A manager `case.resumed` retry mints a fresh
+ * `resumeToken`, so each restart re-runs the agent's tools (a stable-`draftId`
+ * reply/ask no longer cross-dedups against the PRIOR attempt) while a pg-boss
+ * redelivery of the SAME retry keeps the token and still can't double-send.
+ * `supplier.updated` / `manual.takeover` carry no per-delivery id, so they fall
+ * back to the case id (two of the same on one case could cross-dedup — rare).
  */
 export const deliveryScopeFor = (event: DomainEvent): string => {
   switch (event.type) {
@@ -611,9 +613,12 @@ export const deliveryScopeFor = (event: DomainEvent): string => {
       return `ticket:${event.source}`;
     case "tracking.changed":
       return `track:${event.orderId}`;
+    case "case.resumed":
+      return event.resumeToken
+        ? `case:${event.caseId}:${event.resumeToken}`
+        : `case:${event.caseId}`;
     case "supplier.updated":
     case "manual.takeover":
-    case "case.resumed":
       return `case:${event.caseId}`;
   }
 };

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
+  CaseId,
   UNTRUSTED_PREAMBLE,
   type AgentConfig,
+  type DomainEvent,
 } from "@support-agent/agent-core";
 import type { InboundMessage } from "@support-agent/agent-core";
 import {
@@ -10,6 +12,7 @@ import {
   buildSystemPrompt,
   defaultRefundPolicy,
   defaultDiscountPolicy,
+  deliveryScopeFor,
   effectiveHandoffIds,
   hasUnverifiedOrderMismatch,
   inboundReplyCandidateIds,
@@ -20,6 +23,35 @@ import {
   type AgentOverride,
   type SupplierEscalationSheet,
 } from "../src/index.js";
+
+describe("deliveryScopeFor — case.resumed retry token", () => {
+  const base = {
+    type: "case.resumed" as const,
+    caseId: CaseId("c-1"),
+    trigger: "dashboard_full_retry",
+  };
+
+  it("scopes a case.resumed by its resumeToken so a fresh retry re-runs the agent's tools", () => {
+    const a: DomainEvent = { ...base, resumeToken: "tok-a" };
+    const b: DomainEvent = { ...base, resumeToken: "tok-b" };
+    expect(deliveryScopeFor(a)).toBe("case:c-1:tok-a");
+    expect(deliveryScopeFor(b)).toBe("case:c-1:tok-b");
+    // Distinct tokens → distinct scopes → no cross-retry dedup.
+    expect(deliveryScopeFor(a)).not.toBe(deliveryScopeFor(b));
+  });
+
+  it("keeps the same scope for a redelivery of the SAME retry (token unchanged)", () => {
+    const a1: DomainEvent = { ...base, resumeToken: "tok-a" };
+    const a2: DomainEvent = { ...base, resumeToken: "tok-a" };
+    // Same token → same scope → a pg-boss redelivery still can't double-send.
+    expect(deliveryScopeFor(a1)).toBe(deliveryScopeFor(a2));
+  });
+
+  it("falls back to the case id when no resumeToken is present", () => {
+    const legacy: DomainEvent = { ...base };
+    expect(deliveryScopeFor(legacy)).toBe("case:c-1");
+  });
+});
 
 describe("hasUnverifiedOrderMismatch", () => {
   it("is true when the mismatch flag is set and identity is not verified", () => {

@@ -632,6 +632,9 @@ export const handleDashboardRetry = async (
   const outcome = await retryCaseNow({
     caseId: id,
     fromTriage,
+    // Fresh per click so this restart re-runs the agent's tools instead of
+    // deduping against the prior attempt (see deliveryScopeFor / case.resumed).
+    resumeToken: randomUUID(),
     resume: () =>
       runWithDb(layer, (db) =>
         resumeCase(db, {

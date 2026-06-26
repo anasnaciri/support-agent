@@ -554,12 +554,16 @@ triage→handoff→get_order→update_context→final_message flow). Two real bu
   resolving. The runtime maps a non-resolved return → `HumanTakeoverRequired`. User/system (manual + approval-
   resume, line 703) resolves are NOT blocked, so an approved typo-reply still resolves via the user-actor path.
   TDD: `+2` lifecycle-writer units (agent resolve → parks; user resolve → resolves) `+2` e2e repros.
-- **B (NOT fixed — follow-up):** `deliveryScopeFor(case.resumed)` = `case:${caseId}` is STABLE across retries,
-  so a manager's restart re-uses the prior attempt's tool-execution markers → the agent's stable-draftId
-  `ask_customer`/`reply` (`order-status-verify-<threadId>`) gets DEDUPED and silently no-ops → it can never
-  re-act on a retry and falls through to final_message. Fix needs a per-restart token (resumeToken minted on the
-  manager click, carried in the case.resumed payload so pg-boss retries stay stable) feeding `deliveryScopeFor`.
-  Until then a retry SAFELY parks (fix A) but the agent can't self-serve the reply.
+- **B (FIXED, shipped):** `deliveryScopeFor(case.resumed)` was `case:${caseId}` — STABLE across retries, so a
+  manager restart re-used the prior attempt's tool-execution markers → the agent's stable-draftId
+  `ask_customer`/`reply` (`order-status-verify-<threadId>`) got DEDUPED and silently no-op'd → it fell through to
+  final_message. Fix: `case.resumed` events now carry a **`resumeToken`** (optional field on the event;
+  `randomUUID()` minted once per restart click in `handleDashboardRetry` → `retryCaseNow` → the event). pg-boss
+  redeliveries of the SAME job reuse the token (so within one retry the double-send guard still holds), but a
+  fresh restart gets a new token → `deliveryScopeFor` returns `case:${caseId}:${resumeToken}` → distinct scope →
+  the agent re-runs its tools. TDD: `+3` deliveryScopeFor units (distinct tokens → distinct scopes; same token →
+  same scope; no token → legacy `case:id`) + case-retry units assert the token rides the event. Was the exact
+  follow-up the old deliveryScopeFor comment flagged. `pnpm build` green.
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
