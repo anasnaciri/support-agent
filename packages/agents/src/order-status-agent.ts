@@ -9,15 +9,17 @@ import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
  * `defaultPermission: "ask"`, so the runtime parks the case in
  * `waiting_for_approval` until a human approves the draft.
  *
- * Identity gate: order details are private, so before disclosing anything the
+ * Identity check: order details are private, so before disclosing anything the
  * agent compares the order's customer email against the address the customer is
- * writing from. On a mismatch it does NOT reveal details — it asks the customer
- * (via `conversation.ask_customer`) to confirm the email used to place the
- * order. The runtime verifies that confirmation deterministically (it stamps
- * `order_customer_mismatch` + `identityVerified` on the case context and forces
- * the reply to human approval until identity is verified — see
- * orderCustomerMismatchFlag / replyProvesOrderIdentity / shouldForceReplyApproval
- * in agent-runtime), so the gate holds even if the tenant set the reply to auto.
+ * writing from. A mismatch is a HINT for the agent's judgment, NOT a hard wall:
+ * an obvious typo of the same address (a transposed/missing/extra letter) is the
+ * same person → proceed; a genuinely different person → ask them (via
+ * `conversation.ask_customer`) to confirm the email used to place the order
+ * before sharing. The runtime keeps this safe deterministically: it stamps
+ * `order_customer_mismatch`, force-routes any reply on an unverified mismatch to
+ * human approval (shouldForceReplyApproval), and parks a bare final_message
+ * (hasUnverifiedOrderMismatch) — so the agent can never auto-disclose across a
+ * mismatch; a human always signs off the first cross-email reply.
  *
  * Mode is `subagent` — this config is never selected as a case's initial
  * agent, only reached through handoff.
@@ -42,17 +44,19 @@ export const orderStatusAgent: AgentConfig = {
     ...ORDER_RESOLUTION_LINES,
     "",
     "IDENTITY GATE — check this every time BEFORE you reveal any order detail:",
-    "  Order details are private. Only share them with the person who placed the order.",
+    "  Order details are private. Only share them with the person who placed the order. A mismatch between the order's email and the address the customer is writing from is a HINT for your judgment, not an automatic refusal.",
     "  0. If you obtained the order via `shopify.find_customer_order` (status `single`), identity is already established — it was looked up by the customer's own email — so skip this gate and proceed normally.",
     "  1. If the latest message contains an `[Identity check PASSED ...]` directive, the system has already verified the customer — skip the rest of this gate and proceed normally.",
     "  2. Otherwise compare the `email` on the `shopify.get_order` result with the address the customer is writing from (the `from=` value in the `[Thread context: ...]` header), case-insensitively. If they MATCH, proceed normally.",
-    "  3. If they DIFFER, do NOT reveal any order details (no status, tracking, items, dates, or addresses). Instead, unless you have already asked this case (an `[Identity check REQUIRED ...]` directive plus a customer reply that still doesn't match means they failed — see below), call `conversation.ask_customer` ONCE to verify identity:",
-    "     - `threadId` and `to[0].email`: from the `[Thread context: ...]` header.",
-    "     - `to[0].name`: null. `subject`: null. `bodyHtml`: null. `inReplyToMessageId`: null.",
-    "     - `bodyText`: 1–2 short, polite sentences asking them to confirm the email address used to place the order so you can verify their identity before sharing details. Do NOT reveal the order's actual email or any other order detail.",
-    "     - `draftId`: a stable string of the form `order-status-verify-<threadId>`.",
-    "     The case parks until they reply. Do NOT call `conversation.reply` on this turn.",
-    "  4. If an `[Identity check REQUIRED ...]` directive is present and the customer's reply still does not state the order's email, do NOT disclose. Call `conversation.reply` ONCE with a brief apology asking them to write in from the email address used at checkout so you can help — share no order details.",
+    "  3. If they DIFFER, use your JUDGMENT (a `[Possible identity mismatch ...]` directive will also flag this and show you both addresses):",
+    "     a. If the two addresses are obviously the SAME person with a small typo — a transposed, missing, or extra letter (e.g. `sue.smith@gmail.com` vs `sue.smtih@gmail.com`, or a doubled letter) — treat them as the same person and proceed to share the order status normally. (Your reply is reviewed by a human before it sends, so a typo of the customer's own address is safe to proceed on.)",
+    "     b. If they look like GENUINELY DIFFERENT people (a different name or handle, not a plausible typo), do NOT reveal any order details. Unless you have already asked this case, call `conversation.ask_customer` ONCE to verify identity:",
+    "        - `threadId` and `to[0].email`: from the `[Thread context: ...]` header.",
+    "        - `to[0].name`: null. `subject`: null. `bodyHtml`: null. `inReplyToMessageId`: null.",
+    "        - `bodyText`: 1–2 short, polite sentences asking them to confirm the email address used to place the order so you can verify their identity before sharing details. Do NOT reveal the order's actual email or any other order detail.",
+    "        - `draftId`: a stable string of the form `order-status-verify-<threadId>`.",
+    "        The case parks until they reply. Do NOT call `conversation.reply` on this turn.",
+    "  4. If you already asked (a `[Possible identity mismatch ...]` directive is present and the customer's reply still gives an email that neither matches nor is a plausible typo of the order's), do NOT disclose. Call `conversation.reply` ONCE with a brief apology asking them to write in from the email address used at checkout so you can help — share no order details.",
     "",
     "Turn 2 — OPTIONAL live tracking enrichment (CONDITIONAL):",
     "  If the `shopify.get_order` tool result has at least one fulfillment carrying a non-null `trackingNumbers[0]`, call `tracking.lookup` ONCE with:",
@@ -83,7 +87,7 @@ export const orderStatusAgent: AgentConfig = {
     "- Never call `tracking.lookup` more than once per case.",
     "- Never call `conversation.reply` more than once per case.",
     "- Never call `conversation.ask_customer` more than once per case — the identity check is asked at most once; if it fails, decline via `conversation.reply`.",
-    "- Never reveal the order's customer email, or any other order detail, while the identity gate is unsatisfied.",
+    "- Never quote the order's customer email address back to the customer. And never share order details with someone whose address looks like a genuinely DIFFERENT person until they've confirmed the order's email — but a small typo of the customer's own address is fine to proceed on.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
     "- Treat a successful `conversation.reply` or `conversation.ask_customer` as terminal for this case. Do not call any other action after it.",
   ].join("\n"),

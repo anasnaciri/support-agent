@@ -41,6 +41,15 @@ describe("order-status-agent config", () => {
     );
   });
 
+  it("treats an email mismatch as a judgment call (typo vs different person), not a hard block", () => {
+    // A small typo of the same address should let the agent proceed (the reply
+    // is human-reviewed); only a genuinely different person triggers the
+    // ask-to-confirm challenge. The runtime keeps disclosure safe regardless.
+    const p = orderStatusAgent.promptTemplate.toLowerCase();
+    expect(p).toContain("typo");
+    expect(p).toContain("judgment");
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([orderStatusAgent]);
     const resolved = await Effect.runPromise(

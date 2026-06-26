@@ -231,7 +231,7 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     expect(text).not.toContain("conversation.fetch_thread");
   });
 
-  it("injects the identity-check directive (outside the fence) on a flagged where_is_order resume", () => {
+  it("frames a flagged where_is_order mismatch as a judgment hint (outside the fence)", () => {
     const text = textOf(
       buildInitialMessages(messageReceived("can you check my order?", "Help"), {
         subject: null,
@@ -240,16 +240,26 @@ describe("buildInitialMessages — untrusted-content framing", () => {
           classification: "where_is_order",
           identifiedOrderId: "#1001",
           customerEmail: "asker@somewhere.com",
+          pendingOrderEmail: "askerr@somewhere.com",
           riskFlags: ["order_customer_mismatch"],
         },
       }),
     );
     const open = text.indexOf(UNTRUSTED_OPEN);
     // Runtime-authored directive stays OUTSIDE the customer fence.
-    expect(text).toContain("Identity check REQUIRED");
+    expect(text).toContain("Possible identity mismatch");
     expect(text).toContain("#1001");
-    expect(text.indexOf("Identity check REQUIRED")).toBeLessThan(open);
+    expect(text.indexOf("Possible identity mismatch")).toBeLessThan(open);
+    // It is a HINT for the agent's judgment, not a hard block: both emails are
+    // shown, a typo is called out as the likely same-person case, and asking is
+    // ONE option rather than mandated.
+    expect(text).toContain("asker@somewhere.com");
+    expect(text).toContain("askerr@somewhere.com");
+    expect(text.toLowerCase()).toContain("typo");
+    expect(text.toLowerCase()).toContain("judgment");
     expect(text).toContain("conversation.ask_customer");
+    // It must NOT hard-block disclosure outright.
+    expect(text).not.toContain("Do NOT share any order details yet");
   });
 
   it("switches the directive to PASSED once identity is verified", () => {
@@ -267,7 +277,7 @@ describe("buildInitialMessages — untrusted-content framing", () => {
       }),
     );
     expect(text).toContain("Identity check PASSED");
-    expect(text).not.toContain("Identity check REQUIRED");
+    expect(text).not.toContain("Possible identity mismatch");
   });
 
   it("adds no directive for an ordinary where_is_order case (no mismatch flag)", () => {
@@ -428,7 +438,7 @@ describe("buildInitialMessages — case.resumed with an inlined thread transcrip
     expect(text.toLowerCase()).toContain("plain message");
   });
 
-  it("injects the identity-challenge directive on a resumed where_is_order mismatch", () => {
+  it("carries the mismatch judgment hint on a resumed where_is_order", () => {
     const text = textOf(
       buildInitialMessages(resumed, {
         subject: "Where is my order?",
@@ -438,12 +448,14 @@ describe("buildInitialMessages — case.resumed with an inlined thread transcrip
           riskFlags: ["order_customer_mismatch"],
           identifiedOrderId: "gid://shopify/Order/1001",
           customerEmail: "sue@example.com",
+          pendingOrderEmail: "suee@example.com",
         },
         threadTranscript: null,
       }),
     );
-    // The resume path must carry the same disclosure gate the inbound path does.
-    expect(text).toContain("Identity check REQUIRED");
+    // The resume path carries the same judgment hint the inbound path does.
+    expect(text).toContain("Possible identity mismatch");
+    expect(text.toLowerCase()).toContain("typo");
     expect(text).toContain("conversation.ask_customer");
   });
 

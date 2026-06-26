@@ -247,14 +247,20 @@ const buildUserMessageFromInbound = (
 };
 
 /**
- * Trusted directive injected on resume of a `where_is_order` case that was
- * flagged as an order/customer mismatch. Tells the specialist either to run the
- * identity challenge (ask the customer to confirm the order's email before
- * disclosing) or, once the runtime has verified that confirmation, to go ahead
- * and send the status. Carries the order id + reply wiring so the agent can act
- * without the prior tick's tool results. Returns "" for every case that isn't
- * mid-verification, so normal flows are untouched. Stays OUTSIDE the untrusted
- * fence — it's runtime-authored, not customer text.
+ * Trusted directive injected on a `where_is_order` case flagged as an
+ * order/customer email mismatch. The mismatch is a HINT for the agent's
+ * judgment, NOT a hard block: it shows BOTH emails (the customer's and the
+ * order's) and asks the model to decide whether this is an obvious typo (the
+ * same person) — in which case it may share the status — or genuinely different
+ * people, in which case it should ask the customer to confirm the order's email
+ * before disclosing. Security is NOT carried by this prompt: any
+ * `conversation.reply` on an unverified mismatch is force-routed to human
+ * approval (`shouldForceReplyApproval`) and a bare `final_message` parks for a
+ * human (`hasUnverifiedOrderMismatch`), so the model can never auto-disclose
+ * across a mismatch — the human is the backstop. Once the runtime has verified
+ * an exact-email confirmation, the directive flips to PASSED (proceed). Returns
+ * "" for every non-mismatch case, so normal flows are untouched. Stays OUTSIDE
+ * the untrusted fence — runtime-authored, not customer text.
  */
 const orderIdentityDirective = (
   context: Record<string, unknown>,
@@ -283,7 +289,19 @@ const orderIdentityDirective = (
   if (context["identityVerified"] === true) {
     return `[Identity check PASSED${wiringNote}: the customer confirmed the email used to place ${orderRef} and the system verified it. Look up the order and send the status reply now.]`;
   }
-  return `[Identity check REQUIRED${wiringNote}: this customer is writing from a different email than the one ${orderRef} was placed under. Do NOT share any order details yet. Ask them to confirm the email used to place the order via conversation.ask_customer; only after they reply with the matching email may you share the status. If the email they give does not match the order, do not disclose — apologise and ask them to write in from the email used at checkout.]`;
+  const customerEmail =
+    typeof context["customerEmail"] === "string"
+      ? (context["customerEmail"] as string)
+      : null;
+  const orderEmail =
+    typeof context["pendingOrderEmail"] === "string"
+      ? (context["pendingOrderEmail"] as string)
+      : null;
+  const emailsLine =
+    customerEmail && orderEmail
+      ? `This customer is writing from ${customerEmail}, but ${orderRef} was placed under ${orderEmail}.`
+      : `This customer is writing from a different email than the one ${orderRef} was placed under.`;
+  return `[Possible identity mismatch${wiringNote}: ${emailsLine} This is often a harmless typo — a transposed, missing or extra letter usually means the SAME person — but it can also mean someone is asking about another person's order. Use your judgment: if the two addresses are clearly the same person with a small typo, go ahead and share the order status normally. If they look like genuinely different people, do NOT share order details — instead ask the customer to confirm the exact email used to place the order via conversation.ask_customer, and only share once it matches. When you are unsure, ask rather than disclose. (Any reply you send on a flagged case is reviewed by a human before it goes out, so explain your reasoning.)]`;
 };
 
 /**

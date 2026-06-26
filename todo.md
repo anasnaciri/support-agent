@@ -517,9 +517,26 @@ answer as prose) and the runtime **auto-resolved a live case with NOTHING sent t
 TDD: `+3` pure units (`hasUnverifiedOrderMismatch`), `+2` message units (resume identity directive
 REQUIRED/PASSED + tool-priming), `+1` worker e2e (unverified mismatch + `final_message` ⇒ `human_takeover`, no
 `case.resolved`). `pnpm build` green. **NEW INVARIANT: a where_is_order case with an unverified
-order_customer_mismatch must never auto-resolve on a bare final_message.** Follow-up (not done): the broader
-"specialist `final_message` that sent no `conversation.reply` shouldn't auto-resolve" guard; the manual
-"reopen → human takeover" affordance for resolved cases.
+order_customer_mismatch must never auto-resolve on a bare final_message.** Commit `bc84018`, deployed Fly v18.
+
+### ✅ Identity mismatch → judgment hint, not a hard block (2026-06-26)
+
+Follow-on to the above: a customer whose ORDER has an email typo (Susan: order under `sueterrranova@`, writes
+from `sueterranova@`) could never satisfy the old hard gate — it demanded she confirm the *order's* (typo'd)
+email, which she'd never type. Per merchant ask: **the mismatch is now a HINT for the agent's judgment, not an
+automatic refusal.** `orderIdentityDirective` (helpers) softened from "Identity check REQUIRED / Do NOT share"
+to "Possible identity mismatch" — it shows BOTH emails and tells the agent to decide: obvious typo (same
+person) ⇒ share the status; genuinely different person ⇒ `conversation.ask_customer` to confirm. The
+order-status-agent prompt's IDENTITY GATE rewritten to match (step 3 splits a/typo-proceed vs b/different-ask).
+**Security is unchanged and deterministic — NOT carried by the prompt:** `shouldForceReplyApproval` still
+force-routes ANY reply on an unverified mismatch to human approval, the v18 `hasUnverifiedOrderMismatch` guard
+still parks a bare final_message, and `identityVerified` is still runtime-only (exact email match). So the LLM
+can pick ask-vs-proceed but can NEVER auto-disclose across a mismatch — a human signs off the first cross-email
+reply. `replyProvesOrderIdentity` left exact (the fast auto-verify path); typos ride the agent-judgment +
+human-approval path. TDD: message-unit + agent-prompt assertions flipped to the judgment wording (typo/judgment,
+no "Do NOT share any order details yet"). `pnpm build` green; 128 affected-suite tests green. Follow-up: surface
+the two emails + "likely typo" hint explicitly in the dashboard approval card (the human has them via the
+risk-flag + panels today).
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
