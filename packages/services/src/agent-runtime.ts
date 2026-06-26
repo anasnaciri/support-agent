@@ -1951,6 +1951,17 @@ const AgentRuntimeLayer = Layer.effect(
                   return yield* Effect.fail(resolveExit.left);
                 }
                 current = resolveExit.right;
+                // The lifecycle writer can REFUSE to resolve (its bypass-proof
+                // identity backstop) and park the case for a human instead. When
+                // it does, the case did not resolve — report the takeover, not
+                // Completed, so the outer classifier doesn't treat the tick as a
+                // clean close.
+                if (current.status !== "resolved") {
+                  return {
+                    type: "HumanTakeoverRequired",
+                    reason: "resolve blocked: case parked for a human",
+                  } as const;
+                }
               }
               return { type: "Completed" } as const;
             }

@@ -180,6 +180,75 @@ describe("CaseLifecycleWriter", () => {
     });
   });
 
+  it("refuses an AGENT resolve on a case with an unverified order/customer mismatch (parks for a human)", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "in_progress",
+          context: {
+            classification: "where_is_order",
+            riskFlags: ["order_customer_mismatch"],
+            customerEmail: "sue@example.com",
+          },
+        });
+        const result = yield* lifecycle.resolve({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "agent", id: AgentId("order-status-agent") },
+          reason: "runtime: final_message",
+          details: { turn: 6 },
+        });
+        const fetched = yield* cases.getById(created.id, TenantId("tenant-a"));
+        const entries = yield* audit.forCase(created.id, {
+          tenantId: TenantId("tenant-a"),
+        });
+        return { result, fetched, entries };
+      }),
+    );
+
+    // The case is NOT resolved — it parked for a human.
+    expect(out.result.status).toBe("human_takeover");
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.fetched.resolvedAt).toBeNull();
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.resolved");
+    expect(actions).toContain("case.escalated_to_human");
+  });
+
+  it("still allows a HUMAN (user) resolve on an unverified-mismatch case", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "in_progress",
+          context: {
+            classification: "where_is_order",
+            riskFlags: ["order_customer_mismatch"],
+            customerEmail: "sue@example.com",
+          },
+        });
+        const result = yield* lifecycle.resolve({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "mgr-1" },
+          reason: "manager resolved manually",
+        });
+        return { result };
+      }),
+    );
+    expect(out.result.status).toBe("resolved");
+  });
+
   it("parks a case for approval with approval row, transition, and audit", async () => {
     const out = await run(
       Effect.gen(function* () {

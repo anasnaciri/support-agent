@@ -538,6 +538,29 @@ no "Do NOT share any order details yet"). `pnpm build` green; 128 affected-suite
 the two emails + "likely typo" hint explicitly in the dashboard approval card (the human has them via the
 risk-flag + panels today).
 
+### 🔴 Bypass-proof resolve guard + dedup-on-retry (2026-06-26)
+
+Prod 3428f154 STILL auto-resolved on a v19 restart-from-triage despite the v18 in-loop `final_message` guard.
+Forensics (read-only prod audit): the order-status-agent ran get_order → tracking → update_context → a
+**deduped** ask_customer/reply (turn 5, no `tool.invoked`) → bare final_message → `case.resolved` with details
+`{turn, finalMessage}` and **NO `reason`** (impossible from `lifecycle.resolve`, which always injects reason via
+`auditDetails`). Could NOT reproduce locally (the in-loop guard parks correctly in every test incl. the full
+triage→handoff→get_order→update_context→final_message flow). Two real bugs found:
+
+- **A (FIXED, shipped):** the in-loop guard reads the in-memory `current.context`, which somehow missed the
+  flag in prod. Made the guarantee **bypass-proof** by enforcing it inside `lifecycle.resolve` — it reads the
+  FRESH in-transaction context and, when an **agent** actor tries to resolve a case carrying an unverified
+  `order_customer_mismatch`, transitions to `human_takeover` + audits `case.escalated_to_human` instead of
+  resolving. The runtime maps a non-resolved return → `HumanTakeoverRequired`. User/system (manual + approval-
+  resume, line 703) resolves are NOT blocked, so an approved typo-reply still resolves via the user-actor path.
+  TDD: `+2` lifecycle-writer units (agent resolve → parks; user resolve → resolves) `+2` e2e repros.
+- **B (NOT fixed — follow-up):** `deliveryScopeFor(case.resumed)` = `case:${caseId}` is STABLE across retries,
+  so a manager's restart re-uses the prior attempt's tool-execution markers → the agent's stable-draftId
+  `ask_customer`/`reply` (`order-status-verify-<threadId>`) gets DEDUPED and silently no-ops → it can never
+  re-act on a retry and falls through to final_message. Fix needs a per-restart token (resumeToken minted on the
+  manager click, carried in the case.resumed payload so pg-boss retries stay stable) feeding `deliveryScopeFor`.
+  Until then a retry SAFELY parks (fix A) but the agent can't self-serve the reply.
+
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
 ### The use case

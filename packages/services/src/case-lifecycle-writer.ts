@@ -357,6 +357,40 @@ export const CaseLifecycleWriterLive = Layer.effect(
             let current = yield* cases.getById(input.caseId, input.tenantId);
             if (current.status === "resolved") return current;
 
+            // Bypass-proof identity-disclosure backstop (prod 3428f154): an
+            // AGENT must never resolve a case that still carries an UNVERIFIED
+            // order/customer mismatch — we never confirmed who we're talking to,
+            // so closing it would swallow a live case. This reads the FRESH
+            // in-transaction context (not a possibly-stale in-memory copy the
+            // runtime's loop guard relies on), so it holds no matter how the
+            // resolve was reached. Manual (user) and system resolves are allowed
+            // — a human owns that decision.
+            const unverifiedMismatch =
+              readRiskFlags(current.context).includes(
+                "order_customer_mismatch",
+              ) && current.context["identityVerified"] !== true;
+            if (input.actor.type === "agent" && unverifiedMismatch) {
+              const parked = yield* cases.transitionStatus(
+                current.id,
+                "human_takeover",
+                {
+                  tenantId: current.tenantId,
+                  reason: "unverified_identity_mismatch_resolve_blocked",
+                },
+              );
+              yield* audit.record({
+                tenantId: parked.tenantId,
+                caseId: parked.id,
+                actor: { type: "system", id: "case-lifecycle-writer" },
+                action: "case.escalated_to_human",
+                details: auditDetails(
+                  "unverified_identity_mismatch_resolve_blocked",
+                  input.details,
+                ),
+              });
+              return parked;
+            }
+
             if (
               current.status === "human_takeover" &&
               input.bridgeFromHumanTakeover === true

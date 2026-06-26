@@ -1261,6 +1261,228 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(actions).toContain("case.escalated_to_human");
   });
 
+  it("guard still holds when the agent calls case.update_context before the final_message (prod 3428f154 repro)", async () => {
+    // The prod resolve happened AFTER the agent ran case.update_context (it
+    // stamped liveTrackingStatus), then emitted a bare final_message. If
+    // update_context drops the runtime-stamped riskFlags from the in-memory
+    // case, the guard reads a context without the mismatch flag and resolves.
+    const specialist: AgentConfig = {
+      id: AgentId("order-status-agent"),
+      name: "Order status",
+      description: "Looks up orders and replies.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Answer the order status question.",
+      tools: ["case.update_context"],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 4,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "u1",
+        tool: "case.update_context",
+        input: { notes: "order is in transit" },
+      },
+      { type: "final_message", text: "Your order Q537JR5JA is on the way." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([specialist]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: specialist.id,
+            subject: "Where is my order?",
+            threadId: "gmail:mismatch-thread-2" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+            context: {
+              classification: "where_is_order",
+              riskFlags: ["order_customer_mismatch"],
+              identifiedOrderId: "gid://shopify/Order/7213253230783",
+              pendingOrderEmail: "sueterrranova@example.com",
+              customerEmail: "sueterranova@example.com",
+            },
+          });
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.resolved");
+    expect(actions).toContain("case.escalated_to_human");
+  });
+
+  it("guard holds through the FULL restart-from-triage flow (triage handoff -> get_order -> update_context -> final_message)", async () => {
+    // Closest mirror of prod 3428f154: restart-from-triage runs support-triage
+    // (re-classify + handoff), then order-status does get_order (re-detects the
+    // mismatch) + update_context, then a bare final_message. The case is seeded
+    // WITHOUT classification (the restart clears it) but WITH the mismatch flag.
+    const orderId = OrderId("gid://shopify/Order/7213253230783");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#Q537JR5JA",
+      confirmationNumber: "Q537JR5JA",
+      email: "sueterrranova@example.com", // the typo on the ORDER (3 r's)
+      customerId: CustomerId("gid://shopify/Customer/999"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "24.92", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [],
+      fulfillments: [],
+      createdAt: new Date("2026-06-10T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-11T00:00:00.000Z"),
+    } as never;
+    const mockOrderStatus: AgentConfig = {
+      id: AgentId("order-status-agent"),
+      name: "Order status",
+      description: "Looks up orders and replies.",
+      mode: "subagent",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Answer the order status question.",
+      tools: ["shopify.get_order", "case.update_context", "conversation.reply"],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 13,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "t0",
+        tool: "case.update_context",
+        input: { classification: "where_is_order", quotedOrderRef: "Q537JR5JA" },
+      },
+      {
+        type: "tool_call",
+        callId: "t1",
+        tool: "agent.handoff",
+        input: { targetAgent: "order-status-agent", reason: "status request" },
+      },
+      {
+        type: "tool_call",
+        callId: "t2",
+        tool: "shopify.get_order",
+        input: { orderId: "gid://shopify/Order/7213253230783" },
+      },
+      {
+        type: "tool_call",
+        callId: "t3",
+        tool: "case.update_context",
+        input: { notes: "order is in transit" },
+      },
+      { type: "final_message", text: "Your order Q537JR5JA is on the way." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, mockOrderStatus]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const audit = yield* AuditLogService;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            subject: "Where is my order?",
+            threadId: "gmail:mismatch-thread-3" as never,
+            provider: "gmail",
+            mailbox: "support@merchant.com",
+            // No classification (restart-from-triage cleared it); the mismatch
+            // flag + customer email survive from the prior attempts.
+            context: {
+              riskFlags: ["order_customer_mismatch"],
+              identifiedOrderId: "gid://shopify/Order/7213253230783",
+              pendingOrderEmail: "sueterrranova@example.com",
+              customerEmail: "sueterranova@example.com",
+            },
+          });
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          const result = yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+          const fetched = yield* repo.getById(created.id);
+          const entries = yield* audit.forCase(created.id);
+          return { result, fetched, entries };
+        }),
+        layer,
+      ),
+    );
+
+    const actions = out.entries.map((e) => e.action);
+    expect(actions).not.toContain("case.resolved");
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+  });
+
   // ----------------------------------------------------------------
   // Delivery specialist (missing-package-agent), expanded for refund
   // requests that cite a delivery problem. BRANCH B3 — the agent cannot
