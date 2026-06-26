@@ -475,6 +475,27 @@ triage"), new `retryFromTriageAction`. TDD: `+1` case-retry unit (full-retry tri
 (rebind + classification-clear + audit), `case-actions-menu` test updated. `pnpm build` green; full suite
 green (1748). **Backend NOT committed/deployed; dashboard UI needs its own Cloudflare deploy for the buttons.**
 
+### ✅ Enhanced — resume now replays the FULL thread (2026-06-26)
+
+Closes the "triage has no message-replay, so it re-classifies from `notes`" gap above: on **any** `case.resumed`
+tick the runtime now pre-fetches the whole conversation and inlines it, so a restart-from-triage (and any
+hand-back) re-orients on the real emails + the replies we already sent — not just the subject/`notes`. Triage
+especially needed this: its toolset is `["case.update_context","agent.handoff"]`, so the old
+"call `conversation.fetch_thread` yourself" directive on resume was a no-op (no such tool) — it effectively saw
+only the subject. The transcript carries through `agent.handoff`, so the routed specialist sees it too.
+
+Layers: `renderThreadTranscript(thread)` (pure, in `agent-runtime-helpers.ts`) renders messages oldest→first,
+direction-labelled (`Customer <…>` / `You (support) <…>`); `buildInitialMessages` gains an optional
+`threadTranscript` — when present it's inlined **fenced (untrusted)** and the self-fetch directive flips to
+"re-read the conversation above"; when absent (connector hiccup / lean layer) it keeps the old fetch directive.
+Runtime resolves `ConversationService` via `Effect.serviceOption` (optional, like `ImageHashStore`) and, on
+`case.resumed` with a `threadId`+`mailbox`, best-effort `fetchThread` → render → pass through
+(`Effect.catchAllCause` → `null`, so a fetch failure never breaks a resume). TDD: `+4` pure units
+(`renderThreadTranscript` ×2, `buildInitialMessages` transcript present/absent) + `+1` worker e2e
+(`restart-from-triage … sees what was already done` — captures triage's turn-1 user message via
+`LLMServiceFromFn`, asserts both the customer message and our prior reply are present and the fetch directive is
+gone). `pnpm build` green; runtime + messages + e2e + lifecycle suites green. **NOT committed.**
+
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
 ### The use case

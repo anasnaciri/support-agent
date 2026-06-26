@@ -9,6 +9,7 @@ import {
   TenantId,
   ToolRegistryWith,
   type AgentConfig,
+  type ConversationThread,
   type DomainEvent,
   type LLMDecision,
   type ShopifyOrder,
@@ -1052,6 +1053,125 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // The loop ran (not held) — an LLM decision was recorded.
     expect(actions).toContain("llm.decision");
     expect(actions).not.toContain("event.held_waiting_for_supplier");
+  });
+
+  it("restart-from-triage: inlines the whole thread so triage sees what was already done", async () => {
+    const tenantId = TenantId("tenant-acme");
+    const threadId = "gmail:resume-thread";
+    const mailbox = "support@merchant.com";
+
+    // A two-message history: the customer's original request AND the reply we
+    // already sent. support-triage has NO conversation.fetch_thread tool, so
+    // without the runtime pre-fetching the thread it would re-classify from the
+    // subject alone. This proves it now sees the full conversation.
+    const thread: ConversationThread = {
+      id: threadId as never,
+      subject: "Where is my order?",
+      participants: [
+        { name: "Jane", email: "jane@example.com" },
+        { name: "Support", email: mailbox },
+      ],
+      messages: [
+        {
+          id: "m-1",
+          threadId: threadId as never,
+          direction: "inbound",
+          from: { name: "Jane", email: "jane@example.com" },
+          to: [{ name: "Support", email: mailbox }],
+          subject: "Where is my order?",
+          bodyText: "I ordered #1001 three weeks ago and it never arrived.",
+          bodyHtml: null,
+          sentAt: new Date("2026-06-01T00:00:00Z"),
+          attachments: [],
+        },
+        {
+          id: "m-2",
+          threadId: threadId as never,
+          direction: "outbound",
+          from: { name: "Support", email: mailbox },
+          to: [{ name: "Jane", email: "jane@example.com" }],
+          subject: null,
+          bodyText: "Sorry about that — we've asked the warehouse to reship #1001.",
+          bodyHtml: null,
+          sentAt: new Date("2026-06-02T00:00:00Z"),
+          attachments: [],
+        },
+      ],
+    };
+
+    let firstUserMessage: string | null = null;
+    const captureLlm = LLMServiceFromFn((req, ctx) =>
+      Effect.sync(() => {
+        if (ctx.callIndex === 0) {
+          const first = req.messages.find((m) => m.role === "user");
+          firstUserMessage =
+            typeof first?.content === "string"
+              ? first.content
+              : JSON.stringify(first?.content);
+        }
+        // End the tick at once — we only care what triage was shown on turn 1.
+        return { type: "final_message", text: "ok" } as LLMDecision;
+      }),
+    );
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, orderStatusAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      captureLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({
+        threads: new Map([[`${tenantId}:${threadId}`, thread]]),
+      }),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId,
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is my order?",
+            threadId: threadId as never,
+            provider: "gmail",
+            mailbox,
+          });
+          // Resume always runs from in_progress (resumeCase flips
+          // human_takeover → in_progress before publishing case.resumed).
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+        }),
+        layer,
+      ),
+    );
+
+    expect(firstUserMessage).not.toBeNull();
+    // Triage saw the customer's original message AND the reply already sent.
+    expect(firstUserMessage!).toContain("it never arrived");
+    expect(firstUserMessage!).toContain("asked the warehouse to reship");
+    // It was NOT told to fetch the thread itself — the runtime already did.
+    expect(firstUserMessage!).not.toContain("conversation.fetch_thread");
   });
 
   // ----------------------------------------------------------------

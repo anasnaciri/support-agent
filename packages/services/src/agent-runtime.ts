@@ -53,6 +53,7 @@ import {
   ToolExecutionStore,
 } from "./idempotency-store.js";
 import { parseThreadId } from "./conversation-thread-id.js";
+import { ConversationService } from "./conversation-service.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
 import {
   REPLY_DELIVERY_FAILED_FLAG,
@@ -77,6 +78,7 @@ import {
   buildInitialMessages,
   derivePreview,
   deriveSubject,
+  renderThreadTranscript,
   executionKeyFor,
   deliveryScopeFor,
   inboundReplyCandidateIds,
@@ -143,6 +145,13 @@ const AgentRuntimeLayer = Layer.effect(
     // many test layers that don't, in which case duplicate-photo detection
     // is simply skipped.
     const maybeImageHashStore = yield* Effect.serviceOption(ImageHashStore);
+    // Optional conversation connector. Present in the worker (which wires a
+    // ConversationRouter); absent in lean test layers. Used ONLY to pre-fetch
+    // the thread on a `case.resumed` tick so the resumed agent (esp. triage,
+    // which lacks the conversation.fetch_thread tool) sees the whole
+    // conversation + what was already done. Strictly best-effort — a fetch
+    // failure must never break a resume.
+    const maybeConversation = yield* Effect.serviceOption(ConversationService);
     // Optional idempotency stores (audit C2/C3) — present in the worker,
     // absent in lean test layers (which then skip the dedup, as before).
     const maybeProcessed = yield* Effect.serviceOption(ProcessedMessageStore);
@@ -1065,10 +1074,35 @@ const AgentRuntimeLayer = Layer.effect(
             } as const;
           }
           let agent: AgentConfig = applyOverride(resolved, overrideMap);
+          // On a resume (dashboard retry / restart-from-triage / hand-back) the
+          // agent starts blind — there's no inbound payload. Pre-fetch the full
+          // thread so it re-orients on the ACTUAL conversation and what was
+          // already done, instead of being told to fetch it itself (triage has
+          // no such tool). Best-effort: a connector hiccup or a lean layer
+          // without ConversationService falls back to the fetch directive.
+          let resumeTranscript: string | null = null;
+          if (
+            event.type === "case.resumed" &&
+            working.threadId &&
+            working.mailbox &&
+            Option.isSome(maybeConversation)
+          ) {
+            resumeTranscript = yield* maybeConversation.value
+              .fetchThread(
+                working.tenantId,
+                working.threadId,
+                working.mailbox,
+              )
+              .pipe(
+                Effect.map(renderThreadTranscript),
+                Effect.catchAllCause(() => Effect.succeed(null)),
+              );
+          }
           const messages: ChatMessage[] = buildInitialMessages(event, {
             subject: working.subject,
             threadId: working.threadId,
             context: working.context,
+            threadTranscript: resumeTranscript,
           });
           let current = working;
           // Order id/name → customer email, populated as `shopify.get_order`

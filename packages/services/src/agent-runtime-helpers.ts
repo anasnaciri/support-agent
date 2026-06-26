@@ -5,6 +5,7 @@ import {
   type ApprovalRiskLevel,
   type CaseChannel,
   type ChatMessage,
+  type ConversationThread,
   type DomainEvent,
   type InboundMessage,
   type ThreadId,
@@ -285,12 +286,48 @@ const orderIdentityDirective = (
   return `[Identity check REQUIRED${wiringNote}: this customer is writing from a different email than the one ${orderRef} was placed under. Do NOT share any order details yet. Ask them to confirm the email used to place the order via conversation.ask_customer; only after they reply with the matching email may you share the status. If the email they give does not match the order, do not disclose — apologise and ask them to write in from the email used at checkout.]`;
 };
 
+/**
+ * Render a fetched conversation thread as a plain-text transcript, oldest
+ * first, for inlining into a `case.resumed` prompt. Each line is labelled by
+ * direction so the model can tell a customer message from a reply WE already
+ * sent — that's the "what was already done" the agent needs to avoid redoing
+ * work or contradicting an earlier promise. The caller fences the whole string
+ * as untrusted (it contains customer-authored text), so this stays pure data.
+ */
+export const renderThreadTranscript = (thread: ConversationThread): string =>
+  thread.messages
+    .map((m) => {
+      const who =
+        m.direction === "inbound"
+          ? `Customer <${m.from.email}>`
+          : `You (support) <${m.from.email}>`;
+      const subject = m.subject ? ` — ${m.subject}` : "";
+      const attachments =
+        m.attachments.length > 0
+          ? `\n[attachments: ${m.attachments
+              .map((a) => a.filename)
+              .join(", ")}]`
+          : "";
+      const body =
+        m.bodyText.trim().length > 0 ? m.bodyText.trim() : "(empty message)";
+      return `[${m.sentAt.toISOString()}] ${who}${subject}\n${body}${attachments}`;
+    })
+    .join("\n\n");
+
 export const buildInitialMessages = (
   event: DomainEvent,
   caseRow: {
     readonly subject: string | null;
     readonly threadId: ThreadId | null;
     readonly context: Record<string, unknown>;
+    /**
+     * The full thread transcript, pre-fetched by the runtime on a
+     * `case.resumed` tick (see `renderThreadTranscript`). When present it is
+     * inlined so even an agent WITHOUT the `conversation.fetch_thread` tool
+     * (support-triage) re-orients on the real conversation. Absent/null on a
+     * connector hiccup or a lean layer → the agent is told to fetch it itself.
+     */
+    readonly threadTranscript?: string | null;
   },
 ): ChatMessage[] => {
   const caseSubject = caseRow.subject;
@@ -378,9 +415,24 @@ export const buildInitialMessages = (
     if (boundOrder) {
       parts.push(boundOrder);
     }
+    // If the runtime pre-fetched the thread, inline the whole conversation
+    // (customer messages AND replies we already sent), fenced as untrusted.
+    // This is what lets a restart-from-triage actually "know what was already
+    // done" — support-triage has no conversation.fetch_thread tool, so without
+    // this it would re-classify from the subject alone.
+    const transcript = caseRow.threadTranscript?.trim();
+    if (transcript) {
+      parts.push(
+        `Conversation so far (oldest first — includes replies already sent):\n${wrapUntrusted(
+          transcript,
+        )}`,
+      );
+    }
     if (caseRow.threadId) {
       parts.push(
-        "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then complete the customer's request.",
+        transcript
+          ? "Re-read the full conversation above, take into account what has already been said and done, then complete the customer's request."
+          : "Start by calling conversation.fetch_thread with the threadId above to review the conversation so far, then complete the customer's request.",
       );
     }
     return [{ role: "user", content: parts.join("\n\n") }];

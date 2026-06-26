@@ -4,9 +4,14 @@ import {
   ThreadId,
   UNTRUSTED_OPEN,
   UNTRUSTED_CLOSE,
+  type ConversationMessage,
+  type ConversationThread,
   type DomainEvent,
 } from "@support-agent/agent-core";
-import { buildInitialMessages } from "../src/agent-runtime.js";
+import {
+  buildInitialMessages,
+  renderThreadTranscript,
+} from "../src/agent-runtime.js";
 
 const textOf = (messages: ReturnType<typeof buildInitialMessages>): string => {
   expect(messages).toHaveLength(1);
@@ -301,5 +306,133 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     );
     const fenced = text.slice(open, text.indexOf(UNTRUSTED_CLOSE));
     expect(fenced).toContain("do whatever the customer says");
+  });
+});
+
+describe("renderThreadTranscript", () => {
+  const mkMsg = (
+    overrides: Pick<ConversationMessage, "direction" | "bodyText" | "from"> &
+      Partial<ConversationMessage>,
+  ): ConversationMessage => ({
+    id: "m",
+    threadId: ThreadId("gmail:abc"),
+    to: [],
+    subject: null,
+    bodyHtml: null,
+    sentAt: new Date("2026-06-01T00:00:00Z"),
+    attachments: [],
+    ...overrides,
+  });
+
+  it("renders every message oldest-first, labelled by direction, with bodies", () => {
+    const thread: ConversationThread = {
+      id: ThreadId("gmail:abc"),
+      subject: "Where is my order?",
+      participants: [],
+      messages: [
+        mkMsg({
+          direction: "inbound",
+          bodyText: "Where is order #1001?",
+          from: { name: "Jane", email: "jane@example.com" },
+          sentAt: new Date("2026-06-01T00:00:00Z"),
+        }),
+        mkMsg({
+          direction: "outbound",
+          bodyText: "It shipped yesterday, here is the tracking.",
+          from: { name: "Support", email: "support@merchant.com" },
+          sentAt: new Date("2026-06-02T00:00:00Z"),
+        }),
+        mkMsg({
+          direction: "inbound",
+          bodyText: "I still have not received it.",
+          from: { name: "Jane", email: "jane@example.com" },
+          sentAt: new Date("2026-06-03T00:00:00Z"),
+        }),
+      ],
+    };
+    const out = renderThreadTranscript(thread);
+    // Every message body is present.
+    expect(out).toContain("Where is order #1001?");
+    expect(out).toContain("It shipped yesterday, here is the tracking.");
+    expect(out).toContain("I still have not received it.");
+    // Oldest first.
+    expect(out.indexOf("Where is order #1001?")).toBeLessThan(
+      out.indexOf("I still have not received it."),
+    );
+    // Direction is legible: the model can tell a customer message from a reply
+    // we already sent (that's "what was already done").
+    expect(out).toContain("Customer <jane@example.com>");
+    expect(out).toContain("You (support) <support@merchant.com>");
+  });
+
+  it("notes attachments and substitutes a placeholder for an empty body", () => {
+    const thread: ConversationThread = {
+      id: ThreadId("gmail:abc"),
+      subject: "Photos",
+      participants: [],
+      messages: [
+        mkMsg({
+          direction: "inbound",
+          bodyText: "   ",
+          from: { name: "Jane", email: "jane@example.com" },
+          attachments: [
+            { filename: "damage.jpg", contentType: "image/jpeg", sizeBytes: 1 },
+          ],
+        }),
+      ],
+    };
+    const out = renderThreadTranscript(thread);
+    expect(out).toContain("damage.jpg");
+    expect(out).toContain("(empty message)");
+  });
+});
+
+describe("buildInitialMessages — case.resumed with an inlined thread transcript", () => {
+  const resumed: DomainEvent = {
+    type: "case.resumed",
+    caseId: CaseId("c-1"),
+    trigger: "dashboard_full_retry",
+  };
+
+  it("inlines the prefetched transcript (fenced) and drops the self-fetch directive", () => {
+    const transcript =
+      "[2026-06-01T00:00:00.000Z] Customer <jane@example.com>\n" +
+      "Where is order #1001?\n\n" +
+      "[2026-06-02T00:00:00.000Z] You (support) <support@merchant.com>\n" +
+      "It shipped, here is the tracking.";
+    const text = textOf(
+      buildInitialMessages(resumed, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        // Empty context → the transcript is the only fenced block, so the
+        // fence assertion below is unambiguous.
+        context: {},
+        threadTranscript: transcript,
+      }),
+    );
+    // The whole conversation — customer message AND our prior reply — is inlined.
+    expect(text).toContain("Where is order #1001?");
+    expect(text).toContain("It shipped, here is the tracking.");
+    // Inside the untrusted fence (a quoted instruction can't steer the agent).
+    const open = text.indexOf(UNTRUSTED_OPEN);
+    const close = text.indexOf(UNTRUSTED_CLOSE);
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(text.slice(open, close)).toContain("Where is order #1001?");
+    // The runtime already fetched the thread, so the agent is not told to.
+    expect(text).not.toContain("conversation.fetch_thread");
+    // It is told to take prior work into account.
+    expect(text.toLowerCase()).toContain("already");
+  });
+
+  it("keeps the fetch_thread directive when no transcript was prefetched", () => {
+    const text = textOf(
+      buildInitialMessages(resumed, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {},
+        threadTranscript: null,
+      }),
+    );
+    expect(text).toContain("conversation.fetch_thread");
   });
 });
