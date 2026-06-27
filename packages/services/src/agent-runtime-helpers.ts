@@ -600,27 +600,43 @@ export const executionKeyFor = (
  * back to the case id (two of the same on one case could cross-dedup — rare).
  */
 export const deliveryScopeFor = (event: DomainEvent): string => {
-  switch (event.type) {
-    case "message.received":
-    case "customer.replied":
-      return `msg:${event.payload.messageId}`;
-    case "approval.approved":
-    case "approval.rejected":
-      return `appr:${event.approvalId}`;
-    case "timer.expired":
-      return `timer:${event.timerId}`;
-    case "ticket.created":
-      return `ticket:${event.source}`;
-    case "tracking.changed":
-      return `track:${event.orderId}`;
-    case "case.resumed":
-      return event.resumeToken
-        ? `case:${event.caseId}:${event.resumeToken}`
-        : `case:${event.caseId}`;
-    case "supplier.updated":
-    case "manual.takeover":
-      return `case:${event.caseId}`;
-  }
+  const scoped = ((): string | undefined => {
+    switch (event.type) {
+      case "message.received":
+      case "customer.replied":
+        return `msg:${event.payload.messageId}`;
+      case "approval.approved":
+      case "approval.rejected":
+        return `appr:${event.approvalId}`;
+      case "timer.expired":
+        return `timer:${event.timerId}`;
+      case "ticket.created":
+        return `ticket:${event.source}`;
+      case "tracking.changed":
+        return `track:${event.orderId}`;
+      case "case.resumed":
+        return event.resumeToken
+          ? `case:${event.caseId}:${event.resumeToken}`
+          : `case:${event.caseId}`;
+      case "supplier.updated":
+      case "manual.takeover":
+        return `case:${event.caseId}`;
+    }
+  })();
+  if (scoped) return scoped;
+  // Defensive backstop (prod 3428f154): the switch is exhaustive over the known
+  // DomainEvent union, but a MALFORMED event reaching the runtime (a `type` no
+  // case matches) would otherwise fall through to `undefined` → an UNSCOPED
+  // execution key. A bare key collides with a legacy, pre-scoping marker
+  // (`conversation.reply:<draftId>`) and silently dedups a fresh customer reply
+  // — the where_is_order case then auto-resolves with nothing sent. Never key
+  // bare: namespace by the case id when present (so a send can't collide with a
+  // bare legacy marker), else by the event type. Keeps the redelivery guarantee
+  // while making the silent-swallow impossible regardless of event shape.
+  const caseId = (event as { readonly caseId?: unknown }).caseId;
+  return typeof caseId === "string" && caseId.length > 0
+    ? `case:${caseId}`
+    : `event:${(event as { readonly type?: unknown }).type ?? "unknown"}`;
 };
 
 /**

@@ -51,6 +51,30 @@ describe("deliveryScopeFor — case.resumed retry token", () => {
     const legacy: DomainEvent = { ...base };
     expect(deliveryScopeFor(legacy)).toBe("case:c-1");
   });
+
+  // Defensive backstop (prod 3428f154): the switch is exhaustive over known
+  // DomainEvent types, but a malformed event reaching the runtime (a `type`
+  // the switch doesn't match) must NEVER yield a bare/unscoped key. A bare key
+  // collides with legacy pre-scoping markers (`conversation.reply:<draftId>`)
+  // and silently dedups a fresh customer reply → the case auto-resolves with
+  // nothing sent. So deliveryScopeFor must always return a non-empty,
+  // case-namespaced scope.
+  it("never returns a bare/empty scope, even for a malformed event type", () => {
+    const malformed = {
+      type: "totally.unknown" as never,
+      caseId: CaseId("c-9"),
+    } as unknown as DomainEvent;
+    const scope = deliveryScopeFor(malformed);
+    expect(scope).toBeTruthy();
+    // Namespaced by the case id so a send key can't collide with a bare
+    // legacy marker.
+    expect(scope).toBe("case:c-9");
+  });
+
+  it("never returns an empty scope even when no identifier is present", () => {
+    const blank = { type: "totally.unknown" as never } as unknown as DomainEvent;
+    expect(deliveryScopeFor(blank)).toBeTruthy();
+  });
 });
 
 describe("hasUnverifiedOrderMismatch", () => {
