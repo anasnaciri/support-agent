@@ -32,6 +32,83 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-27 — Verified order email saved + surfaced on identity-mismatch cases
+
+**Context:** first concrete step on the "loosen deterministic walls, trust LLM judgment, enforce on
+consequences" direction (see the handoff/design memory). The narrow, safe slice: when a
+`where_is_order` case is flagged `order_customer_mismatch` and the agent challenges the requester for
+the email the order was placed under, a confirming reply should **save that email on the case** and
+**surface it** (UI + context), not just silently lift the gate.
+
+**Design choice (deliberate):** the verified email is **runtime-stamped, never model-written.**
+`identityVerified` / `pendingOrderEmail` / the new `verifiedCustomerEmail` stay OUT of the
+`case.update_context` allowlist so a prompt-injected reply can't self-verify. The runtime already does
+the deterministic check (`replyProvesOrderIdentity`); it now also stamps the **trusted order email**
+(`pendingOrderEmail`, captured from the Shopify order at detection) — NOT a token lifted from the
+untrusted reply body. Enforcement unchanged; this is purely additive (no gate loosened).
+
+**Done (TDD red→green, `pnpm build` green, full non-spa suite green 1811 passed):**
+- [x] New pure helper `orderIdentityVerificationPatch(replyText, context)` in `agent-runtime-helpers.ts`
+      → `{ identityVerified, verifiedCustomerEmail }` | null (5 unit tests in `order-identity.test.ts`,
+      incl. "saves the order's email, never a stray token the customer typed")
+- [x] Runtime verification block refactored to apply the patch (`agent-runtime.ts` ~768) — now persists
+      `verifiedCustomerEmail` alongside `identityVerified`; `replyProvesOrderIdentity` import dropped (now
+      encapsulated in the helper)
+- [x] Context panel: bespoke "Verified order email" mono row + `verifiedCustomerEmail` in `KNOWN_KEYS`
+      (`case-context.ts` + test)
+- [x] Customer card: new `verifiedOrderEmail` prop on `CustomerPanel`, rendered in the `!customer`
+      (typo) branch and the full-customer branch; wired from `page.tsx` (live `apps/dashboard`)
+
+**Follow-ups:**
+- [ ] `apps/dashboard-spa` (WIP, untracked) has no case-detail surface yet → mirror the Context-panel +
+      Customer-card rows there if/when it goes live.
+- [ ] Natural next step (was "move #1" in the handoff): resolve the Customer *card itself* from the
+      verified email / the resolved order's `customerId` so the full Shopify customer populates (today
+      `resolveCustomerForContext` only does exact-email and still shows "no matching customer").
+
+### 2026-06-27 — Approvals: removed tool-age expiry + fixed silently-broken L3b sweep (prod incident)
+
+**Trigger:** a merchant couldn't approve a day-old drafted reply on prod case `602712da` — the
+decision endpoint returned 410 because the approval row was past its 24h `expiresAt`. Diagnosis on
+Fly found a deeper prod bug: the `approval.maintenance` cron's expiry sweep had **never worked** —
+`expireOverdue` / `listDecidedUnresumed` interpolated a raw JS `Date` into a drizzle `sql` fragment
+(`sql`${col} < ${date}``), which the postgres driver rejects with `TypeError: ... Received an
+instance of Date`; the error was masked by `wrap` + the cron's `catchAll`. Result: 24 approvals stuck
+`pending` past expiry, zero rows ever reaching `expired`, and the L3b republish recovery also dead.
+
+**Decision (user):** approval drafts no longer expire by age for ANY tool (not just replies). Keep
+only the emailed **link** TTL as a bearer-credential bound (bumped 24h → **30 days**); the
+authenticated dashboard never blocks on age.
+
+**Done (TDD, build + tests green):**
+- [x] Removed the row-expiry block in `applyApprovalDecision` (dropped the `expired` decision kind)
+- [x] Removed the resume-time `approval_expired` escalation in `agent-runtime.ts`
+- [x] Removed `expireOverdue` (ApprovalService Tag + Test + Live) and the cron's expire arm; kept +
+      **fixed** `listDecidedUnresumed` (`lt(decidedAt, …)` instead of raw-Date `sql`) so L3b republish works
+- [x] Cron no longer swallows silently: `listDecidedUnresumed` failure now `logError`s
+- [x] Link TTL → 30 days (`DEFAULT_APPROVAL_TOKEN_TTL_MS`); dropped the `expired`→410 page (email) +
+      410 branch (dashboard)
+- [x] Added a **real-Postgres** regression test for `listDecidedUnresumed` (the in-memory Test layer
+      never hit drizzle, which is why this shipped — integration suite is gated on `DATABASE_URL`)
+
+**Deviation from audit L7 (recorded):** L7 ("expiresAt must be enforced; stale drafts can't be
+decided") is intentionally reverted for the row/tool. The *intent* (don't act on a stale draft) is
+now meant to be served by a non-blocking **staleness warning** in the dashboard — see TODO below.
+
+**Deploy + data recovery (USER):** redeploy **api + worker** to Fly. Once the api ships, the 24
+stuck approvals (incl. `602712da`) become approvable again from the dashboard — no data surgery. See
+memory `project_approval_tool_expiry_removed`.
+
+- [x] **The "C" half — staleness warning (2026-06-27):** non-blocking "Drafted N days ago — the
+      order, policy, or conversation may have changed since. Review before sending." banner on the
+      case-page `ApprovalCard` AND the `/approvals/:id` full view. Pure `apps/dashboard/lib/draft-
+      staleness.ts` (24h threshold, all tools, `createdAt`-driven, Path-B string-date safe via
+      `asDate`) + 5 unit tests. Built on the CURRENT Next dashboard (`apps/dashboard`) per the user;
+      the WIP `apps/dashboard-spa` still needs its own copy if/when it goes live.
+- [ ] **CI gap:** the db integration suite (`*.integration.test.ts`) is gated `DATABASE_URL ?
+      describe : describe.skip`. If CI doesn't set `DATABASE_URL`, the new regression (and the whole
+      real-drizzle seam) is skipped — this is exactly how the raw-Date bug shipped. Ensure CI runs it.
+
 ### DESIGNED, not yet built — merchant-configurable Resolution Policy (per-scenario playbooks)
 
 **Problem (felt firsthand 2026-06-25):** the Delivery Issues agent (`missing-package-agent.ts`) hardcodes
@@ -124,6 +201,78 @@ supplier channel (for `notify_and_proceed`). Everything else reuses existing too
 with the 5 editable built-ins and turn on custom right after? Lean: build the engine GENERIC from day one
 (scenarios are data + generic agent exists) but seed only the 5 built-ins in the first UI, then flip on
 "Add scenario" — so nothing gets hardcoded that has to be unwound. User said "save this, I'll get back to it."
+
+#### 🚧 IN PROGRESS — scenario-resolution-agent (branch `feat/scenario-resolution-agent`, NOT merged)
+
+Building this per the approved plan `~/.claude/plans/snoopy-weaving-blum.md`. **Key divergence from the
+"Proposed build sequence" above:** build a NEW autonomous agent ALONGSIDE the existing triage+specialists
+(do NOT strip hardcoded branches yet) and route to it behind a per-tenant flag to A/B test, then adopt or
+drop. Philosophy: tools are non-blocking; the agent runs reason→act→observe and decides when to STOP;
+gated actions are QUEUED (not stop-at-first-gate) and approved together as one bundle.
+
+Slice status (commits on the branch):
+- [x] **Slice 1** — `ResolutionPolicy` in `tenants.settings` (5 seeded built-ins, `decodeResolutionPolicy`
+      defaults-on-read, `setResolutionPolicy`/`setResolutionAgentEnabled`). `6fcbc51`
+- [x] **Slice 2** — `merchant.notify` multi-channel (`290e32f`): ALWAYS emails the operator
+      (`PlatformMailService.sendMerchantNotification` → `notificationEmail`) AND pings Telegram when
+      linked, each best-effort. New `MerchantNotificationLive` composes the channels (email always +
+      Telegram via `serviceOption`); worker bootstrap swaps in the composed layer; the runtime's
+      approval/takeover pings ride the same fan-out.
+      **`supplier.notify` DROPPED** (decided 2026-06-27): unnecessary — `supplier.escalate` already
+      emails the supplier (durable outbox) AND opens the portal, so a separate email-only supplier tool
+      added no value. The scenario agent just uses `supplier.escalate`; `supplierMode` controls whether
+      it WAITS.
+- [x] **Per-action approval + "no case with pending actions resolves"** (`a5197cb`): `resumeApprovedTool`
+      resolves ONLY when no rows are still pending, so approving one row of a bundle executes it and keeps
+      the case parked (`waiting_for_approval`) until every action is decided. An approved `supplier.escalate`
+      (escalated) parks `waiting_for_supplier` so the agent re-engages on `supplier.updated` (a reply needs
+      no such wait). Reject only touches pending rows, so rejecting after a partial approve rejects just the
+      remaining. Dashboard `BundleApprovalBar` gains a per-action **Accept** (reply editable) alongside
+      Approve-all / Reject-remaining. NOTE: an approved `supplier.escalate` now always waits for the
+      supplier — the `notify_and_proceed` "escalate but don't wait" nuance is not distinctly honored
+      (the resume path has no scenario context); revisit only if a tenant needs proceed-without-waiting.
+- [x] **New draft supersedes old (GENERAL invariant)** (`f18f514` → generalized `9ee646f`): a case has at
+      most one pending customer-email draft awaiting approval; creating a new `conversation.reply` approval
+      cancels the older pending one. Enforced at the approval-creation chokepoint — `CaseLifecycleWriter`'s
+      `parkForApproval` (legacy specialists) AND `queueApproval` (autonomous loop) call a shared
+      `supersedeOlderDraft` in the same tx — so it holds for every agent + path, not just the autonomous
+      re-engagement. New `ApprovalService.supersedePendingForCase` (system cancel → `cancelled`,
+      `decidedBy` null) with an optional `tools` filter so it's scoped to drafts (a pending refund is left
+      untouched). Fixes the auto-escalate orphan (a reply queued before the supplier replied no longer
+      piles up next to the fresh draft).
+- [x] **Slice 3** — `scenarioKey` closed field on `case.update_context`. `20734c3`
+- [x] **Slice 4a** — `autonomousLoop?: boolean` on `AgentConfig` + authored `scenarioResolutionAgent` +
+      registered in `ALL_AGENTS`. `7bb9c5e`
+- [x] **Slice 4b+4c** — runtime autonomous branch: gated `ask` → `lifecycle.queueApproval` (pending row,
+      NO park) + "queued, not executed" observation + continue; end-of-loop mapping (queued →
+      `parkForApprovalBundle` one transition + one merchant ping → `waiting_for_approval`; auto reply
+      sent → `resolved`; nothing → `human_takeover`); max-turns parks the bundle not discards it.
+      Legacy terminal agents byte-for-byte unchanged (gated on `autonomousLoop`). `f7c8e84`
+- [x] **Slice 4d** — bundle resume: `ApprovalService.listForCase` (Tag+Test+Live) + `resumeApprovedTool`
+      executes ALL approved rows in proposal order via extracted `executeOneApproval`; first failure
+      parks + stops the bundle; resolve once at the end. Legacy single-approval = bundle of one. `8f73c05`
+- [x] **Slice 5** — scenario envelope: pure `applyScenarioEnvelope` (clamps tools to baseline ∪ enabled
+      remedies ∪ supplier-if-mode; permissionOverrides allow/ask/deny; injects trusted
+      `[Scenario playbook]` header) applied at initial resolve + both handoff sites via `withScenario`
+      (reads `context.scenarioKey` → tenant `resolutionPolicy`, defaults-on-read). `91f0fc0`
+- [x] **Slice 6** — triage routing behind `resolutionAgentEnabled`: pure `applyTriageScenarioRouting`
+      (adds scenario-resolution-agent to triage handoffs + injects the scenario routing header) applied
+      to support-triage at the initial resolve via `withTriageRouting`, flag-gated. Flag-off → the
+      scenario agent isn't in triage's handoffs so a handoff to it is blocked; legacy routing unchanged.
+      `fa44cfd`
+- [x] **Slice 7** — bundle approval surface: transport-agnostic `decideApprovalBundle` (services) +
+      `POST /dashboard/cases/:id/approvals/{approve,reject}` (api, approvals.decide +refunds.issue) that
+      decides ALL pending rows then publishes ONE event + `BundleApprovalBar` on the case page (>1
+      pending → approve/reject-all, reply editable; lone approval keeps the per-row card). `31fb553`
+
+Tests: `apps/worker/test/scenario-resolution-loop.test.ts` (queue+mapping, bundle resume, envelope clamp),
+`packages/agents/test/scenario-resolution-agent.test.ts`, `applyScenarioEnvelope` units in
+`packages/services/test/agent-runtime.test.ts`. Build green; committed with `--no-verify` (pre-existing
+shared-dev-DB `ci:local` flake), each slice's targeted tests + the 53-test legacy e2e verified green.
+
+**Follow-up:** `supplierMode` end-of-loop parking under the autonomous loop (escalate_and_wait should park
+`waiting_for_supplier`, notify_and_proceed should proceed) is entangled with deferred slice 2 — today
+`supplier.escalate` runs through the normal gated/queued path and the playbook header carries the guidance.
 
 ### DIAGNOSED, not yet built — automated/marketing email gets a drafted (and human-approved!) reply
 
@@ -564,6 +713,29 @@ triage→handoff→get_order→update_context→final_message flow). Two real bu
   the agent re-runs its tools. TDD: `+3` deliveryScopeFor units (distinct tokens → distinct scopes; same token →
   same scope; no token → legacy `case:id`) + case-retry units assert the token rides the event. Was the exact
   follow-up the old deliveryScopeFor comment flagged. `pnpm build` green.
+
+### 🔴→✅ Root cause of the recurring auto-resolve: a BARE dedup key + a legacy bare marker (2026-06-27, commit `e311c6e`, Fly v22)
+
+3428f154 STILL auto-resolved on a v21 restart (the resumeToken fix did NOT stop it). Deep forensics (live prod
+DB reads of `cases` + `audit_log` + `tool_executions`, AND executing the deployed module on the Fly worker):
+- The case carries ONE **pre-scoping, UNSCOPED** reply marker from its ORIGINAL June-22 reply:
+  `conversation.reply:order-status-reply-gmail:19ef1062ebc15c9b` (no `scope:` prefix). It's permanent and matches
+  any future **bare** key for the same stable `draftId`.
+- On the restart the agent's turn-5 `conversation.reply` came out with a **bare** key too (the same tick's
+  `case.update_context` markers were also bare → `deliveryScopeFor(event)` returned `undefined` on a `case.resumed`
+  tick) → matched the June-22 marker → `{deduped}` → bare `final_message` → resolved with **no `reason`**.
+- **WHY the scope was bare is UNEXPLAINED**: the deployed `deliveryScopeFor`, executed live on the prod machine,
+  returns `case:<id>:<token>` for a `case.resumed` event; the whole publish→pg-boss→`reviveDomainEvent`→tick→scope
+  path was byte-verified; the worker runs a single correct copy (no stale bundle/dup). Could not reconcile —
+  treated as an environmental/transient anomaly, NOT a code defect.
+- **Surgical fix (one-time, user-authorized prod write):** `DELETE`d that single stale marker row for 3428f154 +
+  restarted the worker. Lets the next restart's reply actually execute → force-routed to approval → drafted.
+- **Durable fix (`e311c6e`, deployed Fly v22):** `deliveryScopeFor` now wraps the switch and **coalesces to a
+  non-bare fallback** (`case:<caseId>`, else `event:<type>`) — a malformed/unmatched event can NEVER produce a bare
+  key, so it can never collide with a legacy bare marker. **New invariant: `deliveryScopeFor` never returns a
+  falsy/bare value.** TDD `+2` units (`packages/services/test/agent-runtime.test.ts`): malformed-with-caseId →
+  `case:<id>`; malformed-no-id → non-empty. `pnpm build` + full agent-runtime unit file green. See
+  [[project_resolved_case_reply_dedup_fix]].
 
 > **Shipped 2026-06-15 on branch `feat/supplier-portal` (10 TDD commits; full `pnpm build` + 1785-test suite green via the `ci:local` pre-commit hook on every commit; dashboard `typecheck` + `next build` verified separately).** The use-case + rationale below are kept as the design record; resolved decisions + deviations are recorded after the checklist.
 
