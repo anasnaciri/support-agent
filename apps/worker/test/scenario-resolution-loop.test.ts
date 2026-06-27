@@ -10,6 +10,8 @@ import {
   type LLMDecision,
 } from "@support-agent/agent-core";
 import { ALL_TOOLS } from "@support-agent/tools";
+import { scenarioResolutionAgent } from "@support-agent/agents";
+import type { ResolutionPolicy } from "@support-agent/services";
 import {
   AgentResolverTest,
   AgentRuntime,
@@ -344,6 +346,149 @@ const replyInput = (draftId: string, toEmail: string) => ({
   bodyHtml: null,
   inReplyToMessageId: null,
   draftId,
+});
+
+// ------------------------------------------------------------
+// Slice 5 — the scenario envelope clamps the live agent's tools + permissions.
+// ------------------------------------------------------------
+const SCENARIO_KEY = "delivery_issue";
+
+const driveScenarioCase = (
+  resolutionPolicy: ResolutionPolicy,
+  script: ReadonlyArray<LLMDecision>,
+) => {
+  const settings = new TenantSettings({
+    notificationEmail: null,
+    refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
+    retentionDays: 730,
+    supplierEscalationSheet: null,
+    legalAcceptance: null,
+    resolutionPolicy,
+  });
+  const env = Layer.mergeAll(
+    CaseRepositoryTest,
+    AuditLogServiceTest,
+    ApprovalServiceTest,
+    AgentResolverTest([scenarioResolutionAgent]),
+    ToolRegistryWith(ALL_TOOLS),
+    PermissionServiceDefault,
+    LLMServiceScripted(script),
+    TransactionRunnerPassthrough,
+    ShopifyServiceTest({}),
+    ConversationServiceTest({}),
+    approvalLinkLayer,
+    platformMailNoop,
+    tenantOverridesEmpty,
+    TenantRepositoryTest({
+      settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+    }),
+  );
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const approvals = yield* ApprovalService;
+
+        const created = yield* repo.create({
+          tenantId: TenantId(TENANT),
+          channel: "email",
+          currentAgentId: scenarioResolutionAgent.id,
+          subject: "Need help",
+          mailbox: "support@store.test",
+        });
+        // Stamp the scenario triage would have picked.
+        yield* repo.update(created.id, {
+          context: { scenarioKey: SCENARIO_KEY } as never,
+        });
+
+        const result = yield* runtime.handleEvent({
+          type: "customer.replied",
+          caseId: created.id,
+          payload: {
+            threadId: "thread-x" as never,
+            messageId: "msg-1",
+            from: { name: null, email: "cust@example.com" },
+            to: [],
+            subject: "Re: Need help",
+            bodyText: "My order arrived damaged.",
+            bodyHtml: null,
+            receivedAt: new Date(),
+            attachments: [],
+          },
+        });
+
+        const fetched = yield* repo.getById(created.id);
+        const pending = yield* approvals.listPending(TenantId(TENANT));
+        return { result, fetched, pending };
+      }),
+      layer,
+    ),
+  );
+};
+
+const refundCall = {
+  type: "tool_call" as const,
+  callId: "x0",
+  tool: "refund.create",
+  input: {
+    orderId: "gid://shopify/Order/1001",
+    amount: { amount: "10.00", currencyCode: "USD" },
+    reason: "damaged on arrival",
+  },
+};
+
+describe("scenario envelope (slice 5) — runtime clamps the live agent", () => {
+  it("queues a remedy the scenario ENABLED (with its configured permission)", async () => {
+    const policy: ResolutionPolicy = {
+      scenarios: [
+        {
+          key: SCENARIO_KEY,
+          label: "Delivery problem",
+          builtin: true,
+          enabledActions: [{ tool: "refund.create", permission: "ask" }],
+          supplierMode: "none",
+          notes: "Offer a refund for damaged deliveries.",
+        },
+      ],
+    };
+    const out = await driveScenarioCase(policy, [
+      refundCall,
+      { type: "final_message", text: "Queued a refund for the damaged order." },
+    ]);
+
+    expect(out.pending.map((a) => a.tool)).toEqual(["refund.create"]);
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+  });
+
+  it("denies (does not queue) a remedy the scenario did NOT enable", async () => {
+    const policy: ResolutionPolicy = {
+      scenarios: [
+        {
+          key: SCENARIO_KEY,
+          label: "Delivery problem",
+          builtin: true,
+          enabledActions: [], // refunds NOT enabled for this scenario
+          supplierMode: "none",
+          notes: "Apologize but do not offer money.",
+        },
+      ],
+    };
+    const out = await driveScenarioCase(policy, [
+      refundCall,
+      { type: "final_message", text: "Nothing I can offer here." },
+    ]);
+
+    // refund.create was denied by the envelope → never queued → no action →
+    // the case parks for a human.
+    expect(out.pending).toHaveLength(0);
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+  });
 });
 
 describe("scenario-resolution autonomous loop — bundle resume (slice 4d)", () => {

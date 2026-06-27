@@ -9,6 +9,8 @@ import {
 import type { InboundMessage } from "@support-agent/agent-core";
 import {
   applyOverride,
+  applyScenarioEnvelope,
+  buildScenarioPlaybookHeader,
   buildSystemPrompt,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -21,6 +23,7 @@ import {
   DEFAULT_RETENTION_DAYS,
   toolFailureAuditDetail,
   type AgentOverride,
+  type ScenarioPolicy,
   type SupplierEscalationSheet,
 } from "../src/index.js";
 
@@ -488,5 +491,105 @@ describe("toolFailureAuditDetail", () => {
   it("returns nothing for an empty/unknown failure", () => {
     expect(toolFailureAuditDetail(null)).toEqual({});
     expect(toolFailureAuditDetail({})).toEqual({});
+  });
+});
+
+// Scenario envelope (slice 5): clamp an autonomous agent's tools + permissions
+// to a scenario and inject the playbook header.
+const scenarioAgent = (): AgentConfig =>
+  baseAgent({
+    autonomousLoop: true,
+    tools: [
+      "shopify.get_order",
+      "knowledge.search",
+      "conversation.reply",
+      "merchant.notify",
+      "refund.recommend",
+      "refund.create",
+      "discount.create",
+      "supplier.escalate",
+    ],
+  });
+
+const scenario = (overrides: Partial<ScenarioPolicy> = {}): ScenarioPolicy => ({
+  key: "delivery_issue",
+  label: "Delivery problem",
+  builtin: true,
+  enabledActions: [{ tool: "refund.create", permission: "ask" }],
+  supplierMode: "escalate_and_wait",
+  notes: "Check tracking before offering anything.",
+  ...overrides,
+});
+
+describe("applyScenarioEnvelope", () => {
+  it("drops a remedy tool the scenario didn't enable and denies it", () => {
+    const out = applyScenarioEnvelope(scenarioAgent(), scenario());
+    // refund.create enabled (ask); discount.create NOT enabled → removed + denied.
+    expect(out.tools).toContain("refund.create");
+    expect(out.permissionOverrides["refund.create"]).toBe("ask");
+    expect(out.tools).not.toContain("discount.create");
+    expect(out.permissionOverrides["discount.create"]).toBe("deny");
+  });
+
+  it("always keeps baseline tools (reads, comms, knowledge, recommend, notify)", () => {
+    const out = applyScenarioEnvelope(scenarioAgent(), scenario());
+    for (const baseline of [
+      "shopify.get_order",
+      "knowledge.search",
+      "conversation.reply",
+      "merchant.notify",
+      "refund.recommend",
+    ]) {
+      expect(out.tools).toContain(baseline);
+    }
+  });
+
+  it("presents supplier.escalate only when supplierMode is not none", () => {
+    const wait = applyScenarioEnvelope(
+      scenarioAgent(),
+      scenario({ supplierMode: "escalate_and_wait" }),
+    );
+    expect(wait.tools).toContain("supplier.escalate");
+
+    const none = applyScenarioEnvelope(
+      scenarioAgent(),
+      scenario({ supplierMode: "none" }),
+    );
+    expect(none.tools).not.toContain("supplier.escalate");
+    expect(none.permissionOverrides["supplier.escalate"]).toBe("deny");
+  });
+
+  it("injects the playbook header (label + notes + supplier guidance) into the prompt", () => {
+    const out = applyScenarioEnvelope(scenarioAgent(), scenario());
+    expect(out.promptTemplate).toContain("Scenario playbook");
+    expect(out.promptTemplate).toContain("Delivery problem");
+    expect(out.promptTemplate).toContain("Check tracking before offering anything.");
+    // escalate_and_wait → "WAIT" guidance.
+    expect(out.promptTemplate).toContain("WAIT");
+  });
+
+  it("enables an action with its configured allow permission", () => {
+    const out = applyScenarioEnvelope(
+      scenarioAgent(),
+      scenario({
+        enabledActions: [
+          { tool: "refund.create", permission: "allow" },
+          { tool: "discount.create", permission: "ask" },
+        ],
+      }),
+    );
+    expect(out.permissionOverrides["refund.create"]).toBe("allow");
+    expect(out.tools).toContain("discount.create");
+    expect(out.permissionOverrides["discount.create"]).toBe("ask");
+  });
+});
+
+describe("buildScenarioPlaybookHeader", () => {
+  it("omits the notes line when notes are empty", () => {
+    const header = buildScenarioPlaybookHeader(
+      scenario({ notes: "   " }),
+    );
+    expect(header).toContain("Delivery problem");
+    expect(header).not.toContain("undefined");
   });
 });

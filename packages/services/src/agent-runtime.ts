@@ -47,6 +47,7 @@ import {
 import { AgentResolver } from "./agent-resolver.js";
 import {
   TenantRepository,
+  defaultResolutionPolicy,
   type TenantSettings,
 } from "./tenant-repository.js";
 import { parseRefundAmount } from "./permission-service-live.js";
@@ -89,6 +90,7 @@ import {
   deriveTickLockKey,
   refundCustomerMismatchFlag,
   readRiskFlags,
+  applyScenarioEnvelope,
   hasUnverifiedOrderMismatch,
   orderContextRef,
   orderCustomerMismatchFlag,
@@ -1102,7 +1104,33 @@ const AgentRuntimeLayer = Layer.effect(
               reason: "agent_unresolvable",
             } as const;
           }
-          let agent: AgentConfig = applyOverride(resolved, overrideMap);
+          // Scenario envelope (slice 5): when an autonomous agent runs under a
+          // merchant scenario, clamp its tool/permission envelope and inject the
+          // playbook header. Triage picks the scenario and stamps it on the case
+          // as `context.scenarioKey`; the policy comes from tenant settings
+          // (defaults-on-read). No flag / no key / no match → the agent runs
+          // unclamped. Applied at every point the active agent is (re)bound — the
+          // initial resolve here and each handoff site — so a triage→scenario
+          // handoff in the same tick is clamped too.
+          const withScenario = (
+            a: AgentConfig,
+            ctx: typeof working.context,
+          ): AgentConfig => {
+            if (!a.autonomousLoop) return a;
+            const key =
+              typeof ctx["scenarioKey"] === "string"
+                ? (ctx["scenarioKey"] as string)
+                : null;
+            if (!key) return a;
+            const policy =
+              tenantSettings?.resolutionPolicy ?? defaultResolutionPolicy;
+            const scenario = policy.scenarios.find((s) => s.key === key);
+            return scenario ? applyScenarioEnvelope(a, scenario) : a;
+          };
+          let agent: AgentConfig = withScenario(
+            applyOverride(resolved, overrideMap),
+            working.context,
+          );
           // On a resume (dashboard retry / restart-from-triage / hand-back) the
           // agent starts blind — there's no inbound payload. Pre-fetch the full
           // thread so it re-orients on the ACTUAL conversation and what was
@@ -1455,7 +1483,10 @@ const AgentRuntimeLayer = Layer.effect(
                   });
                   return { agent, current, done: null };
                 }
-                const targetAgent = applyOverride(resolvedTarget, overrideMap);
+                const targetAgent = withScenario(
+                  applyOverride(resolvedTarget, overrideMap),
+                  current.context,
+                );
                 current = yield* tx.run(
                   Effect.gen(function* () {
                     const updated = yield* cases.update(current.id, {
@@ -2140,7 +2171,10 @@ const AgentRuntimeLayer = Layer.effect(
                 );
                 continue;
               }
-              const nextAgent = applyOverride(resolvedNext, overrideMap);
+              const nextAgent = withScenario(
+                applyOverride(resolvedNext, overrideMap),
+                current.context,
+              );
               current = yield* tx.run(
                 Effect.gen(function* () {
                   const updated = yield* cases.update(current.id, {

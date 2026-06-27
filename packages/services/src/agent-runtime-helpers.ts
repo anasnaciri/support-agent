@@ -18,7 +18,11 @@ import { CaseRepository } from "./case-repository.js";
 import { parseThreadId } from "./conversation-thread-id.js";
 import { parseRefundAmount } from "./permission-service-live.js";
 import type { AgentOverride } from "./tenant-agent-overrides.js";
-import type { TenantSettings } from "./tenant-repository.js";
+import type {
+  ScenarioPolicy,
+  SupplierMode,
+  TenantSettings,
+} from "./tenant-repository.js";
 
 // ============================================================
 // Helpers
@@ -1094,4 +1098,108 @@ export const applyOverride = (
     };
   }
   return next;
+};
+
+// ============================================================
+// Scenario envelope (autonomous loop steering)
+// ============================================================
+
+/**
+ * Remedy tools whose presence + permission are controlled by a scenario's
+ * `enabledActions` (the HARD gate). Every OTHER tool the agent declares is a
+ * baseline tool — reads, the customer channel, knowledge, context, the merchant
+ * heads-up, the refund RECOMMENDATION (no money moves) — and is always
+ * presented. `supplier.escalate` is gated separately by `supplierMode`.
+ */
+export const SCENARIO_REMEDY_TOOLS: ReadonlySet<string> = new Set([
+  "refund.create",
+  "discount.create",
+]);
+
+const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";
+
+const supplierGuidanceLine = (mode: SupplierMode): string => {
+  switch (mode) {
+    case "escalate_and_wait":
+      return "If a supplier needs to act, escalate to them with supplier.escalate and WAIT for their response before resolving — do not promise the customer a resolution you can't yet deliver.";
+    case "notify_and_proceed":
+      return "If a supplier needs to act, escalate to them with supplier.escalate AND proceed to help the customer (e.g. set expectations in your reply) without waiting for the supplier.";
+    case "none":
+      return "Do NOT involve a supplier for this scenario.";
+  }
+};
+
+/**
+ * The trusted `[Scenario playbook: ...]` header injected into the autonomous
+ * agent's prompt. The merchant's free-text `notes` are the soft, LLM-interpreted
+ * guidance; the supplier line restates `supplierMode` in plain language. Lives
+ * OUTSIDE the untrusted fence (it's merchant config, not customer content).
+ */
+export const buildScenarioPlaybookHeader = (scenario: ScenarioPolicy): string => {
+  const lines = [`[Scenario playbook — "${scenario.label}":`];
+  const notes = scenario.notes?.trim();
+  if (notes) lines.push(notes);
+  lines.push(supplierGuidanceLine(scenario.supplierMode));
+  lines.push("]");
+  return lines.join("\n");
+};
+
+/**
+ * Clamp an autonomous agent to a scenario's envelope (master-plan: scenario
+ * agent). Pure + exported for unit testing. Layers ON TOP of `applyOverride`
+ * (call it after), returning a new AgentConfig:
+ *   - tools = baseline ∪ enabled remedies ∪ (supplier.escalate iff supplierMode
+ *     != none). A remedy the scenario didn't enable is REMOVED from the schema
+ *     list so the model can't call it.
+ *   - permissionOverrides: each enabled remedy → its allow/ask; each remedy the
+ *     agent declares but the scenario didn't enable → deny (defense in depth on
+ *     top of the schema removal); supplier.escalate → deny when supplierMode is
+ *     none. Scenario permissions win over the incoming map (they're the more
+ *     specific, scenario-scoped intent).
+ *   - promptTemplate gains the trusted playbook header (flows through
+ *     buildSystemPrompt for the whole tick).
+ * Enforcement guards (spending caps, the unverified-mismatch backstop) still
+ * apply on top at the permission check — this only narrows cognition.
+ */
+export const applyScenarioEnvelope = (
+  agent: AgentConfig,
+  scenario: ScenarioPolicy,
+): AgentConfig => {
+  const enabledPermissionByTool = new Map<string, "allow" | "ask">(
+    scenario.enabledActions
+      .filter((a) => SCENARIO_REMEDY_TOOLS.has(a.tool))
+      .map((a) => [a.tool, a.permission]),
+  );
+  const supplierEnabled = scenario.supplierMode !== "none";
+
+  const tools = agent.tools.filter((t) => {
+    const name = t as string;
+    if (SCENARIO_REMEDY_TOOLS.has(name)) return enabledPermissionByTool.has(name);
+    if (name === SUPPLIER_ESCALATE_TOOL) return supplierEnabled;
+    return true;
+  });
+
+  const permissionOverrides: Record<string, AgentConfig["permissionOverrides"][string]> = {
+    ...agent.permissionOverrides,
+  };
+  for (const t of agent.tools) {
+    const name = t as string;
+    if (SCENARIO_REMEDY_TOOLS.has(name)) {
+      const enabled = enabledPermissionByTool.get(name);
+      permissionOverrides[name] = enabled ?? "deny";
+    }
+  }
+  if (
+    agent.tools.some((t) => (t as string) === SUPPLIER_ESCALATE_TOOL) &&
+    !supplierEnabled
+  ) {
+    permissionOverrides[SUPPLIER_ESCALATE_TOOL] = "deny";
+  }
+
+  return {
+    ...agent,
+    tools,
+    permissionOverrides,
+    promptTemplate: `${agent.promptTemplate}\n\n${buildScenarioPlaybookHeader(scenario)}`,
+  };
 };
