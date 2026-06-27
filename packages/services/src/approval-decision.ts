@@ -3,6 +3,7 @@ import {
   ApprovalId as makeApprovalId,
   type Approval,
   type ApprovalId,
+  type CaseId,
   type DomainEvent,
   type TenantId,
   type UserId,
@@ -143,3 +144,69 @@ export const decisionToEvent = (
         managerId,
       };
 };
+
+// ============================================================
+// Decide a whole case's pending approval bundle
+// ============================================================
+//
+// The autonomous resolution agent queues several gated actions on one case
+// (slice 4b). This decides EVERY pending row for the case, then returns ONE
+// event to publish. That ordering is the contract the runtime's bundle resume
+// relies on (slice 4d): all rows must be `approved` BEFORE the event fires, or a
+// per-row event could resolve the case while siblings are still pending.
+//
+// Transport-agnostic (the caller does auth/authz + publishes the returned
+// event). `edits` carries manager-edited inputs keyed by approval id, honored
+// only on `approve` (e.g. an edited reply draft). The event anchors on the first
+// row actually decided; the runtime re-gathers the full bundle from the case.
+
+export interface DecideApprovalBundleInput {
+  readonly tenantId: TenantId;
+  readonly caseId: CaseId;
+  readonly action: "approve" | "reject";
+  readonly managerId: UserId;
+  readonly edits?: Readonly<Record<string, unknown>>;
+}
+
+export interface DecideApprovalBundleResult {
+  /** Pending rows found for the case at decision time. */
+  readonly pendingCount: number;
+  /** Rows that transitioned pending → approved/rejected on this call. */
+  readonly decidedCount: number;
+  /** The single event to publish (null when nothing was decided). */
+  readonly event: DomainEvent | null;
+}
+
+export const decideApprovalBundle = (
+  input: DecideApprovalBundleInput,
+): Effect.Effect<DecideApprovalBundleResult, never, ApprovalService> =>
+  Effect.gen(function* () {
+    const svc = yield* ApprovalService;
+    const all = yield* svc
+      .listForCase(input.tenantId, input.caseId)
+      .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
+    const pending = all.filter((a) => a.status === "pending");
+
+    let firstDecided: ApprovalDecisionResult | null = null;
+    let decidedCount = 0;
+    for (const a of pending) {
+      const edit =
+        input.action === "approve" ? input.edits?.[a.id as string] : undefined;
+      const result = yield* applyApprovalDecision({
+        approvalId: a.id,
+        action: input.action,
+        managerId: input.managerId,
+        tenantId: input.tenantId,
+        ...(edit !== undefined ? { approvedInput: edit } : {}),
+      });
+      if (result.kind === "decided") {
+        decidedCount += 1;
+        if (!firstDecided) firstDecided = result;
+      }
+    }
+
+    const event = firstDecided
+      ? decisionToEvent(firstDecided, input.action, input.managerId)
+      : null;
+    return { pendingCount: pending.length, decidedCount, event };
+  });

@@ -5,6 +5,7 @@ import { handleDashboardAccountDelete } from "../admin/account-handlers.js";
 import {
   handleDashboardAgentOverrides,
   handleDashboardApprovalAction,
+  handleDashboardCaseApprovalsBundle,
   handleDashboardApprovalDetail,
   handleDashboardApprovals,
   handleDashboardAudit,
@@ -218,6 +219,18 @@ export const registerDashboardRoutes = (
     "/dashboard/approvals/:id/reject",
     "Reject an approval (manager)",
     handleDashboardApprovalAction("reject"),
+    "approvals.decide",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/approvals/approve",
+    "Approve the whole pending bundle for a case (manager)",
+    handleDashboardCaseApprovalsBundle("approve"),
+    "approvals.decide",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/approvals/reject",
+    "Reject the whole pending bundle for a case (manager)",
+    handleDashboardCaseApprovalsBundle("reject"),
     "approvals.decide",
   );
   dashboardPost(

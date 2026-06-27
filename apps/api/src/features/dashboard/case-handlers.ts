@@ -2,10 +2,12 @@ import { Effect } from "effect";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   applyApprovalDecision,
+  ApprovalService,
   AuditLogService,
   CaseRepository,
   ConnectorCredentialStore,
   ConversationService,
+  decideApprovalBundle,
   decisionToEvent,
   LLMService,
   ShopifyService,
@@ -509,6 +511,105 @@ export const handleDashboardApprovalAction =
     }
     const status = result.kind === "approval_not_found" ? 404 : 200;
     return sendJson(res, status, result);
+  };
+
+// POST /dashboard/cases/:id/approvals/{approve,reject} — decide the WHOLE
+// pending bundle for a case in one click (autonomous loop, slice 7). The
+// scenario agent queues several gated actions on one case; this approves (or
+// rejects) every pending row, then publishes ONE event so the runtime executes
+// the bundle in order (the slice-4d resume contract: all rows decided BEFORE the
+// event fires, else a per-row event could resolve the case while siblings are
+// still pending). `approve` accepts an optional `{ edits: { [approvalId]: input } }`
+// so an edited reply draft flows through; `reject` moves no money and takes none.
+export const handleDashboardCaseApprovalsBundle =
+  (action: "approve" | "reject") =>
+  async (
+    cfg: ApiConfig,
+    layer: ApiLayer,
+    req: FastifyRequest,
+    res: FastifyReply,
+  ): Promise<FastifyReply> => {
+    const auth = await authenticateDashboard(cfg, layer, req);
+    if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+    if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+    const { id: caseId } = req.params as { id: string };
+    const managerId = UserId(auth.userId);
+
+    // Every pending row for the case, in creation (= proposal) order.
+    const pending = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const svc = yield* ApprovalService;
+          const all = yield* svc.listForCase(
+            TenantId(auth.tenantId),
+            CaseId(caseId),
+          );
+          return all.filter((a) => a.status === "pending");
+        }),
+        layer,
+      ),
+    );
+    if (pending.length === 0) {
+      return sendJson(res, 200, { kind: "no_pending", count: 0 });
+    }
+
+    // Approving a bundle that moves money needs refunds.issue on top of the
+    // route's approvals.decide guard (rejecting moves no money → no extra gate).
+    if (action === "approve" && pending.some((a) => a.tool === "refund.create")) {
+      const access = await runWithDb(layer, (db) =>
+        getMemberAccess(db, auth.tenantId, auth.userId!),
+      );
+      const decision = decideAuthz(access, auth.userId, "refunds.issue");
+      if (!decision.ok) {
+        return sendJson(res, decision.status, { error: decision.error });
+      }
+    }
+
+    const edits =
+      action === "approve"
+        ? ((parseJsonBody(req)["edits"] as
+            | Record<string, unknown>
+            | undefined) ?? {})
+        : {};
+
+    // Decide every pending row + get the single event to publish (the bundle
+    // contract lives in decideApprovalBundle: decide ALL, then one event).
+    const { decidedCount, event } = await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TenantId(auth.tenantId),
+          caseId: CaseId(caseId),
+          action,
+          managerId,
+          edits,
+        }),
+        layer,
+      ),
+    );
+
+    // Publish ONE event AFTER all rows are decided. The runtime gathers every
+    // approved row for the case and runs them in order (slice 4d).
+    if (event) {
+      try {
+        await makePgBossApprovalPublisher(() =>
+          acquireApprovalBoss(cfg.databaseUrl),
+        )(event);
+      } catch (cause) {
+        // Rows are decided; the worker just won't pick them up until ops
+        // replays. Don't fail the request over a publish hiccup.
+        // eslint-disable-next-line no-console
+        console.error(
+          "[dashboard approvals] bundle publish failed; rows decided without event",
+          { caseId, cause },
+        );
+      }
+    }
+
+    return sendJson(res, 200, {
+      kind: "decided",
+      action,
+      count: decidedCount,
+    });
   };
 
 // POST /dashboard/cases/:id/takeover — manager takes over a case.

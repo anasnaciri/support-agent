@@ -107,3 +107,61 @@ export const rejectAction = async (formData: FormData): Promise<void> => {
     banneredPath(returnTo ?? "/approvals", approvalId, "reject", result.kind),
   );
 };
+
+// ---- Bundle decisions (autonomous loop) ----
+// The scenario agent queues several gated actions on one case; these decide the
+// WHOLE pending bundle in one click via the case-scoped endpoint (the api
+// approves/rejects every row, then publishes ONE event so the runtime runs the
+// bundle in order). The case page renders the Approve-all / Reject-all controls.
+
+const caseIdOf = (formData: FormData): string => {
+  const id = formData.get("caseId");
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error("caseId missing from form data");
+  }
+  return id;
+};
+
+const bundleBanneredPath = (
+  caseId: string,
+  action: "approve" | "reject",
+  kind: string,
+): string => `/cases/${caseId}?decided=bundle&action=${action}&kind=${kind}`;
+
+export const approveBundleAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  // Edit-and-Approve for the bundle's single customer reply: when the form
+  // carries the reply approval id + an edited bodyText, send it as a per-row
+  // edit (hydrated from the original proposed input so the shape stays valid).
+  let edits: Record<string, unknown> | undefined = undefined;
+  const replyApprovalId = formData.get("replyApprovalId");
+  const bodyTextRaw = formData.get("bodyText");
+  if (
+    typeof replyApprovalId === "string" &&
+    replyApprovalId.length > 0 &&
+    typeof bodyTextRaw === "string"
+  ) {
+    const original = await loadProposedInput(ctx, replyApprovalId);
+    if (original && typeof original === "object" && "bodyText" in original) {
+      edits = { [replyApprovalId]: { ...original, bodyText: bodyTextRaw } };
+    }
+  }
+
+  const result = await api.approveCaseBundle(ctx, caseId, edits);
+  revalidatePath("/approvals");
+  revalidatePath(`/cases/${caseId}`);
+  redirect(bundleBanneredPath(caseId, "approve", result.kind));
+};
+
+export const rejectBundleAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+  const result = await api.rejectCaseBundle(ctx, caseId);
+  revalidatePath("/approvals");
+  revalidatePath(`/cases/${caseId}`);
+  redirect(bundleBanneredPath(caseId, "reject", result.kind));
+};

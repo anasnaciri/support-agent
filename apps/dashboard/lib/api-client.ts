@@ -358,6 +358,11 @@ export const requireOrganization = async (): Promise<OrgContext> => {
 export interface ApprovalDecisionResultView {
   readonly kind: string;
 }
+export interface CaseBundleDecisionResultView {
+  readonly kind: string;
+  readonly action?: "approve" | "reject";
+  readonly count?: number;
+}
 export interface TakeOverOutcomeView {
   readonly kind: string;
   readonly canceledApprovals?: number;
@@ -970,6 +975,38 @@ export const api = {
       ctx,
     });
     return (body as ApprovalDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  // Decide a whole case's pending approval BUNDLE in one click (autonomous
+  // loop). The api approves/rejects every pending row then publishes one event
+  // so the runtime runs the bundle in order. `edits` carries manager-edited
+  // tool inputs keyed by approval id (e.g. the edited reply), honored only on
+  // approve.
+  approveCaseBundle: async (
+    ctx: CallCtx,
+    caseId: string,
+    edits?: Record<string, unknown>,
+  ): Promise<CaseBundleDecisionResultView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/approvals/approve`,
+      {
+        method: "POST",
+        body: edits !== undefined ? { edits } : {},
+        ctx,
+      },
+    );
+    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  rejectCaseBundle: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<CaseBundleDecisionResultView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/approvals/reject`,
+      { method: "POST", ctx },
+    );
+    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
   },
 
   takeover: async (

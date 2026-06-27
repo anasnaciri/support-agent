@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
   applyApprovalDecision,
+  decideApprovalBundle,
   decisionToEvent,
   ApprovalService,
   ApprovalServiceDbError,
@@ -436,5 +437,116 @@ describe("decisionToEvent", () => {
         manager,
       ),
     ).toBeNull();
+  });
+});
+
+describe("decideApprovalBundle", () => {
+  const TENANT = TenantId("t-bundle");
+  const AGENT = AgentId("scenario-resolution-agent");
+  const MANAGER = UserId("mgr-1");
+
+  it("approves every pending row for the case and returns one approve event", async () => {
+    const { layer, seed, store } = makeService();
+    const caseId = CaseId("case-A");
+    const a = seed({ tenantId: TENANT, caseId, agentId: AGENT, tool: "refund.create" });
+    const b = seed({ tenantId: TENANT, caseId, agentId: AGENT, tool: "conversation.reply" });
+    // A different case's pending row must be untouched (scope).
+    const other = seed({
+      tenantId: TENANT,
+      caseId: CaseId("case-B"),
+      agentId: AGENT,
+      tool: "conversation.reply",
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TENANT,
+          caseId,
+          action: "approve",
+          managerId: MANAGER,
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.pendingCount).toBe(2);
+    expect(out.decidedCount).toBe(2);
+    expect(out.event?.type).toBe("approval.approved");
+    expect(store.get(a.id)?.status).toBe("approved");
+    expect(store.get(b.id)?.status).toBe("approved");
+    // Untouched.
+    expect(store.get(other.id)?.status).toBe("pending");
+  });
+
+  it("rejects every pending row and returns one reject event", async () => {
+    const { layer, seed, store } = makeService();
+    const caseId = CaseId("case-R");
+    const a = seed({ tenantId: TENANT, caseId, agentId: AGENT });
+    const b = seed({ tenantId: TENANT, caseId, agentId: AGENT });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TENANT,
+          caseId,
+          action: "reject",
+          managerId: MANAGER,
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.decidedCount).toBe(2);
+    expect(out.event?.type).toBe("approval.rejected");
+    expect(store.get(a.id)?.status).toBe("rejected");
+    expect(store.get(b.id)?.status).toBe("rejected");
+  });
+
+  it("applies a per-approval edited input on approve", async () => {
+    const { layer, seed, store } = makeService();
+    const caseId = CaseId("case-E");
+    const reply = seed({
+      tenantId: TENANT,
+      caseId,
+      agentId: AGENT,
+      tool: "conversation.reply",
+      proposedInput: { bodyText: "original" },
+    });
+
+    await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TENANT,
+          caseId,
+          action: "approve",
+          managerId: MANAGER,
+          edits: { [reply.id]: { bodyText: "edited by manager" } },
+        }),
+        layer,
+      ),
+    );
+
+    expect(store.get(reply.id)?.approvedInput).toEqual({
+      bodyText: "edited by manager",
+    });
+  });
+
+  it("is a no-op (no event) when the case has no pending approvals", async () => {
+    const { layer } = makeService();
+    const out = await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TENANT,
+          caseId: CaseId("empty"),
+          action: "approve",
+          managerId: MANAGER,
+        }),
+        layer,
+      ),
+    );
+    expect(out.pendingCount).toBe(0);
+    expect(out.decidedCount).toBe(0);
+    expect(out.event).toBeNull();
   });
 });

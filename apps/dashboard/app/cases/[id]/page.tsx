@@ -31,6 +31,7 @@ import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
+import { BundleApprovalBar } from "./BundleApprovalBar";
 import { ReplyComposer } from "./ReplyComposer";
 import { StatusSelect } from "./StatusSelect";
 import { CaseActionsMenu } from "./CaseActionsMenu";
@@ -865,19 +866,27 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         </Card>
       ) : null}
 
-      {pendingApprovals.map((a) => (
-        <ApprovalCard
-          key={a.id}
-          approval={a}
-          returnTo={`/cases/${caseRow.id}`}
-          refundRecommendation={extractRefundRecommendation(entries)}
-          productMatch={productMatch}
-          photoSignals={photoSignals}
-          riskFlags={riskFlags}
-          returnReason={returnReason}
-          requestedResolution={requestedResolution}
-        />
-      ))}
+      {/* A queued BUNDLE (autonomous loop) is decided together via the bundle
+          bar — approving rows one-by-one would fire a per-row event and the
+          runtime could resolve the case while siblings stay pending (slice 4d).
+          A lone approval keeps the rich per-row ApprovalCard. */}
+      {pendingApprovals.length > 1 ? (
+        <BundleApprovalBar caseId={caseRow.id} pending={pendingApprovals} />
+      ) : (
+        pendingApprovals.map((a) => (
+          <ApprovalCard
+            key={a.id}
+            approval={a}
+            returnTo={`/cases/${caseRow.id}`}
+            refundRecommendation={extractRefundRecommendation(entries)}
+            productMatch={productMatch}
+            photoSignals={photoSignals}
+            riskFlags={riskFlags}
+            returnReason={returnReason}
+            requestedResolution={requestedResolution}
+          />
+        ))
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <CustomerPanel
