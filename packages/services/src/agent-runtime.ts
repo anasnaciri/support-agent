@@ -4,6 +4,7 @@ import {
   ToolRegistry,
   type AgentConfig,
   type AnyTool,
+  type Approval,
   type ApprovalId,
   type ApprovalRiskLevel,
   type CaseChannel,
@@ -423,57 +424,16 @@ const AgentRuntimeLayer = Layer.effect(
         // tool is mid-workflow (`refund.create` followed by a reply),
         // widen this branch to push the tool result into a fresh tick
         // and re-enter the agent loop.
-        const resumeApprovedTool = (
+        // Execute ONE approved approval row: re-validate the input, re-check
+        // policy (deny-only), dedup, run the tool, audit. Returns a terminal
+        // WorkflowResult on any problem (so bundle resume STOPS and the case
+        // parks for a human), or `null` on success — the case is NOT resolved
+        // here. Bundle resume resolves once, after the whole bundle has run.
+        const executeOneApproval = (
+          approval: Approval,
           event: Extract<DomainEvent, { type: "approval.approved" }>,
-        ) =>
+        ): Effect.Effect<WorkflowResult | null, unknown> =>
           Effect.gen(function* () {
-            const approval = yield* approvals
-              .getById(event.approvalId, working.tenantId)
-              .pipe(
-              Effect.catchTag("ApprovalNotFound", () =>
-                Effect.succeed(null),
-              ),
-              Effect.catchAll(() => Effect.succeed(null)),
-            );
-            if (!approval) {
-              return {
-                type: "Failed",
-                reason: `approval ${event.approvalId} not found`,
-                retryable: false,
-              } as const;
-            }
-            // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
-            // A re-delivered `approval.approved` for a case that already ran
-            // to completion must NOT execute the gated tool a second time —
-            // that's a double refund / double customer email.
-            if (working.status === "resolved") {
-              yield* tx.run(
-                audit.record({
-                  tenantId: working.tenantId,
-                  caseId: working.id,
-                  actor: { type: "system", id: "runtime" },
-                  action: "approval.duplicate_delivery_skipped",
-                  details: { approvalId: approval.id },
-                }),
-              );
-              return { type: "Completed" } as const;
-            }
-            // A row that was rejected / cancelled / expired out-of-band must
-            // never execute, whatever the event says.
-            if (
-              approval.status === "rejected" ||
-              approval.status === "cancelled" ||
-              approval.status === "expired"
-            ) {
-              yield* escalateToHuman(working.id, "approval_not_runnable", {
-                approvalId: approval.id,
-                status: approval.status,
-              });
-              return {
-                type: "HumanTakeoverRequired",
-                reason: "approval_not_runnable",
-              } as const;
-            }
             const toolToRun = yield* tools.tryGet(approval.tool);
             if (!toolToRun) {
               yield* escalateToHuman(working.id, "approved_tool_unavailable", {
@@ -590,7 +550,7 @@ const AgentRuntimeLayer = Layer.effect(
             let exec: { readonly _tag: "Right" | "Left"; readonly right?: unknown; readonly left?: unknown };
             if (priorMarker) {
               // Already executed successfully in a prior delivery — skip
-              // the side effect, finish the resolve step below.
+              // the side effect, continue the bundle.
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
@@ -684,14 +644,95 @@ const AgentRuntimeLayer = Layer.effect(
             // The approved reply went out — index its Message-ID for correlation
             // of the customer's eventual reply (best-effort, no-op otherwise).
             yield* recordOutboundReplyId(working, approval.tool, exec.right);
+            return null;
+          });
+
+        const resumeApprovedTool = (
+          event: Extract<DomainEvent, { type: "approval.approved" }>,
+        ) =>
+          Effect.gen(function* () {
+            const trigger = yield* approvals
+              .getById(event.approvalId, working.tenantId)
+              .pipe(
+              Effect.catchTag("ApprovalNotFound", () =>
+                Effect.succeed(null),
+              ),
+              Effect.catchAll(() => Effect.succeed(null)),
+            );
+            if (!trigger) {
+              return {
+                type: "Failed",
+                reason: `approval ${event.approvalId} not found`,
+                retryable: false,
+              } as const;
+            }
+            // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
+            // A re-delivered `approval.approved` for a case that already ran
+            // to completion must NOT execute the gated tool(s) a second time —
+            // that's a double refund / double customer email.
+            if (working.status === "resolved") {
+              yield* tx.run(
+                audit.record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "system", id: "runtime" },
+                  action: "approval.duplicate_delivery_skipped",
+                  details: { approvalId: trigger.id },
+                }),
+              );
+              return { type: "Completed" } as const;
+            }
+            // Bundle resume (slice 4d): the autonomous loop can queue SEVERAL
+            // gated actions on one case, all approved together — one
+            // `approval.approved` event executes the whole bundle. Gather every
+            // already-approved row for the case and run them in creation order
+            // (= the order the agent proposed them). The legacy single-approval
+            // path is just a bundle of one. Each row's own execution marker
+            // keeps a redelivery idempotent; the first failure parks the case
+            // and STOPS the bundle (the rest don't run).
+            const all = yield* approvals
+              .listForCase(working.tenantId, working.id)
+              .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
+            let bundle = all.filter((a) => a.status === "approved");
+            if (bundle.length === 0) {
+              // The trigger hasn't been observed as `approved` yet (a lean
+              // ApprovalService without listForCase, or an event that raced the
+              // approve write): fall back to running it as a singleton if it's
+              // still runnable. A rejected/cancelled/expired row never executes.
+              if (
+                trigger.status === "rejected" ||
+                trigger.status === "cancelled" ||
+                trigger.status === "expired"
+              ) {
+                yield* escalateToHuman(working.id, "approval_not_runnable", {
+                  approvalId: trigger.id,
+                  status: trigger.status,
+                });
+                return {
+                  type: "HumanTakeoverRequired",
+                  reason: "approval_not_runnable",
+                } as const;
+              }
+              bundle = [trigger];
+            }
+            for (const approval of bundle) {
+              const outcome = yield* executeOneApproval(approval, event);
+              // A terminal outcome means this action failed / couldn't run; the
+              // case is already parked. Stop — don't run later bundle actions.
+              if (outcome) return outcome;
+            }
+            // The whole bundle executed — resolve once.
             working = yield* lifecycle.resolve({
               caseId: working.id,
               tenantId: working.tenantId,
               actor: { type: "user", id: event.managerId },
-              reason: `approved tool ${approval.tool}`,
+              reason:
+                bundle.length > 1
+                  ? `approved bundle of ${bundle.length} actions`
+                  : `approved tool ${bundle[0]!.tool}`,
               details: {
-                viaApprovalId: approval.id,
-                tool: approval.tool,
+                approvalIds: bundle.map((a) => a.id),
+                tools: bundle.map((a) => a.tool),
               },
             });
             return { type: "Completed" } as const;

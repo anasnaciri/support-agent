@@ -21,6 +21,7 @@ import {
   type Approval,
   type ApprovalRiskLevel,
   type ApprovalStatus,
+  type CaseId,
   type TenantId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -267,6 +268,28 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
+    const listForCase = (
+      tenantId: TenantId,
+      caseId: CaseId,
+    ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "listForCase",
+          db
+            .select()
+            .from(approvals)
+            .where(
+              and(
+                eq(approvals.tenantId, tenantId),
+                eq(approvals.caseId, caseId),
+              ),
+            )
+            .orderBy(sql`${approvals.createdAt} ASC`, sql`${approvals.id} ASC`),
+        );
+        return rows.map(rowToApproval);
+      });
+
     // Audit L3b: decided rows whose case never resumed — the decision
     // committed but the workflow event was lost. Joined against cases so
     // the sweep doesn't rescan history forever.
@@ -306,6 +329,7 @@ export const ApprovalServiceLive = Layer.effect(
       approve,
       reject,
       listPending,
+      listForCase,
       cancelPendingForCase,
       listDecidedUnresumed,
     });

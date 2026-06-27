@@ -108,6 +108,10 @@ const makeService = () => {
         Effect.succeed(
           [...store.values()].filter((r) => r.status === "pending"),
         ),
+      listForCase: (_tenantId, caseId) =>
+        Effect.succeed(
+          [...store.values()].filter((r) => r.caseId === caseId),
+        ),
     }),
   );
 

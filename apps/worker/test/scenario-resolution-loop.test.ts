@@ -5,6 +5,7 @@ import {
   PermissionServiceDefault,
   TenantId,
   ToolRegistryWith,
+  UserId,
   type AgentConfig,
   type LLMDecision,
 } from "@support-agent/agent-core";
@@ -22,6 +23,7 @@ import {
   CaseRepositoryTest,
   ConversationServiceTest,
   LLMServiceScripted,
+  makeConversationServiceTest,
   PlatformMailServiceTest,
   ShopifyServiceTest,
   TenantAgentOverridesServiceTest,
@@ -244,5 +246,134 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
     expect(out.pending).toHaveLength(0);
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
+  });
+});
+
+// ------------------------------------------------------------
+// Slice 4d — one approve event executes the WHOLE queued bundle in order.
+// ------------------------------------------------------------
+type QueuedAction = { readonly tool: string; readonly input: unknown };
+
+const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
+  const convo = makeConversationServiceTest({});
+  const env = Layer.mergeAll(
+    CaseRepositoryTest,
+    AuditLogServiceTest,
+    ApprovalServiceTest,
+    AgentResolverTest([loopAgent()]),
+    ToolRegistryWith(ALL_TOOLS),
+    PermissionServiceDefault,
+    LLMServiceScripted([]), // resume path never consults the LLM
+    TransactionRunnerPassthrough,
+    ShopifyServiceTest({}),
+    convo.layer,
+    approvalLinkLayer,
+    platformMailNoop,
+    tenantOverridesEmpty,
+    tenantRepoDefault,
+  );
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const approvals = yield* ApprovalService;
+
+        const created = yield* repo.create({
+          tenantId: TenantId(TENANT),
+          channel: "email",
+          currentAgentId: AgentId("scenario-resolution-agent"),
+          subject: "Need help",
+          threadId: "thread-x" as never,
+          mailbox: "support@store.test",
+        });
+        // Park the case as if the autonomous loop had queued the bundle.
+        yield* repo.transitionStatus(created.id, "in_progress", {
+          tenantId: TenantId(TENANT),
+          reason: "test setup",
+        });
+        yield* repo.transitionStatus(created.id, "waiting_for_approval", {
+          tenantId: TenantId(TENANT),
+          reason: "test setup: bundle queued",
+        });
+
+        // Create + approve every queued action, in order.
+        const ids: string[] = [];
+        for (const a of actions) {
+          const approval = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AgentId("scenario-resolution-agent"),
+            tool: a.tool,
+            proposedInput: a.input,
+            reasoning: "queued by autonomous loop",
+            riskLevel: "medium",
+            expiresAt: new Date(Date.now() + 60_000),
+          });
+          ids.push(approval.id);
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: UserId("manager-1"),
+            tenantId: TenantId(TENANT),
+          });
+        }
+
+        // One approve event for the FIRST row drives the whole bundle.
+        const result = yield* runtime.handleEvent({
+          type: "approval.approved",
+          approvalId: ids[0] as never,
+          caseId: created.id,
+          managerId: UserId("manager-1"),
+        });
+
+        const fetched = yield* repo.getById(created.id);
+        return { result, fetched, ids };
+      }),
+      layer,
+    ),
+  ).then((r) => ({ ...r, sent: convo.handle.sent }));
+};
+
+const replyInput = (draftId: string, toEmail: string) => ({
+  threadId: "thread-x",
+  to: [{ name: null, email: toEmail }],
+  subject: null,
+  bodyText: `Reply ${draftId}.`,
+  bodyHtml: null,
+  inReplyToMessageId: null,
+  draftId,
+});
+
+describe("scenario-resolution autonomous loop — bundle resume (slice 4d)", () => {
+  it("executes every approved action in order on a single approve event, then resolves", async () => {
+    const out = await seedAndResume([
+      { tool: "conversation.reply", input: replyInput("a", "cust@example.com") },
+      { tool: "conversation.reply", input: replyInput("b", "cust@example.com") },
+    ]);
+
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
+    // Both queued replies ran, in proposal order.
+    expect(out.sent.map((s) => (s.input as { draftId: string }).draftId)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("stops the bundle on the first failure and parks the case for a human", async () => {
+    // The FIRST action is addressed to the connected mailbox → a deterministic
+    // recipient-guard reject; the second must NOT run.
+    const out = await seedAndResume([
+      { tool: "conversation.reply", input: replyInput("fail", "support@store.test") },
+      { tool: "conversation.reply", input: replyInput("after", "cust@example.com") },
+    ]);
+
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    // Neither send landed: the first was rejected before sending, the second
+    // was never reached.
+    expect(out.sent).toHaveLength(0);
   });
 });

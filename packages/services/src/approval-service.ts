@@ -118,6 +118,17 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
 
     /**
+     * Every approval row for a case, in creation order (oldest first). Used by
+     * the autonomous-loop bundle resume (slice 4d): one approve event executes
+     * the whole queued bundle, so the runtime needs all of a case's rows — not
+     * just the pending ones — to run the `approved` ones in proposal order.
+     */
+    readonly listForCase: (
+      tenantId: TenantId,
+      caseId: CaseId,
+    ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /**
      * Cancel every pending approval for a case after an authoritative manual
      * lifecycle write. Returns the number of rows changed.
      */
@@ -262,6 +273,19 @@ export const ApprovalServiceTest = Layer.effect(
           const out: Approval[] = [];
           for (const a of store.values()) {
             if (a.tenantId === tenantId && a.status === "pending") {
+              out.push(a);
+            }
+          }
+          return out;
+        }),
+
+      // Map iteration is insertion order, which mirrors the Live impl's
+      // `ORDER BY created_at ASC` for rows created in sequence.
+      listForCase: (tenantId, caseId) =>
+        Effect.sync(() => {
+          const out: Approval[] = [];
+          for (const a of store.values()) {
+            if (a.tenantId === tenantId && a.caseId === caseId) {
               out.push(a);
             }
           }
