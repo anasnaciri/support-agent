@@ -28,6 +28,7 @@ import {
   CaseRepository,
   CaseRepositoryTest,
   ConversationServiceTest,
+  decideApprovalBundle,
   LLMServiceScripted,
   makeConversationServiceTest,
   PlatformMailServiceTest,
@@ -691,5 +692,182 @@ describe("scenario-resolution autonomous loop — bundle resume (slice 4d)", () 
     // Neither send landed: the first was rejected before sending, the second
     // was never reached.
     expect(out.sent).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------------
+// SMOKE TEST — the whole feature, one chain, through the real runtime:
+// triage (flag ON) → scenario agent loops + queues a refund + a reply →
+// bundle parks waiting_for_approval → operator approves the bundle
+// (decideApprovalBundle, as the dashboard endpoint does) → runtime resumes →
+// executes both queued actions in order → case resolves.
+// ------------------------------------------------------------
+describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle → resolve)", () => {
+  it("routes, queues a bundle, parks, and resolves after one bundle approval", async () => {
+    const smokePolicy: ResolutionPolicy = {
+      scenarios: [
+        {
+          key: "refund_request",
+          label: "Refund request",
+          recognition: "Customer wants their money back.",
+          builtin: true,
+          enabledActions: [{ tool: "refund.create", permission: "ask" }],
+          supplierMode: "none",
+          notes: "Check the order, then refund and tell the customer.",
+        },
+      ],
+    };
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: smokePolicy,
+      resolutionAgentEnabled: true,
+    });
+
+    const script: ReadonlyArray<LLMDecision> = [
+      // — triage —
+      {
+        type: "tool_call",
+        callId: "t0",
+        tool: "case.update_context",
+        input: {
+          classification: "refund_request",
+          scenarioKey: "refund_request",
+          notes: "wants a refund for a damaged order",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "t1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "scenario-resolution-agent",
+          reason: "matches refund_request scenario",
+        },
+      },
+      // — scenario agent (same tick): queue a refund + the customer reply —
+      {
+        type: "tool_call",
+        callId: "s0",
+        tool: "refund.create",
+        input: {
+          orderId: "gid://shopify/Order/1001",
+          amount: { amount: "10.00", currencyCode: "USD" },
+          reason: "refund for the reported issue",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "s1",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-x",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText: "We're processing a refund for your order — you'll see it shortly.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "scenario-reply-thread-x",
+        },
+      },
+      {
+        type: "final_message",
+        text: "Queued a refund and the customer reply for approval.",
+      },
+    ];
+
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, scenarioResolutionAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}), // refundOrder synthesises a refund by default
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+      }),
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId(TENANT),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Refund please",
+            mailbox: "support@store.test",
+          });
+
+          // TICK 1 — inbound customer message drives triage → scenario → queue.
+          const tick1 = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Refund please",
+              bodyText: "I'd like a refund for my order.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          const afterTick1 = yield* repo.getById(created.id);
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+
+          // OPERATOR approves the whole bundle (what the dashboard endpoint does).
+          const bundle = yield* decideApprovalBundle({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            action: "approve",
+            managerId: UserId("manager-1"),
+          });
+
+          // TICK 2 — the single bundle event resumes the runtime.
+          const tick2 = bundle.event
+            ? yield* runtime.handleEvent(bundle.event)
+            : null;
+          const final = yield* repo.getById(created.id);
+
+          return { tick1, afterTick1, pending, bundle, tick2, final };
+        }),
+        layer,
+      ),
+    );
+
+    // Triage routed to the scenario agent and stamped the scenario.
+    expect(out.afterTick1.currentAgentId).toBe("scenario-resolution-agent");
+    expect(out.afterTick1.context["scenarioKey"]).toBe("refund_request");
+    // The autonomous loop queued BOTH actions and parked once.
+    expect(out.tick1.type).toBe("PausedWaitingForApproval");
+    expect(out.afterTick1.status).toBe("waiting_for_approval");
+    expect(new Set(out.pending.map((a) => a.tool))).toEqual(
+      new Set(["refund.create", "conversation.reply"]),
+    );
+    // One bundle approval decided both rows + emitted one event.
+    expect(out.bundle.decidedCount).toBe(2);
+    expect(out.bundle.event?.type).toBe("approval.approved");
+    // The resume executed the bundle and resolved the case.
+    expect(out.tick2?.type).toBe("Completed");
+    expect(out.final.status).toBe("resolved");
   });
 });
