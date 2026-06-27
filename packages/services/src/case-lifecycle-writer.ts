@@ -325,6 +325,13 @@ const replyDeliveryDraftId = (
     : `${caseId}:${tool}`;
 };
 
+// A case should only ever have ONE pending customer-email draft awaiting
+// approval: a newly-created draft supersedes any older still-pending one (the
+// situation may have changed since the old draft, e.g. a supplier replied). This
+// is enforced wherever a reply approval is created (park OR queue), so it holds
+// for every agent and path — not just the autonomous loop.
+const REPLY_DRAFT_TOOL = "conversation.reply";
+
 const RESUME_TO_STATUS = "in_progress" satisfies CaseStatus;
 // The primary/triage agent every case is born on. A `restartFromTriage` resume
 // rebinds here so the next tick re-classifies + re-routes. Mirrors the runtime's
@@ -346,6 +353,35 @@ export const CaseLifecycleWriterLive = Layer.effect(
     const tx = yield* TransactionRunner;
     const maybeReplyDelivery = yield* Effect.serviceOption(ReplyDeliveryService);
     const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
+
+    // A new customer-email draft supersedes any older still-pending draft for
+    // the same case (general "newest draft wins" rule). Runs in the caller's tx
+    // BEFORE the new approval is created, so only the latest draft is ever
+    // pending. No-op for non-reply tools and when there's nothing to supersede.
+    const supersedeOlderDraft = (input: {
+      readonly tenantId: TenantId;
+      readonly caseId: CaseId;
+      readonly tool: string;
+      readonly agentId: AgentId;
+    }) =>
+      Effect.gen(function* () {
+        if (input.tool !== REPLY_DRAFT_TOOL) return;
+        const superseded = yield* approvals.supersedePendingForCase({
+          tenantId: input.tenantId,
+          caseId: input.caseId,
+          reason: "superseded by a newer draft",
+          tools: [REPLY_DRAFT_TOOL],
+        });
+        if (superseded > 0) {
+          yield* audit.record({
+            tenantId: input.tenantId,
+            caseId: input.caseId,
+            actor: { type: "agent", id: input.agentId },
+            action: "approval.superseded",
+            details: { count: superseded, reason: "newer draft" },
+          });
+        }
+      });
 
     return CaseLifecycleWriter.of({
       escalateToHuman: (input) =>
@@ -481,6 +517,7 @@ export const CaseLifecycleWriterLive = Layer.effect(
       parkForApproval: (input) =>
         tx.run(
           Effect.gen(function* () {
+            yield* supersedeOlderDraft(input);
             const approval = yield* approvals.create({
               tenantId: input.tenantId,
               caseId: input.caseId,
@@ -520,6 +557,7 @@ export const CaseLifecycleWriterLive = Layer.effect(
             // Approval row + audit, NO status transition (autonomous loop):
             // the agent keeps acting; the case parks once via
             // parkForApprovalBundle when the loop ends.
+            yield* supersedeOlderDraft(input);
             const approval = yield* approvals.create({
               tenantId: input.tenantId,
               caseId: input.caseId,

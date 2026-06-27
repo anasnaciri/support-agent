@@ -272,6 +272,7 @@ export const ApprovalServiceLive = Layer.effect(
       readonly tenantId: TenantId;
       readonly caseId: CaseId;
       readonly reason: string;
+      readonly tools?: ReadonlyArray<string>;
     }): Effect.Effect<number, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
@@ -290,6 +291,9 @@ export const ApprovalServiceLive = Layer.effect(
                 eq(approvals.tenantId, input.tenantId),
                 eq(approvals.caseId, input.caseId),
                 eq(approvals.status, "pending"),
+                ...(input.tools && input.tools.length > 0
+                  ? [inArray(approvals.tool, [...input.tools])]
+                  : []),
               ),
             )
             .returning({ id: approvals.id }),

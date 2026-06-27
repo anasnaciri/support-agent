@@ -88,6 +88,12 @@ export interface SupersedePendingForCaseInput {
   readonly caseId: CaseId;
   /** Recorded as the cancelled rows' decisionReason (audit trail). */
   readonly reason: string;
+  /**
+   * When set, only pending rows whose `tool` is in this set are superseded
+   * (e.g. `["conversation.reply"]` to cancel just stale email drafts). Omit to
+   * supersede every pending row for the case.
+   */
+  readonly tools?: ReadonlyArray<string>;
 }
 
 // ============================================================
@@ -332,11 +338,13 @@ export const ApprovalServiceTest = Layer.effect(
 
       supersedePendingForCase: (input) =>
         Effect.sync(() => {
+          const toolFilter = input.tools ? new Set(input.tools) : null;
           let superseded = 0;
           for (const [id, approval] of store.entries()) {
             if (approval.tenantId !== input.tenantId) continue;
             if (approval.caseId !== input.caseId) continue;
             if (approval.status !== "pending") continue;
+            if (toolFilter && !toolFilter.has(approval.tool)) continue;
             store.set(id, {
               ...approval,
               status: "cancelled",

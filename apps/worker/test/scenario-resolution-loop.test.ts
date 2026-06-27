@@ -1137,4 +1137,77 @@ describe("re-engagement supersedes stale drafts", () => {
     ).toEqual(["fresh"]);
     expect(out.result.type).toBe("PausedWaitingForApproval");
   });
+
+  it("only supersedes stale DRAFTS — a pending refund is left untouched", async () => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "conversation.reply",
+        input: replyInput("fresh", "cust@example.com"),
+      },
+      { type: "final_message", text: "Drafted a reply." },
+    ];
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId(TENANT),
+            channel: "email",
+            currentAgentId: AgentId("scenario-resolution-agent"),
+            subject: "Need help",
+            threadId: "thread-x" as never,
+            mailbox: "support@store.test",
+          });
+          // A pending refund from a prior decision — NOT a draft.
+          const refund = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AgentId("scenario-resolution-agent"),
+            tool: "refund.create",
+            proposedInput: {
+              orderId: "gid://shopify/Order/1001",
+              amount: { amount: "10.00", currencyCode: "USD" },
+              reason: "x",
+            },
+            reasoning: "",
+            riskLevel: "high",
+            expiresAt: EXPIRES,
+          });
+
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-3",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Need help",
+              bodyText: "Hi",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const refundAfter = yield* approvals.getById(refund.id);
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+          return { refundAfter, pending };
+        }),
+        makeLayer(loopAgent(), script),
+      ),
+    );
+
+    // The refund is NOT a draft → untouched; both it and the fresh draft pend.
+    expect(out.refundAfter.status).toBe("pending");
+    expect(new Set(out.pending.map((a) => a.tool))).toEqual(
+      new Set(["refund.create", "conversation.reply"]),
+    );
+  });
 });
