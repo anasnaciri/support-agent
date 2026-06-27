@@ -90,8 +90,8 @@ import {
   hasUnverifiedOrderMismatch,
   orderContextRef,
   orderCustomerMismatchFlag,
+  orderIdentityVerificationPatch,
   normalizeEmailForMatch,
-  replyProvesOrderIdentity,
   shouldForceReplyApproval,
   riskFor,
   applyOverride,
@@ -762,36 +762,39 @@ const AgentRuntimeLayer = Layer.effect(
           // (the reply still routes to human approval via the backstop at the
           // permission check). Keyed off `pendingOrderEmail`, persisted at
           // detection time. Best-effort: a write failure simply leaves the gate
-          // up. The model cannot set `identityVerified` — it's stamped here and
-          // absent from the case.update_context allowlist — so a prompt-injected
-          // reply body can't fake a pass.
+          // up. The model cannot set `identityVerified`/`verifiedCustomerEmail` —
+          // they're stamped here and absent from the case.update_context
+          // allowlist — so a prompt-injected reply body can't fake a pass. The
+          // saved `verifiedCustomerEmail` is the TRUSTED order email, surfaced on
+          // the case (Context panel + Customer card) once the requester confirms
+          // it; see `orderIdentityVerificationPatch`.
           if (
-            (event.type === "message.received" ||
-              event.type === "customer.replied") &&
-            working.context["identityVerified"] !== true &&
-            readRiskFlags(working.context).includes("order_customer_mismatch") &&
-            replyProvesOrderIdentity(
-              event.payload.bodyText,
-              working.context["pendingOrderEmail"],
-            )
+            event.type === "message.received" ||
+            event.type === "customer.replied"
           ) {
-            working = yield* cases
-              .update(working.id, {
-                context: {
-                  ...working.context,
-                  identityVerified: true,
-                } as never,
-              })
-              .pipe(Effect.catchAll(() => Effect.succeed(working)));
-            yield* audit
-              .record({
-                tenantId: working.tenantId,
-                caseId: working.id,
-                actor: { type: "system", id: "runtime" },
-                action: "case.identity_verified",
-                details: { method: "order_email_confirmed" },
-              })
-              .pipe(Effect.catchAll(() => Effect.void));
+            const verification = orderIdentityVerificationPatch(
+              event.payload.bodyText,
+              working.context,
+            );
+            if (verification) {
+              working = yield* cases
+                .update(working.id, {
+                  context: {
+                    ...working.context,
+                    ...verification,
+                  } as never,
+                })
+                .pipe(Effect.catchAll(() => Effect.succeed(working)));
+              yield* audit
+                .record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "system", id: "runtime" },
+                  action: "case.identity_verified",
+                  details: { method: "order_email_confirmed" },
+                })
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
           }
 
           // 2b. Photo signals — when an inbound message carries image

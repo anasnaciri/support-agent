@@ -606,6 +606,10 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     typeof context["customerEmail"] === "string"
       ? (context["customerEmail"] as string)
       : null;
+  const verifiedOrderEmail =
+    typeof context["verifiedCustomerEmail"] === "string"
+      ? (context["verifiedCustomerEmail"] as string)
+      : null;
   const orderHint =
     typeof context["identifiedOrderId"] === "string"
       ? (context["identifiedOrderId"] as string)
@@ -876,7 +880,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
       ))}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <CustomerPanel customer={customer} customerEmail={customerEmail} />
+        <CustomerPanel
+          customer={customer}
+          customerEmail={customerEmail}
+          verifiedOrderEmail={verifiedOrderEmail}
+        />
         <OrderPanel
           order={order}
           orderHint={orderHint}

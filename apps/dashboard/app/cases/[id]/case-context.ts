@@ -113,6 +113,7 @@ const formatUnknown = (v: unknown): string | null => {
 const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "classification",
   "customerEmail",
+  "verifiedCustomerEmail",
   "identifiedOrderId",
   "quotedOrderRef",
   "identifiedCustomerId",
@@ -141,6 +142,18 @@ export const buildContextRows = (
   const email = asString(context["customerEmail"]);
   if (email)
     rows.push({ key: "customerEmail", label: "Customer email", text: email, mono: true });
+
+  // The order's email, confirmed by the requester on a mismatch case and stamped
+  // by the runtime (never the model). Shown distinctly from the corresponding
+  // `customerEmail`, which may be a typo or a different sender address.
+  const verifiedEmail = asString(context["verifiedCustomerEmail"]);
+  if (verifiedEmail)
+    rows.push({
+      key: "verifiedCustomerEmail",
+      label: "Verified order email",
+      text: verifiedEmail,
+      mono: true,
+    });
 
   const orderId = asString(context["identifiedOrderId"]);
   if (orderId)

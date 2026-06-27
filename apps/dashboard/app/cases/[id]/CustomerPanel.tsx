@@ -7,6 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 interface Props {
   readonly customer: ShopifyCustomer | null;
   readonly customerEmail: string | null;
+  /**
+   * The order's email, confirmed by the requester on an order/customer mismatch
+   * case (runtime-stamped, never model-set). Shown distinctly from `Email`,
+   * which is the corresponding address and may be a typo or a different sender.
+   */
+  readonly verifiedOrderEmail?: string | null;
 }
 
 const fullName = (c: ShopifyCustomer): string | null => {
@@ -49,8 +55,17 @@ const Row = ({
   </>
 );
 
-export const CustomerPanel = ({ customer, customerEmail }: Props) => {
-  if (!customer && !customerEmail) {
+export const CustomerPanel = ({
+  customer,
+  customerEmail,
+  verifiedOrderEmail,
+}: Props) => {
+  const verified =
+    typeof verifiedOrderEmail === "string" && verifiedOrderEmail.length > 0
+      ? verifiedOrderEmail
+      : null;
+
+  if (!customer && !customerEmail && !verified) {
     return (
       <PanelShell title="Customer">
         <p className="text-sm italic text-muted-foreground">
@@ -64,7 +79,10 @@ export const CustomerPanel = ({ customer, customerEmail }: Props) => {
     return (
       <PanelShell title="Customer">
         <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-3 gap-y-1.5">
-          <Row label="Email">{customerEmail}</Row>
+          {customerEmail ? <Row label="Email">{customerEmail}</Row> : null}
+          {verified ? (
+            <Row label="Verified order email">{verified}</Row>
+          ) : null}
         </dl>
         <p className="mt-3 text-sm italic text-muted-foreground">
           No matching Shopify customer (or store not connected).
@@ -82,6 +100,9 @@ export const CustomerPanel = ({ customer, customerEmail }: Props) => {
       <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-3 gap-y-1.5">
         {name ? <Row label="Name">{name}</Row> : null}
         <Row label="Email">{customer.email ?? customerEmail ?? "—"}</Row>
+        {verified && verified !== customer.email ? (
+          <Row label="Verified order email">{verified}</Row>
+        ) : null}
         {customer.phone ? <Row label="Phone">{customer.phone}</Row> : null}
         <Row label="Orders">{customer.ordersCount}</Row>
         <Row label="Lifetime">

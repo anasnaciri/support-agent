@@ -116,6 +116,21 @@ describe("buildContextRows", () => {
     expect(row).toMatchObject({ label: "Notes", multiline: true });
   });
 
+  it("renders the runtime-verified order email as its own labeled mono row", () => {
+    // Stamped by the runtime once the requester confirms the order's email on a
+    // mismatch case — a trusted fact, shown distinctly from the (possibly
+    // mistyped) corresponding `customerEmail`, not buried as a fallback row.
+    const row = byKey(
+      buildContextRows({ verifiedCustomerEmail: "victim@example.com" }),
+      "verifiedCustomerEmail",
+    );
+    expect(row).toMatchObject({
+      label: "Verified order email",
+      text: "victim@example.com",
+      mono: true,
+    });
+  });
+
   it("never hides an unknown key — humanizes it as a fallback row", () => {
     const rows = buildContextRows({ someFutureField: "hello", emptyObj: {} });
     expect(byKey(rows, "someFutureField")).toMatchObject({

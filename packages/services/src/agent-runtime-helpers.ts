@@ -366,10 +366,15 @@ export const buildInitialMessages = (
     const directive =
       orderIdentityDirective(caseRow.context, caseRow.threadId) ||
       boundOrderDirective(caseRow.context);
+    // A reply tick otherwise carries ONLY the latest message — hand the agent
+    // the established case facts (trusted, outside the fence) so it acts on the
+    // whole case, not just the newest line.
+    const facts = caseFactsHeader(caseRow.context);
     const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
+    const preamble = [directive, facts].filter(Boolean).join("\n\n");
     return [
       buildUserMessageFromInbound(
-        directive ? `${directive}\n\n${body}` : body,
+        preamble ? `${preamble}\n\n${body}` : body,
         event.payload.attachments,
       ),
     ];
@@ -390,13 +395,17 @@ export const buildInitialMessages = (
     const directive =
       orderIdentityDirective(caseRow.context, caseRow.threadId) ||
       boundOrderDirective(caseRow.context);
+    const facts = caseFactsHeader(caseRow.context);
     const customerBlock = wrapUntrusted(
       `Subject: ${subject}\n\n${event.payload.bodyText}`,
     );
-    const text = directive
-      ? `${header}\n\n${directive}\n\n${customerBlock}`
-      : `${header}\n\n${customerBlock}`;
-    return [buildUserMessageFromInbound(text, event.payload.attachments)];
+    const trusted = [header, directive, facts].filter(Boolean).join("\n\n");
+    return [
+      buildUserMessageFromInbound(
+        `${trusted}\n\n${customerBlock}`,
+        event.payload.attachments,
+      ),
+    ];
   }
   if (event.type === "case.resumed") {
     // A manager explicitly re-ran the case from the dashboard (or an
@@ -438,6 +447,13 @@ export const buildInitialMessages = (
       boundOrderDirective(caseRow.context);
     if (directive) {
       parts.push(directive);
+    }
+    // The full context blob is inlined below (fenced, since it also holds the
+    // agent's free-text). Surface the trusted, closed-vocab subset here too so
+    // the agent can rely on it without trusting the fenced copy.
+    const facts = caseFactsHeader(caseRow.context);
+    if (facts) {
+      parts.push(facts);
     }
     // If the runtime pre-fetched the thread, inline the whole conversation
     // (customer messages AND replies we already sent), fenced as untrusted.
@@ -859,6 +875,60 @@ export const boundOrderDirective = (
   return `[This case already has an identified order: ${gid}. Load it with shopify.get_order using exactly that id; do NOT search for the order again by any name or confirmation code the customer quoted.]`;
 };
 
+/**
+ * Trusted, compact summary of the substantive facts the system already knows
+ * about a case, injected OUTSIDE the untrusted fence on inbound and reply ticks
+ * so the agent reasons from the full picture rather than re-deriving it — or, on
+ * a customer reply (which otherwise carries ONLY the latest message), flying
+ * blind on what was already established. The order id and the identity-mismatch
+ * specifics have their own directives ({@link boundOrderDirective} /
+ * orderIdentityDirective); this carries the rest of the case substance.
+ *
+ * Includes ONLY runtime-owned fields (`customerEmail`, `verifiedCustomerEmail`,
+ * `identityVerified`) and closed-vocabulary agent fields (`classification`,
+ * `requestedResolution`, `returnReason`, `productMatch`,
+ * `liveTrackingStatus.status`) — each a literal union, never free text. It
+ * deliberately OMITS the agent's free-text `notes` and the untrusted customer
+ * string `quotedOrderRef`, which stay inside the fence, so this header itself
+ * can be trusted (a prompt-injected body can't reach it). Returns null when the
+ * case has no established facts yet (a fresh inbound), so normal first-touch
+ * flows are untouched.
+ */
+export const caseFactsHeader = (
+  context: Record<string, unknown>,
+): string | null => {
+  const str = (k: string): string | null =>
+    typeof context[k] === "string" && (context[k] as string).length > 0
+      ? (context[k] as string)
+      : null;
+
+  const facts: string[] = [];
+  const customerEmail = str("customerEmail");
+  if (customerEmail) facts.push(`customer=${customerEmail}`);
+  const verified = str("verifiedCustomerEmail");
+  if (verified) facts.push(`verifiedOrderEmail=${verified}`);
+  const classification = str("classification");
+  if (classification) facts.push(`classification=${classification}`);
+  const requested = str("requestedResolution");
+  if (requested) facts.push(`requestedResolution=${requested}`);
+  const returnReason = str("returnReason");
+  if (returnReason) facts.push(`returnReason=${returnReason}`);
+  const productMatch = str("productMatch");
+  if (productMatch) facts.push(`photoMatch=${productMatch}`);
+  const tracking = context["liveTrackingStatus"];
+  if (
+    tracking !== null &&
+    typeof tracking === "object" &&
+    typeof (tracking as { status?: unknown }).status === "string"
+  ) {
+    facts.push(`tracking=${(tracking as { status: string }).status}`);
+  }
+  if (context["identityVerified"] === true) facts.push("identityVerified=yes");
+
+  if (facts.length === 0) return null;
+  return `[Case facts known to the system — treat these as established, don't re-derive or contradict them: ${facts.join("; ")}]`;
+};
+
 /** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */
 export const readRiskFlags = (context: Record<string, unknown>): string[] =>
   Array.isArray(context["riskFlags"])
@@ -920,6 +990,32 @@ export const replyProvesOrderIdentity = (
   const tokens = replyText.toLowerCase().match(/[^\s<>()"']+@[^\s<>()"']+/g);
   if (!tokens) return false;
   return tokens.some((t) => t.replace(/[.,;:!?]+$/, "") === target);
+};
+
+/**
+ * Decide, in the runtime (never the model), what to stamp on the case when a
+ * customer's inbound reply answers the order-status identity challenge. Returns
+ * the context patch — `identityVerified` plus the now-confirmed
+ * `verifiedCustomerEmail` — when the reply proves the order's email, else null.
+ *
+ * The saved `verifiedCustomerEmail` is the TRUSTED order email the runtime
+ * stamped at detection (`pendingOrderEmail`, read from the Shopify order), NOT a
+ * token lifted out of the (untrusted) reply text — so a prompt-injected body can
+ * neither fake a pass ({@link replyProvesOrderIdentity} matches against the order
+ * email) nor plant an arbitrary address as the "verified" one. Mirrors the
+ * surrounding pure guards so the decision is unit-tested without the runtime;
+ * the caller still scopes this to inbound message events and persists the patch.
+ */
+export const orderIdentityVerificationPatch = (
+  replyText: unknown,
+  context: Record<string, unknown>,
+): { identityVerified: true; verifiedCustomerEmail: string } | null => {
+  if (context["identityVerified"] === true) return null;
+  if (!readRiskFlags(context).includes("order_customer_mismatch")) return null;
+  const pending = context["pendingOrderEmail"];
+  if (typeof pending !== "string" || pending.length === 0) return null;
+  if (!replyProvesOrderIdentity(replyText, pending)) return null;
+  return { identityVerified: true, verifiedCustomerEmail: pending };
 };
 
 /**

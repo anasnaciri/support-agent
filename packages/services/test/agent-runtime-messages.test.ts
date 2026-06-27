@@ -489,3 +489,73 @@ describe("buildInitialMessages — case.resumed with an inlined thread transcrip
     expect(text).toContain("conversation.fetch_thread");
   });
 });
+
+describe("buildInitialMessages — case facts header (act on all info)", () => {
+  const messageReceived = (bodyText: string): DomainEvent =>
+    ({
+      type: "message.received",
+      tenantId: "t1",
+      threadId: "gmail:abc",
+      payload: {
+        messageId: "m-1",
+        from: { name: "Jane", email: "jane@example.com" },
+        subject: "Help",
+        bodyText,
+        receivedAt: new Date("2026-06-01T00:00:00Z"),
+        attachments: [],
+      },
+    }) as never;
+
+  const customerReplied = (bodyText: string): DomainEvent =>
+    ({
+      type: "customer.replied",
+      tenantId: "t1",
+      caseId: "c1",
+      threadId: "gmail:abc",
+      payload: { bodyText, attachments: [] },
+    }) as never;
+
+  it("injects the established case facts OUTSIDE the fence on an inbound message", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("any update?"), {
+        subject: "Help",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "refund_request",
+          requestedResolution: "refund",
+          returnReason: "defective",
+        },
+      }),
+    );
+    const open = text.indexOf(UNTRUSTED_OPEN);
+    expect(text).toContain("Case facts known to the system");
+    expect(text).toContain("classification=refund_request");
+    expect(text.indexOf("Case facts known to the system")).toBeLessThan(open);
+  });
+
+  it("carries the case facts on a customer reply (which otherwise has only the latest message)", () => {
+    const text = textOf(
+      buildInitialMessages(customerReplied("still waiting"), {
+        subject: "Help",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          requestedResolution: "refund",
+        },
+      }),
+    );
+    expect(text).toContain("Case facts known to the system");
+    expect(text).toContain("classification=where_is_order");
+  });
+
+  it("adds no facts header for a fresh case with no established facts", () => {
+    const text = textOf(
+      buildInitialMessages(messageReceived("hello"), {
+        subject: "Help",
+        threadId: ThreadId("gmail:abc"),
+        context: {},
+      }),
+    );
+    expect(text).not.toContain("Case facts known to the system");
+  });
+});
