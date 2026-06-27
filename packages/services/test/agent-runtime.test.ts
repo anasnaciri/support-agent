@@ -10,6 +10,7 @@ import type { InboundMessage } from "@support-agent/agent-core";
 import {
   applyOverride,
   applyScenarioEnvelope,
+  applyTriageScenarioRouting,
   buildScenarioPlaybookHeader,
   buildSystemPrompt,
   defaultRefundPolicy,
@@ -23,6 +24,7 @@ import {
   DEFAULT_RETENTION_DAYS,
   toolFailureAuditDetail,
   type AgentOverride,
+  type ResolutionPolicy,
   type ScenarioPolicy,
   type SupplierEscalationSheet,
 } from "../src/index.js";
@@ -591,5 +593,62 @@ describe("buildScenarioPlaybookHeader", () => {
     );
     expect(header).toContain("Delivery problem");
     expect(header).not.toContain("undefined");
+  });
+});
+
+// Slice 6: triage routing to the scenario-resolution-agent behind the flag.
+const triageAgent = (): AgentConfig =>
+  baseAgent({
+    id: AgentId("support-triage"),
+    handoffs: [AgentId("order-status-agent")],
+    tools: ["case.update_context", "agent.handoff"],
+  });
+
+const routingPolicy = (): ResolutionPolicy => ({
+  scenarios: [
+    scenario({
+      key: "where_is_order",
+      label: "Where is my order?",
+      recognition: "Customer asks where their order is.",
+    }),
+    scenario({
+      key: "refund_request",
+      label: "Refund request",
+      recognition: "Customer wants their money back.",
+    }),
+  ],
+});
+
+describe("applyTriageScenarioRouting", () => {
+  it("adds the resolution agent to handoffs and injects the routing header", () => {
+    const out = applyTriageScenarioRouting(triageAgent(), routingPolicy());
+    expect(out.handoffs.map((h) => h as string)).toContain(
+      "scenario-resolution-agent",
+    );
+    // Original handoffs preserved.
+    expect(out.handoffs.map((h) => h as string)).toContain("order-status-agent");
+    // Header lists each scenario key + the routing instruction.
+    expect(out.promptTemplate).toContain("Resolution scenarios");
+    expect(out.promptTemplate).toContain("where_is_order");
+    expect(out.promptTemplate).toContain("refund_request");
+    expect(out.promptTemplate).toContain("scenarioKey");
+    expect(out.promptTemplate).toContain("scenario-resolution-agent");
+  });
+
+  it("does not duplicate the resolution agent if already a handoff target", () => {
+    const agent = baseAgent({
+      id: AgentId("support-triage"),
+      handoffs: [AgentId("scenario-resolution-agent")],
+    });
+    const out = applyTriageScenarioRouting(agent, routingPolicy());
+    expect(
+      out.handoffs.filter((h) => (h as string) === "scenario-resolution-agent"),
+    ).toHaveLength(1);
+  });
+
+  it("is a no-op when the policy has no scenarios", () => {
+    const agent = triageAgent();
+    const out = applyTriageScenarioRouting(agent, { scenarios: [] });
+    expect(out).toBe(agent);
   });
 });

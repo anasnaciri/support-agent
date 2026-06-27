@@ -10,7 +10,11 @@ import {
   type LLMDecision,
 } from "@support-agent/agent-core";
 import { ALL_TOOLS } from "@support-agent/tools";
-import { scenarioResolutionAgent } from "@support-agent/agents";
+import {
+  orderStatusAgent,
+  scenarioResolutionAgent,
+  supportTriage,
+} from "@support-agent/agents";
 import type { ResolutionPolicy } from "@support-agent/services";
 import {
   AgentResolverTest,
@@ -488,6 +492,173 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
     expect(out.pending).toHaveLength(0);
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
+  });
+});
+
+// ------------------------------------------------------------
+// Slice 6 — triage routes to the scenario agent behind resolutionAgentEnabled.
+// ------------------------------------------------------------
+const routingPolicy: ResolutionPolicy = {
+  scenarios: [
+    {
+      key: "refund_request",
+      label: "Refund request",
+      recognition: "Customer wants their money back.",
+      builtin: true,
+      enabledActions: [{ tool: "refund.create", permission: "ask" }],
+      supplierMode: "none",
+      notes: "Check the order and the refund policy.",
+    },
+  ],
+};
+
+const driveTriage = (
+  resolutionAgentEnabled: boolean,
+  script: ReadonlyArray<LLMDecision>,
+) => {
+  const settings = new TenantSettings({
+    notificationEmail: null,
+    refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
+    retentionDays: 730,
+    supplierEscalationSheet: null,
+    legalAcceptance: null,
+    resolutionPolicy: routingPolicy,
+    resolutionAgentEnabled,
+  });
+  const env = Layer.mergeAll(
+    CaseRepositoryTest,
+    AuditLogServiceTest,
+    ApprovalServiceTest,
+    AgentResolverTest([supportTriage, scenarioResolutionAgent, orderStatusAgent]),
+    ToolRegistryWith(ALL_TOOLS),
+    PermissionServiceDefault,
+    LLMServiceScripted(script),
+    TransactionRunnerPassthrough,
+    ShopifyServiceTest({}),
+    ConversationServiceTest({}),
+    approvalLinkLayer,
+    platformMailNoop,
+    tenantOverridesEmpty,
+    TenantRepositoryTest({
+      settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+    }),
+  );
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const approvals = yield* ApprovalService;
+
+        const created = yield* repo.create({
+          tenantId: TenantId(TENANT),
+          channel: "email",
+          currentAgentId: supportTriage.id,
+          subject: "Refund please",
+          mailbox: "support@store.test",
+        });
+
+        const result = yield* runtime.handleEvent({
+          type: "customer.replied",
+          caseId: created.id,
+          payload: {
+            threadId: "thread-x" as never,
+            messageId: "msg-1",
+            from: { name: null, email: "cust@example.com" },
+            to: [],
+            subject: "Re: Refund please",
+            bodyText: "I'd like a refund.",
+            bodyHtml: null,
+            receivedAt: new Date(),
+            attachments: [],
+          },
+        });
+
+        const fetched = yield* repo.getById(created.id);
+        const pending = yield* approvals.listPending(TenantId(TENANT));
+        return { result, fetched, pending };
+      }),
+      layer,
+    ),
+  );
+};
+
+describe("triage routing behind resolutionAgentEnabled (slice 6)", () => {
+  it("routes a matching case to the scenario agent when the flag is ON", async () => {
+    const out = await driveTriage(true, [
+      {
+        type: "tool_call",
+        callId: "t0",
+        tool: "case.update_context",
+        input: {
+          classification: "refund_request",
+          scenarioKey: "refund_request",
+          notes: "wants a refund",
+        },
+      },
+      {
+        type: "tool_call",
+        callId: "t1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "scenario-resolution-agent",
+          reason: "matches refund_request scenario",
+        },
+      },
+      // Now the scenario agent runs (same tick): queue a gated reply, then stop.
+      {
+        type: "tool_call",
+        callId: "s0",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-x",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText: "We're looking into your refund and will follow up.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "scenario-reply-thread-x",
+        },
+      },
+      { type: "final_message", text: "Handled by the resolution agent." },
+    ]);
+
+    // The handoff to the scenario agent was allowed and persisted.
+    expect(out.fetched.currentAgentId).toBe("scenario-resolution-agent");
+    expect(out.fetched.context["scenarioKey"]).toBe("refund_request");
+    // The autonomous loop ran and queued the gated reply.
+    expect(out.pending.map((a) => a.tool)).toEqual(["conversation.reply"]);
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+  });
+
+  it("blocks a handoff to the scenario agent when the flag is OFF (legacy routing only)", async () => {
+    const out = await driveTriage(false, [
+      {
+        type: "tool_call",
+        callId: "t0",
+        tool: "case.update_context",
+        input: { classification: "refund_request", notes: "wants a refund" },
+      },
+      {
+        type: "tool_call",
+        callId: "t1",
+        tool: "agent.handoff",
+        input: {
+          targetAgent: "scenario-resolution-agent",
+          reason: "should be blocked when flag off",
+        },
+      },
+      { type: "final_message", text: "done" },
+    ]);
+
+    // Flag off → scenario-resolution-agent is NOT in triage's handoffs → the
+    // handoff is rejected, so the case never bound to it. A routing agent that
+    // finishes without a successful handoff parks for a human.
+    expect(out.fetched.currentAgentId).toBe("support-triage");
+    expect(out.result.type).toBe("HumanTakeoverRequired");
   });
 });
 

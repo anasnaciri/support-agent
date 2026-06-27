@@ -11,6 +11,7 @@ import {
   type ThreadId,
   wrapUntrusted,
   UNTRUSTED_PREAMBLE,
+  AgentId as makeAgentId,
   TenantId as makeTenantId,
   ThreadId as makeThreadId,
 } from "@support-agent/agent-core";
@@ -19,6 +20,7 @@ import { parseThreadId } from "./conversation-thread-id.js";
 import { parseRefundAmount } from "./permission-service-live.js";
 import type { AgentOverride } from "./tenant-agent-overrides.js";
 import type {
+  ResolutionPolicy,
   ScenarioPolicy,
   SupplierMode,
   TenantSettings,
@@ -1201,5 +1203,52 @@ export const applyScenarioEnvelope = (
     tools,
     permissionOverrides,
     promptTemplate: `${agent.promptTemplate}\n\n${buildScenarioPlaybookHeader(scenario)}`,
+  };
+};
+
+/** The id of the autonomous resolution agent triage routes to (slice 6). */
+export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
+
+/**
+ * Re-route support-triage to the scenario-resolution-agent when the tenant has
+ * the resolution agent enabled (slice 6). Pure + exported for unit testing;
+ * the runtime gates the call on `resolutionAgentEnabled` and the agent being
+ * triage. Returns a triage AgentConfig that:
+ *   - adds `scenario-resolution-agent` to `handoffs` (so the handoff allowlist
+ *     — effectiveHandoffIds — permits it), deduped;
+ *   - appends a trusted routing header listing each scenario (key +
+ *     recognition) and instructing triage to stamp `scenarioKey` via
+ *     case.update_context and hand off to the resolution agent, preferring it
+ *     over the built-in specialists for any matching case.
+ * Both flow through the runtime automatically (effectiveHandoffIds reads
+ * `handoffs`; buildSystemPrompt reads `promptTemplate`). No scenarios → no-op.
+ */
+export const applyTriageScenarioRouting = (
+  agent: AgentConfig,
+  policy: ResolutionPolicy,
+): AgentConfig => {
+  if (policy.scenarios.length === 0) return agent;
+  const lines = policy.scenarios.map(
+    (s) =>
+      `- ${s.key} — "${s.label}": ${
+        s.recognition?.trim() || s.notes?.trim() || s.label
+      }`,
+  );
+  const header = [
+    "[Resolution scenarios — this store routes matching cases to the resolution agent. For a case that fits ONE of these scenarios, PREFER this over the built-in specialists:",
+    ...lines,
+    "",
+    'To route a matching case: (1) call case.update_context with `scenarioKey` set to the matching scenario\'s key (keep your usual `classification`/`quotedOrderRef`/`notes` too), then (2) call agent.handoff with targetAgent "scenario-resolution-agent". Only fall back to a built-in specialist when the case fits NONE of the scenarios above.]',
+  ].join("\n");
+  const alreadyListed = agent.handoffs.some(
+    (h) => (h as string) === SCENARIO_RESOLUTION_AGENT_ID,
+  );
+  const handoffs = alreadyListed
+    ? agent.handoffs
+    : [...agent.handoffs, makeAgentId(SCENARIO_RESOLUTION_AGENT_ID)];
+  return {
+    ...agent,
+    handoffs,
+    promptTemplate: `${agent.promptTemplate}\n\n${header}`,
   };
 };

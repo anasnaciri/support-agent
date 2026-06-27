@@ -91,6 +91,7 @@ import {
   refundCustomerMismatchFlag,
   readRiskFlags,
   applyScenarioEnvelope,
+  applyTriageScenarioRouting,
   hasUnverifiedOrderMismatch,
   orderContextRef,
   orderCustomerMismatchFlag,
@@ -1112,6 +1113,8 @@ const AgentRuntimeLayer = Layer.effect(
           // unclamped. Applied at every point the active agent is (re)bound — the
           // initial resolve here and each handoff site — so a triage→scenario
           // handoff in the same tick is clamped too.
+          const resolutionPolicy =
+            tenantSettings?.resolutionPolicy ?? defaultResolutionPolicy;
           const withScenario = (
             a: AgentConfig,
             ctx: typeof working.context,
@@ -1122,13 +1125,22 @@ const AgentRuntimeLayer = Layer.effect(
                 ? (ctx["scenarioKey"] as string)
                 : null;
             if (!key) return a;
-            const policy =
-              tenantSettings?.resolutionPolicy ?? defaultResolutionPolicy;
-            const scenario = policy.scenarios.find((s) => s.key === key);
+            const scenario = resolutionPolicy.scenarios.find(
+              (s) => s.key === key,
+            );
             return scenario ? applyScenarioEnvelope(a, scenario) : a;
           };
+          // Slice 6: when the tenant has the resolution agent enabled, re-route
+          // support-triage to the scenario-resolution-agent (adds it to triage's
+          // handoffs + injects the scenario routing header). Flag off → legacy
+          // specialist routing is untouched. Only triage is rewritten.
+          const withTriageRouting = (a: AgentConfig): AgentConfig =>
+            tenantSettings?.resolutionAgentEnabled === true &&
+            (a.id as string) === "support-triage"
+              ? applyTriageScenarioRouting(a, resolutionPolicy)
+              : a;
           let agent: AgentConfig = withScenario(
-            applyOverride(resolved, overrideMap),
+            withTriageRouting(applyOverride(resolved, overrideMap)),
             working.context,
           );
           // On a resume (dashboard retry / restart-from-triage / hand-back) the
