@@ -161,6 +161,28 @@ describe("case.update_context tool", () => {
     expect(result.context["notes"]).toBe("asked twice");
   });
 
+  it("persists the scenarioKey hint (triage's chosen scenario)", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* RepoTag;
+          const created = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+          });
+          yield* caseUpdateContext.execute(
+            { scenarioKey: "delivery_issue" },
+            baseCtx(created.id),
+          );
+          return yield* repo.getById(created.id);
+        }),
+        toolEnv,
+      ),
+    );
+    expect(result.context["scenarioKey"]).toBe("delivery_issue");
+  });
+
   it("stamps the structured liveTrackingStatus field into context", async () => {
     // order-status-agent writes the tracking.lookup result here so a takeover
     // operator can see carrier-side state. It's a single NAMED object field

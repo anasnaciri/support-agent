@@ -24,6 +24,15 @@ const Input = Schema.Struct({
    */
   quotedOrderRef: Schema.optional(Schema.String),
   identifiedCustomerId: Schema.optional(Schema.String),
+  /**
+   * The resolution scenario triage matched this case to (a `ScenarioPolicy.key`
+   * — built-in like `delivery_issue` or a merchant-defined custom key). The
+   * scenario-resolution agent reads it to load the scenario's tool/permission
+   * envelope + playbook. A free string (the key set is merchant-extensible), but
+   * still a single NAMED field in the closed schema — never an open map — so an
+   * injection can only write this one key, not a runtime-reserved one.
+   */
+  scenarioKey: Schema.optional(Schema.String),
   notes: Schema.optional(Schema.String),
   /**
    * Outcome of the damaged-product photo-vs-product cross-check:
@@ -146,6 +155,8 @@ export const caseUpdateContext = defineTool({
         patch["quotedOrderRef"] = input.quotedOrderRef;
       if (input.identifiedCustomerId !== undefined)
         patch["identifiedCustomerId"] = input.identifiedCustomerId;
+      if (input.scenarioKey !== undefined)
+        patch["scenarioKey"] = input.scenarioKey;
       if (input.notes !== undefined) patch["notes"] = input.notes;
       if (input.productMatch !== undefined)
         patch["productMatch"] = input.productMatch;
