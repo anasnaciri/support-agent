@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalNotFound,
@@ -267,37 +267,6 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
-    // Audit L7: expire overdue pendings (CAS on status='pending' inside
-    // the UPDATE, so racing deciders win cleanly).
-    const expireOverdue = (
-      now: Date,
-      limit = 100,
-    ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
-      Effect.gen(function* () {
-        const db = yield* useDb(defaultDb);
-        const rows = yield* wrap(
-          "expireOverdue",
-          db
-            .update(approvals)
-            .set({ status: "expired" })
-            .where(
-              and(
-                eq(approvals.status, "pending"),
-                sql`${approvals.expiresAt} < ${now}`,
-                sql`${approvals.id} IN (
-                  SELECT id FROM ${approvals}
-                  WHERE ${approvals.status} = 'pending'
-                    AND ${approvals.expiresAt} < ${now}
-                  ORDER BY ${approvals.expiresAt} ASC
-                  LIMIT ${limit}
-                )`,
-              ),
-            )
-            .returning(),
-        );
-        return rows.map(rowToApproval);
-      });
-
     // Audit L3b: decided rows whose case never resumed — the decision
     // committed but the workflow event was lost. Joined against cases so
     // the sweep doesn't rescan history forever.
@@ -316,7 +285,12 @@ export const ApprovalServiceLive = Layer.effect(
             .where(
               and(
                 inArray(approvals.status, ["approved", "rejected"]),
-                sql`${approvals.decidedAt} < ${opts.decidedBefore}`,
+                // NB: `lt(col, date)` binds through the column's timestamp
+                // encoder (Date -> ISO string). A raw `sql`${col} < ${date}``
+                // would pass the Date straight to the driver, which throws
+                // `TypeError: ... Received an instance of Date` and silently
+                // killed this sweep in prod. Keep comparisons operator-based.
+                lt(approvals.decidedAt, opts.decidedBefore),
                 eq(cases.status, "waiting_for_approval"),
               ),
             )
@@ -333,7 +307,6 @@ export const ApprovalServiceLive = Layer.effect(
       reject,
       listPending,
       cancelPendingForCase,
-      expireOverdue,
       listDecidedUnresumed,
     });
   }),

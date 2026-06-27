@@ -26,14 +26,7 @@ import { ApprovalService } from "./approval-service.js";
 export type ApprovalDecisionResult =
   | { readonly kind: "decided"; readonly approval: Approval }
   | { readonly kind: "already_decided"; readonly approval: Approval }
-  | { readonly kind: "approval_not_found" }
-  /**
-   * The row is still pending but past its `expiresAt` (audit L7): the
-   * proposed input is stale — the order, policy, or conversation may
-   * have changed since the agent drafted it — so neither surface may
-   * decide it. The runtime's resume branch enforces the same rule.
-   */
-  | { readonly kind: "expired"; readonly approval: Approval };
+  | { readonly kind: "approval_not_found" };
 
 export interface ApplyApprovalDecisionInput {
   readonly approvalId: string;
@@ -83,13 +76,6 @@ export const applyApprovalDecision = (
 
     if (existing.status !== "pending") {
       return { kind: "already_decided", approval: existing };
-    }
-
-    // 2.5. Expiry (audit L7). `expiresAt` was previously written but
-    // never enforced anywhere — a manager could approve a months-stale
-    // draft against a long-changed order.
-    if (existing.expiresAt.getTime() < Date.now()) {
-      return { kind: "expired", approval: existing };
     }
 
     // 3. Apply the decision. `approvedInput` is honored only for

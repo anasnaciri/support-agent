@@ -57,7 +57,7 @@ describe("approval tokens", () => {
     ).toEqual({ ok: false, reason: "invalid_signature" });
   });
 
-  it("defaults the TTL to 24 hours (matches the approval row expiry)", () => {
+  it("defaults the link TTL to 30 days (the bearer link is the only expiring part)", () => {
     const token = signApprovalToken({
       approvalId: "appr-ttl",
       action: "approve",
@@ -71,7 +71,7 @@ describe("approval tokens", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.expiresAt).toBe(NOW + 24 * 60 * 60 * 1000);
+      expect(result.expiresAt).toBe(NOW + 30 * 24 * 60 * 60 * 1000);
     }
   });
 

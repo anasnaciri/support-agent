@@ -9,7 +9,6 @@ import {
 import {
   ApprovalService,
   ApprovalServiceTest,
-  AuditLogService,
   AuditLogServiceTest,
   CaseLifecycleWriterLive,
   CaseRepository,
@@ -18,12 +17,10 @@ import {
 } from "@support-agent/services";
 import { runApprovalMaintenanceOnce } from "../src/approval-maintenance-schedule.js";
 
-// Audit L7 (sweep half) + L3b — approvals maintenance:
-//   - pending approvals past expiresAt flip to expired and their case
-//     escalates to a human (previously the `expired` status was
-//     unreachable and the case waited forever)
-//   - decided approvals whose case never resumed (the workflow event was
-//     lost between decision-commit and publish) are re-published
+// Audit L3b — approvals maintenance: decided approvals whose case never
+// resumed (the workflow event was lost between decision-commit and
+// publish) are re-published. (Time-based expiry of overdue pendings was
+// removed — approval drafts no longer expire by age for any tool.)
 
 const deps = Layer.mergeAll(
   ApprovalServiceTest,
@@ -51,58 +48,6 @@ const setupCase = Effect.gen(function* () {
 });
 
 describe("runApprovalMaintenanceOnce", () => {
-  it("expires overdue pending approvals and escalates their case (audit L7)", async () => {
-    const out = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          const repo = yield* CaseRepository;
-          const approvals = yield* ApprovalService;
-          const audit = yield* AuditLogService;
-          const row = yield* setupCase;
-          yield* approvals.create({
-            tenantId,
-            caseId: row.id,
-            agentId: AgentId("refund-review-agent"),
-            tool: "conversation.reply",
-            proposedInput: {},
-            reasoning: "test",
-            riskLevel: "medium",
-            expiresAt: new Date(Date.now() - 60_000),
-          });
-          const published: DomainEvent[] = [];
-          const result = yield* runApprovalMaintenanceOnce({
-            publish: (e) => {
-              published.push(e);
-              return Promise.resolve();
-            },
-            now: new Date(),
-          });
-          const fetched = yield* repo.getById(row.id);
-          const entries = yield* audit.forCase(row.id);
-          return { result, fetched, entries, published };
-        }),
-        layer,
-      ) as Effect.Effect<
-        {
-          result: { expired: number; republished: number };
-          fetched: { status: string };
-          entries: ReadonlyArray<{ action: string }>;
-          published: ReadonlyArray<DomainEvent>;
-        },
-        never,
-        never
-      >,
-    );
-
-    expect(out.result.expired).toBe(1);
-    expect(out.fetched.status).toBe("human_takeover");
-    expect(out.entries.map((e) => e.action)).toContain(
-      "case.escalated_to_human",
-    );
-    // Expiry does not publish decision events.
-    expect(out.published).toHaveLength(0);
-  });
-
   it("re-publishes the event for a decided approval whose case never resumed (audit L3b)", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
@@ -138,7 +83,7 @@ describe("runApprovalMaintenanceOnce", () => {
         layer,
       ) as Effect.Effect<
         {
-          result: { expired: number; republished: number };
+          result: { republished: number };
           published: ReadonlyArray<DomainEvent>;
           approvalId: string;
           caseId: string;
@@ -196,7 +141,7 @@ describe("runApprovalMaintenanceOnce", () => {
         layer,
       ) as Effect.Effect<
         {
-          result: { expired: number; republished: number };
+          result: { republished: number };
           published: ReadonlyArray<DomainEvent>;
         },
         never,

@@ -59,7 +59,6 @@ export type ApprovalEndpointOutcome =
   | { readonly kind: "decided"; readonly approval: Approval }
   | { readonly kind: "already_decided"; readonly approval: Approval }
   | { readonly kind: "approval_not_found" }
-  | { readonly kind: "expired"; readonly approval: Approval }
   | { readonly kind: "bad_token"; readonly reason: VerifyApprovalTokenResult & { readonly ok: false } }
   | { readonly kind: "token_mismatch"; readonly tokenApprovalId: string }
   /**
@@ -281,11 +280,6 @@ export const renderApprovalPage = (
         body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge info">Already decided</span><h1 class="title">This approval has already been ${ok ? "approved" : escapeHtml(outcome.approval.status)}</h1><p class="muted">No further action is needed. Decision recorded ${outcome.approval.decidedAt?.toISOString() ?? ""}.</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
       };
     }
-    case "expired":
-      return {
-        status: 410,
-        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Expired</span><h1 class="title">This approval has expired</h1><p class="muted">The proposed action is too old to act on safely — the order or conversation may have changed since it was drafted. The case needs a human decision from the dashboard.</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
-      };
     case "approval_not_found":
       return {
         status: 404,
@@ -294,7 +288,7 @@ export const renderApprovalPage = (
     case "bad_token":
       return {
         status: 400,
-        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${escapeHtml(outcome.reason.reason)}. Approval links expire after a day for safety; decide from the dashboard if you still need to act.</p>${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${escapeHtml(outcome.reason.reason)}. Approval links expire after 30 days for safety; decide from the dashboard if you still need to act.</p>${SHELL_FOOT}`,
       };
     case "token_mismatch":
       return {

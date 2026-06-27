@@ -1,21 +1,19 @@
 // ============================================================
-// Approvals maintenance cron (audit L7 sweep + L3b)
+// Approvals maintenance cron (audit L3b)
 // ============================================================
 //
-// Two recovery loops the approval flow needs to be safe under partial
-// failure:
+// REPUBLISH (L3b): an approval can be decided (row committed) while the
+// matching workflow event publish fails — the case then stays parked
+// even though the manager already said yes/no. Re-publish the event for
+// decided approvals whose case is still parked after a grace window; the
+// runtime's resume guards make re-delivery idempotent.
 //
-//   1. EXPIRY (L7): pending approvals past `expiresAt` flip to `expired`
-//      and their case escalates to a human. Without this the `expired`
-//      status was unreachable and a never-clicked approval left its case
-//      parked in `waiting_for_approval` forever.
-//
-//   2. REPUBLISH (L3b): an approval can be decided (row committed) while
-//      the matching workflow event publish fails — the case then stays
-//      parked even though the manager already said yes/no. Re-publish the
-//      event for decided approvals whose case is still parked after a
-//      grace window; the runtime's resume guards make re-delivery
-//      idempotent.
+// NOTE: this cron used to ALSO time-expire overdue pending approvals and
+// escalate their case to a human (audit L7). That was removed — approval
+// drafts no longer expire by age for any tool; a parked approval waits
+// for a human decision instead of being force-escalated. (The expiry
+// sweep was also silently broken in prod: it interpolated a raw JS Date
+// into a drizzle `sql` fragment, which throws and was swallowed.)
 
 import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
@@ -25,7 +23,6 @@ import {
 } from "@support-agent/agent-core";
 import {
   ApprovalService,
-  CaseLifecycleWriter,
   CaseRepository,
   makeEnqueuedWorkflowEvent,
 } from "@support-agent/services";
@@ -52,7 +49,6 @@ export interface ApprovalMaintenanceOptions {
 }
 
 export interface ApprovalMaintenanceResult {
-  readonly expired: number;
   readonly republished: number;
 }
 
@@ -61,52 +57,30 @@ export const runApprovalMaintenanceOnce = (
 ): Effect.Effect<
   ApprovalMaintenanceResult,
   never,
-  ApprovalService | CaseRepository | CaseLifecycleWriter
+  ApprovalService | CaseRepository
 > =>
   Effect.gen(function* () {
     const approvals = yield* ApprovalService;
     const cases = yield* CaseRepository;
-    const lifecycle = yield* CaseLifecycleWriter;
     const now = opts.now ?? new Date();
     const limit = opts.limit ?? DEFAULT_LIMIT;
 
-    // 1. Expiry (L7).
-    const expiredRows = yield* approvals
-      .expireOverdue(now, limit)
-      .pipe(Effect.catchAll(() => Effect.succeed([] as const)));
-    let expired = 0;
-    for (const approval of expiredRows) {
-      expired += 1;
-      // Park the case for a human — but only when it is still waiting on
-      // this approval; anything else means the case moved on already.
-      yield* lifecycle
-        .escalateToHuman({
-          caseId: approval.caseId,
-          tenantId: approval.tenantId,
-          actor: { type: "system", id: "approval-maintenance" },
-          reason: "approval_expired",
-          onlyFromStatus: "waiting_for_approval",
-          details: {
-            approvalId: approval.id,
-            expiresAt: approval.expiresAt.toISOString(),
-          },
-        })
-        .pipe(
-          Effect.catchAllCause((cause) =>
-            Effect.logError(
-              `[approval-maintenance] failed to escalate case ${approval.caseId}: ${String(cause)}`,
-            ),
-          ),
-        );
-    }
-
-    // 2. Republish (L3b).
+    // Republish (L3b). Decided rows whose case never resumed because the
+    // workflow event was lost between decision-commit and publish.
     const decidedUnresumed = yield* approvals
       .listDecidedUnresumed({
         decidedBefore: new Date(now.getTime() - REPUBLISH_GRACE_MS),
         limit,
       })
-      .pipe(Effect.catchAll(() => Effect.succeed([] as const)));
+      .pipe(
+        // Never swallow silently: a masked DB error here is exactly what
+        // hid the broken date-comparison sweep in prod for 10 days.
+        Effect.catchAll((error) =>
+          Effect.logError(
+            `[approval-maintenance] listDecidedUnresumed failed: ${String(error)}`,
+          ).pipe(Effect.as([] as const)),
+        ),
+      );
     let republished = 0;
     for (const approval of decidedUnresumed) {
       // Re-check the case status — the in-memory Test layer over-returns,
@@ -146,7 +120,7 @@ export const runApprovalMaintenanceOnce = (
       );
     }
 
-    return { expired, republished };
+    return { republished };
   });
 
 interface RegisterOptions {
@@ -206,15 +180,15 @@ export const registerApprovalMaintenance = async (
               (cause): Effect.Effect<ApprovalMaintenanceResult> => {
                 // eslint-disable-next-line no-console
                 console.error("[approval-maintenance] pass crashed:", cause);
-                return Effect.succeed({ expired: 0, republished: 0 });
+                return Effect.succeed({ republished: 0 });
               },
             ),
           ),
         );
-        if (result.expired > 0 || result.republished > 0) {
+        if (result.republished > 0) {
           // eslint-disable-next-line no-console
           console.log(
-            `[approval-maintenance] expired=${result.expired} republished=${result.republished}`,
+            `[approval-maintenance] republished=${result.republished}`,
           );
         }
       }

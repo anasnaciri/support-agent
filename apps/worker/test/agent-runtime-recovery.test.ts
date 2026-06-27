@@ -386,7 +386,7 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     managerId: UserId("manager-1"),
   });
 
-  it("does not execute an expired pending approval", async () => {
+  it("executes a stale (past-expiry) pending approval — tool age never blocks", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
@@ -407,6 +407,8 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           proposedInput: { amount: 5 },
           reasoning: "test",
           riskLevel: "medium",
+          // Drafted over a day ago. Approval drafts no longer expire by
+          // age for any tool, so resume must still run the gated tool.
           expiresAt: new Date(Date.now() - 60_000),
         });
         const result = yield* runtime.handleEvent(
@@ -417,9 +419,9 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
       }),
     );
 
-    expect(counter.count).toBe(0);
-    expect(out.result.type).toBe("HumanTakeoverRequired");
-    expect(out.fetched.status).toBe("human_takeover");
+    expect(counter.count).toBe(1);
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
   });
 
   it("parks when an approved tool is no longer registered", async () => {

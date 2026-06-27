@@ -126,16 +126,6 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
-     * Flip `pending` rows past their `expiresAt` to `expired` (audit L7).
-     * Returns the rows it expired so the caller can escalate their cases.
-     * CAS on pending — racing deciders win cleanly.
-     */
-    readonly expireOverdue: (
-      now: Date,
-      limit?: number,
-    ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
-
-    /**
      * Decided (approved/rejected) approvals older than `decidedBefore`
      * whose case is STILL parked in `waiting_for_approval` (audit L3b):
      * the decision committed but the workflow event was never published
@@ -250,20 +240,6 @@ export const ApprovalServiceTest = Layer.effect(
           },
           input.tenantId,
         ),
-
-      expireOverdue: (now, limit = 100) =>
-        Effect.sync(() => {
-          const expired: Approval[] = [];
-          for (const a of store.values()) {
-            if (expired.length >= limit) break;
-            if (a.status !== "pending") continue;
-            if (a.expiresAt.getTime() >= now.getTime()) continue;
-            const next: Approval = { ...a, status: "expired" };
-            store.set(a.id, next);
-            expired.push(next);
-          }
-          return expired;
-        }),
 
       // In-memory approximation: no case table to join, so this returns
       // decided rows older than the cutoff; the maintenance sweep

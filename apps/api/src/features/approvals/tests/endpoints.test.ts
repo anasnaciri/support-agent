@@ -332,7 +332,7 @@ describe("decideApproval — orchestration", () => {
     expect(published).toHaveLength(0);
   });
 
-  it("refuses to decide an expired pending approval (audit L7)", async () => {
+  it("decides a stale (past-expiry) pending approval — tool age never blocks", async () => {
     const env = makeLayer();
     const { row, token } = seedAndSign(env, "approve", {
       expiresAt: new Date(Date.now() - 60_000),
@@ -348,11 +348,9 @@ describe("decideApproval — orchestration", () => {
         published.push(e);
       },
     });
-    expect(outcome.kind).toBe("expired");
-    expect(published).toHaveLength(0);
-    const page = renderApprovalPage(outcome, "approve");
-    expect(page.status).toBe(410);
-    expect(page.body.toLowerCase()).toContain("expired");
+    expect(outcome.kind).toBe("decided");
+    expect(published).toHaveLength(1);
+    expect(published[0]?.type).toBe("approval.approved");
   });
 
   it("rejects a token signed with the wrong key", async () => {

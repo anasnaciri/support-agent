@@ -140,4 +140,38 @@ describeIfDb("ApprovalService (Live, integration)", () => {
       expect(a.tenantId).toBe(tenantId);
     }
   });
+
+  // Regression (prod, 2026-06-27): listDecidedUnresumed interpolated a raw
+  // JS Date into a drizzle `sql` fragment (`sql`${decidedAt} < ${date}``),
+  // which the postgres driver rejects with
+  // `TypeError: ... Received an instance of Date`. The error was masked and
+  // the L3b republish sweep silently never ran. Only a real-DB seam catches
+  // it — the in-memory Test layer doesn't touch drizzle. Must run against PG.
+  it("listDecidedUnresumed runs against postgres and returns decided-but-parked rows", async () => {
+    // Park the shared case so the inner join on case status matches.
+    await raw!.db
+      .update(cases)
+      .set({ status: "waiting_for_approval" })
+      .where(sql`${cases.id} = ${caseId}`);
+    const result = await runLive(
+      Effect.gen(function* () {
+        const svc = yield* ApprovalService;
+        const created = yield* svc.create(sample());
+        const approved = yield* svc.approve({
+          id: created.id,
+          decidedBy: UserId(randomUUID()),
+        });
+        // Cutoff in the future so the just-decided row qualifies. With the
+        // old raw-Date code this call THREW; with lt() it resolves.
+        const found = yield* svc.listDecidedUnresumed({
+          decidedBefore: new Date(Date.now() + 60 * 60_000),
+        });
+        return { approvedId: approved.id, found };
+      }),
+    );
+    expect(result.found.map((a) => a.id)).toContain(result.approvedId);
+    for (const a of result.found) {
+      expect(["approved", "rejected"]).toContain(a.status);
+    }
+  });
 });

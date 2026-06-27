@@ -62,7 +62,13 @@ export interface SignApprovalTokenInput {
   readonly nowMs?: number;
 }
 
-export const DEFAULT_APPROVAL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+// The emailed approve/reject link is a bearer credential sitting in a
+// manager's inbox, so it still carries a TTL (the authenticated dashboard
+// is the no-expiry path). 30 days: long enough that a manager who acts
+// days later isn't dead-ended, short enough to cap a leaked-link window.
+// NOTE: this bounds only the signed LINK — the approval row itself no
+// longer expires; tool age never blocks a decision.
+export const DEFAULT_APPROVAL_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const signApprovalToken = (input: SignApprovalTokenInput): string => {
   const now = input.nowMs ?? Date.now();

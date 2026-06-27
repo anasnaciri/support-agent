@@ -473,23 +473,6 @@ const AgentRuntimeLayer = Layer.effect(
                 reason: "approval_not_runnable",
               } as const;
             }
-            // Expiry (audit L7): an undecided row past its expiry must not
-            // run a stale draft. (Rows already flipped to `approved` were
-            // validated at decision time; queue latency after a timely
-            // decision is fine.)
-            if (
-              approval.status === "pending" &&
-              approval.expiresAt.getTime() < Date.now()
-            ) {
-              yield* escalateToHuman(working.id, "approval_expired", {
-                approvalId: approval.id,
-                expiresAt: approval.expiresAt.toISOString(),
-              });
-              return {
-                type: "HumanTakeoverRequired",
-                reason: "approval_expired",
-              } as const;
-            }
             const toolToRun = yield* tools.tryGet(approval.tool);
             if (!toolToRun) {
               yield* escalateToHuman(working.id, "approved_tool_unavailable", {

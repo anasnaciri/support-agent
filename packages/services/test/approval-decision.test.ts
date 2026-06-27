@@ -145,12 +145,14 @@ describe("applyApprovalDecision", () => {
     }
   });
 
-  it("refuses to decide an expired pending approval (audit L7)", async () => {
+  it("decides a stale (past-expiry) pending approval — tool age never blocks", async () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
       caseId: caseA,
       agentId,
+      // Drafted well over a day ago. Approval drafts no longer expire by
+      // age for ANY tool, so a late decision must still go through.
       expiresAt: new Date(Date.now() - 60_000),
     });
     const result = await Effect.runPromise(
@@ -163,10 +165,9 @@ describe("applyApprovalDecision", () => {
         svc.layer,
       ),
     );
-    expect(result.kind).toBe("expired");
-    // The row must NOT have been flipped to approved.
+    expect(result.kind).toBe("decided");
     const after = svc.store.get(row.id);
-    expect(after?.status).toBe("pending");
+    expect(after?.status).toBe("approved");
   });
 
   it("approves with manager-edited approvedInput (Edit-and-Approve path)", async () => {

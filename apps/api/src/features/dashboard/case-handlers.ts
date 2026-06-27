@@ -506,12 +506,7 @@ export const handleDashboardApprovalAction =
         );
       }
     }
-    const status =
-      result.kind === "approval_not_found"
-        ? 404
-        : result.kind === "expired"
-          ? 410
-          : 200;
+    const status = result.kind === "approval_not_found" ? 404 : 200;
     return sendJson(res, status, result);
   };
 
