@@ -83,6 +83,13 @@ export interface CancelPendingForCaseInput {
   readonly decisionReason: string;
 }
 
+export interface SupersedePendingForCaseInput {
+  readonly tenantId: TenantId;
+  readonly caseId: CaseId;
+  /** Recorded as the cancelled rows' decisionReason (audit trail). */
+  readonly reason: string;
+}
+
 // ============================================================
 // Tag
 // ============================================================
@@ -134,6 +141,18 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
      */
     readonly cancelPendingForCase: (
       input: CancelPendingForCaseInput,
+    ) => Effect.Effect<number, ApprovalServiceError>;
+
+    /**
+     * Supersede every pending approval for a case: a SYSTEM-initiated cancel
+     * (status → `cancelled`, `decidedBy` null) used when the agent re-engages a
+     * case and re-decides — the prior run's still-pending proposals (e.g. a draft
+     * reply queued before a supplier replied) are stale and the new run replaces
+     * them. Distinct from `cancelPendingForCase` (a human/manual reject that
+     * needs a `decidedBy`). Returns the number of rows changed.
+     */
+    readonly supersedePendingForCase: (
+      input: SupersedePendingForCaseInput,
     ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
@@ -309,6 +328,25 @@ export const ApprovalServiceTest = Layer.effect(
             canceled += 1;
           }
           return canceled;
+        }),
+
+      supersedePendingForCase: (input) =>
+        Effect.sync(() => {
+          let superseded = 0;
+          for (const [id, approval] of store.entries()) {
+            if (approval.tenantId !== input.tenantId) continue;
+            if (approval.caseId !== input.caseId) continue;
+            if (approval.status !== "pending") continue;
+            store.set(id, {
+              ...approval,
+              status: "cancelled",
+              decidedBy: null,
+              decidedAt: new Date(),
+              decisionReason: input.reason,
+            });
+            superseded += 1;
+          }
+          return superseded;
         }),
     });
   }),

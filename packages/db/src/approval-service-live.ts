@@ -268,6 +268,35 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
+    const supersedePendingForCase = (input: {
+      readonly tenantId: TenantId;
+      readonly caseId: CaseId;
+      readonly reason: string;
+    }): Effect.Effect<number, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "supersedePendingForCase",
+          db
+            .update(approvals)
+            .set({
+              status: "cancelled",
+              decidedAt: new Date(),
+              decidedBy: null,
+              decisionReason: input.reason,
+            })
+            .where(
+              and(
+                eq(approvals.tenantId, input.tenantId),
+                eq(approvals.caseId, input.caseId),
+                eq(approvals.status, "pending"),
+              ),
+            )
+            .returning({ id: approvals.id }),
+        );
+        return rows.length;
+      });
+
     const listForCase = (
       tenantId: TenantId,
       caseId: CaseId,
@@ -331,6 +360,7 @@ export const ApprovalServiceLive = Layer.effect(
       listPending,
       listForCase,
       cancelPendingForCase,
+      supersedePendingForCase,
       listDecidedUnresumed,
     });
   }),

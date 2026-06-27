@@ -2016,6 +2016,41 @@ const AgentRuntimeLayer = Layer.effect(
               return { agent, current, done: null };
             });
 
+          // Re-engagement supersede (autonomous loop): a fresh run re-decides the
+          // case from the CURRENT situation, so any still-pending proposals left
+          // by a PRIOR run — e.g. a draft reply queued before the supplier replied
+          // — are stale. Cancel them so the agent's new drafts REPLACE the old
+          // ones instead of piling up two emails for the operator to approve.
+          // Best-effort. In practice this only fires for the orphan case (a queued
+          // draft left when an auto `supplier.escalate` parked the case for the
+          // supplier mid-tick); the approval-park guard keeps the agent from
+          // running at all while a case is `waiting_for_approval`.
+          if (agent.autonomousLoop) {
+            const superseded = yield* approvals
+              .supersedePendingForCase({
+                tenantId: current.tenantId,
+                caseId: current.id,
+                reason: "superseded by agent re-engagement",
+              })
+              .pipe(Effect.catchAll(() => Effect.succeed(0)));
+            if (superseded > 0) {
+              yield* tx
+                .run(
+                  audit.record({
+                    tenantId: current.tenantId,
+                    caseId: current.id,
+                    actor: { type: "agent", id: agent.id },
+                    action: "approval.superseded",
+                    details: {
+                      count: superseded,
+                      reason: "agent re-engagement",
+                    },
+                  }),
+                )
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
+          }
+
           for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
             const schemas = yield* tools.schemasFor(agent.tools);
             // BYOK: surface missing/revoked per-tenant LLM credentials as

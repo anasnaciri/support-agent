@@ -1063,3 +1063,78 @@ describe("per-action approval — no case with pending actions resolves", () => 
     expect(out.final.status).toBe("waiting_for_supplier");
   });
 });
+
+describe("re-engagement supersedes stale drafts", () => {
+  it("cancels a leftover pending draft when the agent re-runs and drafts a fresh one", async () => {
+    const convo = makeConversationServiceTest({});
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "c0",
+        tool: "conversation.reply",
+        input: replyInput("fresh", "cust@example.com"),
+      },
+      { type: "final_message", text: "Drafted a fresh reply after re-engaging." },
+    ];
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* repo.create({
+            tenantId: TenantId(TENANT),
+            channel: "email",
+            currentAgentId: AgentId("scenario-resolution-agent"),
+            subject: "Need help",
+            threadId: "thread-x" as never,
+            mailbox: "support@store.test",
+          });
+          // A draft left pending by a PRIOR run (the auto-escalate orphan).
+          const stale = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AgentId("scenario-resolution-agent"),
+            tool: "conversation.reply",
+            proposedInput: replyInput("stale", "cust@example.com"),
+            reasoning: "old draft, before the situation changed",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+
+          // The agent re-engages and drafts a fresh reply.
+          const result = yield* runtime.handleEvent({
+            type: "customer.replied",
+            caseId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-2",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Need help",
+              bodyText: "Any update?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+
+          const staleAfter = yield* approvals.getById(stale.id);
+          const pending = yield* approvals.listPending(TenantId(TENANT));
+          return { result, staleAfter, pending };
+        }),
+        makeLayer(loopAgent(), script),
+      ),
+    );
+
+    // The old draft was superseded (cancelled), not left to pile up.
+    expect(out.staleAfter.status).toBe("cancelled");
+    // Only the fresh draft is awaiting approval.
+    expect(
+      out.pending.map((a) => (a.proposedInput as { draftId: string }).draftId),
+    ).toEqual(["fresh"]);
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+  });
+});
