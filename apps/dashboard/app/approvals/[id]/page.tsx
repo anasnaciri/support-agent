@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { Clock } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { approvalStatusLabel, toolActionLabel } from "@/lib/labels";
@@ -7,6 +8,7 @@ import {
   approvalStatusVariant,
   riskVariant,
 } from "@/lib/status-variants";
+import { draftStaleness } from "@/lib/draft-staleness";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
@@ -35,6 +37,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
     proposed && typeof proposed["bodyText"] === "string"
       ? (proposed["bodyText"] as string)
       : null;
+  const staleness = isPending ? draftStaleness(row.createdAt) : null;
 
   return (
     <div className="space-y-6">
@@ -77,6 +80,16 @@ export default async function ApprovalDetailPage({ params }: Params) {
           </span>
         </div>
       </div>
+
+      {staleness ? (
+        <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+          <Clock className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+          <p>
+            Drafted {staleness.ageLabel} ago — the order, policy, or
+            conversation may have changed since. Review before sending.
+          </p>
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader>

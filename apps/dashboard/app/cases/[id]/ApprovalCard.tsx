@@ -1,6 +1,6 @@
 import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 import Link from "next/link";
-import { ClipboardCheck, Lightbulb } from "lucide-react";
+import { ClipboardCheck, Clock, Lightbulb } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
 import { toolActionLabel } from "@/lib/labels";
@@ -13,6 +13,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { riskVariant } from "@/lib/status-variants";
+import { draftStaleness } from "@/lib/draft-staleness";
 
 import { approveAction, rejectAction } from "../../approvals/[id]/actions";
 import {
@@ -105,6 +106,7 @@ export const ApprovalCard = ({
     proposed && typeof proposed["bodyText"] === "string"
       ? (proposed["bodyText"] as string)
       : null;
+  const staleness = draftStaleness(approval.createdAt);
 
   return (
     <Card className="border-warning/40 bg-warning/5">
@@ -133,6 +135,16 @@ export const ApprovalCard = ({
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-0">
+        {staleness ? (
+          <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
+            <Clock className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+            <p>
+              Drafted {staleness.ageLabel} ago — the order, policy, or
+              conversation may have changed since. Review before sending.
+            </p>
+          </div>
+        ) : null}
+
         {approval.reasoning ? (
           <p className="text-sm">{approval.reasoning}</p>
         ) : null}
