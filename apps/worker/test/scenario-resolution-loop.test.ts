@@ -33,6 +33,7 @@ import {
   makeConversationServiceTest,
   PlatformMailServiceTest,
   ShopifyServiceTest,
+  SupplierEscalationServiceTest,
   TenantAgentOverridesServiceTest,
   TenantRepositoryTest,
   TenantSettings,
@@ -869,5 +870,196 @@ describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle 
     // The resume executed the bundle and resolved the case.
     expect(out.tick2?.type).toBe("Completed");
     expect(out.final.status).toBe("resolved");
+  });
+});
+
+// ------------------------------------------------------------
+// Per-action approval — a case with PENDING actions never resolves; an
+// approved supplier escalation waits on the supplier (not resolution).
+// ------------------------------------------------------------
+const EXPIRES = new Date(Date.now() + 60_000);
+const AGENT_ID = AgentId("scenario-resolution-agent");
+const MGR = UserId("manager-1");
+
+const partialLayer = (
+  convo: ReturnType<typeof makeConversationServiceTest>,
+  extra: ReadonlyArray<Layer.Layer<never, never, never>> = [],
+) => {
+  const env = Layer.mergeAll(
+    CaseRepositoryTest,
+    AuditLogServiceTest,
+    ApprovalServiceTest,
+    AgentResolverTest([loopAgent()]),
+    ToolRegistryWith(ALL_TOOLS),
+    PermissionServiceDefault,
+    LLMServiceScripted([]),
+    TransactionRunnerPassthrough,
+    ShopifyServiceTest({}),
+    convo.layer,
+    approvalLinkLayer,
+    platformMailNoop,
+    tenantOverridesEmpty,
+    tenantRepoDefault,
+    ...extra,
+  );
+  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+};
+
+const seedParkedCase = (repo: typeof CaseRepository.Service, threadId = "thread-x") =>
+  Effect.gen(function* () {
+    const created = yield* repo.create({
+      tenantId: TenantId(TENANT),
+      channel: "email",
+      currentAgentId: AGENT_ID,
+      subject: "Need help",
+      threadId: threadId as never,
+      mailbox: "support@store.test",
+    });
+    yield* repo.transitionStatus(created.id, "in_progress", {
+      tenantId: TenantId(TENANT),
+      reason: "setup",
+    });
+    yield* repo.transitionStatus(created.id, "waiting_for_approval", {
+      tenantId: TenantId(TENANT),
+      reason: "setup: bundle queued",
+    });
+    return created;
+  });
+
+describe("per-action approval — no case with pending actions resolves", () => {
+  it("executes an approved action but keeps the case parked while another is pending, then resolves once the last is approved", async () => {
+    const convo = makeConversationServiceTest({});
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* seedParkedCase(repo);
+          const refund = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AGENT_ID,
+            tool: "refund.create",
+            proposedInput: {
+              orderId: "gid://shopify/Order/1001",
+              amount: { amount: "10.00", currencyCode: "USD" },
+              reason: "approved item",
+            },
+            reasoning: "",
+            riskLevel: "high",
+            expiresAt: EXPIRES,
+          });
+          const reply = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AGENT_ID,
+            tool: "conversation.reply",
+            proposedInput: replyInput("a", "cust@example.com"),
+            reasoning: "",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+
+          // Approve ONLY the refund.
+          yield* approvals.approve({
+            id: refund.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const r1 = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: refund.id as never,
+            caseId: created.id,
+            managerId: MGR,
+          });
+          const afterFirst = yield* repo.getById(created.id);
+          const pendingAfterFirst = yield* approvals.listPending(
+            TenantId(TENANT),
+          );
+          const sentAfterFirst = convo.handle.sent.length;
+
+          // Approve the reply too.
+          yield* approvals.approve({
+            id: reply.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const r2 = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: reply.id as never,
+            caseId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return {
+            r1,
+            afterFirst,
+            pendingAfterFirst,
+            sentAfterFirst,
+            r2,
+            final,
+          };
+        }),
+        partialLayer(convo),
+      ),
+    );
+
+    // Refund executed, but the case is NOT resolved — the reply still pends.
+    expect(out.r1.type).toBe("PausedWaitingForApproval");
+    expect(out.afterFirst.status).toBe("waiting_for_approval");
+    expect(out.pendingAfterFirst.map((a) => a.tool)).toEqual([
+      "conversation.reply",
+    ]);
+    expect(out.sentAfterFirst).toBe(0);
+    // Approving the last pending action resolves the case + sends the reply.
+    expect(out.r2.type).toBe("Completed");
+    expect(out.final.status).toBe("resolved");
+    expect(convo.handle.sent.map((s) => (s.input as { draftId: string }).draftId)).toEqual([
+      "a",
+    ]);
+  });
+
+  it("parks waiting_for_supplier (not resolved) when an approved action escalates to a supplier", async () => {
+    const convo = makeConversationServiceTest({});
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* seedParkedCase(repo);
+          const esc = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AGENT_ID,
+            tool: "supplier.escalate",
+            proposedInput: { problem: "unit damaged in transit, please reship" },
+            reasoning: "",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: esc.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: esc.id as never,
+            caseId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(convo, [SupplierEscalationServiceTest({})]),
+      ),
+    );
+
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.final.status).toBe("waiting_for_supplier");
   });
 });

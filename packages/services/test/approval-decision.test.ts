@@ -503,6 +503,44 @@ describe("decideApprovalBundle", () => {
     expect(store.get(b.id)?.status).toBe("rejected");
   });
 
+  it("reject only decides the still-pending rows, leaving an already-approved row untouched", async () => {
+    // Per-action flow: the operator approved one action earlier, then rejects.
+    // Reject must only reject the REMAINING (pending) rows — never un-decide the
+    // one already approved (and executed).
+    const { layer, seed, store } = makeService();
+    const caseId = CaseId("case-mixed");
+    const approved = seed({
+      tenantId: TENANT,
+      caseId,
+      agentId: AGENT,
+      tool: "refund.create",
+      status: "approved",
+    });
+    const pending = seed({
+      tenantId: TENANT,
+      caseId,
+      agentId: AGENT,
+      tool: "conversation.reply",
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        decideApprovalBundle({
+          tenantId: TENANT,
+          caseId,
+          action: "reject",
+          managerId: MANAGER,
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.pendingCount).toBe(1);
+    expect(out.decidedCount).toBe(1);
+    expect(store.get(approved.id)?.status).toBe("approved"); // untouched
+    expect(store.get(pending.id)?.status).toBe("rejected");
+  });
+
   it("applies a per-approval edited input on approve", async () => {
     const { layer, seed, store } = makeService();
     const caseId = CaseId("case-E");

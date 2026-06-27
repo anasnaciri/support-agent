@@ -430,12 +430,17 @@ const AgentRuntimeLayer = Layer.effect(
         // Execute ONE approved approval row: re-validate the input, re-check
         // policy (deny-only), dedup, run the tool, audit. Returns a terminal
         // WorkflowResult on any problem (so bundle resume STOPS and the case
-        // parks for a human), or `null` on success — the case is NOT resolved
-        // here. Bundle resume resolves once, after the whole bundle has run.
+        // parks for a human), or `{ ok, tool, result }` on success — the case is
+        // NOT resolved here. The caller decides the case outcome once every
+        // approved row has run (and never while other rows are still pending).
         const executeOneApproval = (
           approval: Approval,
           event: Extract<DomainEvent, { type: "approval.approved" }>,
-        ): Effect.Effect<WorkflowResult | null, unknown> =>
+        ): Effect.Effect<
+          | WorkflowResult
+          | { readonly ok: true; readonly tool: string; readonly result: unknown },
+          unknown
+        > =>
           Effect.gen(function* () {
             const toolToRun = yield* tools.tryGet(approval.tool);
             if (!toolToRun) {
@@ -647,7 +652,7 @@ const AgentRuntimeLayer = Layer.effect(
             // The approved reply went out — index its Message-ID for correlation
             // of the customer's eventual reply (best-effort, no-op otherwise).
             yield* recordOutboundReplyId(working, approval.tool, exec.right);
-            return null;
+            return { ok: true as const, tool: approval.tool, result: exec.right };
           });
 
         const resumeApprovedTool = (
@@ -696,7 +701,9 @@ const AgentRuntimeLayer = Layer.effect(
             const all = yield* approvals
               .listForCase(working.tenantId, working.id)
               .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
-            let bundle = all.filter((a) => a.status === "approved");
+            const approvedRows = all.filter((a) => a.status === "approved");
+            let bundle = approvedRows;
+            let usedFallback = false;
             if (bundle.length === 0) {
               // The trigger hasn't been observed as `approved` yet (a lean
               // ApprovalService without listForCase, or an event that raced the
@@ -717,14 +724,51 @@ const AgentRuntimeLayer = Layer.effect(
                 } as const;
               }
               bundle = [trigger];
+              usedFallback = true;
             }
+            const ran: Array<{ readonly tool: string; readonly result: unknown }> =
+              [];
             for (const approval of bundle) {
               const outcome = yield* executeOneApproval(approval, event);
-              // A terminal outcome means this action failed / couldn't run; the
-              // case is already parked. Stop — don't run later bundle actions.
-              if (outcome) return outcome;
+              // A WorkflowResult (no `ok`) means this action failed / couldn't
+              // run; the case is already parked. Stop — don't run later actions.
+              if (!("ok" in outcome)) return outcome;
+              ran.push({ tool: outcome.tool, result: outcome.result });
             }
-            // The whole bundle executed — resolve once.
+            // Per-action approval: NEVER resolve a case that still has actions
+            // awaiting a decision. The operator may approve some now and decide
+            // the rest later; keep the case parked until every row is decided.
+            const stillPending = usedFallback
+              ? []
+              : all.filter((a) => a.status === "pending");
+            if (stillPending.length > 0) {
+              return {
+                type: "PausedWaitingForApproval",
+                approvalId: stillPending[0]!.id,
+              } as const;
+            }
+            // All actions decided. If one was a supplier escalation, the case is
+            // now waiting on the SUPPLIER (not done): park `waiting_for_supplier`
+            // so the agent re-engages on `supplier.updated`, exactly like the
+            // in-loop escalate path. A `no_supplier` escalate (escalated:false)
+            // is not a wait — it falls through to resolve.
+            const escalatedToSupplier = ran.some(
+              (r) =>
+                r.tool === "supplier.escalate" &&
+                (r.result as { readonly escalated?: boolean } | null)
+                  ?.escalated === true,
+            );
+            if (escalatedToSupplier) {
+              working = yield* lifecycle.parkWaitingForSupplier({
+                caseId: working.id,
+                tenantId: working.tenantId,
+                agentId: trigger.agentId,
+                tool: "supplier.escalate",
+                callId: `approval-${trigger.id}`,
+              });
+              return { type: "PausedWaitingForSupplier" } as const;
+            }
+            // Nothing left to wait on — resolve once.
             working = yield* lifecycle.resolve({
               caseId: working.id,
               tenantId: working.tenantId,
