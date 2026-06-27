@@ -308,6 +308,7 @@ export const handleDashboardCaseShopify = async (
         const customer = yield* resolveCustomerForContext(
           TenantId(auth.tenantId),
           context,
+          order,
         );
         return { kind: "ok" as const, customer, order, shopDomain };
       }),

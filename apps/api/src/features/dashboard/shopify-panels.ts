@@ -74,22 +74,64 @@ export const resolveShopCurrencyCode = (
   });
 
 /**
- * Best-effort customer for a case's `shopifyCustomerId` (preferred) or
- * `customerEmail`. Errors map to null.
+ * Single source of truth for the case's customer, resolved through ONE ordered
+ * chain of fallbacks (never several independent lookups racing to fill the same
+ * slot). Precedence, most-trusted first:
+ *
+ *   1. `shopifyCustomerId` — the CANONICAL id the runtime stamps only on a
+ *      positive email match (`agent-runtime` enrichCase). Trusted; agents
+ *      cannot write it.
+ *   2. the bound order's `customerId` — when the order resolved but the sender
+ *      address didn't match (a typo'd-at-checkout email), the order still
+ *      carries its real customer. This is what keeps the panel from showing
+ *      "No matching Shopify customer" on an otherwise-identified case.
+ *   3. `searchByEmail(customerEmail)` — the sender address, in case Shopify
+ *      creds were connected only after the case was created (so step 1 never
+ *      ran) and the addresses do line up.
+ *   4. `identifiedCustomerId` — the UNTRUSTED hint an agent recorded via
+ *      `case.update_context`. Last resort, never ahead of the verified id.
+ *
+ * `boundOrder` is the already-resolved order from `resolveOrderForContext`
+ * (the caller resolves it first), passed in so we don't fetch it twice. Every
+ * step is best-effort: any failure falls through to the next, and an
+ * all-misses chain resolves to null so the panel renders its empty state.
  */
 export const resolveCustomerForContext = (
   tenantId: TenantId,
   context: CaseContext,
+  boundOrder: ShopifyOrder | null,
 ): Effect.Effect<ShopifyCustomer | null, never, ShopifyService> =>
   Effect.gen(function* () {
-    const idRaw = context["shopifyCustomerId"];
-    const emailRaw = context["customerEmail"];
-    if (!isNonEmptyString(idRaw) && !isNonEmptyString(emailRaw)) return null;
     const shopify = yield* ShopifyService;
-    const lookup = isNonEmptyString(idRaw)
-      ? shopify.getCustomer(tenantId, CustomerId(idRaw))
-      : isNonEmptyString(emailRaw)
-        ? shopify.searchByEmail(tenantId, emailRaw)
-        : Effect.succeed(null);
-    return yield* lookup.pipe(Effect.catchAll(() => Effect.succeed(null)));
+    const byId = (id: string) =>
+      shopify
+        .getCustomer(tenantId, CustomerId(id))
+        .pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+    const canonical = context["shopifyCustomerId"];
+    if (isNonEmptyString(canonical)) {
+      const c = yield* byId(canonical);
+      if (c) return c;
+    }
+
+    if (boundOrder?.customerId) {
+      const c = yield* byId(boundOrder.customerId);
+      if (c) return c;
+    }
+
+    const email = context["customerEmail"];
+    if (isNonEmptyString(email)) {
+      const c = yield* shopify
+        .searchByEmail(tenantId, email)
+        .pipe(Effect.catchAll(() => Effect.succeed(null)));
+      if (c) return c;
+    }
+
+    const hint = context["identifiedCustomerId"];
+    if (isNonEmptyString(hint)) {
+      const c = yield* byId(hint);
+      if (c) return c;
+    }
+
+    return null;
   });

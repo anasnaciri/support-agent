@@ -4,6 +4,7 @@ import {
   CustomerId,
   OrderId,
   TenantId,
+  type ShopifyCustomer,
   type ShopifyOrder,
 } from "@support-agent/agent-core";
 import { ShopifyServiceTest } from "@support-agent/services";
@@ -11,6 +12,7 @@ import {
   isNonEmptyString,
   looksLikeGid,
   looksLikeOrderName,
+  resolveCustomerForContext,
   resolveOrderForContext,
 } from "../shopify-panels.js";
 
@@ -86,6 +88,113 @@ describe("resolveOrderForContext", () => {
     );
     expect(result?.id).toBe("gid://shopify/Order/12345");
     expect(result?.confirmationNumber).toBe("XPAV284CT");
+  });
+});
+
+const buildCustomer = (id: string, email: string): ShopifyCustomer => ({
+  id: CustomerId(id),
+  email,
+  firstName: "Sue",
+  lastName: "Smith",
+  phone: null,
+  ordersCount: 3,
+  totalSpent: { amount: "120.00", currencyCode: "USD" },
+  defaultAddress: null,
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
+});
+
+describe("resolveCustomerForContext (single source of truth, with fallbacks)", () => {
+  it("resolves the canonical shopifyCustomerId exactly via getCustomer", async () => {
+    // The runtime-verified id wins over everything else.
+    const cust = buildCustomer("gid://shopify/Customer/777", "sue@example.com");
+    const env = ShopifyServiceTest({
+      customers: new Map([[CustomerId("gid://shopify/Customer/777"), cust]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          { shopifyCustomerId: "gid://shopify/Customer/777" },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/777");
+  });
+
+  it("falls back to the bound order's customer when the sender email doesn't match (typo case)", async () => {
+    // The customer typo'd their email at checkout: searchByEmail on the sender
+    // address finds nothing and the runtime never stamped shopifyCustomerId —
+    // but the resolved order still carries the customer. This is the fix for
+    // the "No matching Shopify customer" panel on a typo'd-email case.
+    const cust = buildCustomer(
+      "gid://shopify/Customer/777",
+      "sue.typo@example.com",
+    );
+    const order = buildOrder("gid://shopify/Order/12345"); // customerId -> 777
+    const env = ShopifyServiceTest({
+      customers: new Map([[CustomerId("gid://shopify/Customer/777"), cust]]),
+      // The sender address is deliberately absent from customersByEmail.
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          { customerEmail: "sue@example.com" },
+          order,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/777");
+  });
+
+  it("falls back to searchByEmail on the sender address when there is no id or bound order", async () => {
+    const cust = buildCustomer(
+      "gid://shopify/Customer/888",
+      "match@example.com",
+    );
+    const env = ShopifyServiceTest({
+      customersByEmail: new Map([["match@example.com", cust]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          { customerEmail: "match@example.com" },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/888");
+  });
+
+  it("falls back to the agent-provided identifiedCustomerId hint as a last resort", async () => {
+    const cust = buildCustomer("gid://shopify/Customer/999", "hint@example.com");
+    const env = ShopifyServiceTest({
+      customers: new Map([[CustomerId("gid://shopify/Customer/999"), cust]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          { identifiedCustomerId: "gid://shopify/Customer/999" },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/999");
+  });
+
+  it("returns null when nothing resolves", async () => {
+    const env = ShopifyServiceTest({});
+    const result = await Effect.runPromise(
+      Effect.provide(resolveCustomerForContext(TenantId("t1"), {}, null), env),
+    );
+    expect(result).toBeNull();
   });
 });
 
