@@ -4,6 +4,7 @@ import {
   ToolRegistry,
   type AgentConfig,
   type AnyTool,
+  type ApprovalId,
   type ApprovalRiskLevel,
   type CaseChannel,
   type ChatMessage,
@@ -1097,6 +1098,14 @@ const AgentRuntimeLayer = Layer.effect(
           // targets an order belonging to a different customer than the case
           // (prompt-injection scope guard — see refundCustomerMismatchFlag).
           const seenOrderEmails = new Map<string, string | null>();
+          // Autonomous loop (slice 4b/4c): in autonomous mode a gated (`ask`)
+          // tool is QUEUED here (a pending approval row, no park) and the loop
+          // continues; `sentAutoReply` records whether an auto-permitted
+          // customer reply actually went out. At end-of-loop these drive the
+          // status mapping: queued actions → one waiting_for_approval bundle;
+          // else an auto reply sent → resolved; else nothing → human_takeover.
+          const queuedApprovals: ApprovalId[] = [];
+          let sentAutoReply = false;
 
           // Map an LLM call failure to a terminal result: BYOK credential gaps
           // and deterministic failures park for a human; anything else is a
@@ -1247,6 +1256,37 @@ const AgentRuntimeLayer = Layer.effect(
               return {
                 type: "PausedWaitingForApproval",
                 approvalId: approval.id,
+              } as const;
+            });
+
+          // Autonomous loop end-of-run (slice 4c): the agent stopped with one or
+          // more QUEUED gated actions. Park the case ONCE in waiting_for_approval
+          // (a single transition covering the whole bundle) and send ONE merchant
+          // ping. The dashboard (slice 7) is the bundle approve/reject surface;
+          // on approval the runtime executes the queued rows in order (slice 4d).
+          const parkQueuedBundle = (current: typeof working, agent: AgentConfig, turn: number) =>
+            Effect.gen(function* () {
+              const parked = yield* lifecycle.parkForApprovalBundle({
+                caseId: current.id,
+                tenantId: current.tenantId,
+                agentId: agent.id,
+                approvalIds: queuedApprovals,
+                turn,
+              });
+              yield* notifyMerchant(
+                parked.tenantId,
+                approvalRequestedNotification({
+                  caseId: parked.id,
+                  toolName: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"}`,
+                  draftSubject: parked.subject,
+                  draftPreview: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"} are queued and awaiting your approval.`,
+                  approveUrl: `${linkConfig.baseUrl}/cases/${parked.id}`,
+                  rejectUrl: `${linkConfig.baseUrl}/cases/${parked.id}`,
+                }),
+              );
+              return {
+                type: "PausedWaitingForApproval",
+                approvalId: queuedApprovals[0]!,
               } as const;
             });
 
@@ -1520,6 +1560,36 @@ const AgentRuntimeLayer = Layer.effect(
               }
 
               if (effectivePermission === "ask") {
+                // Autonomous loop (slice 4b): a gated action is NON-BLOCKING.
+                // Queue it (pending approval row, NO park) and feed back a
+                // "queued, not executed" observation so the agent keeps looping
+                // and drafts its reply conditionally. The case parks once, as a
+                // bundle, when the loop ends (parkQueuedBundle).
+                if (agent.autonomousLoop) {
+                  const approval = yield* lifecycle.queueApproval({
+                    caseId: current.id,
+                    tenantId: current.tenantId,
+                    agentId: agent.id,
+                    tool: tool.name,
+                    proposedInput: callInput,
+                    reasoning: decision.reasoning ?? "",
+                    riskLevel: riskFor(tool),
+                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    turn,
+                  });
+                  queuedApprovals.push(approval.id);
+                  messages.push({
+                    role: "tool",
+                    toolCallId: decision.callId,
+                    toolName: tool.name,
+                    content: {
+                      queued: true,
+                      executed: false,
+                      note: "Recorded for the merchant to approve; it has NOT run yet. Continue, and write the customer reply conditionally.",
+                    },
+                  });
+                  return { agent, current, done: null };
+                }
                 return {
                   agent,
                   current,
@@ -1639,6 +1709,13 @@ const AgentRuntimeLayer = Layer.effect(
                 // the customer's eventual reply (best-effort, no-op for non-reply
                 // tools).
                 yield* recordOutboundReplyId(current, tool.name, exec.right);
+                // Autonomous loop: an auto-permitted reply that actually went out
+                // (or was deduped from a prior delivery) is the "resolved" signal
+                // at end-of-loop. `ask`-gated replies are queued above and never
+                // reach here, so this only flips on a genuine auto-send.
+                if (tool.name === "conversation.reply") {
+                  sentAutoReply = true;
+                }
                 if (tool.name === "conversation.ask_customer") {
                   current = yield* lifecycle.parkWaitingForCustomer({
                     caseId: current.id,
@@ -1869,6 +1946,15 @@ const AgentRuntimeLayer = Layer.effect(
 
             if (decision.type === "final_message") {
               if (current.status !== "resolved") {
+                // Autonomous loop (slice 4c): the agent stopped with queued gated
+                // actions. Park the whole bundle for one merchant approval rather
+                // than resolving. Checked FIRST so a run that proposed remedies +
+                // a reply parks for sign-off instead of falling through to the
+                // resolve/no-action branches below. On approval the runtime
+                // executes the bundle in order (slice 4d).
+                if (agent.autonomousLoop && queuedApprovals.length > 0) {
+                  return yield* parkQueuedBundle(current, agent, turn);
+                }
                 // GUARD: a routing agent (one with handoff targets, e.g.
                 // triage) must never resolve a case with a bare final
                 // message. Its only legitimate terminal move is
@@ -1909,6 +1995,20 @@ const AgentRuntimeLayer = Layer.effect(
                   return {
                     type: "HumanTakeoverRequired",
                     reason: "unverified order/customer identity mismatch",
+                  } as const;
+                }
+                // Autonomous loop (slice 4c): nothing was queued AND no auto
+                // reply went out — the run produced no customer-facing action.
+                // Never silently resolve (no-silent-resolve invariant); park for
+                // a human to pick up.
+                if (agent.autonomousLoop && !sentAutoReply) {
+                  yield* escalateToHuman(current.id, "autonomous_no_action", {
+                    turn,
+                    finalMessage: decision.text,
+                  });
+                  return {
+                    type: "HumanTakeoverRequired",
+                    reason: "autonomous run produced no actionable result",
                   } as const;
                 }
                 // The lifecycle writer wraps the final transition +
@@ -2063,6 +2163,22 @@ const AgentRuntimeLayer = Layer.effect(
           // Turn budget exhausted — park the case durably (audit L4). Guard
           // against clobbering a terminal status a tool legitimately set on
           // the final turn.
+          // Autonomous loop: if the agent queued gated actions before running
+          // out of turns, don't throw that work away — park the bundle for
+          // approval (the queued reply, if any, still goes out on approve).
+          if (
+            agent.autonomousLoop &&
+            queuedApprovals.length > 0 &&
+            current.status !== "resolved" &&
+            current.status !== "human_takeover" &&
+            current.status !== "waiting_for_approval"
+          ) {
+            return yield* parkQueuedBundle(
+              current,
+              agent,
+              agent.maxTurnsPerTick,
+            );
+          }
           if (
             current.status !== "resolved" &&
             current.status !== "human_takeover"

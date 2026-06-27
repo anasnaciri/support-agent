@@ -4,6 +4,7 @@ import {
   isStatusTransitionAllowed,
   type AgentId,
   type Approval,
+  type ApprovalId,
   type ApprovalRiskLevel,
   type Case,
   type CaseContext,
@@ -75,6 +76,39 @@ export interface ParkForApprovalInput {
 export interface ParkForApprovalResult {
   readonly approval: Approval;
   readonly case_: Case;
+}
+
+/**
+ * Queue a gated action WITHOUT parking the case (autonomous loop, slice 4b).
+ * Same approval-row + audit write as {@link ParkForApprovalInput}, but it does
+ * NOT transition the case status — the agent keeps looping. The case parks once,
+ * at end-of-loop, via {@link ParkForApprovalBundleInput}.
+ */
+export interface QueueApprovalInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId;
+  readonly tool: string;
+  readonly proposedInput: unknown;
+  readonly reasoning: string;
+  readonly riskLevel: ApprovalRiskLevel;
+  readonly expiresAt: Date;
+  readonly turn: number;
+}
+
+/**
+ * Park a case for a bundle of already-queued approvals (autonomous loop end,
+ * slice 4c). One `in_progress → waiting_for_approval` transition + one audit
+ * row covering the whole bundle. The approval rows were created earlier by
+ * {@link QueueApprovalInput}; this just flips the case so the merchant reviews
+ * them together.
+ */
+export interface ParkForApprovalBundleInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly agentId: AgentId;
+  readonly approvalIds: ReadonlyArray<ApprovalId>;
+  readonly turn: number;
 }
 
 export interface ParkForWaitInput {
@@ -193,6 +227,14 @@ export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
     readonly parkForApproval: (
       input: ParkForApprovalInput,
     ) => Effect.Effect<ParkForApprovalResult, CaseLifecycleWriterError>;
+
+    readonly queueApproval: (
+      input: QueueApprovalInput,
+    ) => Effect.Effect<Approval, CaseLifecycleWriterError>;
+
+    readonly parkForApprovalBundle: (
+      input: ParkForApprovalBundleInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
 
     readonly parkWaitingForCustomer: (
       input: ParkForWaitInput,
@@ -469,6 +511,64 @@ export const CaseLifecycleWriterLive = Layer.effect(
               },
             });
             return { approval, case_: row };
+          }),
+        ),
+
+      queueApproval: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            // Approval row + audit, NO status transition (autonomous loop):
+            // the agent keeps acting; the case parks once via
+            // parkForApprovalBundle when the loop ends.
+            const approval = yield* approvals.create({
+              tenantId: input.tenantId,
+              caseId: input.caseId,
+              agentId: input.agentId,
+              tool: input.tool,
+              proposedInput: input.proposedInput,
+              reasoning: input.reasoning,
+              riskLevel: input.riskLevel,
+              expiresAt: input.expiresAt,
+            });
+            yield* audit.record({
+              tenantId: input.tenantId,
+              caseId: input.caseId,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.action_queued",
+              details: {
+                approvalId: approval.id,
+                tool: input.tool,
+                turn: input.turn,
+              },
+            });
+            return approval;
+          }),
+        ),
+
+      parkForApprovalBundle: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const row = yield* cases.transitionStatus(
+              input.caseId,
+              "waiting_for_approval",
+              {
+                tenantId: input.tenantId,
+                reason: `${input.approvalIds.length} action(s) pending approval`,
+              },
+            );
+            yield* audit.record({
+              tenantId: row.tenantId,
+              caseId: row.id,
+              actor: { type: "agent", id: input.agentId },
+              action: "case.waiting_for_approval",
+              details: {
+                bundle: true,
+                approvalIds: [...input.approvalIds],
+                count: input.approvalIds.length,
+                turn: input.turn,
+              },
+            });
+            return row;
           }),
         ),
 
