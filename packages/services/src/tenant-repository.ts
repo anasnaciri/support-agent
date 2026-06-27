@@ -132,6 +132,187 @@ export const defaultDiscountPolicy: DiscountPolicy = {
   mode: "thresholds",
 };
 
+// ============================================================
+// ResolutionPolicy — merchant-configurable per-scenario playbooks
+// ============================================================
+//
+// A "scenario" is a kind of customer situation (delivery problem, refund
+// request, ...). For each, the merchant declares — as DATA, not code — which
+// remedy tools the scenario-resolution agent may use and whether each is
+// automatic or needs human approval (`enabledActions`, the HARD gate), how to
+// handle the supplier (`supplierMode`), and free-text guidance (`notes`, the
+// only soft, LLM-interpreted field). `recognition` is fed to triage so it can
+// match an inbound message to the scenario.
+//
+// Baseline tools (order lookup, knowledge.search, reply, ask_customer,
+// update_context, merchant.notify) are ALWAYS available and are NEVER listed in
+// `enabledActions` — the envelope unions them back in. `enabledActions` only
+// configures the remedy/write tools (refund, discount, ...). Spending caps
+// (RefundPolicy / DiscountPolicy) still gate the money tools on top.
+
+export type ScenarioActionPermission = "allow" | "ask";
+
+export interface ScenarioAction {
+  readonly tool: string;
+  readonly permission: ScenarioActionPermission;
+}
+
+export type SupplierMode = "escalate_and_wait" | "notify_and_proceed" | "none";
+
+export interface ScenarioPolicy {
+  /** Stable id. Built-ins are fixed; custom scenarios are merchant-defined. */
+  readonly key: string;
+  /** Merchant-facing name. */
+  readonly label: string;
+  /** "When this applies" — injected into triage to match inbound messages. */
+  readonly recognition?: string;
+  /** Seeded + (for built-ins) backed by a tuned flow, vs merchant-authored. */
+  readonly builtin: boolean;
+  /** Remedy tools this scenario may use + auto/ask each. Absent ⇒ denied. */
+  readonly enabledActions: ReadonlyArray<ScenarioAction>;
+  readonly supplierMode: SupplierMode;
+  /** Free-text playbook injected verbatim into the prompt (soft layer). */
+  readonly notes?: string;
+}
+
+export interface ResolutionPolicy {
+  readonly scenarios: ReadonlyArray<ScenarioPolicy>;
+}
+
+/**
+ * Seeded built-in scenarios, pre-filled to match today's specialist behavior.
+ * Used as the defaults-on-read fallback when a tenant has never configured a
+ * resolution policy. Money tools default to `ask` (gated); supplier handling
+ * mirrors today (delivery/damage escalate + wait). Baseline tools are omitted
+ * on purpose (always-on).
+ */
+export const defaultResolutionPolicy: ResolutionPolicy = {
+  scenarios: [
+    {
+      key: "where_is_order",
+      label: "Where is my order?",
+      recognition:
+        "Customer is asking where their order is, or for its tracking / delivery status.",
+      builtin: true,
+      enabledActions: [],
+      supplierMode: "none",
+      notes:
+        "Look up the order, check tracking if available, and tell the customer the status.",
+    },
+    {
+      key: "delivery_issue",
+      label: "Delivery problem (lost / stuck / late)",
+      recognition: "A shipped order is lost, stuck in transit, or very late.",
+      builtin: true,
+      enabledActions: [{ tool: "refund.create", permission: "ask" }],
+      supplierMode: "escalate_and_wait",
+      notes:
+        "Verify the carrier status first. On an exception, escalate to the supplier to reship and let the customer know. If genuinely lost and there is no supplier, offer a refund.",
+    },
+    {
+      key: "damaged_product",
+      label: "Damaged or defective item",
+      recognition: "The item arrived damaged, defective, or broken.",
+      builtin: true,
+      enabledActions: [{ tool: "refund.create", permission: "ask" }],
+      supplierMode: "escalate_and_wait",
+      notes:
+        "Confirm the damage from the customer's description/photos. Prefer a replacement via the supplier; refund if no replacement is possible.",
+    },
+    {
+      key: "refund_request",
+      label: "Refund request",
+      recognition:
+        "Customer explicitly asks for their money back (not a delivery problem).",
+      builtin: true,
+      enabledActions: [
+        { tool: "refund.create", permission: "ask" },
+        { tool: "discount.create", permission: "ask" },
+      ],
+      supplierMode: "none",
+      notes:
+        "Check the order and the refund policy. Prefer a replacement or store credit before a full refund when appropriate.",
+    },
+    {
+      key: "general_inquiry",
+      label: "General question",
+      recognition: "A general store, product, or policy question.",
+      builtin: true,
+      enabledActions: [],
+      supplierMode: "none",
+      notes:
+        "Answer from the knowledge base and product catalog. Decline offers/scams and hand off anything out of scope to a human.",
+    },
+  ],
+};
+
+const isSupplierMode = (v: unknown): v is SupplierMode =>
+  v === "escalate_and_wait" || v === "notify_and_proceed" || v === "none";
+
+/** Decode one scenario; returns null when key/label/supplierMode are invalid. */
+const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const key = r["key"];
+  const label = r["label"];
+  const builtin = r["builtin"];
+  const supplierMode = r["supplierMode"];
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    typeof label !== "string" ||
+    label.length === 0 ||
+    typeof builtin !== "boolean" ||
+    !isSupplierMode(supplierMode)
+  ) {
+    return null;
+  }
+  const actionsRaw = Array.isArray(r["enabledActions"]) ? r["enabledActions"] : [];
+  const enabledActions: ScenarioAction[] = [];
+  for (const a of actionsRaw) {
+    if (!a || typeof a !== "object") continue;
+    const ar = a as Record<string, unknown>;
+    const tool = ar["tool"];
+    const permission = ar["permission"];
+    if (
+      typeof tool === "string" &&
+      tool.length > 0 &&
+      (permission === "allow" || permission === "ask")
+    ) {
+      enabledActions.push({ tool, permission });
+    }
+  }
+  const recognition = r["recognition"];
+  const notes = r["notes"];
+  return {
+    key,
+    label,
+    builtin,
+    enabledActions,
+    supplierMode,
+    ...(typeof recognition === "string" && recognition.length > 0
+      ? { recognition }
+      : {}),
+    ...(typeof notes === "string" && notes.length > 0 ? { notes } : {}),
+  };
+};
+
+/**
+ * Decode the persisted JSONB `resolutionPolicy` block. Returns the seeded
+ * built-ins when the value is missing, malformed, or contains no valid
+ * scenario (defends against hand-edited rows). Individual invalid scenarios /
+ * actions are dropped; a wholly-empty result falls back to the defaults.
+ */
+export const decodeResolutionPolicy = (raw: unknown): ResolutionPolicy => {
+  if (!raw || typeof raw !== "object") return defaultResolutionPolicy;
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r["scenarios"])) return defaultResolutionPolicy;
+  const scenarios = r["scenarios"]
+    .map(decodeScenario)
+    .filter((s): s is ScenarioPolicy => s !== null);
+  return scenarios.length > 0 ? { scenarios } : defaultResolutionPolicy;
+};
+
 /**
  * Default retention for resolved cases. 24 months from `resolved_at`
  * matches the privacy-policy default in `docs/shopify-pcd.md` §7. The
@@ -233,6 +414,22 @@ export class TenantSettings extends Data.Class<{
    * JSONB; reads tolerate its absence (older rows have no value).
    */
   readonly rephraseModel?: string | null;
+  /**
+   * Merchant-configurable per-scenario playbooks for the scenario-resolution
+   * agent. Optional on the class (so existing construction sites don't ripple);
+   * the Live `getSettings` ALWAYS populates it via `decodeResolutionPolicy`
+   * (defaults-on-read → the seeded built-ins), so readers can rely on it being
+   * present from the repository. Readers that build settings by hand should
+   * fall back to `defaultResolutionPolicy`.
+   */
+  readonly resolutionPolicy?: ResolutionPolicy;
+  /**
+   * Per-tenant A/B flag: when true, triage routes cases to the new
+   * scenario-resolution agent instead of the legacy specialists. Optional;
+   * absent ⇒ false (legacy routing). Lets a merchant test the new agent then
+   * adopt or drop it.
+   */
+  readonly resolutionAgentEnabled?: boolean;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -299,6 +496,23 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
       tenantId: TenantId,
       model: string | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Replace the tenant's resolution policy (per-scenario playbooks). Same
+     * deep-merge semantics as `setRefundPolicy` — unrelated settings columns
+     * are preserved.
+     */
+    readonly setResolutionPolicy: (
+      tenantId: TenantId,
+      policy: ResolutionPolicy,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Toggle the per-tenant scenario-agent A/B flag. Same deep-merge semantics
+     * as `setRefundPolicy`.
+     */
+    readonly setResolutionAgentEnabled: (
+      tenantId: TenantId,
+      enabled: boolean,
+    ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
 
@@ -333,18 +547,7 @@ export const TenantRepositoryTest = (
         if (!prev) {
           return Effect.fail(new TenantNotFound({ tenantId }));
         }
-        store.set(
-          tenantId,
-          new TenantSettings({
-            notificationEmail: prev.notificationEmail,
-            refundPolicy: policy,
-            discountPolicy: prev.discountPolicy,
-            retentionDays: prev.retentionDays,
-            supplierEscalationSheet: prev.supplierEscalationSheet,
-            legalAcceptance: prev.legalAcceptance,
-            rephraseModel: prev.rephraseModel ?? null,
-          }),
-        );
+        store.set(tenantId, new TenantSettings({ ...prev, refundPolicy: policy }));
         return Effect.void;
       },
       setDiscountPolicy: (tenantId, policy) => {
@@ -354,15 +557,7 @@ export const TenantRepositoryTest = (
         }
         store.set(
           tenantId,
-          new TenantSettings({
-            notificationEmail: prev.notificationEmail,
-            refundPolicy: prev.refundPolicy,
-            discountPolicy: policy,
-            retentionDays: prev.retentionDays,
-            supplierEscalationSheet: prev.supplierEscalationSheet,
-            legalAcceptance: prev.legalAcceptance,
-            rephraseModel: prev.rephraseModel ?? null,
-          }),
+          new TenantSettings({ ...prev, discountPolicy: policy }),
         );
         return Effect.void;
       },
@@ -373,15 +568,7 @@ export const TenantRepositoryTest = (
         }
         store.set(
           tenantId,
-          new TenantSettings({
-            notificationEmail: prev.notificationEmail,
-            refundPolicy: prev.refundPolicy,
-            discountPolicy: prev.discountPolicy,
-            retentionDays: prev.retentionDays,
-            supplierEscalationSheet: sheet,
-            legalAcceptance: prev.legalAcceptance,
-            rephraseModel: prev.rephraseModel ?? null,
-          }),
+          new TenantSettings({ ...prev, supplierEscalationSheet: sheet }),
         );
         return Effect.void;
       },
@@ -392,15 +579,7 @@ export const TenantRepositoryTest = (
         }
         store.set(
           tenantId,
-          new TenantSettings({
-            notificationEmail: prev.notificationEmail,
-            refundPolicy: prev.refundPolicy,
-            discountPolicy: prev.discountPolicy,
-            retentionDays: prev.retentionDays,
-            supplierEscalationSheet: prev.supplierEscalationSheet,
-            legalAcceptance: acceptance,
-            rephraseModel: prev.rephraseModel ?? null,
-          }),
+          new TenantSettings({ ...prev, legalAcceptance: acceptance }),
         );
         return Effect.void;
       },
@@ -411,15 +590,29 @@ export const TenantRepositoryTest = (
         }
         store.set(
           tenantId,
-          new TenantSettings({
-            notificationEmail: prev.notificationEmail,
-            refundPolicy: prev.refundPolicy,
-            discountPolicy: prev.discountPolicy,
-            retentionDays: prev.retentionDays,
-            supplierEscalationSheet: prev.supplierEscalationSheet,
-            legalAcceptance: prev.legalAcceptance,
-            rephraseModel: model,
-          }),
+          new TenantSettings({ ...prev, rephraseModel: model }),
+        );
+        return Effect.void;
+      },
+      setResolutionPolicy: (tenantId, policy) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, resolutionPolicy: policy }),
+        );
+        return Effect.void;
+      },
+      setResolutionAgentEnabled: (tenantId, enabled) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, resolutionAgentEnabled: enabled }),
         );
         return Effect.void;
       },

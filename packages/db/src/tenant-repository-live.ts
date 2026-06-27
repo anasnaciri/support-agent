@@ -1,6 +1,7 @@
 import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
+  decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   DEFAULT_RETENTION_DAYS,
@@ -13,6 +14,7 @@ import {
   type LegalAcceptance,
   type RefundPolicy,
   type RefundPolicyMode,
+  type ResolutionPolicy,
   type SupplierEscalationSheet,
 } from "@support-agent/services";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -212,6 +214,8 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly supplierEscalationSheet?: unknown;
                 readonly legalAcceptance?: unknown;
                 readonly rephraseModel?: unknown;
+                readonly resolutionPolicy?: unknown;
+                readonly resolutionAgentEnabled?: unknown;
               }
             | null;
           const notificationEmail =
@@ -241,6 +245,11 @@ export const TenantRepositoryLive = Layer.effect(
             settings.rephraseModel.length > 0
               ? settings.rephraseModel
               : null;
+          const resolutionPolicy = decodeResolutionPolicy(
+            settings?.resolutionPolicy,
+          );
+          const resolutionAgentEnabled =
+            settings?.resolutionAgentEnabled === true;
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -249,6 +258,8 @@ export const TenantRepositoryLive = Layer.effect(
             supplierEscalationSheet,
             legalAcceptance,
             rephraseModel,
+            resolutionPolicy,
+            resolutionAgentEnabled,
           });
         }),
 
@@ -380,6 +391,56 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setRephraseModel",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setResolutionPolicy: (tenantId, policy: ResolutionPolicy) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy — replaces the
+          // `resolutionPolicy` block, leaves every sibling setting untouched.
+          const policyJson = JSON.stringify({ resolutionPolicy: policy });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${policyJson}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setResolutionPolicy",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setResolutionAgentEnabled: (tenantId, enabled: boolean) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          const json = JSON.stringify({ resolutionAgentEnabled: enabled });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setResolutionAgentEnabled",
                 cause,
               }),
           });

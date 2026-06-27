@@ -8,10 +8,13 @@ import {
   TenantRepository,
   TenantRepositoryTest,
   TenantSettings,
+  decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
+  defaultResolutionPolicy,
   type LegalAcceptance,
   type RefundPolicy,
+  type ResolutionPolicy,
 } from "../src/index.js";
 
 const tenantId = TenantId("00000000-0000-0000-0000-000000000001");
@@ -278,5 +281,140 @@ describe("TenantRepositoryTest", () => {
       const err = (exit.cause as { error?: unknown }).error;
       expect(err).toBeInstanceOf(TenantNotFound);
     }
+  });
+
+  it("setResolutionPolicy round-trips and preserves siblings", async () => {
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const custom: ResolutionPolicy = {
+      scenarios: [
+        {
+          key: "vip_complaint",
+          label: "VIP complaint",
+          builtin: false,
+          enabledActions: [{ tool: "refund.create", permission: "ask" }],
+          supplierMode: "none",
+        },
+      ],
+    };
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setResolutionPolicy(tenantId, custom);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.resolutionPolicy).toEqual(custom);
+    expect(got.notificationEmail).toBe("ops@example.com");
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
+  });
+
+  it("setResolutionAgentEnabled round-trips and preserves siblings", async () => {
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setResolutionAgentEnabled(tenantId, true);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.resolutionAgentEnabled).toBe(true);
+    expect(got.notificationEmail).toBe("ops@example.com");
+  });
+});
+
+describe("decodeResolutionPolicy (defaults-on-read)", () => {
+  it("returns the seeded built-ins when the value is absent", () => {
+    const p = decodeResolutionPolicy(undefined);
+    expect(p.scenarios.length).toBeGreaterThanOrEqual(5);
+    expect(p.scenarios.every((s) => s.builtin)).toBe(true);
+    expect(p.scenarios.map((s) => s.key)).toContain("refund_request");
+  });
+
+  it("falls back to defaults on malformed input", () => {
+    expect(decodeResolutionPolicy(42)).toEqual(defaultResolutionPolicy);
+    expect(decodeResolutionPolicy({ scenarios: "nope" })).toEqual(
+      defaultResolutionPolicy,
+    );
+  });
+
+  it("keeps a valid custom scenario", () => {
+    const raw = {
+      scenarios: [
+        {
+          key: "vip_complaint",
+          label: "VIP complaint",
+          recognition: "An angry high-value customer",
+          builtin: false,
+          enabledActions: [{ tool: "refund.create", permission: "ask" }],
+          supplierMode: "none",
+          notes: "Be extra gracious.",
+        },
+      ],
+    };
+    const p = decodeResolutionPolicy(raw);
+    expect(p.scenarios).toHaveLength(1);
+    expect(p.scenarios[0]!.key).toBe("vip_complaint");
+    expect(p.scenarios[0]!.enabledActions[0]).toEqual({
+      tool: "refund.create",
+      permission: "ask",
+    });
+    expect(p.scenarios[0]!.supplierMode).toBe("none");
+    expect(p.scenarios[0]!.notes).toBe("Be extra gracious.");
+  });
+
+  it("falls back to defaults when no scenario is valid (bad supplierMode / empty key)", () => {
+    const raw = {
+      scenarios: [
+        {
+          key: "bad",
+          label: "Bad",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "whenever", // invalid supplierMode → scenario dropped
+        },
+        {
+          key: "", // empty key → scenario dropped
+          label: "Empty key",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    };
+    expect(decodeResolutionPolicy(raw)).toEqual(defaultResolutionPolicy);
+  });
+
+  it("drops invalid actions but keeps the otherwise-valid scenario", () => {
+    const raw = {
+      scenarios: [
+        {
+          key: "mix",
+          label: "Mix",
+          builtin: false,
+          enabledActions: [
+            { tool: "refund.create", permission: "ask" },
+            { tool: 5, permission: "allow" },
+          ],
+          supplierMode: "none",
+        },
+      ],
+    };
+    const p = decodeResolutionPolicy(raw);
+    expect(p.scenarios).toHaveLength(1);
+    expect(p.scenarios[0]!.enabledActions).toEqual([
+      { tool: "refund.create", permission: "ask" },
+    ]);
   });
 });
