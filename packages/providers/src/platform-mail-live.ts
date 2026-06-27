@@ -284,6 +284,37 @@ export const PlatformMailServiceLive = Layer.effect(
             `connector-alert:${input.tenantId}:${input.provider}:${input.mailbox}`,
           );
         }),
+      // Email channel of a merchant heads-up. Recipient resolved like the
+      // approval/connector mail; no notificationEmail → PlatformMailUnconfigured
+      // (the multi-channel notifier degrades to its other channels). No
+      // idempotency key — pings are intentionally one-shot, not retried.
+      sendMerchantNotification: (input) =>
+        Effect.gen(function* () {
+          const settings = yield* tenantRepo.getSettings(input.tenantId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause,
+                }),
+            ),
+          );
+          const recipient = settings.notificationEmail;
+          if (!recipient) {
+            return yield* Effect.fail(
+              new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+            );
+          }
+          const ref = input.caseId ? ` (case ${input.caseId})` : "";
+          const subject = `[support-agent] ${input.title}`;
+          const text = `${input.body}${ref}`;
+          const html = `<p>${input.body}</p>${
+            input.caseId
+              ? `<p style="color:#666">Case reference: ${input.caseId}</p>`
+              : ""
+          }`;
+          yield* post(input.tenantId, recipient, { subject, text, html });
+        }),
       sendApprovalLink: (input) =>
         Effect.gen(function* () {
           // 1. Resolve recipient via the TenantRepository Tag (db Live impl

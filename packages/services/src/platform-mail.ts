@@ -69,6 +69,16 @@ export interface SendConnectorAlertInput {
   readonly reason: string;
 }
 
+export interface SendMerchantNotificationInput {
+  readonly tenantId: TenantId;
+  /** One-line headline (the agent's `merchant.notify` title, or an emitter's). */
+  readonly title: string;
+  /** Plain-text body (1–3 sentences). May contain URLs; never customer PII. */
+  readonly body: string;
+  /** Present when the ping is about a specific case (rendered as a reference). */
+  readonly caseId?: string;
+}
+
 export interface SendSupplierEscalationInput {
   readonly tenantId: TenantId;
   /** The escalation id — for a stable Resend idempotency key. */
@@ -113,6 +123,17 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
     readonly sendSupplierEscalation: (
       input: SendSupplierEscalationInput,
     ) => Effect.Effect<void, PlatformMailError>;
+    /**
+     * Email channel of a merchant heads-up (the `merchant.notify` tool +
+     * runtime emitters). Recipient resolved from the tenant's
+     * `notificationEmail` like the approval/connector mail; a tenant without
+     * one surfaces `PlatformMailUnconfigured` and the multi-channel notifier
+     * falls back to its other channels. The lightweight always-on counterpart
+     * to the Telegram ping.
+     */
+    readonly sendMerchantNotification: (
+      input: SendMerchantNotificationInput,
+    ) => Effect.Effect<void, PlatformMailError>;
   }
 >() {}
 
@@ -133,6 +154,10 @@ export type PlatformMailTestRecord =
   | {
       readonly kind: "supplier-escalation";
       readonly input: SendSupplierEscalationInput;
+    }
+  | {
+      readonly kind: "merchant-notification";
+      readonly input: SendMerchantNotificationInput;
     };
 
 export interface PlatformMailTestHandle {
@@ -233,6 +258,26 @@ export const makePlatformMailServiceTest = (
               );
             }
             sent.push({ kind: "supplier-escalation", input });
+            return Effect.succeed(undefined);
+          },
+        ),
+      sendMerchantNotification: (input) =>
+        Effect.suspend(
+          (): Effect.Effect<void, PlatformMailError> => {
+            if (fixtures.unconfiguredFor?.has(input.tenantId)) {
+              return Effect.fail(
+                new PlatformMailUnconfigured({ tenantId: input.tenantId }),
+              );
+            }
+            if (fixtures.failAll) {
+              return Effect.fail(
+                new PlatformMailSendFailed({
+                  tenantId: input.tenantId,
+                  cause: "fixture: failAll",
+                }),
+              );
+            }
+            sent.push({ kind: "merchant-notification", input });
             return Effect.succeed(undefined);
           },
         ),

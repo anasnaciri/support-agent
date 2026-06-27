@@ -42,10 +42,15 @@ export interface MerchantNotification {
   readonly caseId?: CaseId;
 }
 
-export type MerchantNotificationChannel = "telegram";
+export type MerchantNotificationChannel = "telegram" | "email";
 
 export interface MerchantNotifyResult {
   readonly delivered: boolean;
+  /**
+   * A channel the notification reached, or null when none did. With the
+   * multi-channel notifier this is the FIRST channel that delivered (Telegram
+   * preferred for its real-time feel); `delivered` is the OR across channels.
+   */
   readonly channel: MerchantNotificationChannel | null;
 }
 

@@ -73,11 +73,10 @@ import {
   LLMCredentialResolverFromLLMConfig,
   LLMServiceLive,
   OrgDirectoryServiceLive,
-  MerchantNotificationNoopLive,
+  MerchantNotificationLive,
   PlatformMailServiceLive,
   ResendConfigFromEnv,
   TelegramConfigFromEnv,
-  TelegramMerchantNotificationLive,
   WorkosConfigFromEnv,
   ShopifyCredentialStoreFromConnector,
   ShopifyCredentialStoreFromEnv,
@@ -384,29 +383,37 @@ export const buildWorker = async (
     );
   }
 
-  // Merchant push notifications (Telegram). The bot env trio + the
-  // encryption key (per-tenant chat bindings live in
-  // connector_connections) gate the Live layer; otherwise a no-op layer
-  // reports delivered:false so the merchant.notify tool and the
-  // runtime/cron emitters degrade exactly like "tenant not linked".
+  // Merchant push notifications — MULTI-CHANNEL: ALWAYS email the operator
+  // (via the platform mail layer → tenant notificationEmail) AND ping Telegram
+  // when the bot env trio + the encryption key (per-tenant chat bindings live
+  // in connector_connections) are present. Each channel is best-effort; one
+  // failing or being absent never blocks the other. With neither configured the
+  // notifier still builds (email channel resolves no recipient → delivered
+  // false), so the merchant.notify tool + runtime/cron emitters degrade exactly
+  // like "tenant not linked".
   const tgBotToken = process.env["TELEGRAM_BOT_TOKEN"];
   const tgBotUsername = process.env["TELEGRAM_BOT_USERNAME"];
   const tgWebhookSecret = process.env["TELEGRAM_WEBHOOK_SECRET"];
-  const merchantNotifications =
-    credKeyB64 && tgBotToken && tgBotUsername && tgWebhookSecret
-      ? TelegramMerchantNotificationLive.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              TelegramConfigFromEnv,
-              ConnectorCredentialStoreLive(encryptionKeys!),
-            ),
-          ),
-        )
-      : (warnProdFallback(
-          "Merchant notifications (Telegram)",
-          "TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET (with CREDENTIAL_ENCRYPTION_KEY)",
-        ),
-        MerchantNotificationNoopLive);
+  const telegramConfigured = Boolean(
+    credKeyB64 && tgBotToken && tgBotUsername && tgWebhookSecret,
+  );
+  if (!telegramConfigured) {
+    warnProdFallback(
+      "Merchant Telegram pings (email channel still active)",
+      "TELEGRAM_BOT_TOKEN + TELEGRAM_BOT_USERNAME + TELEGRAM_WEBHOOK_SECRET (with CREDENTIAL_ENCRYPTION_KEY)",
+    );
+  }
+  const merchantNotifications = MerchantNotificationLive.pipe(
+    Layer.provide(
+      telegramConfigured
+        ? Layer.mergeAll(
+            mail,
+            TelegramConfigFromEnv,
+            ConnectorCredentialStoreLive(encryptionKeys!),
+          )
+        : mail,
+    ),
+  );
 
   // Org directory (WorkOS) — used by the account-cleanup consumer to delete
   // a tenant's organization after self-service / admin account deletion.

@@ -1,8 +1,9 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   ConnectorCredentialStore,
   MerchantNotificationSendFailed,
   MerchantNotificationService,
+  PlatformMailService,
   type MerchantNotifyResult,
 } from "@support-agent/services";
 
@@ -156,5 +157,83 @@ export const MerchantNotificationNoopLive = Layer.succeed(
   MerchantNotificationService,
   MerchantNotificationService.of({
     notify: () => Effect.succeed({ delivered: false, channel: null }),
+  }),
+);
+
+// ============================================================
+// Multi-channel MerchantNotificationService (email + Telegram)
+// ============================================================
+//
+// The merchant heads-up the user asked for: ALWAYS email the operator (via
+// PlatformMailService → tenant `notificationEmail`) AND ping Telegram when the
+// tenant has linked a chat. Each channel is best-effort and independent — one
+// channel's failure (or absence) never blocks the other, and `delivered` is the
+// OR across them. Telegram is OPTIONAL at the layer level (resolved via
+// `serviceOption`), so a deployment with no bot still gets the email channel.
+//
+// Requires PlatformMailService; uses TelegramConfig + ConnectorCredentialStore
+// when they're provided. Drop-in replacement for TelegramMerchantNotificationLive
+// in the worker bootstrap.
+
+export const MerchantNotificationLive = Layer.effect(
+  MerchantNotificationService,
+  Effect.gen(function* () {
+    const mail = yield* PlatformMailService;
+    const maybeTelegramConfig = yield* Effect.serviceOption(TelegramConfig);
+    const maybeStore = yield* Effect.serviceOption(ConnectorCredentialStore);
+
+    return MerchantNotificationService.of({
+      notify: (tenantId, notification) =>
+        Effect.gen(function* () {
+          // Email channel — always attempted; best-effort. An unconfigured
+          // notificationEmail or a transport failure just means "not delivered
+          // here", never an error that sinks the Telegram channel.
+          const emailDelivered = yield* mail
+            .sendMerchantNotification({
+              tenantId,
+              title: notification.title,
+              body: notification.body,
+              ...(notification.caseId ? { caseId: notification.caseId } : {}),
+            })
+            .pipe(
+              Effect.map(() => true),
+              Effect.catchAll(() => Effect.succeed(false)),
+            );
+
+          // Telegram channel — only when a bot is configured AND the tenant has
+          // a chat binding. Same best-effort discipline.
+          const telegramDelivered =
+            Option.isSome(maybeTelegramConfig) && Option.isSome(maybeStore)
+              ? yield* Effect.gen(function* () {
+                  const config = maybeTelegramConfig.value;
+                  const store = maybeStore.value;
+                  const binding = yield* store.get(tenantId, "telegram").pipe(
+                    Effect.catchAll(() => Effect.succeed(null)),
+                  );
+                  if (binding === null) return false;
+                  return yield* telegramSendMessage({
+                    botToken: config.botToken,
+                    chatId: binding.accessToken,
+                    text: `${notification.title}\n\n${notification.body}`,
+                    ...(config.fetchImpl ? { fetchImpl: config.fetchImpl } : {}),
+                  }).pipe(
+                    Effect.map(() => true),
+                    Effect.catchAll(() => Effect.succeed(false)),
+                  );
+                })
+              : false;
+
+          // Telegram preferred as the reported channel for its real-time feel.
+          const channel = telegramDelivered
+            ? ("telegram" as const)
+            : emailDelivered
+              ? ("email" as const)
+              : null;
+          return {
+            delivered: emailDelivered || telegramDelivered,
+            channel,
+          } satisfies MerchantNotifyResult;
+        }),
+    });
   }),
 );
