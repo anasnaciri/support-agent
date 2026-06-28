@@ -105,3 +105,70 @@ export const applyFreshPage = <T extends { readonly id: string }>(
   const byId = new Map(fresh.map((r) => [r.id, r]));
   return existing.map((row) => byId.get(row.id) ?? row);
 };
+
+// ── Sidebar mode: All vs Needs attention ────────────────────────────────────
+
+/** "all" lists every case; "attention" hides resolved (done) cases. */
+export type SidebarMode = "all" | "attention";
+
+/** The terminal status hidden by the "Needs attention" mode. */
+export const RESOLVED_STATUS = "resolved";
+
+/** localStorage key remembering the merchant's chosen sidebar mode. */
+export const MODE_STORAGE_KEY = "cases-sidebar-mode";
+
+/** The statuses the api should exclude for a given mode. */
+export const sidebarExcludeStatuses = (
+  mode: SidebarMode,
+): ReadonlyArray<string> =>
+  mode === "attention" ? [RESOLVED_STATUS] : [];
+
+/**
+ * The stale-response / reset identity for a fetch. Folding the mode in (not
+ * just the query text) means switching modes resets to page 1 and rejects any
+ * in-flight response from the previous mode.
+ */
+export const sidebarRequestSignature = (
+  mode: SidebarMode,
+  q: string,
+): string => `${mode} ${q}`;
+
+/** A persisted mode value, defaulting to "all" for anything unrecognized. */
+export const parseStoredMode = (raw: string | null): SidebarMode =>
+  raw === "attention" ? "attention" : "all";
+
+export interface CaseRowClasses {
+  /** Classes for the row link container (background / elevation / opacity). */
+  readonly container: string;
+  /** Classes for the subject line (font weight / color). */
+  readonly subject: string;
+}
+
+/**
+ * Per-row appearance for the case switcher. The active row keeps its elevated,
+ * medium-weight treatment regardless of status. Among inactive rows, resolved
+ * (done) cases recede — lower opacity, thinner, muted — while everything still
+ * needing work is bumped: semibold on a filled background.
+ */
+export const caseRowClasses = (args: {
+  readonly status: string;
+  readonly active: boolean;
+}): CaseRowClasses => {
+  if (args.active) {
+    return {
+      container:
+        "bg-card shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10",
+      subject: "font-medium text-foreground",
+    };
+  }
+  if (args.status === RESOLVED_STATUS) {
+    return {
+      container: "opacity-60 hover:bg-accent hover:opacity-100",
+      subject: "font-light text-muted-foreground",
+    };
+  }
+  return {
+    container: "bg-muted/40 hover:bg-accent",
+    subject: "font-semibold text-foreground",
+  };
+};

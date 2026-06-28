@@ -13,7 +13,9 @@ import { WORKSPACE_COOKIE } from "@/lib/workspace";
 // search the tenant's cases (infinite scroll). The dashboard holds the api
 // service token server-side, so the browser can't call apps/api directly —
 // this thin route authenticates the merchant via WorkOS and forwards to
-// GET /dashboard/cases?q=&page=&limit=, returning Page<CaseListRow> as JSON.
+// GET /dashboard/cases?q=&status=&excludeStatus=&page=&limit=, returning
+// Page<CaseListRow> as JSON. The sidebar's "Needs attention" mode passes
+// excludeStatus=resolved.
 
 export async function GET(req: Request) {
   // Route handlers CAN Set-Cookie, so an expired-mid-session access token is
@@ -26,7 +28,11 @@ export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
   const page = parsePageNumber(params.get("page") ?? undefined);
   const limit = parsePageSize(params.get("limit") ?? undefined);
-  const q = params.get("q") ?? undefined;
+  const filter = {
+    q: params.get("q") ?? undefined,
+    status: params.getAll("status"),
+    excludeStatus: params.getAll("excludeStatus"),
+  };
   // Same workspace pin as the RSC pages, or the sidebar would list the
   // DEFAULT workspace's cases next to another workspace's case detail. A
   // stale cookie (workspace deleted in another tab) 404s api-side; surface
@@ -37,9 +43,9 @@ export async function GET(req: Request) {
   try {
     result = await api.cases(
       { accessToken, ...(workspaceId ? { workspaceId } : {}) },
+      filter,
       page,
       limit,
-      q,
     );
   } catch {
     return new Response("not found", { status: 404 });

@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   applyFreshPage,
   caseIdFromPathname,
+  caseRowClasses,
   mergeDedupeById,
+  parseStoredMode,
   shouldLoadMore,
+  sidebarExcludeStatuses,
+  sidebarRequestSignature,
   windowRange,
 } from "../app/cases/_components/cases-sidebar-data.js";
 
@@ -154,5 +158,77 @@ describe("applyFreshPage", () => {
 
   it("returns the existing rows unchanged for an empty fresh page", () => {
     expect(applyFreshPage([row("a")], [])).toEqual([row("a")]);
+  });
+});
+
+// The sidebar toggles between "All" and "Needs attention" (hide resolved).
+// The mode drives a server-side excludeStatus filter, is folded into the
+// stale-response guard so a mode switch resets to page 1, and is persisted.
+describe("sidebarExcludeStatuses", () => {
+  it("hides resolved in attention mode", () => {
+    expect(sidebarExcludeStatuses("attention")).toEqual(["resolved"]);
+  });
+
+  it("hides nothing in all mode", () => {
+    expect(sidebarExcludeStatuses("all")).toEqual([]);
+  });
+});
+
+describe("sidebarRequestSignature", () => {
+  it("differs by mode for the same query so a switch supersedes in-flight fetches", () => {
+    expect(sidebarRequestSignature("all", "ann")).not.toBe(
+      sidebarRequestSignature("attention", "ann"),
+    );
+  });
+
+  it("differs by query within a mode", () => {
+    expect(sidebarRequestSignature("all", "ann")).not.toBe(
+      sidebarRequestSignature("all", "bob"),
+    );
+  });
+
+  it("is stable for the same mode + query", () => {
+    expect(sidebarRequestSignature("attention", "x")).toBe(
+      sidebarRequestSignature("attention", "x"),
+    );
+  });
+});
+
+describe("parseStoredMode", () => {
+  it("round-trips a stored mode", () => {
+    expect(parseStoredMode("attention")).toBe("attention");
+    expect(parseStoredMode("all")).toBe("all");
+  });
+
+  it("defaults to all for anything unrecognized", () => {
+    expect(parseStoredMode(null)).toBe("all");
+    expect(parseStoredMode("")).toBe("all");
+    expect(parseStoredMode("garbage")).toBe("all");
+  });
+});
+
+describe("caseRowClasses", () => {
+  it("keeps the elevated, medium-weight look for the active row (any status)", () => {
+    const a = caseRowClasses({ status: "resolved", active: true });
+    expect(a.subject).toContain("font-medium");
+    expect(a.container).toContain("bg-card");
+    expect(a.container).toContain("ring-1");
+    // active wins over the resolved de-emphasis
+    expect(a.container).not.toContain("opacity-");
+    expect(a.subject).not.toContain("font-light");
+  });
+
+  it("bumps inactive non-resolved rows: semibold on a filled background", () => {
+    const r = caseRowClasses({ status: "in_progress", active: false });
+    expect(r.subject).toContain("font-semibold");
+    expect(r.container).toContain("bg-muted/40");
+    expect(r.container).not.toContain("opacity-");
+  });
+
+  it("recedes inactive resolved rows: thinner, muted, lower opacity", () => {
+    const r = caseRowClasses({ status: "resolved", active: false });
+    expect(r.subject).toContain("font-light");
+    expect(r.subject).toContain("text-muted-foreground");
+    expect(r.container).toContain("opacity-60");
   });
 });

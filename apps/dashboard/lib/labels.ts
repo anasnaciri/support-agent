@@ -25,6 +25,16 @@ const CASE_STATUS_LABELS: Readonly<Record<string, string>> = {
 export const caseStatusLabel = (status: string): string =>
   CASE_STATUS_LABELS[status] ?? humanizeSlug(status);
 
+/** The case statuses offered by the cases-list status filter, in display
+ *  order — derived from the canonical label map so the picker never drifts. */
+export const caseStatusFilterOptions: ReadonlyArray<{
+  readonly label: string;
+  readonly value: string;
+}> = Object.entries(CASE_STATUS_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}));
+
 export const approvalStatusLabel = (status: string): string =>
   humanizeSlug(status);
 

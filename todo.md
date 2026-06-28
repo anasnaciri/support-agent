@@ -32,6 +32,37 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-28 — Cases status filter + case-sidebar "Needs attention" mode (apps/dashboard)
+
+**What:** two case-navigation UX upgrades on the live Next dashboard (`apps/dashboard`).
+1. **Cases list (`/cases`)** gets a status filter — a `MultiSelect` over `<form method="get">`
+   (mirrors the approvals page), default = no filter (all statuses), carries through pagination.
+2. **Case-detail secondary sidebar** (the virtualized switcher) gets an **icon-only segmented
+   toggle**: `List` = All, `Inbox` = Needs attention (hides `resolved` only). Mode persists in
+   localStorage, default = All. In normal view, resolved rows recede (`opacity-60`,
+   `font-light`, muted) while open rows are bumped (`font-semibold`, `bg-muted/40`); the active
+   row keeps its elevated look.
+
+**Cross-stack:**
+- `dashboard-contracts`: `CasesFilter` gained `status?` (include) + `excludeStatus?` (exclude).
+- `packages/db` `casesList`: `inArray(cases.status,…)` / `notInArray(…)` whereParts (mirrors
+  `approvalsList`); added `notInArray` import.
+- `apps/api` `handleDashboardCases`: parses `status` / `excludeStatus` via `strList`.
+- `apps/dashboard`: `api.cases` refactored to `(ctx, filter, page, limit)` (both callers updated);
+  `/api/cases` route forwards `getAll("status"|"excludeStatus")`; new pure `lib/cases-filters.ts`
+  (+ `caseStatusFilterOptions` exported from `lib/labels.ts`); `/cases` page filter form;
+  `cases-sidebar-data.ts` gained `SidebarMode`, `sidebarExcludeStatuses`, `sidebarRequestSignature`
+  (folded into the stale-response guard), `parseStoredMode`, `caseRowClasses`; `CasesSidebar.tsx`
+  wired mode state + localStorage + per-row restyle.
+- TDD: `test/cases-filters.test.ts` (4) + extended `test/cases-sidebar.test.ts` (+10) — red→green.
+  `pnpm build` (tsc -b) green; 383 dashboard tests green.
+
+**Follow-ups:**
+- [ ] NOT committed; dashboard changes need their own CF/OpenNext deploy.
+- [ ] Optional `casesList` status/excludeStatus **integration** test (needs dev Postgres; the SQL
+      mirrors the already-tested `approvalsList` path, pure helpers carry deterministic coverage).
+- [ ] Mirror onto `apps/dashboard-spa` once its cases feature is ported (currently a stub).
+
 ### 2026-06-28 — Shopify-style refund modal on the case page (full line-item + restock refund)
 
 **What:** a standalone **"Refund"** button in the case-page header (apps/dashboard) opens a modal that

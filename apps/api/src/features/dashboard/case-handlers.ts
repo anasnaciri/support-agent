@@ -96,7 +96,8 @@ export const handleDashboardToday = async (
   return sendJson(res, 200, summary);
 };
 
-// GET /dashboard/cases?q=&page=&limit= — paginated cases list, optional search.
+// GET /dashboard/cases?q=&status=&excludeStatus=&page=&limit= — paginated cases
+// list, optional search + status include/exclude filters.
 export const handleDashboardCases = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -110,7 +111,11 @@ export const handleDashboardCases = async (
     casesList(
       db,
       auth.tenantId,
-      { q: strField(q, "q") },
+      {
+        q: strField(q, "q"),
+        status: strList(q, "status"),
+        excludeStatus: strList(q, "excludeStatus"),
+      },
       parsePageNumber(strField(q, "page")),
       parsePageSize(strField(q, "limit")),
     ),

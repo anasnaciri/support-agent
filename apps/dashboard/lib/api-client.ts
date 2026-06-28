@@ -21,6 +21,7 @@ import type {
   CaseDetail,
   CaseEventsResult,
   CaseListRow,
+  CasesFilter,
   CatalogResponse,
   CustomAgentView,
   CustomAgentWriteBody,
@@ -454,13 +455,17 @@ export const api = {
 
   cases: (
     ctx: CallCtx,
+    filter: CasesFilter,
     page: number,
     limit: number,
-    q?: string,
   ): Promise<Page<CaseListRow>> => {
-    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-    const trimmed = q?.trim();
+    const qs = new URLSearchParams();
+    const trimmed = filter.q?.trim();
     if (trimmed) qs.set("q", trimmed);
+    for (const v of filter.status ?? []) qs.append("status", v);
+    for (const v of filter.excludeStatus ?? []) qs.append("excludeStatus", v);
+    qs.set("page", String(page));
+    qs.set("limit", String(limit));
     return okBody(`/cases?${qs.toString()}`, ctx) as Promise<Page<CaseListRow>>;
   },
 

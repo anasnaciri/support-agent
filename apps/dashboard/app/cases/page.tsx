@@ -8,10 +8,22 @@ import {
   resolvePageSize,
   ROWS_COOKIE,
 } from "@/lib/pagination";
-import { caseStatusLabel, humanizeSlug } from "@/lib/labels";
+import {
+  caseStatusFilterOptions,
+  caseStatusLabel,
+  humanizeSlug,
+} from "@/lib/labels";
+import {
+  casesHiddenParams,
+  isDefaultCasesFilter,
+  toFilterValues,
+} from "@/lib/cases-filters";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { TablePagination } from "@/components/TablePagination";
 import {
@@ -25,6 +37,7 @@ import {
 
 interface SearchParams {
   readonly searchParams: Promise<{
+    readonly status?: string | string[];
     readonly page?: string;
     readonly limit?: string;
   }>;
@@ -33,6 +46,7 @@ interface SearchParams {
 export default async function CasesPage({ searchParams }: SearchParams) {
   const ctx = await getDashboardContext();
   const sp = await searchParams;
+  const statusValues = toFilterValues(sp.status);
   const cookieRows = (await cookies()).get(ROWS_COOKIE)?.value;
   const defaultPageSize = resolveDefaultPageSize(cookieRows);
   const pageSize = resolvePageSize(sp.limit, cookieRows);
@@ -40,9 +54,12 @@ export default async function CasesPage({ searchParams }: SearchParams) {
 
   const { totalRows, page, rows } = await api.cases(
     ctx,
+    { status: statusValues },
     requestedPage,
     pageSize,
   );
+
+  const isReset = isDefaultCasesFilter(statusValues);
 
   return (
     <div className="space-y-6">
@@ -54,6 +71,46 @@ export default async function CasesPage({ searchParams }: SearchParams) {
           Newest activity first. Showing up to {pageSize} per page.
         </p>
       </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <form
+            method="get"
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          >
+            {pageSize !== defaultPageSize ? (
+              <input type="hidden" name="limit" value={pageSize} />
+            ) : null}
+            <div className="space-y-1.5 sm:w-64">
+              <Label
+                htmlFor="status"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Status
+              </Label>
+              <MultiSelect
+                id="status"
+                name="status"
+                values={statusValues}
+                placeholder="Any status"
+                allLabel="Any status"
+                options={caseStatusFilterOptions.map((o) => ({
+                  label: o.label,
+                  value: o.value,
+                }))}
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <Button type="submit">Apply</Button>
+              {!isReset ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/cases">Reset</Link>
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
       <Card>
         <Table>
@@ -73,7 +130,7 @@ export default async function CasesPage({ searchParams }: SearchParams) {
                   colSpan={5}
                   className="py-8 text-center text-sm italic text-muted-foreground"
                 >
-                  No cases yet.
+                  {isReset ? "No cases yet." : "No cases match these filters."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -114,6 +171,7 @@ export default async function CasesPage({ searchParams }: SearchParams) {
         pageSize={pageSize}
         totalRows={totalRows}
         defaultPageSize={defaultPageSize}
+        hiddenParams={casesHiddenParams(statusValues)}
       />
     </div>
   );

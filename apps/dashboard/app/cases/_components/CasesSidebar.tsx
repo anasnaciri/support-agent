@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search } from "lucide-react";
+import { Inbox, List, Search } from "lucide-react";
 
 import type { CaseListRow, Page } from "@support-agent/dashboard-contracts";
 import { cn } from "@/lib/utils";
@@ -14,14 +14,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   LOAD_MORE_THRESHOLD_PX,
+  MODE_STORAGE_KEY,
   OVERSCAN,
   ROW_HEIGHT,
   SIDEBAR_PAGE_SIZE,
   applyFreshPage,
   caseIdFromPathname,
+  caseRowClasses,
   mergeDedupeById,
+  parseStoredMode,
   shouldLoadMore,
+  sidebarExcludeStatuses,
+  sidebarRequestSignature,
   windowRange,
+  type SidebarMode,
 } from "./cases-sidebar-data";
 
 // A searchable, virtualized, infinite-scroll case switcher — the secondary
@@ -36,6 +42,9 @@ export function CasesSidebar() {
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
+  // "all" lists every case; "attention" hides resolved (done) cases. Default
+  // is "all"; the remembered choice is restored from localStorage on mount.
+  const [mode, setModeState] = useState<SidebarMode>("all");
   const [rows, setRows] = useState<ReadonlyArray<CaseListRow>>([]);
   const [page, setPage] = useState(0);
   const [totalRows, setTotalRows] = useState(0);
@@ -46,13 +55,39 @@ export function CasesSidebar() {
   const [viewportHeight, setViewportHeight] = useState(600);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Guards against stale responses (an older query resolving late) and
-  // overlapping page fetches.
+  // Guards against stale responses (an older query/mode resolving late) and
+  // overlapping page fetches. latestQueryRef holds the request *signature*
+  // (mode + query) so a mode switch supersedes in-flight fetches.
   const latestQueryRef = useRef("");
   const loadingRef = useRef(false);
+  // Current query text + mode, mirrored into refs so the page-fetch callback
+  // (stable, empty deps) always reads the live values.
+  const debouncedRef = useRef("");
+  const modeRef = useRef<SidebarMode>("all");
+
+  // Restore the remembered mode on mount (client-only); a non-default mode
+  // triggers the reset effect, which reloads page 1 with the right filter.
+  useEffect(() => {
+    const stored = parseStoredMode(
+      typeof window === "undefined"
+        ? null
+        : window.localStorage.getItem(MODE_STORAGE_KEY),
+    );
+    if (stored !== "all") setModeState(stored);
+  }, []);
+
+  const setMode = useCallback((next: SidebarMode) => {
+    setModeState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(MODE_STORAGE_KEY, next);
+    }
+  }, []);
 
   const fetchPage = useCallback(
-    async (q: string, nextPage: number, replace: boolean) => {
+    async (nextPage: number, replace: boolean) => {
+      const activeMode = modeRef.current;
+      const q = debouncedRef.current;
+      const sig = sidebarRequestSignature(activeMode, q);
       loadingRef.current = true;
       setLoading(true);
       try {
@@ -61,6 +96,9 @@ export function CasesSidebar() {
           limit: String(SIDEBAR_PAGE_SIZE),
         });
         if (q) params.set("q", q);
+        for (const s of sidebarExcludeStatuses(activeMode)) {
+          params.append("excludeStatus", s);
+        }
         const res = await fetch(`/api/cases?${params.toString()}`, {
           cache: "no-store",
         });
@@ -75,7 +113,7 @@ export function CasesSidebar() {
         }
         if (!res.ok) throw new Error(`cases ${res.status}`);
         const data = (await res.json()) as Page<CaseListRow>;
-        if (q !== latestQueryRef.current) return; // a newer query superseded us
+        if (sig !== latestQueryRef.current) return; // a newer request superseded us
         setTotalRows(data.totalRows);
         setPage(data.page);
         setRows((prev) =>
@@ -83,9 +121,9 @@ export function CasesSidebar() {
         );
         setError(false);
       } catch {
-        if (q === latestQueryRef.current) setError(true);
+        if (sig === latestQueryRef.current) setError(true);
       } finally {
-        if (q === latestQueryRef.current) {
+        if (sig === latestQueryRef.current) {
           loadingRef.current = false;
           setLoading(false);
         }
@@ -100,17 +138,21 @@ export function CasesSidebar() {
     return () => clearTimeout(t);
   }, [query]);
 
-  // New search term → reset and load page 1 (also the initial mount load).
+  // New search term or mode → reset and load page 1 (also the initial mount
+  // load). Folding mode in means switching All ↔ Needs attention reloads with
+  // the right filter and supersedes any in-flight fetch from the old mode.
   useEffect(() => {
-    latestQueryRef.current = debounced;
+    debouncedRef.current = debounced;
+    modeRef.current = mode;
+    latestQueryRef.current = sidebarRequestSignature(mode, debounced);
     setRows([]);
     setPage(0);
     setTotalRows(0);
     setError(false);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
     setScrollTop(0);
-    void fetchPage(debounced, 1, true);
-  }, [debounced, fetchPage]);
+    void fetchPage(1, true);
+  }, [debounced, mode, fetchPage]);
 
   // Pathname change ⇒ a server action probably just ran (take over, hand
   // back, approve) and revalidated the page — but this list is client state,
@@ -125,7 +167,9 @@ export function CasesSidebar() {
     }
     if (mountedPathRef.current === pathname) return;
     mountedPathRef.current = pathname;
-    const q = latestQueryRef.current;
+    const activeMode = modeRef.current;
+    const q = debouncedRef.current;
+    const sig = sidebarRequestSignature(activeMode, q);
     void (async () => {
       try {
         const params = new URLSearchParams({
@@ -133,12 +177,15 @@ export function CasesSidebar() {
           limit: String(SIDEBAR_PAGE_SIZE),
         });
         if (q) params.set("q", q);
+        for (const s of sidebarExcludeStatuses(activeMode)) {
+          params.append("excludeStatus", s);
+        }
         const res = await fetch(`/api/cases?${params.toString()}`, {
           cache: "no-store",
         });
         if (!res.ok) return; // best-effort freshness; the poller/Retry handle errors
         const data = (await res.json()) as Page<CaseListRow>;
-        if (q !== latestQueryRef.current) return;
+        if (sig !== latestQueryRef.current) return;
         setRows((prev) => applyFreshPage(prev, data.rows));
       } catch {
         // Ignore — purely a freshness top-up.
@@ -164,7 +211,7 @@ export function CasesSidebar() {
   useEffect(() => {
     if (loadingRef.current || !hasMore) return;
     if (rows.length * ROW_HEIGHT <= viewportHeight + LOAD_MORE_THRESHOLD_PX) {
-      void fetchPage(latestQueryRef.current, page + 1, false);
+      void fetchPage(page + 1, false);
     }
   }, [rows.length, totalRows, viewportHeight, page, hasMore, fetchPage]);
 
@@ -181,7 +228,7 @@ export function CasesSidebar() {
         loading: loadingRef.current,
       })
     ) {
-      void fetchPage(latestQueryRef.current, page + 1, false);
+      void fetchPage(page + 1, false);
     }
   };
 
@@ -197,7 +244,43 @@ export function CasesSidebar() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-3 pb-3">
+      <div className="space-y-2 px-3 pb-3">
+        <div
+          className="inline-flex rounded-md border border-border bg-muted/40 p-0.5"
+          role="group"
+          aria-label="Filter cases"
+        >
+          <button
+            type="button"
+            onClick={() => setMode("all")}
+            aria-pressed={mode === "all"}
+            aria-label="All cases"
+            title="All cases"
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded transition-colors",
+              mode === "all"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <List className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("attention")}
+            aria-pressed={mode === "attention"}
+            aria-label="Needs attention"
+            title="Needs attention"
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded transition-colors",
+              mode === "attention"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Inbox className="size-4" aria-hidden />
+          </button>
+        </div>
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -238,7 +321,7 @@ export function CasesSidebar() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => void fetchPage(latestQueryRef.current, 1, true)}
+                onClick={() => void fetchPage(1, true)}
               >
                 Retry
               </Button>
@@ -256,6 +339,12 @@ export function CasesSidebar() {
             >
               {visible.map((row) => {
                 const active = row.id === activeId;
+                // Active row stays elevated; among the rest, resolved (done)
+                // cases recede while cases still needing work are bumped.
+                const appearance = caseRowClasses({
+                  status: row.status,
+                  active,
+                });
                 return (
                   <li key={row.id} style={{ height: ROW_HEIGHT }} className="py-1">
                     <Link
@@ -263,19 +352,10 @@ export function CasesSidebar() {
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "flex h-full flex-col justify-center gap-1 rounded-lg px-3 transition-colors",
-                        // Active = an elevated neutral surface (depth via shadow,
-                        // not a colored indicator); inactive recesses on hover.
-                        active
-                          ? "bg-card shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10"
-                          : "hover:bg-accent",
+                        appearance.container,
                       )}
                     >
-                      <span
-                        className={cn(
-                          "truncate text-sm text-foreground",
-                          active && "font-medium",
-                        )}
-                      >
+                      <span className={cn("truncate text-sm", appearance.subject)}>
                         {row.subject ?? "(no subject)"}
                       </span>
                       <span className="flex items-center gap-2 overflow-hidden">

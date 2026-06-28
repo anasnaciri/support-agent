@@ -106,6 +106,16 @@ export interface CasesFilter {
    * subject, summary, and category. Empty/absent means no filter.
    */
   readonly q?: string | undefined;
+  /**
+   * Restrict to these statuses (the cases-list status picker). Empty/absent
+   * means every status.
+   */
+  readonly status?: ReadonlyArray<string> | undefined;
+  /**
+   * Hide these statuses (the case sidebar's "Needs attention" mode passes
+   * `["resolved"]`). Empty/absent means hide nothing.
+   */
+  readonly excludeStatus?: ReadonlyArray<string> | undefined;
 }
 
 export interface CaseDetailCase {

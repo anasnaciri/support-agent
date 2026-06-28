@@ -9,6 +9,7 @@ import {
   inArray,
   like,
   lt,
+  notInArray,
   or,
   sql,
   type SQL,
@@ -357,6 +358,12 @@ export const casesList = async (
         ilike(cases.shopifyOrderId, term),
       )!,
     );
+  }
+  if (filter.status?.length) {
+    whereParts.push(inArray(cases.status, [...filter.status]));
+  }
+  if (filter.excludeStatus?.length) {
+    whereParts.push(notInArray(cases.status, [...filter.excludeStatus]));
   }
   const whereExpr = and(...whereParts);
 
