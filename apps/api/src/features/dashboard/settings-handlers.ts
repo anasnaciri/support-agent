@@ -392,6 +392,7 @@ const scenarioToView = (s: ScenarioPolicy) => ({
   label: s.label,
   recognition: s.recognition ?? null,
   builtin: s.builtin,
+  enabled: s.enabled !== false,
   enabledActions: s.enabledActions.map((a) => ({
     tool: a.tool,
     permission: a.permission,

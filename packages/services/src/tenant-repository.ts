@@ -168,6 +168,13 @@ export interface ScenarioPolicy {
   readonly recognition?: string;
   /** Seeded + (for built-ins) backed by a tuned flow, vs merchant-authored. */
   readonly builtin: boolean;
+  /**
+   * Whether triage may route NEW cases to the resolution agent for this
+   * scenario. Optional for back-compat (absent ⇒ enabled); the decoder
+   * normalizes it, so a decoded scenario always carries a boolean. A disabled
+   * scenario is simply not offered to triage — in-flight cases keep theirs.
+   */
+  readonly enabled?: boolean;
   /** Remedy tools this scenario may use + auto/ask each. Absent ⇒ denied. */
   readonly enabledActions: ReadonlyArray<ScenarioAction>;
   readonly supplierMode: SupplierMode;
@@ -194,6 +201,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       recognition:
         "Customer is asking where their order is, or for its tracking / delivery status.",
       builtin: true,
+      enabled: true,
       enabledActions: [],
       supplierMode: "none",
       notes:
@@ -204,6 +212,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       label: "Delivery problem (lost / stuck / late)",
       recognition: "A shipped order is lost, stuck in transit, or very late.",
       builtin: true,
+      enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
@@ -214,6 +223,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       label: "Damaged or defective item",
       recognition: "The item arrived damaged, defective, or broken.",
       builtin: true,
+      enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
@@ -225,6 +235,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       recognition:
         "Customer explicitly asks for their money back (not a delivery problem).",
       builtin: true,
+      enabled: true,
       enabledActions: [
         { tool: "refund.create", permission: "ask" },
         { tool: "discount.create", permission: "ask" },
@@ -238,6 +249,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       label: "General question",
       recognition: "A general store, product, or policy question.",
       builtin: true,
+      enabled: true,
       enabledActions: [],
       supplierMode: "none",
       notes:
@@ -284,10 +296,14 @@ const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
   }
   const recognition = r["recognition"];
   const notes = r["notes"];
+  // Default-true: only an explicit `false` disables (back-compat — scenarios
+  // stored before this field, and the seeded built-ins, are enabled).
+  const enabled = r["enabled"] !== false;
   return {
     key,
     label,
     builtin,
+    enabled,
     enabledActions,
     supplierMode,
     ...(typeof recognition === "string" && recognition.length > 0

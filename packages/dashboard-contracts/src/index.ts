@@ -723,6 +723,8 @@ export interface ResolutionScenarioView {
   /** "When does this apply" — shown for custom scenarios; null for built-ins. */
   readonly recognition: string | null;
   readonly builtin: boolean;
+  /** Whether triage routes new matching cases to the resolution agent. */
+  readonly enabled: boolean;
   /** Remedy tools the agent may use for this scenario + their permission. */
   readonly enabledActions: ReadonlyArray<ScenarioActionView>;
   readonly supplierMode: SupplierModeView;

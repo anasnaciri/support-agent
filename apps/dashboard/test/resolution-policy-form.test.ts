@@ -12,6 +12,7 @@ const stored: ReadonlyArray<ResolutionScenarioView> = [
     label: "Delivery problem",
     recognition: "lost / stuck",
     builtin: true,
+    enabled: true,
     enabledActions: [{ tool: "refund.create", permission: "ask" }],
     supplierMode: "escalate_and_wait",
     notes: "check tracking",
@@ -21,6 +22,7 @@ const stored: ReadonlyArray<ResolutionScenarioView> = [
     label: "General question",
     recognition: null,
     builtin: true,
+    enabled: true,
     enabledActions: [],
     supplierMode: "none",
     notes: null,
@@ -35,6 +37,7 @@ const getter =
 describe("parseResolutionForm", () => {
   it("keeps immutable fields and applies enabled actions, permissions, supplier mode, notes", () => {
     const m = new Map<string, string>([
+      [fieldName("delivery_issue", "enabled"), "on"],
       [fieldName("delivery_issue", "action:refund.create:enabled"), "on"],
       [fieldName("delivery_issue", "action:refund.create:permission"), "allow"],
       [fieldName("delivery_issue", "action:discount.create:enabled"), "on"],
@@ -47,6 +50,9 @@ describe("parseResolutionForm", () => {
     const out = parseResolutionForm(getter(m), stored);
 
     const d = out[0]!;
+    // delivery_issue had its Active box checked; general_inquiry did not.
+    expect(d.enabled).toBe(true);
+    expect(out[1]!.enabled).toBe(false);
     expect(d.key).toBe("delivery_issue");
     expect(d.label).toBe("Delivery problem");
     expect(d.recognition).toBe("lost / stuck");

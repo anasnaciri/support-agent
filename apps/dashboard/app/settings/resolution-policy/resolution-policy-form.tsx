@@ -35,10 +35,25 @@ export function ResolutionPolicyForm({
         return (
           <Card key={s.key}>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">{s.label}</CardTitle>
-              {s.recognition ? (
-                <p className="text-sm text-muted-foreground">{s.recognition}</p>
-              ) : null}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">{s.label}</CardTitle>
+                  {s.recognition ? (
+                    <p className="text-sm text-muted-foreground">
+                      {s.recognition}
+                    </p>
+                  ) : null}
+                </div>
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name={fieldName(s.key, "enabled")}
+                    defaultChecked={s.enabled}
+                    className="size-4 rounded border-input accent-primary"
+                  />
+                  <span className="font-medium">Active</span>
+                </label>
+              </div>
             </CardHeader>
             <CardContent className="space-y-5">
               {/* Remedy actions the agent may take for this scenario. */}

@@ -48,11 +48,14 @@ export const parseResolutionForm = (
     const notesRaw = get(fieldName(s.key, "notes"));
     const notes = typeof notesRaw === "string" ? notesRaw.trim() : "";
 
+    const enabled = get(fieldName(s.key, "enabled")) === "on";
+
     return {
       key: s.key,
       label: s.label,
       recognition: s.recognition,
       builtin: s.builtin,
+      enabled,
       enabledActions,
       supplierMode,
       notes: notes.length > 0 ? notes : null,

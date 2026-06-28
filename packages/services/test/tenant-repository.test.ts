@@ -372,6 +372,33 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
     });
     expect(p.scenarios[0]!.supplierMode).toBe("none");
     expect(p.scenarios[0]!.notes).toBe("Be extra gracious.");
+    // No `enabled` in the raw → defaults to enabled (back-compat).
+    expect(p.scenarios[0]!.enabled).toBe(true);
+  });
+
+  it("respects an explicit enabled:false and defaults absent enabled to true", () => {
+    const raw = {
+      scenarios: [
+        {
+          key: "off_one",
+          label: "Off",
+          builtin: false,
+          enabled: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+        {
+          key: "on_one",
+          label: "On",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    };
+    const p = decodeResolutionPolicy(raw);
+    expect(p.scenarios.find((s) => s.key === "off_one")!.enabled).toBe(false);
+    expect(p.scenarios.find((s) => s.key === "on_one")!.enabled).toBe(true);
   });
 
   it("falls back to defaults when no scenario is valid (bad supplierMode / empty key)", () => {

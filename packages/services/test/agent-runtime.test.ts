@@ -651,4 +651,29 @@ describe("applyTriageScenarioRouting", () => {
     const out = applyTriageScenarioRouting(agent, { scenarios: [] });
     expect(out).toBe(agent);
   });
+
+  it("offers only ENABLED scenarios — a disabled one is not listed for triage", () => {
+    const policy: ResolutionPolicy = {
+      scenarios: [
+        scenario({ key: "where_is_order", label: "Where is my order?" }),
+        scenario({
+          key: "refund_request",
+          label: "Refund request",
+          enabled: false,
+        }),
+      ],
+    };
+    const out = applyTriageScenarioRouting(triageAgent(), policy);
+    expect(out.promptTemplate).toContain("where_is_order");
+    expect(out.promptTemplate).not.toContain("refund_request");
+  });
+
+  it("is a no-op when every scenario is disabled (routes as if the agent were off)", () => {
+    const agent = triageAgent();
+    const policy: ResolutionPolicy = {
+      scenarios: [scenario({ key: "where_is_order", enabled: false })],
+    };
+    const out = applyTriageScenarioRouting(agent, policy);
+    expect(out).toBe(agent);
+  });
 });

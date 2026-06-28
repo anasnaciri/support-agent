@@ -1221,14 +1221,17 @@ export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
  *     case.update_context and hand off to the resolution agent, preferring it
  *     over the built-in specialists for any matching case.
  * Both flow through the runtime automatically (effectiveHandoffIds reads
- * `handoffs`; buildSystemPrompt reads `promptTemplate`). No scenarios → no-op.
+ * `handoffs`; buildSystemPrompt reads `promptTemplate`). Only ENABLED scenarios
+ * are offered (a disabled one falls back to the built-in specialists); no
+ * enabled scenarios → no-op (triage routes as if the agent were off).
  */
 export const applyTriageScenarioRouting = (
   agent: AgentConfig,
   policy: ResolutionPolicy,
 ): AgentConfig => {
-  if (policy.scenarios.length === 0) return agent;
-  const lines = policy.scenarios.map(
+  const active = policy.scenarios.filter((s) => s.enabled !== false);
+  if (active.length === 0) return agent;
+  const lines = active.map(
     (s) =>
       `- ${s.key} — "${s.label}": ${
         s.recognition?.trim() || s.notes?.trim() || s.label
