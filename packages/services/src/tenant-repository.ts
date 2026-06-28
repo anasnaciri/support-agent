@@ -261,6 +261,26 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
 const isSupplierMode = (v: unknown): v is SupplierMode =>
   v === "escalate_and_wait" || v === "notify_and_proceed" || v === "none";
 
+/** Keep only well-formed `{ tool, permission }` actions; drop the rest. */
+const decodeScenarioActions = (raw: unknown): ScenarioAction[] => {
+  const actionsRaw = Array.isArray(raw) ? raw : [];
+  const enabledActions: ScenarioAction[] = [];
+  for (const a of actionsRaw) {
+    if (!a || typeof a !== "object") continue;
+    const ar = a as Record<string, unknown>;
+    const tool = ar["tool"];
+    const permission = ar["permission"];
+    if (
+      typeof tool === "string" &&
+      tool.length > 0 &&
+      (permission === "allow" || permission === "ask")
+    ) {
+      enabledActions.push({ tool, permission });
+    }
+  }
+  return enabledActions;
+};
+
 /** Decode one scenario; returns null when key/label/supplierMode are invalid. */
 const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
   if (!raw || typeof raw !== "object") return null;
@@ -279,21 +299,7 @@ const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
   ) {
     return null;
   }
-  const actionsRaw = Array.isArray(r["enabledActions"]) ? r["enabledActions"] : [];
-  const enabledActions: ScenarioAction[] = [];
-  for (const a of actionsRaw) {
-    if (!a || typeof a !== "object") continue;
-    const ar = a as Record<string, unknown>;
-    const tool = ar["tool"];
-    const permission = ar["permission"];
-    if (
-      typeof tool === "string" &&
-      tool.length > 0 &&
-      (permission === "allow" || permission === "ask")
-    ) {
-      enabledActions.push({ tool, permission });
-    }
-  }
+  const enabledActions = decodeScenarioActions(r["enabledActions"]);
   const recognition = r["recognition"];
   const notes = r["notes"];
   // Default-true: only an explicit `false` disables (back-compat — scenarios
@@ -327,6 +333,144 @@ export const decodeResolutionPolicy = (raw: unknown): ResolutionPolicy => {
     .map(decodeScenario)
     .filter((s): s is ScenarioPolicy => s !== null);
   return scenarios.length > 0 ? { scenarios } : defaultResolutionPolicy;
+};
+
+/**
+ * Custom (merchant-authored) scenario keys are namespaced so they can NEVER
+ * collide with a built-in key — the write decoder forces this prefix on every
+ * custom key, and built-ins are matched/emitted first.
+ */
+export const CUSTOM_SCENARIO_KEY_PREFIX = "custom_";
+
+/** Lowercase ascii slug ([a-z0-9_]), suitable for a scenario key fragment. */
+const slugifyScenarioKey = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+
+/** Stable, namespaced key for a custom scenario: keep an already-assigned key,
+ *  otherwise derive one from the label. Always carries the custom prefix. */
+const customScenarioKey = (rawKey: string, label: string): string => {
+  const base = slugifyScenarioKey(rawKey) || slugifyScenarioKey(label) || "scenario";
+  return base.startsWith(CUSTOM_SCENARIO_KEY_PREFIX)
+    ? base
+    : `${CUSTOM_SCENARIO_KEY_PREFIX}${base}`;
+};
+
+/** Append `_2`, `_3`, … until the key is free. */
+const dedupeScenarioKey = (key: string, taken: ReadonlySet<string>): string => {
+  if (!taken.has(key)) return key;
+  let n = 2;
+  while (taken.has(`${key}_${n}`)) n += 1;
+  return `${key}_${n}`;
+};
+
+interface EditableScenarioFields {
+  readonly key: string; // raw; "" means "assign one"
+  readonly label: string; // trimmed; "" means drop (custom) / fall back (built-in)
+  readonly recognition?: string;
+  readonly enabled: boolean;
+  readonly enabledActions: ReadonlyArray<ScenarioAction>;
+  readonly supplierMode: SupplierMode;
+  readonly notes?: string;
+}
+
+/** Lenient row parse for the write path: tolerates an empty key (new custom)
+ *  and an invalid supplierMode (defaults to none); never trusts `builtin`. */
+const extractScenarioRow = (raw: unknown): EditableScenarioFields | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const key = typeof r["key"] === "string" ? r["key"] : "";
+  const label = typeof r["label"] === "string" ? r["label"].trim() : "";
+  const recognition =
+    typeof r["recognition"] === "string" ? r["recognition"].trim() : "";
+  const notes = typeof r["notes"] === "string" ? r["notes"].trim() : "";
+  return {
+    key,
+    label,
+    enabled: r["enabled"] !== false,
+    enabledActions: decodeScenarioActions(r["enabledActions"]),
+    supplierMode: isSupplierMode(r["supplierMode"]) ? r["supplierMode"] : "none",
+    ...(recognition ? { recognition } : {}),
+    ...(notes ? { notes } : {}),
+  };
+};
+
+/**
+ * Decode a merchant-submitted resolution policy (the dashboard SAVE path).
+ * Unlike `decodeResolutionPolicy` (the trusting read decoder), this is the
+ * server-side authority on the shape merchants are allowed to persist:
+ *   - Built-ins are ALWAYS present (a merchant can't delete one) and their
+ *     immutable fields (key/label/recognition/builtin) are forced from the
+ *     seeded defaults; only the editable fields (enabled / enabledActions /
+ *     supplierMode / notes) are taken from the body.
+ *   - Custom scenarios are accepted with `builtin` forced to false, a label
+ *     (required — blank ones are dropped), and a stable, unique, namespaced
+ *     key: an already-assigned `custom_*` key is kept as-is (so renaming the
+ *     label never re-keys an in-flight scenario), otherwise one is derived
+ *     from the label. Keys are deduped and can never collide with a built-in.
+ * Built-ins are emitted first, in their seeded order, then customs in body
+ * order. A wholly malformed body yields the default built-ins.
+ */
+export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => {
+  const rows: EditableScenarioFields[] = [];
+  if (raw && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>)["scenarios"])) {
+    for (const r of (raw as Record<string, unknown>)["scenarios"] as unknown[]) {
+      const row = extractScenarioRow(r);
+      if (row) rows.push(row);
+    }
+  }
+
+  const defaultByKey = new Map(
+    defaultResolutionPolicy.scenarios.map((s) => [s.key, s] as const),
+  );
+  const sentBuiltins = new Map<string, EditableScenarioFields>();
+  const customRows: EditableScenarioFields[] = [];
+  for (const row of rows) {
+    if (row.key && defaultByKey.has(row.key)) sentBuiltins.set(row.key, row);
+    else customRows.push(row);
+  }
+
+  const taken = new Set<string>();
+  const out: ScenarioPolicy[] = [];
+
+  // Built-ins: always present; immutable fields from defaults, editable from body.
+  for (const def of defaultResolutionPolicy.scenarios) {
+    taken.add(def.key);
+    const sent = sentBuiltins.get(def.key);
+    const notes = sent ? sent.notes : def.notes;
+    out.push({
+      key: def.key,
+      label: def.label,
+      builtin: true,
+      enabled: sent ? sent.enabled : def.enabled !== false,
+      enabledActions: sent ? sent.enabledActions : def.enabledActions,
+      supplierMode: sent ? sent.supplierMode : def.supplierMode,
+      ...(def.recognition ? { recognition: def.recognition } : {}),
+      ...(notes ? { notes } : {}),
+    });
+  }
+
+  // Customs: builtin forced false; stable unique namespaced key; label required.
+  for (const row of customRows) {
+    if (!row.label) continue;
+    const key = dedupeScenarioKey(customScenarioKey(row.key, row.label), taken);
+    taken.add(key);
+    out.push({
+      key,
+      label: row.label,
+      builtin: false,
+      enabled: row.enabled,
+      enabledActions: row.enabledActions,
+      supplierMode: row.supplierMode,
+      ...(row.recognition ? { recognition: row.recognition } : {}),
+      ...(row.notes ? { notes: row.notes } : {}),
+    });
+  }
+
+  return { scenarios: out };
 };
 
 /**

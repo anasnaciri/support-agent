@@ -195,12 +195,15 @@ supplier channel (for `notify_and_proceed`). Everything else reuses existing too
        `permissionOverrides` + supplier-mode control flow + `buildSystemPrompt` policy header.
 4. [ ] Strip hardcoded branches from specialists → generic + policy-driven (Delivery Issues first).
 5. [ ] `/settings/resolution-policy` dashboard page (5 seeded built-in cards).
-6. [ ] Generic resolution agent + triage reads-the-scenario-list → enable "Add scenario" (custom scenarios).
+6. [x] Generic resolution agent + triage reads-the-scenario-list → enable "Add scenario" (custom scenarios).
+       **DONE 2026-06-28** — the engine was already generic (data-driven `scenarioKey` lookup + triage
+       reads the scenario list), so this was the UI + a server-side write decoder. See "Add scenario" slice
+       below.
 
-**Open decision (user to make on return):** ship "Add scenario" (custom scenarios, steps 6) in v1, or start
-with the 5 editable built-ins and turn on custom right after? Lean: build the engine GENERIC from day one
-(scenarios are data + generic agent exists) but seed only the 5 built-ins in the first UI, then flip on
-"Add scenario" — so nothing gets hardcoded that has to be unwound. User said "save this, I'll get back to it."
+**Open decision — RESOLVED 2026-06-28:** shipped "Add scenario" (custom scenarios). Confirmed the lean
+above held: the engine was generic from day one, so enabling custom scenarios needed no runtime change —
+only the dashboard UI + a write-path decoder that makes the API (not the client) the authority on built-in
+immutability and custom-key assignment.
 
 #### 🚧 IN PROGRESS — scenario-resolution-agent (branch `feat/scenario-resolution-agent`, NOT merged)
 
@@ -264,6 +267,33 @@ Slice status (commits on the branch):
       `POST /dashboard/cases/:id/approvals/{approve,reject}` (api, approvals.decide +refunds.issue) that
       decides ALL pending rows then publishes ONE event + `BundleApprovalBar` on the case page (>1
       pending → approve/reject-all, reply editable; lone approval keeps the per-row card). `31fb553`
+- [x] **"Add scenario" — merchant-authored custom scenarios** (2026-06-28, NOT committed): the engine was
+      already generic (runtime `withScenario` looks up `resolutionPolicy.scenarios` by `context.scenarioKey`,
+      and `applyTriageScenarioRouting` lists ALL enabled scenarios — built-in + custom — to triage), so this
+      was UI + a server-authoritative write decoder, no runtime change.
+      - **Services:** new `decodeResolutionPolicyUpdate` (write path, distinct from the trusting read-path
+        `decodeResolutionPolicy`): built-ins ALWAYS present with immutable fields (key/label/recognition/
+        builtin) FORCED from `defaultResolutionPolicy` (a merchant can't rename/delete one); customs get
+        `builtin:false` + a stable, unique, `custom_`-namespaced key (existing `custom_*` key kept as-is so a
+        label rename never re-keys an in-flight scenario; else slugged from the label; deduped; can never
+        collide with a built-in). `builtin` is NEVER trusted from the body — derived by key membership.
+        Extracted `decodeScenarioActions`, exported `CUSTOM_SCENARIO_KEY_PREFIX`.
+      - **API:** `POST /dashboard/resolution-policy` now uses `decodeResolutionPolicyUpdate` (was the read
+        decoder) → custom scenarios persist; built-in immutability enforced server-side (the dashboard is a
+        pure api client, so this is the real boundary).
+      - **Dashboard:** `resolution-policy-form.tsx` is now a client component (discount-policy-form pattern):
+        static built-in cards + stateful custom cards with editable name + "when does this apply" +
+        Add/Remove. A hidden `__scenarioKeys` manifest lists every card's form key; the parser derives
+        built-in vs existing-custom (`custom_*`) vs freshly-added (`__new_*`, key blanked so the server
+        assigns) from the key prefix. `parse-resolution.ts` rewritten (no longer needs the re-read `stored`);
+        `actions.ts` no longer re-reads stored (server is authority).
+      - Tests: `decodeResolutionPolicyUpdate` units (9) in `tenant-repository.test.ts`; rewritten
+        `resolution-policy-form.test.ts` (7) for the manifest parser. Build + dashboard typecheck green; the
+        53-test scenario e2e + 14-test worker loop unaffected.
+      - **Follow-up:** custom scenarios route through the GENERIC scenario agent only when
+        `resolutionAgentEnabled` is on (legacy triage routing has a hardcoded enum and ignores
+        `resolutionPolicy` keys). The WIP `apps/dashboard-spa` has no resolution-policy page yet — it'll need
+        its own copy when it goes live.
 
 Tests: `apps/worker/test/scenario-resolution-loop.test.ts` (queue+mapping, bundle resume, envelope clamp),
 `packages/agents/test/scenario-resolution-agent.test.ts`, `applyScenarioEnvelope` units in

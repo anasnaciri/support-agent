@@ -3,7 +3,7 @@ import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   DEFAULT_RETENTION_DAYS,
   CustomAgentService,
-  decodeResolutionPolicy,
+  decodeResolutionPolicyUpdate,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -437,11 +437,12 @@ export const handleDashboardResolutionPolicy = async (
   });
 };
 
-// POST /dashboard/resolution-policy — save the scenario cards. The body's
-// `scenarios` are sanitized through `decodeResolutionPolicy` (drops invalid
-// scenarios/actions, falls back to the seeded defaults if none survive), the
-// same decoder the runtime reads with — so the UI can't persist a shape the
-// agent then chokes on.
+// POST /dashboard/resolution-policy — save the scenario cards (built-in edits
+// + merchant-authored custom scenarios). The body's `scenarios` go through
+// `decodeResolutionPolicyUpdate`, the server-side authority: built-in immutable
+// fields are forced from the seeded defaults (a merchant can't rename or delete
+// one), and custom scenarios get `builtin:false` + a stable, namespaced key.
+// The result is the same shape the runtime reads, so the agent can't choke.
 export const handleDashboardSetResolutionPolicy = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -451,7 +452,7 @@ export const handleDashboardSetResolutionPolicy = async (
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const body = parseJsonBody(req);
-  const policy = decodeResolutionPolicy({ scenarios: body["scenarios"] });
+  const policy = decodeResolutionPolicyUpdate({ scenarios: body["scenarios"] });
   await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {

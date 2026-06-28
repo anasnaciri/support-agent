@@ -6,20 +6,19 @@ import { api, getDashboardContext } from "@/lib/api-client";
 
 import { parseResolutionForm } from "./parse-resolution";
 
-// Save the scenario cards. Immutable fields come from the stored policy (re-read
-// here), so the form can only change which actions are enabled + their
-// permission, the supplier mode, and the notes. The api re-sanitizes through
-// the same decoder the runtime reads with.
+// Save the scenario cards (built-in edits + merchant-authored custom
+// scenarios). The form is parsed into a faithful payload; the api is the
+// authority — its decoder forces built-in immutable fields from the seeded
+// defaults and assigns stable, namespaced keys to custom scenarios.
 export const saveResolutionPolicyAction = async (
   formData: FormData,
 ): Promise<void> => {
   const ctx = await getDashboardContext();
-  const { scenarios: stored } = await api.resolutionPolicy(ctx);
   const get = (name: string): string | null => {
     const v = formData.get(name);
     return typeof v === "string" ? v : null;
   };
-  const next = parseResolutionForm(get, stored);
+  const next = parseResolutionForm(get);
   await api.setResolutionPolicy(ctx, next);
   revalidatePath("/settings/resolution-policy");
   redirect("/settings/resolution-policy?saved=1");

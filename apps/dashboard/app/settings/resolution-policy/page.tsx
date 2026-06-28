@@ -65,7 +65,10 @@ export default async function ResolutionPolicyPage({ searchParams }: PageProps) 
         <h2 className="text-lg font-semibold tracking-tight">Scenarios</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           For each situation, choose what the agent may do and whether it acts
-          automatically or asks you first.
+          automatically or asks you first. The built-in scenarios cover the
+          common cases; add your own for anything specific to your store —
+          describe when it applies and the agent will route matching messages to
+          it.
         </p>
       </div>
 

@@ -9,6 +9,7 @@ import {
   TenantRepositoryTest,
   TenantSettings,
   decodeResolutionPolicy,
+  decodeResolutionPolicyUpdate,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -443,5 +444,196 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
     expect(p.scenarios[0]!.enabledActions).toEqual([
       { tool: "refund.create", permission: "ask" },
     ]);
+  });
+});
+
+describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
+  const builtinKeys = defaultResolutionPolicy.scenarios.map((s) => s.key);
+
+  it("always keeps every built-in present, even when the body omits them", () => {
+    const p = decodeResolutionPolicyUpdate({ scenarios: [] });
+    expect(p.scenarios.map((s) => s.key)).toEqual(builtinKeys);
+    expect(p.scenarios.every((s) => s.builtin)).toBe(true);
+  });
+
+  it("forces built-in immutable fields (key/label/recognition/builtin) from defaults", () => {
+    const def = defaultResolutionPolicy.scenarios[0]!;
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          // A merchant tries to rename a built-in + flip its builtin flag.
+          key: def.key,
+          label: "Hacked label",
+          recognition: "Hacked recognition",
+          builtin: false,
+          enabled: false,
+          enabledActions: [{ tool: "refund.create", permission: "allow" }],
+          supplierMode: "notify_and_proceed",
+          notes: "merchant note",
+        },
+      ],
+    });
+    const out = p.scenarios.find((s) => s.key === def.key)!;
+    // Immutable fields are restored from the seeded defaults …
+    expect(out.label).toBe(def.label);
+    expect(out.recognition).toBe(def.recognition);
+    expect(out.builtin).toBe(true);
+    // … while the editable fields are taken from the body.
+    expect(out.enabled).toBe(false);
+    expect(out.enabledActions).toEqual([
+      { tool: "refund.create", permission: "allow" },
+    ]);
+    expect(out.supplierMode).toBe("notify_and_proceed");
+    expect(out.notes).toBe("merchant note");
+  });
+
+  it("accepts a custom scenario, forcing builtin:false and namespacing its key", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "VIP Complaint!", // unsanitized
+          label: "VIP complaint",
+          recognition: "An angry high-value customer",
+          builtin: true, // lie — must be coerced to false
+          enabled: true,
+          enabledActions: [{ tool: "discount.create", permission: "ask" }],
+          supplierMode: "none",
+          notes: "Be gracious.",
+        },
+      ],
+    });
+    const custom = p.scenarios.find((s) => !s.builtin)!;
+    expect(custom.builtin).toBe(false);
+    expect(custom.key).toBe("custom_vip_complaint");
+    expect(custom.label).toBe("VIP complaint");
+    expect(custom.recognition).toBe("An angry high-value customer");
+    expect(custom.enabledActions).toEqual([
+      { tool: "discount.create", permission: "ask" },
+    ]);
+    // Built-ins still come along.
+    expect(p.scenarios.filter((s) => s.builtin).map((s) => s.key)).toEqual(
+      builtinKeys,
+    );
+  });
+
+  it("derives a custom key from the label when none is supplied", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "",
+          label: "Wholesale order question",
+          recognition: "B2B / bulk buyer asking about an order",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    });
+    expect(p.scenarios.find((s) => !s.builtin)!.key).toBe(
+      "custom_wholesale_order_question",
+    );
+  });
+
+  it("dedupes colliding custom keys and never clobbers a built-in", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "",
+          label: "Returns",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+        {
+          key: "",
+          label: "Returns",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+        {
+          // Tries to masquerade as a built-in via a custom_ key.
+          key: "custom_where_is_order",
+          label: "Sneaky",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    });
+    const customKeys = p.scenarios.filter((s) => !s.builtin).map((s) => s.key);
+    expect(customKeys).toEqual([
+      "custom_returns",
+      "custom_returns_2",
+      "custom_where_is_order",
+    ]);
+    // The real built-in is untouched + distinct.
+    expect(p.scenarios.find((s) => s.key === "where_is_order")!.builtin).toBe(
+      true,
+    );
+  });
+
+  it("keeps a stable existing custom key across an edit (no re-slug from label)", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "custom_vip_complaint", // already-assigned key round-tripped
+          label: "VIP escalation", // renamed
+          recognition: "angry whale",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    });
+    expect(p.scenarios.find((s) => !s.builtin)!.key).toBe("custom_vip_complaint");
+  });
+
+  it("drops a custom scenario with a blank label", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "",
+          label: "   ",
+          builtin: false,
+          enabledActions: [],
+          supplierMode: "none",
+        },
+      ],
+    });
+    expect(p.scenarios.every((s) => s.builtin)).toBe(true);
+  });
+
+  it("defaults a custom's invalid supplierMode to none and drops invalid actions", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "",
+          label: "Odd one",
+          builtin: false,
+          enabledActions: [
+            { tool: "refund.create", permission: "ask" },
+            { tool: 7, permission: "allow" },
+          ],
+          supplierMode: "whenever",
+        },
+      ],
+    });
+    const custom = p.scenarios.find((s) => !s.builtin)!;
+    expect(custom.supplierMode).toBe("none");
+    expect(custom.enabledActions).toEqual([
+      { tool: "refund.create", permission: "ask" },
+    ]);
+  });
+
+  it("falls back to all built-ins on a wholly malformed body", () => {
+    expect(decodeResolutionPolicyUpdate(42).scenarios.map((s) => s.key)).toEqual(
+      builtinKeys,
+    );
+    expect(
+      decodeResolutionPolicyUpdate({ scenarios: "nope" }).scenarios.every(
+        (s) => s.builtin,
+      ),
+    ).toBe(true);
   });
 });
