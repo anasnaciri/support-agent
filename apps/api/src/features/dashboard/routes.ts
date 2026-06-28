@@ -40,6 +40,9 @@ import {
   handleDashboardModels,
   handleDashboardRephraseModelSet,
   handleDashboardOnboarding,
+  handleDashboardResolutionPolicy,
+  handleDashboardSetResolutionPolicy,
+  handleDashboardSetResolutionAgentEnabled,
   handleDashboardSettings,
   handleDashboardShopCurrency,
   handleDashboardTenant,
@@ -201,6 +204,12 @@ export const registerDashboardRoutes = (
     "/dashboard/settings",
     "Resolved tenant settings (refund policy + supplier sheet)",
     handleDashboardSettings,
+  );
+  dashboardGet(
+    "/dashboard/resolution-policy",
+    "Resolution agent flag + scenario playbooks",
+    handleDashboardResolutionPolicy,
+    "settings.agents",
   );
   dashboardGet(
     "/dashboard/shop-currency",
@@ -417,6 +426,18 @@ export const registerDashboardRoutes = (
     "Set the goodwill-coupon (discount) policy",
     handleDashboardDiscountPolicy,
     "settings.refund_policy",
+  );
+  dashboardPost(
+    "/dashboard/resolution-policy",
+    "Save the resolution-agent scenario playbooks",
+    handleDashboardSetResolutionPolicy,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/resolution-agent",
+    "Toggle the resolution agent for new cases",
+    handleDashboardSetResolutionAgentEnabled,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/supplier-sheet",

@@ -27,6 +27,8 @@ import type {
   ModelsResponse,
   OnboardingResult,
   Page,
+  ResolutionPolicyView,
+  ResolutionScenarioView,
   ShopifyAppGateView,
   CreateWorkspaceResult,
   TenantInfo,
@@ -585,6 +587,9 @@ export const api = {
   settings: (ctx: CallCtx): Promise<TenantSettingsView> =>
     okBody("/settings", ctx) as Promise<TenantSettingsView>,
 
+  resolutionPolicy: (ctx: CallCtx): Promise<ResolutionPolicyView> =>
+    okBody("/resolution-policy", ctx) as Promise<ResolutionPolicyView>,
+
   shopCurrency: (
     ctx: CallCtx,
   ): Promise<{ readonly currencyCode: string | null }> =>
@@ -846,6 +851,18 @@ export const api = {
     },
   ): Promise<CallResult> =>
     call("/discount-policy", { method: "POST", body: input, ctx }),
+
+  setResolutionPolicy: (
+    ctx: CallCtx,
+    scenarios: ReadonlyArray<ResolutionScenarioView>,
+  ): Promise<CallResult> =>
+    call("/resolution-policy", { method: "POST", body: { scenarios }, ctx }),
+
+  setResolutionAgentEnabled: (
+    ctx: CallCtx,
+    enabled: boolean,
+  ): Promise<CallResult> =>
+    call("/resolution-agent", { method: "POST", body: { enabled }, ctx }),
 
   setSupplierSheet: (
     ctx: CallCtx,

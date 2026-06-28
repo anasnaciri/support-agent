@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   Users,
+  Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -31,6 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings": LayoutGrid,
   "/settings/agents": Bot,
   "/settings/permissions": ShieldCheck,
+  "/settings/resolution-policy": Workflow,
   "/settings/llm": KeyRound,
   "/settings/refund-policy": Banknote,
   "/settings/knowledge": Library,

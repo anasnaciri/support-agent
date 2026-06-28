@@ -701,6 +701,42 @@ export interface TenantSettingsView {
 }
 
 // ============================================================
+// Resolution policy (scenario agent)
+// ============================================================
+
+export type ScenarioActionPermissionView = "allow" | "ask";
+
+export interface ScenarioActionView {
+  /** Tool id (e.g. "refund.create"); the UI renders a plain-language label. */
+  readonly tool: string;
+  readonly permission: ScenarioActionPermissionView;
+}
+
+export type SupplierModeView =
+  | "escalate_and_wait"
+  | "notify_and_proceed"
+  | "none";
+
+export interface ResolutionScenarioView {
+  readonly key: string;
+  readonly label: string;
+  /** "When does this apply" — shown for custom scenarios; null for built-ins. */
+  readonly recognition: string | null;
+  readonly builtin: boolean;
+  /** Remedy tools the agent may use for this scenario + their permission. */
+  readonly enabledActions: ReadonlyArray<ScenarioActionView>;
+  readonly supplierMode: SupplierModeView;
+  /** Free-text playbook guidance injected verbatim into the agent. */
+  readonly notes: string | null;
+}
+
+export interface ResolutionPolicyView {
+  /** Whether triage routes new cases to the scenario agent for this tenant. */
+  readonly resolutionAgentEnabled: boolean;
+  readonly scenarios: ReadonlyArray<ResolutionScenarioView>;
+}
+
+// ============================================================
 // Connector scope coverage (shared rule)
 // ============================================================
 

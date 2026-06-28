@@ -3,12 +3,15 @@ import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   DEFAULT_RETENTION_DAYS,
   CustomAgentService,
+  decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
+  defaultResolutionPolicy,
   legalAcceptanceIsCurrent,
   TenantAgentOverridesService,
   TenantRepository,
   type LegalAcceptance,
+  type ScenarioPolicy,
 } from "@support-agent/services";
 import { AgentId, TenantId } from "@support-agent/agent-core";
 import { ALL_AGENTS } from "@support-agent/agents";
@@ -380,6 +383,108 @@ export const handleDashboardSettings = async (
     supplierEscalationSheet: settings.supplierEscalationSheet,
     legalAcceptance: settings.legalAcceptance,
   });
+};
+
+// ---- Resolution policy (scenario agent) ----
+
+const scenarioToView = (s: ScenarioPolicy) => ({
+  key: s.key,
+  label: s.label,
+  recognition: s.recognition ?? null,
+  builtin: s.builtin,
+  enabledActions: s.enabledActions.map((a) => ({
+    tool: a.tool,
+    permission: a.permission,
+  })),
+  supplierMode: s.supplierMode,
+  notes: s.notes ?? null,
+});
+
+// GET /dashboard/resolution-policy — the flag + the scenario cards (defaults-on-read).
+export const handleDashboardResolutionPolicy = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { enabled, scenarios } = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo.getSettings(TenantId(auth.tenantId));
+        const policy = settings.resolutionPolicy ?? defaultResolutionPolicy;
+        return {
+          enabled: settings.resolutionAgentEnabled === true,
+          scenarios: policy.scenarios,
+        };
+      }).pipe(
+        Effect.catchAll(() =>
+          Effect.succeed({
+            enabled: false,
+            scenarios: defaultResolutionPolicy.scenarios,
+          }),
+        ),
+      ),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, {
+    resolutionAgentEnabled: enabled,
+    scenarios: scenarios.map(scenarioToView),
+  });
+};
+
+// POST /dashboard/resolution-policy — save the scenario cards. The body's
+// `scenarios` are sanitized through `decodeResolutionPolicy` (drops invalid
+// scenarios/actions, falls back to the seeded defaults if none survive), the
+// same decoder the runtime reads with — so the UI can't persist a shape the
+// agent then chokes on.
+export const handleDashboardSetResolutionPolicy = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const policy = decodeResolutionPolicy({ scenarios: body["scenarios"] });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setResolutionPolicy(TenantId(auth.tenantId), policy);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// POST /dashboard/resolution-agent — toggle whether triage routes to the
+// scenario agent for this tenant.
+export const handleDashboardSetResolutionAgentEnabled = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const enabled = body["enabled"] === true;
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setResolutionAgentEnabled(TenantId(auth.tenantId), enabled);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true, enabled });
 };
 
 // POST /dashboard/onboarding — create a tenant for the asserted org.
