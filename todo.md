@@ -32,6 +32,28 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-28 — Subject-less cases no longer render blank (apps/dashboard)
+
+**What:** cases that arrived without a usable Subject (empty or whitespace-only header,
+not just a missing one) rendered as a blank, awkward row. Root cause: every render site
+used `subject ?? "(no subject)"`, and `??` only catches `null`/`undefined` — an empty
+string `""` (which inbound email produces, and `toInboundMessage` lets through since `""`
+isn't nullish) slipped past it. Fix is display-only: two pure helpers in `lib/labels.ts`
+— `caseSubjectLabel(subject)` (trims; returns `"(No subject)"` for null/empty/whitespace)
+and `hasSubject(subject)` — wired into all 5 case-subject render sites (`app/page.tsx`
+Today list, `app/cases/page.tsx` table, `CasesSidebar.tsx` switcher, `cases/[id]/page.tsx`
+breadcrumb + h1). The fallback is de-emphasized (`italic text-muted-foreground`, or
+`italic opacity-70` in the sidebar where active-state color must win) via a conditional
+`cn(...)` class so real subjects keep their styling. TDD: extended `test/labels.test.ts`
+(red→green); 15 label tests + dashboard `tsc --noEmit` green.
+
+**Follow-ups (not done — kept tight to the ask):** the email-thread panel header
+(`cases/[id]/page.tsx` ~L503, `result.thread.subject`, a required `string`) has no
+fallback and would also render blank for an empty thread subject — route it through
+`caseSubjectLabel` if it surfaces. Optional: normalize `""`→`null` at the
+`toInboundMessage` boundary so the DB stops storing display text. `apps/dashboard-spa`
+(untracked WIP) carries the same pattern and was intentionally left untouched.
+
 ### 2026-06-28 — Cases status filter + case-sidebar "Needs attention" mode (apps/dashboard)
 
 **What:** two case-navigation UX upgrades on the live Next dashboard (`apps/dashboard`).

@@ -4,6 +4,8 @@ import {
   approvalStatusLabel,
   auditActionLabel,
   caseStatusLabel,
+  caseSubjectLabel,
+  hasSubject,
   humanizeSlug,
   toolActionLabel,
 } from "../lib/labels";
@@ -52,6 +54,34 @@ describe("caseStatusLabel", () => {
 
   it("humanizes unknown statuses instead of leaking snake_case", () => {
     expect(caseStatusLabel("some_future_status")).toBe("Some future status");
+  });
+});
+
+describe("caseSubjectLabel", () => {
+  it("returns a real subject, trimmed of surrounding whitespace", () => {
+    expect(caseSubjectLabel("Refund for order #1024")).toBe(
+      "Refund for order #1024",
+    );
+    expect(caseSubjectLabel("  Order question  ")).toBe("Order question");
+  });
+
+  it("falls back when the subject is missing or only whitespace", () => {
+    // `?? "(no subject)"` only caught null/undefined; an empty or
+    // whitespace-only Subject header slipped through and rendered blank.
+    expect(caseSubjectLabel(null)).toBe("(No subject)");
+    expect(caseSubjectLabel(undefined)).toBe("(No subject)");
+    expect(caseSubjectLabel("")).toBe("(No subject)");
+    expect(caseSubjectLabel("   ")).toBe("(No subject)");
+  });
+});
+
+describe("hasSubject", () => {
+  it("is true only when there is non-whitespace content", () => {
+    expect(hasSubject("Hello")).toBe(true);
+    expect(hasSubject(null)).toBe(false);
+    expect(hasSubject(undefined)).toBe(false);
+    expect(hasSubject("")).toBe(false);
+    expect(hasSubject("   ")).toBe(false);
   });
 });
 

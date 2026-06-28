@@ -11,8 +11,11 @@ import {
 import {
   caseStatusFilterOptions,
   caseStatusLabel,
+  caseSubjectLabel,
+  hasSubject,
   humanizeSlug,
 } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 import {
   casesHiddenParams,
   isDefaultCasesFilter,
@@ -139,9 +142,13 @@ export default async function CasesPage({ searchParams }: SearchParams) {
                   <TableCell>
                     <Link
                       href={`/cases/${r.id}`}
-                      className="font-medium text-primary hover:underline"
+                      className={cn(
+                        "font-medium text-primary hover:underline",
+                        !hasSubject(r.subject) &&
+                          "font-normal italic text-muted-foreground",
+                      )}
                     >
-                      {r.subject ?? "(no subject)"}
+                      {caseSubjectLabel(r.subject)}
                     </Link>
                   </TableCell>
                   <TableCell>

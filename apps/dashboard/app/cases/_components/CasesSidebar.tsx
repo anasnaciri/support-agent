@@ -8,7 +8,7 @@ import { Inbox, List, Search } from "lucide-react";
 import type { CaseListRow, Page } from "@support-agent/dashboard-contracts";
 import { cn } from "@/lib/utils";
 import { buildSignInRedirect } from "@/lib/auth-redirect";
-import { caseStatusLabel } from "@/lib/labels";
+import { caseStatusLabel, caseSubjectLabel, hasSubject } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -355,8 +355,14 @@ export function CasesSidebar() {
                         appearance.container,
                       )}
                     >
-                      <span className={cn("truncate text-sm", appearance.subject)}>
-                        {row.subject ?? "(no subject)"}
+                      <span
+                        className={cn(
+                          "truncate text-sm",
+                          appearance.subject,
+                          !hasSubject(row.subject) && "italic opacity-70",
+                        )}
+                      >
+                        {caseSubjectLabel(row.subject)}
                       </span>
                       <span className="flex items-center gap-2 overflow-hidden">
                         <Badge

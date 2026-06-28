@@ -15,6 +15,8 @@ import { api, getDashboardContext } from "@/lib/api-client";
 import {
   auditActionLabel,
   caseStatusLabel,
+  caseSubjectLabel,
+  hasSubject,
   humanizeSlug,
   toolActionLabel,
 } from "@/lib/labels";
@@ -721,7 +723,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     <div className="space-y-6">
       <PageBreadcrumb
         items={[{ href: "/cases", label: "Cases" }]}
-        current={caseRow.subject ?? "(no subject)"}
+        current={caseSubjectLabel(caseRow.subject)}
       />
 
       {banner ? (
@@ -732,8 +734,14 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
       <div>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {caseRow.subject ?? "(no subject)"}
+          <h1
+            className={cn(
+              "text-2xl font-semibold tracking-tight",
+              !hasSubject(caseRow.subject) &&
+                "font-normal italic text-muted-foreground",
+            )}
+          >
+            {caseSubjectLabel(caseRow.subject)}
           </h1>
           <CaseLiveBoundary
             caseId={caseRow.id}

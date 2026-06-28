@@ -25,6 +25,20 @@ const CASE_STATUS_LABELS: Readonly<Record<string, string>> = {
 export const caseStatusLabel = (status: string): string =>
   CASE_STATUS_LABELS[status] ?? humanizeSlug(status);
 
+/**
+ * True when a case actually carries a subject. A `??` fallback only caught
+ * null/undefined — an empty or whitespace-only Subject header (which inbound
+ * email can produce) slipped through and rendered as a blank, awkward row.
+ */
+export const hasSubject = (subject: string | null | undefined): boolean =>
+  (subject ?? "").trim().length > 0;
+
+/** A case's subject for display: trimmed, or "(No subject)" when there is none. */
+export const caseSubjectLabel = (subject: string | null | undefined): string => {
+  const trimmed = (subject ?? "").trim();
+  return trimmed.length > 0 ? trimmed : "(No subject)";
+};
+
 /** The case statuses offered by the cases-list status filter, in display
  *  order — derived from the canonical label map so the picker never drifts. */
 export const caseStatusFilterOptions: ReadonlyArray<{

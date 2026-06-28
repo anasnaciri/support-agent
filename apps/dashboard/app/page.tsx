@@ -10,7 +10,8 @@ import {
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
-import { toolActionLabel } from "@/lib/labels";
+import { caseSubjectLabel, hasSubject, toolActionLabel } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 import { resolveFeedback } from "@/lib/toast-feedback";
 import {
   Card,
@@ -186,9 +187,13 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
                   <div className="min-w-0">
                     <Link
                       href={`/cases/${c.id}`}
-                      className="text-sm font-medium hover:underline"
+                      className={cn(
+                        "text-sm font-medium hover:underline",
+                        !hasSubject(c.subject) &&
+                          "font-normal italic text-muted-foreground",
+                      )}
                     >
-                      {c.subject ?? "(no subject)"}
+                      {caseSubjectLabel(c.subject)}
                     </Link>
                     <div className="mt-0.5 text-xs text-muted-foreground">
                       {c.category ?? "uncategorized"}
