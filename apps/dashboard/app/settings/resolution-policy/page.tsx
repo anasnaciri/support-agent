@@ -3,6 +3,7 @@ import { Workflow } from "lucide-react";
 import { api, getDashboardContext } from "@/lib/api-client";
 import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
 import { FeedbackToaster } from "@/components/ui/feedback-toaster";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
@@ -71,6 +72,14 @@ export default async function ResolutionPolicyPage({ searchParams }: PageProps) 
           it.
         </p>
       </div>
+
+      {!policy.resolutionAgentEnabled ? (
+        <Alert variant="info">
+          <AlertDescription>
+            These settings take effect only while the resolution agent is on.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <ResolutionPolicyForm scenarios={policy.scenarios} />
     </div>
