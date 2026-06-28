@@ -142,17 +142,27 @@ export const toolDisplayLabel = (tool: ToolDto): string =>
 export const isGatedTool = (tool: ToolDto): boolean => tool.risk !== "read";
 
 /**
- * One friendly capability per catalog tool that declares
- * `requiredConnectorScopes` for the named provider. Sorted by label so the list
- * is stable between renders. The raw scope is carried (not shown) so the page
- * can render a granted/missing dot against the connection's scopes.
+ * One friendly capability per catalog tool that declares at least one
+ * `requiredConnectorScopes` scope for the named provider. Sorted by label so
+ * the list is stable between renders. The raw scope is carried (not shown) so
+ * the page can render a granted/missing dot against the connection's scopes.
+ *
+ * Tools that match the provider but require NO scope (e.g.
+ * `shopify.get_store_info`, whose Shop query needs no Shopify scope) are
+ * excluded: with no scope to grant, the row would be rendered with scope "" and
+ * so painted permanently "not granted" (red), which also wrongly trips the
+ * "Reinstall to update permissions" hint.
  */
 export const capabilitiesForProvider = (
   catalog: CatalogResponse,
   provider: string,
 ): ReadonlyArray<ConnectorCapability> =>
   catalog.tools
-    .filter((t) => t.requiredConnectorScopes?.provider === provider)
+    .filter(
+      (t) =>
+        t.requiredConnectorScopes?.provider === provider &&
+        (t.requiredConnectorScopes?.scopes.length ?? 0) > 0,
+    )
     .map((t) => ({
       tool: t.name,
       label:

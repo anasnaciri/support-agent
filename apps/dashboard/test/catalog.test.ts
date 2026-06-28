@@ -189,6 +189,25 @@ describe("capabilitiesForProvider", () => {
     expect(tools).not.toContain("conversation.reply");
     expect(tools).not.toContain("supplier.add_sheet_row");
   });
+
+  it("excludes a tool that matches the provider but requires no scope", () => {
+    // shopify.get_store_info declares { provider: 'shopify', scopes: [] }
+    // — the Shop query needs no Shopify scope. It must NOT appear in the
+    // scope grid: with no scope to grant, it was rendered with scope "" and
+    // so painted permanently "not granted" (red), which also forced the
+    // misleading "Missing a capability? Reinstall" hint to always show.
+    const cat: CatalogResponse = {
+      agents: [],
+      tools: [
+        tool({
+          name: "shopify.get_store_info",
+          displayName: "Get store info",
+          requiredConnectorScopes: { provider: "shopify", scopes: [] },
+        }),
+      ],
+    };
+    expect(capabilitiesForProvider(cat, "shopify")).toEqual([]);
+  });
 });
 
 describe("currentToolPermission", () => {
