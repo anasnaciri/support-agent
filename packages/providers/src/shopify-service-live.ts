@@ -9,8 +9,11 @@ import {
   type ShopifyFulfillment,
   type ShopifyFulfillmentStatus,
   type ShopifyLineItem,
+  type ShopifyLocation,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyOrderRefundContext,
+  type ShopifyRefundLineItem,
   type ShopifyProduct,
   type ShopifyProductImage,
   type ShopifyProductSearchResult,
@@ -819,6 +822,149 @@ type RefundCreatePayload = {
   };
 };
 
+// Backs `getOrderRefundContext`. `suggestedRefund(suggestFullRefund: true)` is
+// Shopify's own refund-calculator — it returns the accurate per-line subtotals
+// + tax, the refundable shipping, the maximum refundable, and the suggested
+// gateway, exactly as the Shopify admin refund page uses. Needs only
+// `read_orders` (the restock `location` + root `locations` are fetched
+// separately and best-effort, because they additionally require
+// `read_inventory`, which older installs may not have granted).
+const ORDER_REFUND_CONTEXT_QUERY = `
+  query OrderRefundContext($id: ID!) {
+    order(id: $id) {
+      id
+      name
+      currencyCode
+      lineItems(first: 50) {
+        nodes {
+          id
+          title
+          sku
+          variantTitle
+          quantity
+          refundableQuantity
+          unfulfilledQuantity
+          restockable
+          discountedUnitPriceSet { shopMoney { amount currencyCode } }
+          image { url }
+        }
+      }
+      suggestedRefund(suggestFullRefund: true) {
+        subtotalSet { shopMoney { amount currencyCode } }
+        maximumRefundableSet { shopMoney { amount currencyCode } }
+        shipping {
+          amountSet { shopMoney { amount currencyCode } }
+          maximumRefundableSet { shopMoney { amount currencyCode } }
+        }
+        refundLineItems {
+          lineItem { id }
+          quantity
+          subtotalSet { shopMoney { amount currencyCode } }
+          totalTaxSet { shopMoney { amount currencyCode } }
+        }
+        suggestedTransactions {
+          gateway
+          formattedGateway
+          amountSet { shopMoney { amount currencyCode } }
+        }
+      }
+    }
+  }
+`;
+
+// Best-effort restock leg — needs `read_inventory` + `read_locations` on top of
+// `read_orders`. Fetched separately so a store that hasn't granted inventory
+// access still gets the full refund modal (just without restock locations).
+const ORDER_RESTOCK_CONTEXT_QUERY = `
+  query OrderRestockContext($id: ID!) {
+    order(id: $id) {
+      suggestedRefund(suggestFullRefund: true) {
+        refundLineItems {
+          lineItem { id }
+          restockType
+          location { id name }
+        }
+      }
+    }
+    locations(first: 20) {
+      nodes { id name }
+    }
+  }
+`;
+
+type GqlMoneyBag = { readonly shopMoney: GqlMoney };
+
+type GqlRefundContextResponse = {
+  readonly order: {
+    readonly id: string;
+    readonly name: string;
+    readonly currencyCode: string;
+    readonly lineItems: {
+      readonly nodes: ReadonlyArray<{
+        readonly id: string;
+        readonly title: string;
+        readonly sku: string | null;
+        readonly variantTitle: string | null;
+        readonly quantity: number;
+        readonly refundableQuantity: number;
+        readonly unfulfilledQuantity: number;
+        readonly restockable: boolean;
+        readonly discountedUnitPriceSet: GqlMoneyBag;
+        readonly image: { readonly url: string } | null;
+      }>;
+    };
+    readonly suggestedRefund: {
+      readonly subtotalSet: GqlMoneyBag;
+      readonly maximumRefundableSet: GqlMoneyBag;
+      readonly shipping: {
+        readonly amountSet: GqlMoneyBag;
+        readonly maximumRefundableSet: GqlMoneyBag;
+      };
+      readonly refundLineItems: ReadonlyArray<{
+        readonly lineItem: { readonly id: string };
+        readonly quantity: number;
+        readonly subtotalSet: GqlMoneyBag;
+        readonly totalTaxSet: GqlMoneyBag;
+      }>;
+      readonly suggestedTransactions: ReadonlyArray<{
+        readonly gateway: string | null;
+        readonly formattedGateway: string | null;
+        readonly amountSet: GqlMoneyBag;
+      }>;
+    } | null;
+  } | null;
+};
+
+type GqlRestockContextResponse = {
+  readonly order: {
+    readonly suggestedRefund: {
+      readonly refundLineItems: ReadonlyArray<{
+        readonly lineItem: { readonly id: string };
+        readonly restockType: string;
+        readonly location: { readonly id: string; readonly name: string } | null;
+      }>;
+    } | null;
+  } | null;
+  readonly locations: {
+    readonly nodes: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  };
+};
+
+// Per-unit money from a line's total + quantity. Rounds to 2dp for display /
+// client-side partial-selection math; the default refund amount uses Shopify's
+// exact `maximumRefundable`, and Shopify re-validates the issued amount, so this
+// rounding never decides what actually moves.
+const perUnitMoney = (
+  total: GqlMoney,
+  quantity: number,
+): ShopifyMoney => ({
+  amount:
+    quantity > 0
+      ? (Number.parseFloat(total.amount) / quantity).toFixed(2)
+      : total.amount,
+  currencyCode: total.currencyCode,
+});
+
 const DISCOUNT_CODE_CREATE_MUTATION = `
   mutation DiscountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
     discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
@@ -1185,6 +1331,95 @@ export const ShopifyServiceLive = Layer.effect(
           ),
         ),
 
+      getOrderRefundContext: (tenantId, orderId) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            const orderGidStr = orderGid(orderId);
+            // Core leg (read_orders only): line items + Shopify's own
+            // suggestedRefund calculation.
+            const data = yield* runQuery<GqlRefundContextResponse>(
+              http,
+              creds,
+              tenantId,
+              ORDER_REFUND_CONTEXT_QUERY,
+              { id: orderGidStr },
+            );
+            const order = data.order;
+            if (!order || !order.suggestedRefund) {
+              return yield* Effect.fail(new OrderNotFound({ orderId }));
+            }
+            const suggested = order.suggestedRefund;
+
+            // Best-effort restock leg (needs read_inventory). On any failure —
+            // most commonly a store that hasn't granted inventory access — fall
+            // back to no restock locations rather than failing the whole modal.
+            const restock = yield* runQuery<GqlRestockContextResponse>(
+              http,
+              creds,
+              tenantId,
+              ORDER_RESTOCK_CONTEXT_QUERY,
+              { id: orderGidStr },
+            ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+            const suggestedByLine = new Map(
+              suggested.refundLineItems.map((r) => [r.lineItem.id, r]),
+            );
+            const restockByLine = new Map(
+              (restock?.order?.suggestedRefund?.refundLineItems ?? []).map(
+                (r) => [r.lineItem.id, r],
+              ),
+            );
+            const locations: ReadonlyArray<ShopifyLocation> = (
+              restock?.locations?.nodes ?? []
+            ).map((l) => ({ id: l.id, name: l.name }));
+
+            const lineItems: ReadonlyArray<ShopifyRefundLineItem> = order.lineItems.nodes
+              .filter((n) => n.refundableQuantity > 0)
+              .map((n) => {
+                const s = suggestedByLine.get(n.id);
+                const r = restockByLine.get(n.id);
+                const unitPrice = s
+                  ? perUnitMoney(s.subtotalSet.shopMoney, s.quantity)
+                  : mapMoney(n.discountedUnitPriceSet.shopMoney);
+                const unitTax = s
+                  ? perUnitMoney(s.totalTaxSet.shopMoney, s.quantity)
+                  : { amount: "0.00", currencyCode: order.currencyCode };
+                return {
+                  lineItemId: n.id,
+                  title: n.title,
+                  variantTitle: n.variantTitle,
+                  sku: n.sku,
+                  imageUrl: n.image?.url ?? null,
+                  refundableQuantity: n.refundableQuantity,
+                  unitPrice,
+                  unitTax,
+                  restockable: n.restockable,
+                  fulfilled: n.unfulfilledQuantity === 0,
+                  restockLocationId: r?.location?.id ?? null,
+                };
+              });
+
+            const tx = suggested.suggestedTransactions[0];
+            const result: ShopifyOrderRefundContext = {
+              orderId,
+              orderName: order.name,
+              currencyCode: order.currencyCode,
+              subtotal: mapMoney(suggested.subtotalSet.shopMoney),
+              maximumRefundable: mapMoney(
+                suggested.maximumRefundableSet.shopMoney,
+              ),
+              shippingRefundable: mapMoney(
+                suggested.shipping.maximumRefundableSet.shopMoney,
+              ),
+              paymentGateway:
+                tx?.formattedGateway ?? tx?.gateway ?? null,
+              lineItems,
+              locations,
+            };
+            return result;
+          }),
+        ),
+
       refundOrder: (tenantId, input: RefundOrderInput) =>
         withCreds(tenantId, (creds) =>
           Effect.gen(function* () {
@@ -1242,10 +1477,30 @@ export const ShopifyServiceLive = Layer.effect(
             // points at the original sale; `kind: "REFUND"` flips it
             // from a charge to a refund; `gateway` must match the parent
             // (Shopify rejects mismatched gateways).
+            // The dashboard refund modal additionally selects which line
+            // items to restock (and the shipping to refund); the agent's
+            // amount-only `refund.create` path leaves both unset. Shopify
+            // requires a `locationId` for RETURN/CANCEL restocks and rejects
+            // it for NO_RESTOCK, so we only attach it when restocking.
+            const refundLineItems = (input.lineItems ?? [])
+              .filter((li) => li.quantity > 0)
+              .map((li) => ({
+                lineItemId: li.lineItemId,
+                quantity: li.quantity,
+                restockType: li.restockType,
+                ...(li.restockType !== "NO_RESTOCK" && li.locationId
+                  ? { locationId: li.locationId }
+                  : {}),
+              }));
+
             const refundInput = {
               orderId: orderGidStr,
               note: input.note,
               notify: input.notifyCustomer,
+              ...(refundLineItems.length > 0 ? { refundLineItems } : {}),
+              ...(input.shipping
+                ? { shipping: { amount: input.shipping.amount } }
+                : {}),
               transactions: [
                 {
                   orderId: orderGidStr,

@@ -35,12 +35,14 @@ import { BundleApprovalBar } from "./BundleApprovalBar";
 import { ReplyComposer } from "./ReplyComposer";
 import { StatusSelect } from "./StatusSelect";
 import { CaseActionsMenu } from "./CaseActionsMenu";
+import { RefundDialog } from "./RefundDialog";
 import {
   caseActionMenuItems,
   type CaseActionKey,
 } from "./case-actions-menu";
 import {
   issueRefundAction,
+  loadRefundContextAction,
   resumeAction,
   retryAction,
   retryFromTriageAction,
@@ -671,6 +673,11 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   // the operator a button to issue it directly. `issuableRefund` returns null
   // once a refund's been issued, or when the recommendation has no amount.
   const refundToIssue = issuableRefund(entries);
+  // The standalone "Refund" button opens the Shopify-style refund modal. Shown
+  // whenever the case has a Shopify order that isn't already fully refunded —
+  // independent of whether the agent recommended one (that's the card below).
+  const refundableOrder =
+    order && order.financialStatus !== "refunded" ? order : null;
   const summaryText =
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
@@ -780,6 +787,14 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                   </SubmitButton>
                 </form>
               </>
+            ) : null}
+            {refundableOrder ? (
+              <RefundDialog
+                caseId={caseRow.id}
+                orderName={refundableOrder.name}
+                loadContext={loadRefundContextAction}
+                issueAction={issueRefundAction}
+              />
             ) : null}
             <CaseActionsMenu actions={menuActions} />
           </div>

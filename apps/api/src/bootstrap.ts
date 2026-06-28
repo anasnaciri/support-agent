@@ -92,7 +92,15 @@ export interface ShopifyAppConfig {
  *      - `write_discounts`  → discount.create (goodwill coupon codes)
  *      - `read_locations`   → shopify.list_pickup_locations (general-inquiry
  *                             pickup answers; the service filters to
- *                             pickup-enabled locations only)
+ *                             pickup-enabled locations only) AND the dashboard
+ *                             refund modal's restock-location dropdown
+ *      - `read_inventory` / `write_inventory` → the dashboard refund modal's
+ *                             restock leg (`getOrderRefundContext` reads the
+ *                             suggested restock location; `refundOrder`
+ *                             restocks the returned units). Best-effort: an
+ *                             install without them still gets the refund modal,
+ *                             just without restocking — it must re-OAuth to
+ *                             grant them.
  *      - `read_legal_policies` → post-connect shop-policy import (seeds the
  *                             knowledge base with the store's shipping +
  *                             refund policy text). Not tied to a tool — the
@@ -117,6 +125,8 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_legal_policies",
   "read_online_store_pages",
   "read_locations",
+  "read_inventory",
+  "write_inventory",
 ];
 
 export interface GoogleAppConfig {

@@ -54,6 +54,8 @@ import {
   type ManualReplyCaseView,
 } from "./case-reply.js";
 import { issueCaseRefund } from "./case-refund.js";
+import { dashboardRefundNote } from "./refund-note.js";
+import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
 import {
   buildRephraseMessages,
   rephraseDraft,
@@ -998,6 +1000,14 @@ export const handleDashboardIssueRefund = async (
         ? amountRaw["currencyCode"]
         : "",
   };
+  // The dashboard refund modal adds the optional staff reason ("Reason for
+  // refund"), the restock line selection, and the shipping refund. The agent
+  // recommendation path posts none of these (amount-only).
+  const reasonRaw = body["reason"];
+  const reason =
+    typeof reasonRaw === "string" && reasonRaw.trim() ? reasonRaw.trim() : null;
+  const lineItems = parseRefundLineItems(body["lineItems"]);
+  const shipping = parseRefundShipping(body["shipping"]);
   const tenantId = TenantId(auth.tenantId);
   const caseId = CaseId(id);
   const userId = auth.userId;
@@ -1040,11 +1050,15 @@ export const handleDashboardIssueRefund = async (
                   amount: money.amount,
                   currencyCode: money.currencyCode,
                 },
-                note: `Refund issued from dashboard (agent recommendation) — case ${id}`,
+                note: dashboardRefundNote({ caseId: id, reason }),
                 notifyCustomer: true,
                 // Stable over (case, order, amount) so a double-click / retry
                 // can't double-refund (mirrors refund.create's idempotencyKey).
                 idempotencyKey: `dash-refund:${id}:${orderId}:${money.amount}:${money.currencyCode}`,
+                // Restock selection + shipping refund from the modal; absent on
+                // the agent-recommendation (amount-only) path.
+                ...(lineItems.length > 0 ? { lineItems } : {}),
+                ...(shipping ? { shipping } : {}),
               })
               .pipe(Effect.either);
           }),
@@ -1076,7 +1090,15 @@ export const handleDashboardIssueRefund = async (
                   refundId: refund.id,
                   amount: refund.amount.amount,
                   currencyCode: refund.amount.currencyCode,
-                  via: "dashboard_recommendation",
+                  via: "dashboard",
+                  ...(reason ? { reason } : {}),
+                  ...(lineItems.length > 0
+                    ? {
+                        restockedLines: lineItems.filter(
+                          (li) => li.restockType !== "NO_RESTOCK",
+                        ).length,
+                      }
+                    : {}),
                 },
               })
               .pipe(Effect.catchAll(() => Effect.void));
@@ -1096,6 +1118,57 @@ export const handleDashboardIssueRefund = async (
           : outcome.kind === "refund_failed"
             ? 502
             : 409; // already_refunded | currency_mismatch
+  return sendJson(res, status, outcome);
+};
+
+// GET /dashboard/cases/:id/refund-context — everything the dashboard's
+// Shopify-style refund modal needs to render and price a refund: the refundable
+// line items (with per-unit pricing from Shopify's own `suggestedRefund`), the
+// refundable shipping, the maximum refundable, the payment-method label, and
+// the store's stock locations. Route-gated on `refunds.issue` (it's the first
+// step of issuing a refund). Resolves the case's order with the same resolver
+// the order panel + issue-refund handler use, so the modal acts on exactly the
+// order the agent identified.
+export const handleDashboardRefundContext = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const tenantId = TenantId(auth.tenantId);
+
+  const caseRow = await runWithDb(layer, (db) =>
+    caseContextForTenant(db, auth.tenantId, id),
+  );
+  if (!caseRow) return sendJson(res, 404, { kind: "case_not_found" });
+  const context = (caseRow.context ?? {}) as Record<string, unknown>;
+
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const order = yield* resolveOrderForContext(tenantId, context);
+        if (!order) return { kind: "order_not_found" as const };
+        const shopify = yield* ShopifyService;
+        const ctx = yield* shopify
+          .getOrderRefundContext(tenantId, OrderId(String(order.id)))
+          .pipe(Effect.either);
+        return ctx._tag === "Left"
+          ? { kind: "context_unavailable" as const }
+          : { kind: "ok" as const, context: ctx.right };
+      }),
+      layer,
+    ),
+  );
+
+  const status =
+    outcome.kind === "ok"
+      ? 200
+      : outcome.kind === "order_not_found"
+        ? 404
+        : 502; // context_unavailable
   return sendJson(res, status, outcome);
 };
 

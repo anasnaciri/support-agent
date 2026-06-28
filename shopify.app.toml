@@ -72,8 +72,14 @@ embedded = false
 # read_locations → shopify.list_pickup_locations: customer pickup answers in
 # the general-inquiry agent. The service filters to pickup-ENABLED locations
 # only — private warehouses / 3PLs / dropship origins never surface. Not
-# protected customer data.
-scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations"
+# protected customer data. ALSO backs the dashboard refund modal's
+# restock-location dropdown.
+#
+# read_inventory / write_inventory → the dashboard refund modal's restock leg:
+# getOrderRefundContext reads the suggested restock location, and refundOrder
+# restocks the returned units through refundCreate. Best-effort — an install
+# without them still gets the refund modal, minus restocking, until re-OAuth.
+scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations,read_inventory,write_inventory"
 
 [auth]
 redirect_urls = [

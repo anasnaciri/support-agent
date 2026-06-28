@@ -1633,6 +1633,279 @@ describe("ShopifyServiceLive — refundOrder", () => {
       expect(err).toBeInstanceOf(OrderNotFound);
     }
   });
+
+  it("threads refundLineItems + shipping into the RefundInput when supplied", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, txPayload()),
+        () => respond(200, refundOkPayload),
+      ]),
+    );
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.refundOrder(tenantId, {
+            orderId: OrderId(orderGid),
+            amount: { amount: "20.00", currencyCode: "USD" },
+            note: "Dashboard refund",
+            notifyCustomer: true,
+            idempotencyKey: "call-restock",
+            lineItems: [
+              {
+                lineItemId: "gid://shopify/LineItem/1",
+                quantity: 2,
+                restockType: "RETURN",
+                locationId: "gid://shopify/Location/5",
+              },
+              // NO_RESTOCK must NOT carry a locationId (Shopify rejects it).
+              {
+                lineItemId: "gid://shopify/LineItem/2",
+                quantity: 1,
+                restockType: "NO_RESTOCK",
+                locationId: "gid://shopify/Location/5",
+              },
+              // Zero-quantity lines are dropped.
+              {
+                lineItemId: "gid://shopify/LineItem/3",
+                quantity: 0,
+                restockType: "RETURN",
+                locationId: "gid://shopify/Location/5",
+              },
+            ],
+            shipping: { amount: "4.99", currencyCode: "USD" },
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    const input = (
+      JSON.parse(captures[1]!.body) as {
+        variables: { input: Record<string, unknown> };
+      }
+    ).variables.input;
+    const rli = input["refundLineItems"] as ReadonlyArray<
+      Record<string, unknown>
+    >;
+    expect(rli).toHaveLength(2);
+    expect(rli[0]).toEqual({
+      lineItemId: "gid://shopify/LineItem/1",
+      quantity: 2,
+      restockType: "RETURN",
+      locationId: "gid://shopify/Location/5",
+    });
+    expect(rli[1]).toEqual({
+      lineItemId: "gid://shopify/LineItem/2",
+      quantity: 1,
+      restockType: "NO_RESTOCK",
+    });
+    expect(input["shipping"]).toEqual({ amount: "4.99" });
+  });
+
+  it("omits refundLineItems + shipping for an amount-only refund", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, txPayload()),
+        () => respond(200, refundOkPayload),
+      ]),
+    );
+    await callRefund(layer);
+    const input = (
+      JSON.parse(captures[1]!.body) as {
+        variables: { input: Record<string, unknown> };
+      }
+    ).variables.input;
+    expect(input["refundLineItems"]).toBeUndefined();
+    expect(input["shipping"]).toBeUndefined();
+  });
+});
+
+// ============================================================
+// getOrderRefundContext
+// ============================================================
+
+describe("ShopifyServiceLive — getOrderRefundContext", () => {
+  const orderGid = "gid://shopify/Order/12345";
+
+  const contextPayload = {
+    data: {
+      order: {
+        id: orderGid,
+        name: "#1001",
+        currencyCode: "USD",
+        lineItems: {
+          nodes: [
+            {
+              id: "gid://shopify/LineItem/1",
+              title: "The Collection Snowboard: Hydrogen",
+              sku: "snow-1",
+              variantTitle: null,
+              quantity: 2,
+              refundableQuantity: 2,
+              unfulfilledQuantity: 0,
+              restockable: true,
+              discountedUnitPriceSet: {
+                shopMoney: { amount: "300.00", currencyCode: "USD" },
+              },
+              image: { url: "https://cdn/snow.png" },
+            },
+            // refundableQuantity 0 → filtered out of the modal.
+            {
+              id: "gid://shopify/LineItem/9",
+              title: "Already refunded",
+              sku: null,
+              variantTitle: null,
+              quantity: 1,
+              refundableQuantity: 0,
+              unfulfilledQuantity: 0,
+              restockable: false,
+              discountedUnitPriceSet: {
+                shopMoney: { amount: "10.00", currencyCode: "USD" },
+              },
+              image: null,
+            },
+          ],
+        },
+        suggestedRefund: {
+          subtotalSet: { shopMoney: { amount: "600.00", currencyCode: "USD" } },
+          maximumRefundableSet: {
+            shopMoney: { amount: "660.00", currencyCode: "USD" },
+          },
+          shipping: {
+            amountSet: { shopMoney: { amount: "0.00", currencyCode: "USD" } },
+            maximumRefundableSet: {
+              shopMoney: { amount: "9.99", currencyCode: "USD" },
+            },
+          },
+          refundLineItems: [
+            {
+              lineItem: { id: "gid://shopify/LineItem/1" },
+              quantity: 2,
+              subtotalSet: {
+                shopMoney: { amount: "600.00", currencyCode: "USD" },
+              },
+              totalTaxSet: {
+                shopMoney: { amount: "60.00", currencyCode: "USD" },
+              },
+            },
+          ],
+          suggestedTransactions: [
+            {
+              gateway: "bogus",
+              formattedGateway: "(For Testing) Bogus Gateway",
+              amountSet: {
+                shopMoney: { amount: "660.00", currencyCode: "USD" },
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const restockPayload = {
+    data: {
+      order: {
+        suggestedRefund: {
+          refundLineItems: [
+            {
+              lineItem: { id: "gid://shopify/LineItem/1" },
+              restockType: "RETURN",
+              location: { id: "gid://shopify/Location/5", name: "Shop location" },
+            },
+          ],
+        },
+      },
+      locations: {
+        nodes: [{ id: "gid://shopify/Location/5", name: "Shop location" }],
+      },
+    },
+  };
+
+  const callContext = (layer: Layer.Layer<ShopifyService>) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.getOrderRefundContext(tenantId, OrderId(orderGid)),
+        ),
+        layer,
+      ),
+    );
+
+  it("maps suggestedRefund into per-unit pricing, shipping, gateway + restock", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, contextPayload),
+        () => respond(200, restockPayload),
+      ]),
+    );
+    const exit = await callContext(layer);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const ctx = exit.value;
+    expect(ctx.orderName).toBe("#1001");
+    expect(ctx.currencyCode).toBe("USD");
+    expect(ctx.subtotal).toEqual({ amount: "600.00", currencyCode: "USD" });
+    expect(ctx.maximumRefundable).toEqual({
+      amount: "660.00",
+      currencyCode: "USD",
+    });
+    expect(ctx.shippingRefundable).toEqual({
+      amount: "9.99",
+      currencyCode: "USD",
+    });
+    expect(ctx.paymentGateway).toBe("(For Testing) Bogus Gateway");
+    expect(ctx.locations).toEqual([
+      { id: "gid://shopify/Location/5", name: "Shop location" },
+    ]);
+    // refundableQuantity 0 line excluded.
+    expect(ctx.lineItems).toHaveLength(1);
+    const li = ctx.lineItems[0]!;
+    expect(li.lineItemId).toBe("gid://shopify/LineItem/1");
+    expect(li.imageUrl).toBe("https://cdn/snow.png");
+    expect(li.refundableQuantity).toBe(2);
+    // 600.00 subtotal / qty 2 = 300.00 per unit; 60.00 tax / 2 = 30.00.
+    expect(li.unitPrice).toEqual({ amount: "300.00", currencyCode: "USD" });
+    expect(li.unitTax).toEqual({ amount: "30.00", currencyCode: "USD" });
+    expect(li.fulfilled).toBe(true);
+    expect(li.restockable).toBe(true);
+    expect(li.restockLocationId).toBe("gid://shopify/Location/5");
+  });
+
+  it("degrades gracefully when the restock leg fails (missing read_inventory)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, contextPayload),
+        () => respond(403, { errors: [{ message: "access denied" }] }),
+      ]),
+    );
+    const exit = await callContext(layer);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const ctx = exit.value;
+    // Core pricing still present; restock context simply empty.
+    expect(ctx.lineItems).toHaveLength(1);
+    expect(ctx.lineItems[0]!.unitPrice.amount).toBe("300.00");
+    expect(ctx.locations).toEqual([]);
+    expect(ctx.lineItems[0]!.restockLocationId).toBeNull();
+  });
+
+  it("unknown order → OrderNotFound", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, { data: { order: null } })]),
+    );
+    const exit = await callContext(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderNotFound);
+    }
+  });
 });
 
 // ============================================================

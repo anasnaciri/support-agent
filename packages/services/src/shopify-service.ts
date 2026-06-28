@@ -9,6 +9,7 @@ import {
   type ShopifyFulfillment,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyOrderRefundContext,
   type ShopifyProduct,
   type ShopifyProductSearchResult,
   type ShopifyRefund,
@@ -21,14 +22,30 @@ import {
 } from "@support-agent/agent-core";
 
 /**
- * Input for `ShopifyService.refundOrder`. We deliberately keep the
- * shape narrow for v1: amount-only refunds against the order's primary
- * refundable transaction. Line-item refunds (where you specify which
- * SKUs/quantities to return) are a follow-up — they need quantity
- * math, restocking decisions, and shipping refund logic that aren't
- * worth coupling into this MVP. `idempotencyKey` lets the runtime
- * dedupe retries; the Live impl threads it into the mutation's
- * `clientMutationId`-style header pattern.
+ * One line to restock/track as part of a refund. The agent's `refund.create`
+ * path never sets these (amount-only refund); the dashboard's Shopify-style
+ * refund modal does, so the refund records which units came back and restocks
+ * them. `restockType` mirrors Shopify's enum: `RETURN` (fulfilled item coming
+ * back to a location), `CANCEL` (unfulfilled item never shipped), or
+ * `NO_RESTOCK` (refund without returning stock). `locationId` is required by
+ * Shopify for `RETURN`/`CANCEL`.
+ */
+export interface RefundLineItemInput {
+  readonly lineItemId: string;
+  readonly quantity: number;
+  readonly restockType: "RETURN" | "CANCEL" | "NO_RESTOCK";
+  readonly locationId: string | null;
+}
+
+/**
+ * Input for `ShopifyService.refundOrder`. `amount` is always the authoritative
+ * money figure refunded against the order's primary refundable transaction
+ * (the operator-entered / agent-recommended amount; Shopify is the final
+ * authority and rejects an over-refund). The optional `lineItems` + `shipping`
+ * carry the dashboard refund modal's selection so the refund restocks the right
+ * units and records the shipping refund — when omitted (the agent's
+ * `refund.create` path) the refund is amount-only, exactly as before.
+ * `idempotencyKey` lets the runtime dedupe retries.
  */
 export interface RefundOrderInput {
   readonly orderId: OrderId;
@@ -36,6 +53,10 @@ export interface RefundOrderInput {
   readonly note: string | null;
   readonly notifyCustomer: boolean;
   readonly idempotencyKey: string | null;
+  /** Lines to restock/track; omit for an amount-only refund. */
+  readonly lineItems?: ReadonlyArray<RefundLineItemInput>;
+  /** Shipping to refund (a portion of the order's refundable shipping). */
+  readonly shipping?: ShopifyMoney | null;
 }
 
 /**
@@ -238,6 +259,20 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       input: RefundOrderInput,
     ) => Effect.Effect<ShopifyRefund, ShopifyError>;
+
+    /**
+     * Everything the dashboard's Shopify-style refund modal needs to render
+     * and price a refund: refundable line items with per-unit pricing (from
+     * Shopify's own `suggestedRefund` calculation, so partial selections price
+     * accurately incl. tax), refundable shipping, the maximum refundable, the
+     * payment-method label, and the store's stock locations. Read-only; the
+     * refund itself goes through `refundOrder`. `OrderNotFound` when the id is
+     * unknown.
+     */
+    readonly getOrderRefundContext: (
+      tenantId: TenantId,
+      orderId: OrderId,
+    ) => Effect.Effect<ShopifyOrderRefundContext, ShopifyError>;
 
     /**
      * Create a single-use discount code locked to one customer. Money
@@ -457,6 +492,15 @@ export interface ShopifyTestFixtures {
     input: RefundOrderInput,
   ) => Effect.Effect<ShopifyRefund, ShopifyError>;
   /**
+   * Per-order refund-context fixture for the dashboard refund modal. When an
+   * orderId isn't in the map the default Test impl fails with `OrderNotFound`
+   * — the same shape the Live impl produces on a 404.
+   */
+  readonly orderRefundContext?: ReadonlyMap<
+    OrderId,
+    ShopifyOrderRefundContext
+  >;
+  /**
    * Optional override for `createDiscountCode`. When unset the default
    * Test impl synthesises a `ShopifyDiscount` from the input — useful for
    * happy-path tests where the exact code-node id doesn't matter. Tests
@@ -587,6 +631,12 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         ),
       getFulfillment: (_tenantId, orderId) =>
         Effect.succeed(fixtures.fulfillments?.get(orderId) ?? []),
+      getOrderRefundContext: (_tenantId, orderId) => {
+        const ctx = fixtures.orderRefundContext?.get(orderId);
+        return ctx
+          ? Effect.succeed(ctx)
+          : Effect.fail(new OrderNotFound({ orderId }));
+      },
       refundOrder: (_tenantId, input) => {
         if (fixtures.refundOrder) {
           return fixtures.refundOrder(input);

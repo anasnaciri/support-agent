@@ -32,6 +32,43 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-28 — Shopify-style refund modal on the case page (full line-item + restock refund)
+
+**What:** a standalone **"Refund"** button in the case-page header (apps/dashboard) opens a modal that
+mirrors Shopify admin's refund page — refundable line items (image, per-unit price, quantity selector),
+per-line restock + a restock-location dropdown, a live summary (items subtotal, tax, shipping refund,
+refund total), an editable refund amount capped at Shopify's maximum, the payment-gateway label, and a
+staff-only "Reason for refund". Separate from the existing agent-recommendation "Issue refund" card
+(that card still exists, amount-only). Supplier escalation was explicitly deferred.
+
+**Cross-stack (all 5 layers), TDD where pure:**
+- `agent-core/shopify.ts`: new `ShopifyRefundLineItem`, `ShopifyLocation`, `ShopifyOrderRefundContext`
+  types; `RefundOrderInput` gained optional `lineItems` (restock) + `shipping`.
+- `services`: `ShopifyService.getOrderRefundContext` Tag + Test fixture (`orderRefundContext` map);
+  `RefundLineItemInput` type.
+- `providers/shopify-service-live.ts`: `getOrderRefundContext` via Shopify **`suggestedRefund(suggestFullRefund: true)`**
+  (per-unit subtotal/tax, maximumRefundable, shipping, gateway) — core leg needs only `read_orders`; the
+  restock leg (`location` + root `locations`) is a **best-effort second query** (needs `read_inventory`)
+  that degrades to no-restock on failure. `refundOrder` now threads `refundLineItems` + `shipping` into
+  `refundCreate` (NO_RESTOCK never carries a locationId). GraphQL validated against the live `2026-04`
+  schema via the Shopify MCP.
+- `apps/api`: `GET /dashboard/cases/:id/refund-context` + extended `POST .../refund` (parses `reason`,
+  `lineItems`, `shipping`); both gated on `refunds.issue`. Note now `dashboardRefundNote(...)`
+  (operator-generic + appended reason); audit `via: "dashboard"` (+ reason, restockedLines).
+- `apps/dashboard`: api-client `refundContext` + extended `issueRefund`; `loadRefundContextAction`
+  (lazy — Shopify fetch only on modal open); pure `refund-dialog-data.ts` (amount math, restock-type
+  derivation, validation) + `RefundDialog.tsx`.
+
+**Scopes:** added `read_inventory` + `write_inventory` to `DEFAULT_SHOPIFY_SCOPES`, `shopify.app.toml`,
+and the bootstrap doc. **Existing installs must re-OAuth** to get restocking; until then the modal works
+without the restock locations (graceful degrade).
+
+- [ ] **Verify live** end-to-end against a connected store (refund amount accuracy, restock actually
+      moves inventory, gateway/locations render). Provider GraphQL is schema-validated but not run live here.
+- [ ] Follow-up: per-keystroke `suggestedRefund` re-quote for exact tax on partial selections (current
+      modal sums per-unit client-side; default amount uses Shopify's exact `maximumRefundable`).
+- [ ] Mirror onto `apps/dashboard-spa` if/when that migration lands (this work is `apps/dashboard` only).
+
 ### 2026-06-27 — Verified order email saved + surfaced on identity-mismatch cases
 
 **Context:** first concrete step on the "loosen deterministic walls, trust LLM judgment, enforce on

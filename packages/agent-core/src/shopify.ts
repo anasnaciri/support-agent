@@ -210,6 +210,70 @@ export type ShopifyRefund = {
 };
 
 /**
+ * A line item as the dashboard refund flow needs it — enriched with the
+ * pricing, image, refundable-quantity, and restock data Shopify's refund page
+ * shows. Deliberately separate from the lean `ShopifyLineItem` (which agent
+ * code maps from every order) so this richer, refund-only shape doesn't bloat
+ * the general order model. Amounts come from Shopify's `suggestedRefund`
+ * calculation (per-unit, so the dashboard can price partial selections
+ * accurately, tax included).
+ */
+export type ShopifyRefundLineItem = {
+  /** Order line-item GID (`gid://shopify/LineItem/...`). */
+  readonly lineItemId: string;
+  readonly title: string;
+  readonly variantTitle: string | null;
+  readonly sku: string | null;
+  readonly imageUrl: string | null;
+  /** Quantity still refundable on this line (the selector's max). */
+  readonly refundableQuantity: number;
+  /** Per-unit price after line discounts, excluding tax. */
+  readonly unitPrice: ShopifyMoney;
+  /** Per-unit tax, so a partial-quantity selection prices accurately. */
+  readonly unitTax: ShopifyMoney;
+  /** Whether Shopify reports this item as restockable right now. */
+  readonly restockable: boolean;
+  /**
+   * Whether the item has been fulfilled (shipped). Drives the restock type:
+   * fulfilled ⇒ `RETURN`, unfulfilled ⇒ `CANCEL`. Shopify rejects the wrong
+   * restock type for a line's fulfillment state.
+   */
+  readonly fulfilled: boolean;
+  /** Default restock location Shopify suggests (the item's origin), if any. */
+  readonly restockLocationId: string | null;
+};
+
+/** A stock location, for the restock-location dropdown. */
+export type ShopifyLocation = {
+  readonly id: string;
+  readonly name: string;
+};
+
+/**
+ * Everything the dashboard's Shopify-style "Refund" modal needs to render and
+ * price a refund accurately: the refundable line items (with per-unit pricing
+ * from Shopify's own `suggestedRefund` calculation), the refundable shipping,
+ * the maximum Shopify will allow, the payment method label, and the store's
+ * stock locations for restocking. Read-only — issuing the refund goes through
+ * `ShopifyService.refundOrder`.
+ */
+export type ShopifyOrderRefundContext = {
+  readonly orderId: OrderId;
+  readonly orderName: string; // e.g. "#1001"
+  readonly currencyCode: string;
+  /** Sum of the refundable line subtotals (pre-tax) — the "Items subtotal". */
+  readonly subtotal: ShopifyMoney;
+  /** The most Shopify will allow to be refunded on the order right now. */
+  readonly maximumRefundable: ShopifyMoney;
+  /** Refundable shipping (the "Refund shipping" line); zero when none left. */
+  readonly shippingRefundable: ShopifyMoney;
+  /** Display label for the original payment method, e.g. "Bogus Gateway". */
+  readonly paymentGateway: string | null;
+  readonly lineItems: ReadonlyArray<ShopifyRefundLineItem>;
+  readonly locations: ReadonlyArray<ShopifyLocation>;
+};
+
+/**
  * How a discount code's value is expressed. `percentage` is a whole-or-
  * decimal percent off the order (`value: "10"` ⇒ 10% off); `fixed_amount`
  * is a flat money amount off (`value: "5.00"` in `currencyCode`). These are

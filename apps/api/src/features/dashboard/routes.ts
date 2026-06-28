@@ -14,6 +14,7 @@ import {
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
   handleDashboardIssueRefund,
+  handleDashboardRefundContext,
   handleDashboardRephrase,
   handleDashboardCaseShopify,
   handleDashboardCases,
@@ -278,9 +279,15 @@ export const registerDashboardRoutes = (
     handleDashboardCaseReply,
     "cases.reply",
   );
+  dashboardGet(
+    "/dashboard/cases/:id/refund-context",
+    "Refundable line items + pricing for the case's order (refund modal)",
+    handleDashboardRefundContext,
+    "refunds.issue",
+  );
   dashboardPost(
     "/dashboard/cases/:id/refund",
-    "Issue an agent-recommended refund on a case (manager)",
+    "Issue a refund on a case's order (manager)",
     handleDashboardIssueRefund,
     "refunds.issue",
   );

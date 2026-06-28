@@ -3,7 +3,11 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSessionState } from "./session";
 import { buildRefreshRedirect } from "./session-refresh";
-import type { ShopifyCustomer, ShopifyOrder } from "@support-agent/agent-core";
+import type {
+  ShopifyCustomer,
+  ShopifyOrder,
+  ShopifyOrderRefundContext,
+} from "@support-agent/agent-core";
 import type {
   AgentOverrideRow,
   ApprovalDetail,
@@ -390,6 +394,27 @@ export interface IssueRefundOutcomeView {
   readonly requestedCurrency?: string;
   readonly error?: string;
 }
+
+// One restock/refund line the dashboard refund modal sends to the issue-refund
+// endpoint. Mirrors the api's `RefundLineItemInput` (resolved client-side:
+// restockType + locationId already decided from the order's fulfillment state +
+// the operator's restock toggle).
+export interface RefundLineItemPayload {
+  readonly lineItemId: string;
+  readonly quantity: number;
+  readonly restockType: "RETURN" | "CANCEL" | "NO_RESTOCK";
+  readonly locationId: string | null;
+}
+
+// Outcome of fetching the refund modal's context. `ok` carries the Shopify
+// refund context (line items + pricing); the others tell the modal why it can't
+// render (no order resolved, or Shopify wouldn't return the calculation).
+export type RefundContextOutcome =
+  | { readonly kind: "ok"; readonly context: ShopifyOrderRefundContext }
+  | { readonly kind: "order_not_found" }
+  | { readonly kind: "context_unavailable" }
+  | { readonly kind: "case_not_found" }
+  | { readonly kind: "error" };
 
 export interface CaseShopifyPanels {
   readonly customer: ShopifyCustomer | null;
@@ -1080,13 +1105,43 @@ export const api = {
     ctx: CallCtx,
     caseId: string,
     amount: { readonly amount: string; readonly currencyCode: string },
+    opts: {
+      readonly reason?: string | null;
+      readonly lineItems?: ReadonlyArray<RefundLineItemPayload>;
+      readonly shipping?: {
+        readonly amount: string;
+        readonly currencyCode: string;
+      } | null;
+    } = {},
   ): Promise<IssueRefundOutcomeView> => {
     const { body } = await call(`/cases/${encodeURIComponent(caseId)}/refund`, {
       method: "POST",
-      body: { amount },
+      body: {
+        amount,
+        ...(opts.reason ? { reason: opts.reason } : {}),
+        ...(opts.lineItems && opts.lineItems.length > 0
+          ? { lineItems: opts.lineItems }
+          : {}),
+        ...(opts.shipping ? { shipping: opts.shipping } : {}),
+      },
       ctx,
     });
     return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Refundable line items + pricing for the case's order, powering the
+  // Shopify-style refund modal. Read-only (gated on `refunds.issue` like the
+  // issue endpoint). Returns the discriminated outcome so the modal can explain
+  // why it can't render (no order / Shopify wouldn't calculate).
+  refundContext: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<RefundContextOutcome> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/refund-context`,
+      { ctx },
+    );
+    return (body as RefundContextOutcome | null) ?? { kind: "error" };
   },
 
   // Resume + an immediate `case.resumed` tick — the agent retries now

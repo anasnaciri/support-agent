@@ -2,7 +2,43 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { api, getDashboardContext } from "@/lib/api-client";
+import {
+  api,
+  getDashboardContext,
+  type RefundContextOutcome,
+  type RefundLineItemPayload,
+} from "@/lib/api-client";
+
+// The refund modal serializes its restock selection + shipping into hidden form
+// fields; parse them back defensively (the api re-validates too).
+const parseLineItemsField = (
+  raw: FormDataEntryValue | null,
+): ReadonlyArray<RefundLineItemPayload> | undefined => {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? (parsed as ReadonlyArray<RefundLineItemPayload>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const parseShippingField = (
+  raw: FormDataEntryValue | null,
+): { readonly amount: string; readonly currencyCode: string } | null => {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    return typeof p?.["amount"] === "string" &&
+      typeof p?.["currencyCode"] === "string"
+      ? { amount: p["amount"], currencyCode: p["currencyCode"] }
+      : null;
+  } catch {
+    return null;
+  }
+};
 
 const caseIdOf = (formData: FormData): string => {
   const id = formData.get("caseId");
@@ -89,16 +125,40 @@ export const issueRefundAction = async (formData: FormData): Promise<void> => {
   const caseId = caseIdOf(formData);
   const amount = formData.get("amount");
   const currencyCode = formData.get("currencyCode");
+  const reasonRaw = formData.get("reason");
+  const lineItems = parseLineItemsField(formData.get("lineItems"));
   const ctx = await getDashboardContext();
 
-  const result = await api.issueRefund(ctx, caseId, {
-    amount: typeof amount === "string" ? amount : "",
-    currencyCode: typeof currencyCode === "string" ? currencyCode : "",
-  });
+  const result = await api.issueRefund(
+    ctx,
+    caseId,
+    {
+      amount: typeof amount === "string" ? amount : "",
+      currencyCode: typeof currencyCode === "string" ? currencyCode : "",
+    },
+    {
+      reason:
+        typeof reasonRaw === "string" && reasonRaw.trim()
+          ? reasonRaw.trim()
+          : null,
+      ...(lineItems ? { lineItems } : {}),
+      shipping: parseShippingField(formData.get("shipping")),
+    },
+  );
 
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
   redirect(`/cases/${caseId}?refundIssued=${result.kind}`);
+};
+
+// Lazily load the refund modal's context (refundable line items + Shopify
+// pricing) when the operator opens it — keeps the heavy 3-call Shopify fetch off
+// every case-page render. Returns the discriminated outcome to the client.
+export const loadRefundContextAction = async (
+  caseId: string,
+): Promise<RefundContextOutcome> => {
+  const ctx = await getDashboardContext();
+  return api.refundContext(ctx, caseId);
 };
 
 // Send a human-drafted customer reply while driving a taken-over case. Goes
