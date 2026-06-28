@@ -66,6 +66,38 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-28 — Integrations grid: fix false-red "Get store info" + surface forgotten platform scopes
+
+The Shopify integration page's "Granted capabilities" grid is derived from agent
+tools' `requiredConnectorScopes`. Two problems found from a real connection
+(`...,write_inventory,read_legal_policies,...`):
+
+- **False red.** `shopify.get_store_info` declares `{ provider: "shopify", scopes: [] }`
+  (the Shop query needs no scope). `capabilitiesForProvider` collapsed that to
+  `scope: ""`, and the page asked `isConnectorScopeGranted(provider, "", scopes)` →
+  always `false` → "Get store info" painted red on every connection, which also
+  forced the misleading "Missing a capability? Reinstall" hint to always show.
+  Fix: the grid now excludes tools that match the provider but require **no**
+  scope (a scopeless capability belongs in neither the scope→tool mapping nor the
+  re-OAuth signal). Runtime `checkRequiredScopes` was already correct (it iterates
+  `req.scopes`, so an empty array is vacuously "ok" — never passes `""`).
+- **Forgotten scopes.** Four requested scopes were invisible because no *tool*
+  claims them: `write_inventory`/`read_inventory` (refund-modal restock — an
+  operator dashboard action) and `read_legal_policies`/`read_online_store_pages`
+  (post-connect KB import job). Added `platformCapabilitiesForProvider` + a
+  `PLATFORM_CAPABILITIES` table: two non-tool rows ("Restock returned items on
+  refunds", "Import store policies & pages") concatenated onto the tool-derived
+  grid. `ConnectorCapability.scope` → `scopes: string[]`; new pure
+  `isCapabilityGranted` (green only when EVERY scope is granted, deferring per-scope
+  coverage — incl. Shopify `write_X`⇒`read_X` — to `isConnectorScopeGranted`).
+
+TDD: failing tests first in `apps/dashboard/test/catalog.test.ts` (16 pass).
+Touched `apps/dashboard/lib/catalog.ts` + the integrations `[provider]/page.tsx`
+only. `pnpm build` green; dashboard `tsc --noEmit` green; 393 dashboard tests pass.
+Note: nothing changed about what OAuth requests — those 4 scopes were already
+granted; this only makes the grid honest. Inventory write was never actually
+missing on the user's store (`write_inventory` present, covers `read_inventory`).
+
 ### 2026-06-28 — Built-in "Cancel my order" scenario + `order.cancel` tool
 
 A customer asking to cancel is now handled end-to-end by the scenario-resolution

@@ -1,9 +1,10 @@
 import type { Permission } from "@support-agent/agent-core";
-import type {
-  AgentDto,
-  AgentOverrideRow,
-  CatalogResponse,
-  ToolDto,
+import {
+  isConnectorScopeGranted,
+  type AgentDto,
+  type AgentOverrideRow,
+  type CatalogResponse,
+  type ToolDto,
 } from "@support-agent/dashboard-contracts";
 
 // Pure views over the agent/tool inventory the api returns from
@@ -92,12 +93,18 @@ export const currentToolPermission = (
 
 /** One capability shown on a connector's Manage page. */
 export interface ConnectorCapability {
-  /** Tool name — stable key. */
+  /**
+   * Stable key: the catalog tool name, or a synthetic `platform:*` id for a
+   * capability not backed by an agent tool (see `PLATFORM_CAPABILITIES`).
+   */
   readonly tool: string;
-  /** Merchant-facing label for what the connection lets the agent do. */
+  /** Merchant-facing label for what the connection lets the platform do. */
   readonly label: string;
-  /** The connector scope this capability needs (for the granted dot). */
-  readonly scope: string;
+  /**
+   * Every connector scope this capability needs. The granted dot is green only
+   * when ALL of them are granted (`isCapabilityGranted`).
+   */
+  readonly scopes: ReadonlyArray<string>;
 }
 
 /**
@@ -149,9 +156,9 @@ export const isGatedTool = (tool: ToolDto): boolean => tool.risk !== "read";
  *
  * Tools that match the provider but require NO scope (e.g.
  * `shopify.get_store_info`, whose Shop query needs no Shopify scope) are
- * excluded: with no scope to grant, the row would be rendered with scope "" and
- * so painted permanently "not granted" (red), which also wrongly trips the
- * "Reinstall to update permissions" hint.
+ * excluded: the grid surfaces the scope→tool mapping and the re-OAuth signal,
+ * and a scopeless capability belongs to neither — it has no scope to render a
+ * granted dot against, so it would be painted permanently "not granted".
  */
 export const capabilitiesForProvider = (
   catalog: CatalogResponse,
@@ -167,6 +174,63 @@ export const capabilitiesForProvider = (
       tool: t.name,
       label:
         CAPABILITY_LABELS[t.name] ?? t.displayName ?? humanizeToolName(t.name),
-      scope: t.requiredConnectorScopes?.scopes[0] ?? "",
+      scopes: t.requiredConnectorScopes?.scopes ?? [],
     }))
     .sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+
+/**
+ * Capabilities the platform exercises with connector scopes that NO agent tool
+ * declares — so the tool-derived grid above can't surface them, yet the OAuth
+ * flow requests their scopes and the features break silently when a stale
+ * connection predates them. Surfaced as their own rows so the operator sees the
+ * full picture and the "Reinstall to update permissions" signal fires when a
+ * scope is missing.
+ *
+ * Shopify:
+ *  - Refund-modal restock (an operator dashboard action, not an agent tool)
+ *    needs `write_inventory` — which also covers the `read_inventory` the
+ *    restock-context query uses. `read_locations` is already shown via the
+ *    pickup-locations tool, so it isn't repeated here.
+ *  - The post-connect knowledge-base import job reads `read_legal_policies`
+ *    (shipping/refund policies) and `read_online_store_pages` (About/Contact/FAQ).
+ */
+const PLATFORM_CAPABILITIES: Readonly<
+  Record<string, ReadonlyArray<ConnectorCapability>>
+> = {
+  shopify: [
+    {
+      tool: "platform:shopify.refund_restock",
+      label: "Restock returned items on refunds",
+      scopes: ["write_inventory"],
+    },
+    {
+      tool: "platform:shopify.policy_import",
+      label: "Import store policies & pages",
+      scopes: ["read_legal_policies", "read_online_store_pages"],
+    },
+  ],
+};
+
+/**
+ * Non-tool capabilities for a provider — features that consume connector scopes
+ * but have no catalog tool, so `capabilitiesForProvider` never lists them. The
+ * Manage page concatenates these onto the tool-derived rows.
+ */
+export const platformCapabilitiesForProvider = (
+  provider: string,
+): ReadonlyArray<ConnectorCapability> => PLATFORM_CAPABILITIES[provider] ?? [];
+
+/**
+ * Whether a capability is unlocked by the connection's granted scopes — true
+ * only when EVERY scope it needs is granted. Defers per-scope coverage (e.g.
+ * Shopify's `write_X` implies `read_X`) to the shared `isConnectorScopeGranted`
+ * rule, so the dashboard dot never disagrees with the runtime precheck.
+ */
+export const isCapabilityGranted = (
+  provider: string,
+  capability: ConnectorCapability,
+  grantedScopes: ReadonlyArray<string>,
+): boolean =>
+  capability.scopes.every((s) =>
+    isConnectorScopeGranted(provider, s, grantedScopes),
+  );

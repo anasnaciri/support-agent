@@ -8,7 +8,9 @@ import type {
 import {
   capabilitiesForProvider,
   currentToolPermission,
+  isCapabilityGranted,
   merchantConfigurableTools,
+  platformCapabilitiesForProvider,
   tenantConfigurableActions,
 } from "../lib/catalog.js";
 
@@ -165,12 +167,12 @@ describe("capabilitiesForProvider", () => {
       {
         tool: "supplier.add_sheet_row",
         label: "Add row",
-        scope: SHEETS_SCOPE,
+        scopes: [SHEETS_SCOPE],
       },
       {
         tool: "supplier.read_sheet_columns",
         label: "Read sheet",
-        scope: SHEETS_SCOPE,
+        scopes: [SHEETS_SCOPE],
       },
     ]);
   });
@@ -207,6 +209,57 @@ describe("capabilitiesForProvider", () => {
       ],
     };
     expect(capabilitiesForProvider(cat, "shopify")).toEqual([]);
+  });
+});
+
+describe("platformCapabilitiesForProvider", () => {
+  it("surfaces Shopify features that use scopes no agent tool declares", () => {
+    const caps = platformCapabilitiesForProvider("shopify");
+    // Restock needs write_inventory (no tool claims it); policy/page import
+    // needs both read_legal_policies and read_online_store_pages.
+    expect(caps.map((c) => c.scopes)).toEqual([
+      ["write_inventory"],
+      ["read_legal_policies", "read_online_store_pages"],
+    ]);
+  });
+
+  it("returns nothing for providers without platform-only scopes", () => {
+    expect(platformCapabilitiesForProvider("gmail")).toEqual([]);
+    expect(platformCapabilitiesForProvider("google_sheets")).toEqual([]);
+  });
+});
+
+describe("isCapabilityGranted", () => {
+  const cap = (scopes: ReadonlyArray<string>) => ({
+    tool: "x",
+    label: "x",
+    scopes,
+  });
+
+  it("is granted only when EVERY required scope is granted", () => {
+    expect(
+      isCapabilityGranted(
+        "shopify",
+        cap(["read_legal_policies", "read_online_store_pages"]),
+        ["read_legal_policies", "read_online_store_pages"],
+      ),
+    ).toBe(true);
+    expect(
+      isCapabilityGranted(
+        "shopify",
+        cap(["read_legal_policies", "read_online_store_pages"]),
+        ["read_legal_policies"], // missing the second
+      ),
+    ).toBe(false);
+  });
+
+  it("honors Shopify's write_X covers read_X implication", () => {
+    // The connection only has write_inventory; read_inventory is implied.
+    expect(
+      isCapabilityGranted("shopify", cap(["read_inventory"]), [
+        "write_inventory",
+      ]),
+    ).toBe(true);
   });
 });
 

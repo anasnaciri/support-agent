@@ -1,12 +1,15 @@
 import { notFound } from "next/navigation";
 import { AlertTriangle, ClipboardList } from "lucide-react";
 
-import { isConnectorScopeGranted } from "@support-agent/dashboard-contracts";
 import { api } from "@/lib/api-client";
 import { requirePermission } from "@/lib/require-permission";
 import { resolveFeedback, type FeedbackRule } from "@/lib/toast-feedback";
 import { FeedbackToaster } from "@/components/ui/feedback-toaster";
-import { capabilitiesForProvider } from "@/lib/catalog";
+import {
+  capabilitiesForProvider,
+  isCapabilityGranted,
+  platformCapabilitiesForProvider,
+} from "@/lib/catalog";
 import {
   connectorHealth,
   connectorHealthReasonLabel,
@@ -146,12 +149,13 @@ export default async function ConnectorManagePage({
           ? disconnectGoogleSheetsAction
           : null;
   const showDisconnect = !!disconnectAction && tone === "active";
-  const capabilities = capabilitiesForProvider(catalog, provider);
+  const capabilities = [
+    ...capabilitiesForProvider(catalog, provider),
+    ...platformCapabilitiesForProvider(provider),
+  ];
   const missingCapability =
     !!row &&
-    capabilities.some(
-      (c) => !isConnectorScopeGranted(provider, c.scope, row.scopes),
-    );
+    capabilities.some((c) => !isCapabilityGranted(provider, c, row.scopes));
 
   // The Google Sheets connector owns the sheet target the agent writes to
   // (the missing-package supplier-escalation row). It lives here — on the
@@ -350,11 +354,7 @@ export default async function ConnectorManagePage({
           <CardContent className="space-y-2 pt-0">
             <ul className="space-y-1.5 text-sm">
               {capabilities.map((cap) => {
-                const granted = isConnectorScopeGranted(
-                  provider,
-                  cap.scope,
-                  row.scopes,
-                );
+                const granted = isCapabilityGranted(provider, cap, row.scopes);
                 return (
                   <li key={cap.tool} className="flex items-center gap-2">
                     <span
