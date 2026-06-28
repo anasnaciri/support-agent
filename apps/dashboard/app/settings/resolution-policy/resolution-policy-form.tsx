@@ -26,6 +26,16 @@ import {
   fieldName,
 } from "./parse-resolution";
 
+/**
+ * Per-scenario remedy-action control is HIDDEN for now (2026-06-28): tools and
+ * permissions are configured once on the agent (Settings → Agents), not per
+ * scenario. The editor UI below is kept behind this flag — flip to `true` to
+ * resurface fine-grained per-scenario tool control. While hidden, each card
+ * round-trips its stored `enabledActions` through hidden inputs so saving the
+ * policy never wipes them. See todo "RESURFACE LATER".
+ */
+const SHOW_PER_SCENARIO_ACTIONS = false;
+
 interface CustomCard {
   /** Stable React key + form-field prefix (a `custom_*` or `__new_*` key). */
   readonly formKey: string;
@@ -137,55 +147,77 @@ function ScenarioCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Remedy actions the agent may take for this scenario. */}
-        <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">
-            Actions the agent can take
-          </legend>
-          {REMEDY_ACTIONS.map((action) => {
-            const enabled = byTool.has(action.tool);
-            const permission = byTool.get(action.tool) ?? "ask";
-            return (
-              <div
-                key={action.tool}
-                className="flex flex-wrap items-center gap-x-3 gap-y-2"
-              >
-                <label className="flex flex-1 items-start gap-2">
-                  <input
-                    type="checkbox"
-                    name={fieldName(formKey, `action:${action.tool}:enabled`)}
-                    defaultChecked={enabled}
-                    className="mt-0.5 size-4 rounded border-input accent-primary"
-                  />
-                  <span className="text-sm">
-                    <span className="font-medium">{action.label}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {action.help}
-                    </span>
-                  </span>
-                </label>
-                <NativeSelect
-                  name={fieldName(formKey, `action:${action.tool}:permission`)}
-                  defaultValue={permission}
-                  aria-label={`${action.label} — approval`}
-                  className="w-44"
-                >
-                  {PERMISSION_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </div>
-            );
-          })}
-          <p className="text-xs text-muted-foreground">
-            Reading the order, searching your knowledge base, and replying to the
-            customer are always on.
-          </p>
-        </fieldset>
+        {/* Per-scenario remedy actions. HIDDEN 2026-06-28 (tools configured once
+            on the agent now); the editor is kept behind SHOW_PER_SCENARIO_ACTIONS
+            and the stored enabledActions are round-tripped via hidden inputs so a
+            save never wipes them. */}
+        {SHOW_PER_SCENARIO_ACTIONS ? (
+          <>
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">
+                Actions the agent can take
+              </legend>
+              {REMEDY_ACTIONS.map((action) => {
+                const enabled = byTool.has(action.tool);
+                const permission = byTool.get(action.tool) ?? "ask";
+                return (
+                  <div
+                    key={action.tool}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-2"
+                  >
+                    <label className="flex flex-1 items-start gap-2">
+                      <input
+                        type="checkbox"
+                        name={fieldName(formKey, `action:${action.tool}:enabled`)}
+                        defaultChecked={enabled}
+                        className="mt-0.5 size-4 rounded border-input accent-primary"
+                      />
+                      <span className="text-sm">
+                        <span className="font-medium">{action.label}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {action.help}
+                        </span>
+                      </span>
+                    </label>
+                    <NativeSelect
+                      name={fieldName(formKey, `action:${action.tool}:permission`)}
+                      defaultValue={permission}
+                      aria-label={`${action.label} — approval`}
+                      className="w-44"
+                    >
+                      {PERMISSION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                );
+              })}
+              <p className="text-xs text-muted-foreground">
+                Reading the order, searching your knowledge base, and replying to
+                the customer are always on.
+              </p>
+            </fieldset>
 
-        <Separator />
+            <Separator />
+          </>
+        ) : (
+          Array.from(byTool.entries()).flatMap(([tool, perm]) => [
+            <input
+              key={`${tool}:enabled`}
+              type="hidden"
+              name={fieldName(formKey, `action:${tool}:enabled`)}
+              value="on"
+            />,
+            <input
+              key={`${tool}:permission`}
+              type="hidden"
+              name={fieldName(formKey, `action:${tool}:permission`)}
+              value={perm}
+            />,
+          ])
+        )}
 
         {/* Supplier handling. */}
         <fieldset className="space-y-2">
