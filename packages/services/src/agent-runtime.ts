@@ -90,8 +90,9 @@ import {
   deriveTickLockKey,
   refundCustomerMismatchFlag,
   readRiskFlags,
-  applyScenarioEnvelope,
-  applyTriageScenarioRouting,
+  applyScenarioSteering,
+  applyResolutionAgentEntry,
+  SCENARIO_RESOLUTION_AGENT_ID,
   hasUnverifiedOrderMismatch,
   orderContextRef,
   orderCustomerMismatchFlag,
@@ -1172,21 +1173,67 @@ const AgentRuntimeLayer = Layer.effect(
             const scenario = resolutionPolicy.scenarios.find(
               (s) => s.key === key,
             );
-            return scenario ? applyScenarioEnvelope(a, scenario) : a;
+            // Steering only — tools/permissions are configured once on the agent
+            // now, not clamped per scenario (2026-06-28). `applyScenarioEnvelope`
+            // (the clamping variant) is retained + tested for the resurface path.
+            return scenario ? applyScenarioSteering(a, scenario) : a;
           };
-          // Slice 6: when the tenant has the resolution agent enabled, re-route
-          // support-triage to the scenario-resolution-agent (adds it to triage's
-          // handoffs + injects the scenario routing header). Flag off → legacy
-          // specialist routing is untouched. Only triage is rewritten.
-          const withTriageRouting = (a: AgentConfig): AgentConfig =>
-            tenantSettings?.resolutionAgentEnabled === true &&
-            (a.id as string) === "support-triage"
-              ? applyTriageScenarioRouting(a, resolutionPolicy)
-              : a;
-          let agent: AgentConfig = withScenario(
-            withTriageRouting(applyOverride(resolved, overrideMap)),
-            working.context,
-          );
+          // Resolution-agent-direct (2026-06-28): when the tenant has the
+          // resolution agent enabled, inbound cases bound to the primary
+          // (support-triage) run the scenario-resolution-agent DIRECTLY — it
+          // picks the matching scenario itself (sets `scenarioKey`) and resolves
+          // end-to-end. This replaces the old triage→handoff routing, whose
+          // brittle classification step intermittently silently-resolved cases
+          // (a weak triage model bailing to `final_message` instead of handing
+          // off). Flag off → legacy triage + specialist routing is untouched.
+          // (Supersedes `applyTriageScenarioRouting`, which is retained + tested
+          // for the resurface path but no longer wired in.)
+          const resolutionAgentOn =
+            tenantSettings?.resolutionAgentEnabled === true;
+          let entryBase: AgentConfig = applyOverride(resolved, overrideMap);
+          if (resolutionAgentOn && (resolved.id as string) === "support-triage") {
+            const resolutionAgent = yield* resolver.tryResolve(
+              working.tenantId,
+              makeAgentId(SCENARIO_RESOLUTION_AGENT_ID),
+            );
+            if (resolutionAgent) {
+              entryBase = applyOverride(resolutionAgent, overrideMap);
+              // Persist the entry binding so the dashboard shows the agent that
+              // is actually handling the case and a later resume runs it
+              // directly (resolves straight to the resolution agent, no re-swap).
+              // One-time write per entry; a restart-from-triage rebinds to
+              // support-triage and re-enters here.
+              working = yield* tx.run(
+                Effect.gen(function* () {
+                  const updated = yield* cases.update(working.id, {
+                    currentAgentId: makeAgentId(SCENARIO_RESOLUTION_AGENT_ID),
+                  });
+                  yield* audit.record({
+                    tenantId: updated.tenantId,
+                    caseId: updated.id,
+                    actor: { type: "system", id: "runtime" },
+                    action: "agent.routed",
+                    details: {
+                      from: "support-triage",
+                      to: SCENARIO_RESOLUTION_AGENT_ID,
+                      via: "resolution-agent-direct",
+                    },
+                  });
+                  return updated;
+                }),
+              );
+            }
+          }
+          // The resolution agent picks the scenario itself — inject the scenario
+          // menu whenever it runs as the entry point: the swap just above, OR a
+          // resume where current_agent_id is already the resolution agent.
+          if (
+            resolutionAgentOn &&
+            (entryBase.id as string) === SCENARIO_RESOLUTION_AGENT_ID
+          ) {
+            entryBase = applyResolutionAgentEntry(entryBase, resolutionPolicy);
+          }
+          let agent: AgentConfig = withScenario(entryBase, working.context);
           // On a resume (dashboard retry / restart-from-triage / hand-back) the
           // agent starts blind — there's no inbound payload. Pre-fetch the full
           // thread so it re-orients on the ACTUAL conversation and what was

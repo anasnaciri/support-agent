@@ -56,8 +56,11 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toContain("queue");
     // The loop ends when the agent emits a final answer, not when a tool runs.
     expect(p).toContain("stop");
-    // Drives the playbook seam the runtime injects (slice 5).
-    expect(p).toContain("playbook");
+    // Direct-entry (2026-06-28): the agent picks the scenario itself from the
+    // injected `[Resolution scenarios]` menu and records it via scenarioKey,
+    // rather than being handed a single pre-chosen playbook.
+    expect(p).toContain("scenario");
+    expect(p).toContain("scenariokey");
   });
 
   it("is registrable + resolvable through AgentRegistry", async () => {

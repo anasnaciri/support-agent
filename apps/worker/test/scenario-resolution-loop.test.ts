@@ -471,29 +471,33 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
     expect(out.fetched.status).toBe("waiting_for_approval");
   });
 
-  it("denies (does not queue) a remedy the scenario did NOT enable", async () => {
+  it("keeps a remedy available even when the scenario didn't list it (tools on the agent, not clamped per scenario)", async () => {
     const policy: ResolutionPolicy = {
       scenarios: [
         {
           key: SCENARIO_KEY,
           label: "Delivery problem",
           builtin: true,
-          enabledActions: [], // refunds NOT enabled for this scenario
+          // 2026-06-28: enabledActions is no longer applied at runtime — tools
+          // are configured once on the agent. Per-scenario clamping is retained
+          // (applyScenarioEnvelope) + tested but unwired.
+          enabledActions: [],
           supplierMode: "none",
-          notes: "Apologize but do not offer money.",
+          notes: "Handle the delivery problem.",
         },
       ],
     };
     const out = await driveScenarioCase(policy, [
       refundCall,
-      { type: "final_message", text: "Nothing I can offer here." },
+      { type: "final_message", text: "Queued a refund for the order." },
     ]);
 
-    // refund.create was denied by the envelope → never queued → no action →
-    // the case parks for a human.
-    expect(out.pending).toHaveLength(0);
-    expect(out.result.type).toBe("HumanTakeoverRequired");
-    expect(out.fetched.status).toBe("human_takeover");
+    // No per-scenario clamp: refund.create is governed by the agent + refund
+    // policy (ask), so it QUEUES instead of being denied — the case parks for
+    // bundle approval rather than escalating to a human.
+    expect(out.pending.map((a) => a.tool)).toEqual(["refund.create"]);
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
   });
 });
 
@@ -588,12 +592,14 @@ const driveTriage = (
   );
 };
 
-describe("triage routing behind resolutionAgentEnabled (slice 6)", () => {
-  it("routes a matching case to the scenario agent when the flag is ON", async () => {
+describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => {
+  it("runs the resolution agent directly (no triage) when the flag is ON, persisting the binding", async () => {
     const out = await driveTriage(true, [
+      // No triage hop: the resolution agent runs from turn 0 and picks the
+      // scenario itself, then queues a gated reply and stops.
       {
         type: "tool_call",
-        callId: "t0",
+        callId: "s0",
         tool: "case.update_context",
         input: {
           classification: "refund_request",
@@ -603,17 +609,7 @@ describe("triage routing behind resolutionAgentEnabled (slice 6)", () => {
       },
       {
         type: "tool_call",
-        callId: "t1",
-        tool: "agent.handoff",
-        input: {
-          targetAgent: "scenario-resolution-agent",
-          reason: "matches refund_request scenario",
-        },
-      },
-      // Now the scenario agent runs (same tick): queue a gated reply, then stop.
-      {
-        type: "tool_call",
-        callId: "s0",
+        callId: "s1",
         tool: "conversation.reply",
         input: {
           threadId: "thread-x",
@@ -628,8 +624,9 @@ describe("triage routing behind resolutionAgentEnabled (slice 6)", () => {
       { type: "final_message", text: "Handled by the resolution agent." },
     ]);
 
-    // The handoff to the scenario agent was allowed and persisted.
+    // The runtime swapped support-triage → the resolution agent and persisted it.
     expect(out.fetched.currentAgentId).toBe("scenario-resolution-agent");
+    // The agent picked the scenario itself.
     expect(out.fetched.context["scenarioKey"]).toBe("refund_request");
     // The autonomous loop ran and queued the gated reply.
     expect(out.pending.map((a) => a.tool)).toEqual(["conversation.reply"]);
@@ -698,12 +695,12 @@ describe("scenario-resolution autonomous loop — bundle resume (slice 4d)", () 
 
 // ------------------------------------------------------------
 // SMOKE TEST — the whole feature, one chain, through the real runtime:
-// triage (flag ON) → scenario agent loops + queues a refund + a reply →
-// bundle parks waiting_for_approval → operator approves the bundle
-// (decideApprovalBundle, as the dashboard endpoint does) → runtime resumes →
-// executes both queued actions in order → case resolves.
+// inbound (flag ON) → resolution agent runs directly, picks the scenario,
+// loops + queues a refund + a reply → bundle parks waiting_for_approval →
+// operator approves the bundle (decideApprovalBundle, as the dashboard endpoint
+// does) → runtime resumes → executes both queued actions in order → resolves.
 // ------------------------------------------------------------
-describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle → resolve)", () => {
+describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundle → resolve)", () => {
   it("routes, queues a bundle, parks, and resolves after one bundle approval", async () => {
     const smokePolicy: ResolutionPolicy = {
       scenarios: [
@@ -730,10 +727,11 @@ describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle 
     });
 
     const script: ReadonlyArray<LLMDecision> = [
-      // — triage —
+      // — resolution agent, from turn 0 (no triage hop): pick the scenario,
+      //   then queue a refund + the customer reply —
       {
         type: "tool_call",
-        callId: "t0",
+        callId: "s-pick",
         tool: "case.update_context",
         input: {
           classification: "refund_request",
@@ -741,16 +739,6 @@ describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle 
           notes: "wants a refund for a damaged order",
         },
       },
-      {
-        type: "tool_call",
-        callId: "t1",
-        tool: "agent.handoff",
-        input: {
-          targetAgent: "scenario-resolution-agent",
-          reason: "matches refund_request scenario",
-        },
-      },
-      // — scenario agent (same tick): queue a refund + the customer reply —
       {
         type: "tool_call",
         callId: "s0",
@@ -855,7 +843,8 @@ describe("SMOKE: scenario agent end-to-end (triage → queue → approve bundle 
       ),
     );
 
-    // Triage routed to the scenario agent and stamped the scenario.
+    // The runtime ran the resolution agent directly, persisted the binding, and
+    // the agent stamped the scenario it picked.
     expect(out.afterTick1.currentAgentId).toBe("scenario-resolution-agent");
     expect(out.afterTick1.context["scenarioKey"]).toBe("refund_request");
     // The autonomous loop queued BOTH actions and parked once.

@@ -9,7 +9,9 @@ import {
 import type { InboundMessage } from "@support-agent/agent-core";
 import {
   applyOverride,
+  applyResolutionAgentEntry,
   applyScenarioEnvelope,
+  applyScenarioSteering,
   applyTriageScenarioRouting,
   buildScenarioPlaybookHeader,
   buildSystemPrompt,
@@ -611,6 +613,29 @@ describe("applyScenarioEnvelope", () => {
   });
 });
 
+// Tools-once-on-the-agent (2026-06-28): the wired scenario application now
+// injects ONLY the steering header — it no longer clamps tools/permissions.
+// (The clamping `applyScenarioEnvelope` above is retained + tested but unwired,
+// for the resurface path.)
+describe("applyScenarioSteering", () => {
+  it("injects the playbook header (label + notes + supplier guidance)", () => {
+    const out = applyScenarioSteering(scenarioAgent(), scenario());
+    expect(out.promptTemplate).toContain("Scenario playbook");
+    expect(out.promptTemplate).toContain("Delivery problem");
+    expect(out.promptTemplate).toContain("Check tracking before offering anything.");
+    expect(out.promptTemplate).toContain("WAIT");
+  });
+
+  it("does NOT clamp tools or permissions (agent config governs)", () => {
+    const agent = scenarioAgent();
+    const out = applyScenarioSteering(agent, scenario());
+    // refund.create / discount.create / order.cancel etc. all preserved, even
+    // though the scenario's enabledActions only lists refund.create.
+    expect(out.tools).toEqual(agent.tools);
+    expect(out.permissionOverrides).toEqual(agent.permissionOverrides);
+  });
+});
+
 describe("buildScenarioPlaybookHeader", () => {
   it("omits the notes line when notes are empty", () => {
     const header = buildScenarioPlaybookHeader(
@@ -700,5 +725,50 @@ describe("applyTriageScenarioRouting", () => {
     };
     const out = applyTriageScenarioRouting(agent, policy);
     expect(out).toBe(agent);
+  });
+});
+
+// Resolution-agent-direct (2026-06-28): when the resolution agent is the
+// inbound entry point, it picks the scenario itself. The entry header lists the
+// enabled scenarios + instructs the agent to set `scenarioKey` first (or
+// escalate if none fits). Crucially it does NOT clamp tools/permissions — those
+// are configured once on the agent now (per-scenario clamping is hidden).
+describe("applyResolutionAgentEntry", () => {
+  it("injects the scenario menu and the pick-scenario-first instruction", () => {
+    const out = applyResolutionAgentEntry(scenarioAgent(), routingPolicy());
+    expect(out.promptTemplate).toContain("where_is_order");
+    expect(out.promptTemplate).toContain("refund_request");
+    expect(out.promptTemplate).toContain("scenarioKey");
+  });
+
+  it("does NOT clamp tools or permissions (agent config governs)", () => {
+    const agent = scenarioAgent();
+    const out = applyResolutionAgentEntry(agent, routingPolicy());
+    // Every configured tool is preserved — including remedies a scenario's
+    // enabledActions would previously have stripped.
+    expect(out.tools).toEqual(agent.tools);
+    expect(out.permissionOverrides).toEqual(agent.permissionOverrides);
+  });
+
+  it("tells the agent to escalate (merchant.notify) when no scenario fits", () => {
+    const out = applyResolutionAgentEntry(scenarioAgent(), routingPolicy());
+    expect(out.promptTemplate).toContain("merchant.notify");
+  });
+
+  it("lists only ENABLED scenarios", () => {
+    const policy: ResolutionPolicy = {
+      scenarios: [
+        scenario({ key: "where_is_order", label: "Where is my order?" }),
+        scenario({ key: "refund_request", enabled: false }),
+      ],
+    };
+    const out = applyResolutionAgentEntry(scenarioAgent(), policy);
+    expect(out.promptTemplate).toContain("where_is_order");
+    expect(out.promptTemplate).not.toContain("refund_request");
+  });
+
+  it("is a no-op when no scenarios are enabled", () => {
+    const agent = scenarioAgent();
+    expect(applyResolutionAgentEntry(agent, { scenarios: [] })).toBe(agent);
   });
 });

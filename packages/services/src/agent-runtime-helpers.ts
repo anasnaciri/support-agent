@@ -1207,6 +1207,23 @@ export const applyScenarioEnvelope = (
   };
 };
 
+/**
+ * Apply a scenario to an autonomous agent as STEERING ONLY — inject the playbook
+ * header (label + notes + supplier guidance) and leave `tools` /
+ * `permissionOverrides` untouched (2026-06-28). This is what the runtime wires
+ * in now: tools/permissions are configured once on the agent (per-agent config),
+ * not per scenario. The richer `applyScenarioEnvelope` above (which also clamps
+ * the tool set per `enabledActions`) is retained + tested for the resurface
+ * path, but no longer called by the runtime. Pure + exported for unit testing.
+ */
+export const applyScenarioSteering = (
+  agent: AgentConfig,
+  scenario: ScenarioPolicy,
+): AgentConfig => ({
+  ...agent,
+  promptTemplate: `${agent.promptTemplate}\n\n${buildScenarioPlaybookHeader(scenario)}`,
+});
+
 /** The id of the autonomous resolution agent triage routes to (slice 6). */
 export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
 
@@ -1253,6 +1270,54 @@ export const applyTriageScenarioRouting = (
   return {
     ...agent,
     handoffs,
+    promptTemplate: `${agent.promptTemplate}\n\n${header}`,
+  };
+};
+
+/**
+ * Resolution-agent-direct entry (2026-06-28). When the tenant has the resolution
+ * agent enabled, inbound cases run the scenario-resolution-agent DIRECTLY (no
+ * support-triage hop). This wraps that agent with a steering header so it picks
+ * the matching scenario ITSELF as its first step — replacing the brittle
+ * triage→handoff classification that intermittently silently-resolved cases.
+ *
+ * Unlike `applyScenarioEnvelope`, this does NOT touch `tools` or
+ * `permissionOverrides`: tools/permissions are configured ONCE on the agent now
+ * (per-agent config + the /settings/agents permission toggle). The scenario
+ * contributes STEERING only — recognition (to pick) plus each scenario's notes
+ * and supplier guidance (to act). Per-scenario tool clamping
+ * (`ScenarioPolicy.enabledActions`) is intentionally retained in the model but
+ * not applied here; see todo "RESURFACE LATER: fine-grained per-scenario tool
+ * control".
+ *
+ * No enabled scenarios → no-op (the agent runs on its base prompt). Pure +
+ * exported for unit testing; the runtime gates the call on
+ * `resolutionAgentEnabled` and the resolved agent being the primary entry.
+ */
+export const applyResolutionAgentEntry = (
+  agent: AgentConfig,
+  policy: ResolutionPolicy,
+): AgentConfig => {
+  const active = policy.scenarios.filter((s) => s.enabled !== false);
+  if (active.length === 0) return agent;
+  const lines = active.map((s) => {
+    const recognition = s.recognition?.trim() || s.notes?.trim() || s.label;
+    const notes = s.notes?.trim();
+    const guidance = supplierGuidanceLine(s.supplierMode);
+    const detail = [recognition, notes && notes !== recognition ? notes : null]
+      .filter(Boolean)
+      .join(" ");
+    return `- ${s.key} — "${s.label}": ${detail} (${guidance})`;
+  });
+  const header = [
+    "[Resolution scenarios — you are the entry point for this store. FIRST, read the customer's message and decide which ONE of these scenarios it matches:",
+    ...lines,
+    "",
+    "As your FIRST action, call case.update_context with `scenarioKey` set to the matching scenario's key (and `classification`/`quotedOrderRef`/`notes` when useful). Then follow that scenario's guidance to resolve the case end-to-end using your available tools.",
+    "If the message genuinely fits NONE of these scenarios — spam, an offer/solicitation, or something only a human should decide — do NOT guess and do NOT send a customer reply: call merchant.notify and stop with a brief final message, which parks the case for a human. Never close a real customer's case without helping them.]",
+  ].join("\n");
+  return {
+    ...agent,
     promptTemplate: `${agent.promptTemplate}\n\n${header}`,
   };
 };

@@ -24,6 +24,40 @@ agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by
 `suggest ignore domain: true` to the case context, which the owner approves on the case page.
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
 
+Resolution-agent-direct + tool-config-once (decided 2026-06-28):
+- STATUS 2026-06-28: slices 1–3 landed in the working tree (TDD, full `pnpm build` green,
+  dashboard `tsc --noEmit` green); NOT yet committed or deployed.
+  - Slice 1 (direct routing): `applyResolutionAgentEntry` helper + runtime binding swaps
+    support-triage → scenario-resolution-agent at bind time when `resolutionAgentEnabled`
+    (agent-runtime.ts ~1178). `applyTriageScenarioRouting` retained + tested but unwired.
+  - Slice 2 (tools once on agent): `applyScenarioSteering` (header-only) is wired into
+    `withScenario`; `applyScenarioEnvelope` (clamping) retained + tested but unwired.
+  - Slice 2b: scenario-resolution-agent prompt rewritten — it's the entry point and picks the
+    scenario itself (removed the false "triaged & handed to you" premise).
+  - Slice 3 (hide UI): per-scenario "Actions the agent can take" editor hidden behind
+    `SHOW_PER_SCENARIO_ACTIONS=false` in resolution-policy-form.tsx; stored `enabledActions`
+    round-tripped via hidden inputs so saving never wipes them.
+  - [x] Slice 4: stripped the temporary `routedbg.bound` / `routedbg.decision` audit diagnostics
+        from agent-runtime.ts.
+  - [ ] Deploy: Fly backend (api+worker) for slices 1+2+4; Cloudflare dashboard for slice 3.
+- WHEN `resolutionAgentEnabled`, route inbound cases DIRECTLY to the
+  scenario-resolution-agent (no support-triage hop). The resolution agent picks the matching
+  scenario itself (sets `scenarioKey`) and resolves end-to-end. Motivation: the support-triage →
+  handoff step was the source of intermittent silent-resolves (a weak triage model bailing to
+  `final_message` instead of handing off; ~27 historical triage silent-resolves on the pilot tenant).
+  Routing direct deletes that failure class; the resolution agent's autonomousLoop guards
+  (queued→approval, no-action→human_takeover) already prevent silent closes.
+- DECISION: tools/permissions are configured ONCE on the agent (per-agent config + the existing
+  /settings/agents tool-permission toggle), NOT per scenario. The per-scenario `enabledActions`
+  (fine-grained tool allow/ask/deny per scenario) is being HIDDEN, not removed — the data model
+  (`ScenarioPolicy.enabledActions`) and `applyScenarioEnvelope` clamping code stay in place but are
+  no longer applied/surfaced. Scenarios now contribute STEERING only (recognition + notes + supplier
+  guidance), not the hard tool gate.
+- [ ] RESURFACE LATER: re-enable fine-grained per-scenario tool control (enabledActions clamping +
+      the dashboard UI for it) once the simpler per-agent model is validated. The envelope code in
+      `applyScenarioEnvelope` and the `enabledActions` field are intentionally retained for this.
+- The temporary `routedbg.*` audit diagnostics used to chase the silent-resolve have been removed.
+
 Architecture follow-up discussed 2026-06-25:
 - [ ] Evaluate a supervisor/reporting subagent pattern for read-only research and bounded specialist
       analysis, without moving final side-effect decisions out of the runtime permission/audit/state
