@@ -868,6 +868,12 @@ export const api = {
   ): Promise<CallResult> =>
     call("/refund-policy", { method: "POST", body: input, ctx }),
 
+  setCancellationRestock: (
+    ctx: CallCtx,
+    restock: boolean,
+  ): Promise<CallResult> =>
+    call("/cancellation-restock", { method: "POST", body: { restock }, ctx }),
+
   setDiscountPolicy: (
     ctx: CallCtx,
     input: {

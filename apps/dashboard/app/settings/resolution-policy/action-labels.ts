@@ -20,6 +20,11 @@ export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
     label: "Offer a discount coupon",
     help: "A single-use coupon locked to the customer — capped by your Discount policy.",
   },
+  {
+    tool: "order.cancel",
+    label: "Cancel the order",
+    help: "Cancel an unshipped order and refund it — governed by your Refund policy.",
+  },
 ];
 
 export interface SupplierModeOption {

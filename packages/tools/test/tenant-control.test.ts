@@ -8,6 +8,7 @@ import {
   supplierEscalate,
   shopifyRefundCreate,
   shopifyDiscountCreate,
+  shopifyOrderCancel,
 } from "../src/index.js";
 
 // The dashboard's tenant-facing "Actions" card is driven entirely by this
@@ -58,6 +59,14 @@ describe("tenant-facing tool metadata", () => {
       displayName: "Issue a discount code",
       control: "discount-threshold",
     },
+    {
+      tool: shopifyOrderCancel,
+      name: "order.cancel",
+      displayName: "Cancel the order",
+      // Cancelling issues a refund, so it's governed by the refund policy —
+      // same control as refund.create.
+      control: "refund-threshold",
+    },
   ];
 
   for (const e of expected) {
@@ -81,6 +90,7 @@ describe("tenant-facing tool metadata", () => {
         "supplier.escalate",
         "refund.create",
         "discount.create",
+        "order.cancel",
       ].sort(),
     );
   });

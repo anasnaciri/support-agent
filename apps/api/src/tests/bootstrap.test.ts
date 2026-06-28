@@ -13,7 +13,7 @@ describe("DEFAULT_SHOPIFY_SCOPES", () => {
       "read_orders", // shopify.get_order / findOrderByName
       "read_customers", // shopify.get_customer / searchByEmail
       "read_products", // shopify.get_product / search_products
-      "write_orders", // refund.create
+      "write_orders", // refund.create + order.cancel
       "write_discounts", // discount.create
       "read_locations", // shopify.list_pickup_locations
     ]) {

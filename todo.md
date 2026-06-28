@@ -32,6 +32,51 @@ Architecture follow-up discussed 2026-06-25:
       money action. Avoid a broad rewrite from the current handoff model until tested on one narrow flow
       such as order-status data gathering or refund eligibility analysis.
 
+### 2026-06-28 — Built-in "Cancel my order" scenario + `order.cancel` tool
+
+A customer asking to cancel is now handled end-to-end by the scenario-resolution
+agent: it looks up the order, checks the cancellation policy in the knowledge
+base, and branches — **not yet shipped** → propose `order.cancel` (cancel +
+refund); **already shipped** → reply it can't be cancelled and offer
+return-for-refund. Delivered as a built-in **scenario** (rides the existing
+autonomous agent), not a new specialist. **No new Shopify scope** — `orderCancel`
+is gated by `write_orders`, already requested (same as refunds).
+
+- [x] New `order.cancel` tool (`packages/tools/src/shopify/cancel-order.ts`),
+      mirrors `refund.create`: `write_orders` scope, `risk:money`,
+      `defaultPermission:ask`, `tenantControl:"refund-threshold"`,
+      `idempotencyKey cancel:<orderId>`. Forces `refund:true`, `reason:customer`,
+      `notifyCustomer:false`; reads `restock` from the tenant setting.
+- [x] `ShopifyService.cancelOrder` Tag + Test impl + fixtures (`shopify-service.ts`);
+      Live `orderCancel` mutation + `OrderCancelFailed` mapping + `cancelledAt`
+      added to `ORDER_FIELDS`/`mapOrder` and the `get_order` projection
+      (`packages/providers/...`, `packages/agent-core/src/{shopify,errors}.ts`).
+- [x] Permission: `order.cancel` routes through the SAME refund-policy branch as
+      `refund.create` (`permission-service-live.ts` — `CANCEL_TOOL`), so default
+      policy (askAbove=0) → queue-for-approval; merchant thresholds apply.
+- [x] Scenario wiring: `order.cancel` added to `SCENARIO_REMEDY_TOOLS` +
+      `scenarioResolutionAgent.tools`; new `order_cancellation` built-in in
+      `defaultResolutionPolicy` (enabledActions `order.cancel:ask`, supplier none,
+      playbook notes). Triage offers it automatically via `applyTriageScenarioRouting`.
+- [x] Restock-on-cancel = merchant checkbox: `cancellationRestock` tenant setting
+      (defaults-on-read true) + `setCancellationRestock`; surfaced on the
+      refund-policy page ("Order cancellations" section) via
+      `/dashboard/cancellation-restock` + `TenantSettingsView.cancellationRestock`.
+- [x] Operator RBAC parity: approving a queued `order.cancel` requires
+      `refunds.issue` (both single + bundle paths in `case-handlers.ts`).
+- [x] Dashboard labels: REMEDY_ACTIONS, `labels.ts`, `BundleApprovalBar` money set.
+- [x] TDD green: tool (calls cancelOrder with forced flags + restock-from-setting,
+      OrderCancelFailed mapping, idempotency, metadata), permission routing
+      (allow/ask/deny + default-queues), scenario default + envelope, provider
+      mutation mapping, tenant setter. Full `tsc -b` + all package/app suites pass.
+- [ ] **Requires the Resolution agent toggle ON** (like every scenario) — with it
+      OFF, cancellations fall to the legacy specialists (no cancel path). Did NOT
+      build a parallel legacy specialist (scope: "built-in scenario").
+- [ ] **Verify live** against a connected store: (a) unshipped → bundle approval →
+      order cancelled + refunded in Shopify; (b) shipped → return-for-refund reply.
+- [ ] `orderCancel` is async (returns a job) — we don't poll it to confirm completion.
+- [ ] Mirror the restock checkbox onto `apps/dashboard-spa` once its settings land.
+
 ### 2026-06-28 — Subject-less cases no longer render blank (apps/dashboard)
 
 **What:** cases that arrived without a usable Subject (empty or whitespace-only header,

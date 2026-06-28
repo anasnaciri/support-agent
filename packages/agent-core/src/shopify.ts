@@ -97,6 +97,12 @@ export type ShopifyOrder = {
   readonly customerId: CustomerId | null;
   readonly fulfillmentStatus: ShopifyFulfillmentStatus | null;
   readonly financialStatus: ShopifyFinancialStatus | null;
+  /**
+   * When the order was cancelled, or null if it is still open. Surfaced as
+   * an eligibility signal for the cancellation flow: an order that already
+   * carries a `cancelledAt` must never be offered another cancellation.
+   */
+  readonly cancelledAt: Date | null;
   readonly totalPrice: ShopifyMoney;
   readonly shippingAddress: ShopifyAddress | null;
   readonly lineItems: ReadonlyArray<ShopifyLineItem>;
@@ -207,6 +213,22 @@ export type ShopifyRefund = {
   readonly amount: ShopifyMoney;
   readonly note: string | null;
   readonly createdAt: Date;
+};
+
+/**
+ * Result of a successful `orderCancel` mutation. Shopify processes the
+ * cancellation (and the optional refund/restock) asynchronously via a job,
+ * so there is no refund record to return synchronously — we surface the
+ * job id and an `accepted` flag confirming Shopify queued the cancellation.
+ * The agent never claims the refund "already happened" off the back of
+ * this (the queued-action model + conditional reply wording handle that).
+ */
+export type ShopifyOrderCancellation = {
+  readonly orderId: OrderId;
+  /** Shopify's async job GID (`gid://shopify/Job/...`), null if not returned. */
+  readonly jobId: string | null;
+  /** True when Shopify accepted the cancellation request (no user errors). */
+  readonly accepted: boolean;
 };
 
 /**

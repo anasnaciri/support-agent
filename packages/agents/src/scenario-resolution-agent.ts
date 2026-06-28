@@ -95,6 +95,7 @@ export const scenarioResolutionAgent: AgentConfig = {
     "refund.recommend",
     "refund.create",
     "discount.create",
+    "order.cancel",
     "supplier.escalate",
   ],
   permissionOverrides: {},

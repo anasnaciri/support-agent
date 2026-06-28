@@ -1,4 +1,4 @@
-import { Banknote } from "lucide-react";
+import { Banknote, XCircle } from "lucide-react";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { refundCurrencyMismatch } from "@/lib/refund-currency";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SettingsBreadcrumb } from "@/app/settings/_components/settings-breadcrumb";
 
 import { RefundPolicyForm } from "./refund-policy-form";
+import { CancellationRestockToggle } from "./cancellation-restock-toggle";
 
 const minorToMajor = (minor: number): string => (minor / 100).toFixed(2);
 
@@ -43,13 +44,14 @@ interface PageProps {
 
 export default async function RefundPolicyPage({ searchParams }: PageProps) {
   const ctx = await getDashboardContext();
-  const [{ refundPolicy: policy }, shopCurrency] = await Promise.all([
-    api.settings(ctx),
-    // Best-effort — the warning is omitted if the store currency is unknown.
-    api
-      .shopCurrency(ctx)
-      .catch(() => ({ currencyCode: null as string | null })),
-  ]);
+  const [{ refundPolicy: policy, cancellationRestock }, shopCurrency] =
+    await Promise.all([
+      api.settings(ctx),
+      // Best-effort — the warning is omitted if the store currency is unknown.
+      api
+        .shopCurrency(ctx)
+        .catch(() => ({ currencyCode: null as string | null })),
+    ]);
   const feedback = resolveFeedback((await searchParams) ?? {}, FEEDBACK);
 
   const showCurrencyWarning = refundCurrencyMismatch(
@@ -98,6 +100,24 @@ export default async function RefundPolicyPage({ searchParams }: PageProps) {
         </CardHeader>
         <CardContent className="pt-0">
           <RefundPolicyForm policy={policy} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <XCircle className="size-4" aria-hidden />
+            Order cancellations
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0">
+          <p className="text-sm text-muted-foreground">
+            When a customer asks to cancel an order that hasn&apos;t shipped
+            yet, the agent can cancel and refund it. The cancellation and its
+            refund follow the thresholds above. Choose whether the cancelled
+            order&apos;s items go back into your inventory.
+          </p>
+          <CancellationRestockToggle restock={cancellationRestock} />
         </CardContent>
       </Card>
 

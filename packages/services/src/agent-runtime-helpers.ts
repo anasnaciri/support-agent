@@ -1116,6 +1116,7 @@ export const applyOverride = (
 export const SCENARIO_REMEDY_TOOLS: ReadonlySet<string> = new Set([
   "refund.create",
   "discount.create",
+  "order.cancel",
 ]);
 
 const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";

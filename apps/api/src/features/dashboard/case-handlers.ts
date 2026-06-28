@@ -476,7 +476,12 @@ export const handleDashboardApprovalAction =
       const detail = await runWithDb(layer, (db) =>
         approvalDetail(db, auth.tenantId, id),
       );
-      if (detail && detail.tool === "refund.create") {
+      // A cancellation issues a refund too, so it needs the same refunds.issue
+      // permission as a refund approval.
+      if (
+        detail &&
+        (detail.tool === "refund.create" || detail.tool === "order.cancel")
+      ) {
         const access = await runWithDb(layer, (db) =>
           getMemberAccess(db, auth.tenantId, auth.userId!),
         );
@@ -562,7 +567,12 @@ export const handleDashboardCaseApprovalsBundle =
 
     // Approving a bundle that moves money needs refunds.issue on top of the
     // route's approvals.decide guard (rejecting moves no money → no extra gate).
-    if (action === "approve" && pending.some((a) => a.tool === "refund.create")) {
+    if (
+      action === "approve" &&
+      pending.some(
+        (a) => a.tool === "refund.create" || a.tool === "order.cancel",
+      )
+    ) {
       const access = await runWithDb(layer, (db) =>
         getMemberAccess(db, auth.tenantId, auth.userId!),
       );

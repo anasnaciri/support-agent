@@ -55,6 +55,11 @@ export { isConnectorScopeGranted };
  */
 const REFUND_TOOL = "refund.create";
 const DISCOUNT_TOOL = "discount.create";
+// `order.cancel` cancels an order AND refunds it, so it's gated by the same
+// per-tenant refund policy as `refund.create` (mode + amount thresholds). Its
+// payload carries the order's refundable total under the same `amount` shape,
+// so `parseRefundAmount` reads it directly.
+const CANCEL_TOOL = "order.cancel";
 
 /**
  * Parse `amount` from a `refund.create` payload into minor units
@@ -359,10 +364,13 @@ export const PermissionServiceLive = Layer.effect(
             );
           }
 
-          // Step 3b: conditional refund-amount threshold. Other tools
-          // short-circuit here so we don't pay the tenant-settings DB
-          // hop on every permission check.
-          if (tool.name !== REFUND_TOOL) return staticPermission;
+          // Step 3b: conditional refund-amount threshold. Applies to BOTH
+          // `refund.create` and `order.cancel` (the cancel issues a refund, so
+          // the merchant's refund policy gates it the same way). Other tools
+          // short-circuit here so we don't pay the tenant-settings DB hop on
+          // every permission check.
+          if (tool.name !== REFUND_TOOL && tool.name !== CANCEL_TOOL)
+            return staticPermission;
 
           // Read the tenant's refund policy. On DB failure (which
           // SHOULD be rare and indicates infra is broken) we

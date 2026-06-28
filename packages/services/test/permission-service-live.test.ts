@@ -422,6 +422,30 @@ const shopifyConnectionWithRefunds: ConnectorConnection = {
   status: "active",
 };
 
+// order.cancel cancels + refunds, so it's gated by the SAME refund policy as
+// refund.create. Its payload carries the order's refundable total under the
+// same `amount` shape. Mirrors the real declaration (write_orders scope).
+const cancelTool = defineTool({
+  name: "order.cancel",
+  description: "stub",
+  inputSchema: Schema.Struct({
+    orderId: Schema.String,
+    amount: Schema.Struct({
+      amount: Schema.String,
+      currencyCode: Schema.String,
+    }),
+  }),
+  outputSchema: Schema.Struct({}),
+  risk: "money",
+  defaultPermission: "ask",
+  sideEffectClass: "financial",
+  requiredConnectorScopes: {
+    provider: "shopify",
+    scopes: ["write_orders"],
+  },
+  execute: () => Effect.succeed({}),
+});
+
 const readTool = defineTool({
   name: "shopify.get_order",
   description: "stub",
@@ -456,7 +480,12 @@ const runCheck = async (
     shopifyConnectionWithRefunds,
   ],
 ): Promise<string> => {
-  const tool = toolName === "refund.create" ? refundTool : readTool;
+  const tool =
+    toolName === "refund.create"
+      ? refundTool
+      : toolName === "order.cancel"
+        ? cancelTool
+        : readTool;
   const tenants = TenantRepositoryTest({
     settingsByTenant: new Map([
       [
@@ -522,6 +551,59 @@ describe("PermissionServiceLive", () => {
       policy,
     );
     expect(result).toBe("deny");
+  });
+
+  // order.cancel issues a refund, so the same refund policy gates it. These
+  // pin that order.cancel is routed through applyRefundPolicy exactly like
+  // refund.create (not short-circuited at the static `ask`).
+  it("auto-allows a $20 cancellation when askAbove=$25", async () => {
+    const result = await runCheck(
+      "order.cancel",
+      {
+        orderId: "gid://shopify/Order/1",
+        amount: { amount: "20.00", currencyCode: "USD" },
+      },
+      policy,
+    );
+    expect(result).toBe("allow");
+  });
+
+  it("asks on a $100 cancellation (mid-range)", async () => {
+    const result = await runCheck(
+      "order.cancel",
+      {
+        orderId: "gid://shopify/Order/1",
+        amount: { amount: "100.00", currencyCode: "USD" },
+      },
+      policy,
+    );
+    expect(result).toBe("ask");
+  });
+
+  it("denies a $500 cancellation (above hard cap)", async () => {
+    const result = await runCheck(
+      "order.cancel",
+      {
+        orderId: "gid://shopify/Order/1",
+        amount: { amount: "500.00", currencyCode: "USD" },
+      },
+      policy,
+    );
+    expect(result).toBe("deny");
+  });
+
+  it("always queues a cancellation under the default policy (askAbove=$0)", async () => {
+    // The shipped default refund policy asks for every amount — so a
+    // cancellation defaults to queue-for-approval out of the box.
+    const result = await runCheck(
+      "order.cancel",
+      {
+        orderId: "gid://shopify/Order/1",
+        amount: { amount: "5.00", currencyCode: "USD" },
+      },
+      defaultRefundPolicy,
+    );
+    expect(result).toBe("ask");
   });
 
   // Audit L9 — N small refunds must not bypass the cap: the policy

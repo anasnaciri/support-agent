@@ -88,7 +88,9 @@ export interface ShopifyAppConfig {
  *      - `read_customers`   → shopify.get_customer, shopify.searchByEmail
  *      - `read_products`    → shopify.get_product (damaged-product photo
  *                             cross-check)
- *      - `write_orders`     → refund.create (and future order-edit tools)
+ *      - `write_orders`     → refund.create, order.cancel (cancel + refund an
+ *                             unshipped order; same scope as refunds — no new
+ *                             scope needed) and future order-edit tools
  *      - `write_discounts`  → discount.create (goodwill coupon codes)
  *      - `read_locations`   → shopify.list_pickup_locations (general-inquiry
  *                             pickup answers; the service filters to

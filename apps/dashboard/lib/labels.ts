@@ -62,6 +62,7 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
   "conversation.reply": "Send customer reply",
   "conversation.ask_customer": "Ask the customer a question",
   "refund.create": "Issue a refund",
+  "order.cancel": "Cancel the order",
   "supplier.add_sheet_row": "Escalate to supplier",
   "supplier.escalate": "Escalate to supplier",
   "merchant.notify": "Send you a heads-up",

@@ -9,6 +9,7 @@ import {
   type ShopifyFulfillment,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyOrderCancellation,
   type ShopifyOrderRefundContext,
   type ShopifyProduct,
   type ShopifyProductSearchResult,
@@ -57,6 +58,41 @@ export interface RefundOrderInput {
   readonly lineItems?: ReadonlyArray<RefundLineItemInput>;
   /** Shipping to refund (a portion of the order's refundable shipping). */
   readonly shipping?: ShopifyMoney | null;
+}
+
+/**
+ * Why an order is being cancelled. Maps 1:1 to Shopify's required
+ * `OrderCancelReason` enum (the Live impl upper-cases it). The
+ * `order.cancel` tool only ever passes `"customer"` (a customer-requested
+ * cancellation), but the union keeps the service honest if a future caller
+ * needs FRAUD / INVENTORY / etc.
+ */
+export type OrderCancelReason =
+  | "customer"
+  | "declined"
+  | "fraud"
+  | "inventory"
+  | "staff"
+  | "other";
+
+/**
+ * Input for `ShopifyService.cancelOrder`. `refund` and `restock` are
+ * required by Shopify's `orderCancel` mutation; the `order.cancel` tool
+ * always passes `refund: true` (cancel + refund) and resolves `restock`
+ * from the tenant's cancellation setting. `notifyCustomer` defaults to
+ * false at the tool — the agent sends its own reply, so we don't want
+ * Shopify also emailing a cancellation notice. `staffNote` records the
+ * agent's reason on the order timeline. `idempotencyKey` lets the runtime
+ * dedupe retries (Shopify has no cancel-level idempotency header).
+ */
+export interface CancelOrderInput {
+  readonly orderId: OrderId;
+  readonly reason: OrderCancelReason;
+  readonly refund: boolean;
+  readonly restock: boolean;
+  readonly notifyCustomer: boolean;
+  readonly staffNote: string | null;
+  readonly idempotencyKey: string | null;
 }
 
 /**
@@ -259,6 +295,24 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       tenantId: TenantId,
       input: RefundOrderInput,
     ) => Effect.Effect<ShopifyRefund, ShopifyError>;
+
+    /**
+     * Cancel an order via Shopify's `orderCancel` mutation, optionally
+     * refunding and restocking. Money risk — every caller goes through
+     * `PermissionService` first (the `order.cancel` tool is
+     * `defaultPermission: "ask"` and the runtime overlays the same refund-
+     * policy threshold as `refund.create`, since the cancel issues a
+     * refund). The cancellation is processed asynchronously by Shopify;
+     * the returned `ShopifyOrderCancellation` carries the job id, not a
+     * refund record. Maps `orderCancel.orderCancelUserErrors` (e.g. the
+     * order already shipped / is already cancelled) → `OrderCancelFailed`;
+     * structural failures reuse the existing `ShopifyError` tags. Needs the
+     * `write_orders` scope (same as refunds).
+     */
+    readonly cancelOrder: (
+      tenantId: TenantId,
+      input: CancelOrderInput,
+    ) => Effect.Effect<ShopifyOrderCancellation, ShopifyError>;
 
     /**
      * Everything the dashboard's Shopify-style refund modal needs to render
@@ -492,6 +546,17 @@ export interface ShopifyTestFixtures {
     input: RefundOrderInput,
   ) => Effect.Effect<ShopifyRefund, ShopifyError>;
   /**
+   * Optional override for `cancelOrder`. When unset the default Test impl
+   * synthesises an accepted `ShopifyOrderCancellation` from the input —
+   * useful for happy-path tests. Tests that need to assert the input shape
+   * (that the tool forced `refund: true`, passed the tenant's `restock`,
+   * kept `notifyCustomer: false`) or simulate an `OrderCancelFailed`
+   * (already-shipped order) override this and inspect / throw inside.
+   */
+  readonly cancelOrder?: (
+    input: CancelOrderInput,
+  ) => Effect.Effect<ShopifyOrderCancellation, ShopifyError>;
+  /**
    * Per-order refund-context fixture for the dashboard refund modal. When an
    * orderId isn't in the map the default Test impl fails with `OrderNotFound`
    * — the same shape the Live impl produces on a 404.
@@ -653,6 +718,20 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           amount: input.amount,
           note: input.note,
           createdAt: new Date(0),
+        });
+      },
+      cancelOrder: (_tenantId, input) => {
+        if (fixtures.cancelOrder) {
+          return fixtures.cancelOrder(input);
+        }
+        // Default: Shopify accepted the cancellation. Tests that care
+        // about the job id or the input shape override the fixture.
+        return Effect.succeed<ShopifyOrderCancellation>({
+          orderId: input.orderId,
+          jobId: `gid://shopify/Job/test-${
+            input.idempotencyKey ?? input.orderId
+          }`,
+          accepted: true,
         });
       },
       createDiscountCode: (_tenantId, input) => {

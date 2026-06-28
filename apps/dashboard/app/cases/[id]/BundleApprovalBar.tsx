@@ -37,6 +37,7 @@ interface Props {
 const MONEY_TOOLS: ReadonlySet<string> = new Set([
   "refund.create",
   "discount.create",
+  "order.cancel",
 ]);
 
 const replyBodyText = (approval: ApprovalDetail): string => {

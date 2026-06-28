@@ -218,6 +218,35 @@ export const handleDashboardRefundPolicy = async (
   return sendJson(res, 200, { ok: true });
 };
 
+// POST /dashboard/cancellation-restock — toggle whether `order.cancel` returns
+// the cancelled order's items to inventory. Lives next to the refund policy
+// because a cancellation issues a refund; the dashboard renders its checkbox on
+// the refund-policy page.
+export const handleDashboardCancellationRestock = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const restock = body["restock"];
+  if (typeof restock !== "boolean") {
+    return sendJson(res, 400, { error: "bad_restock" });
+  }
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setCancellationRestock(TenantId(auth.tenantId), restock);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
 // POST /dashboard/discount-policy — set the goodwill-coupon policy.
 export const handleDashboardDiscountPolicy = async (
   cfg: ApiConfig,

@@ -58,3 +58,18 @@ export const saveRefundPolicyAction = async (
   revalidatePath("/settings/refund-policy");
   redirect("/settings/refund-policy?saved=1");
 };
+
+/**
+ * Toggle whether `order.cancel` returns the cancelled order's items to
+ * inventory. Submitted on change by the restock checkbox (no Save button); the
+ * page revalidates in place. A checkbox sends "on" when checked and is absent
+ * when unchecked.
+ */
+export const saveCancellationRestockAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const ctx = await getDashboardContext();
+  const restock = formData.get("restock") === "on";
+  await api.setCancellationRestock(ctx, restock);
+  revalidatePath("/settings/refund-policy");
+};

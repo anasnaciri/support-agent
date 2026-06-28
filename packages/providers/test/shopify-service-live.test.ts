@@ -5,6 +5,7 @@ import {
   CustomerNotFound,
   DiscountFailed,
   NetworkError,
+  OrderCancelFailed,
   OrderId,
   OrderNotFound,
   ProductNotFound,
@@ -2066,6 +2067,111 @@ describe("ShopifyServiceLive — createDiscountCode", () => {
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error: unknown }).error;
       expect(err).toBeInstanceOf(DiscountFailed);
+    }
+  });
+});
+
+// ============================================================
+// cancelOrder
+// ============================================================
+
+describe("ShopifyServiceLive — cancelOrder", () => {
+  const orderGid = "gid://shopify/Order/12345";
+
+  const callCancel = (
+    layer: Layer.Layer<ShopifyService>,
+    restock = true,
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.cancelOrder(tenantId, {
+            orderId: OrderId(orderGid),
+            reason: "customer",
+            refund: true,
+            restock,
+            notifyCustomer: false,
+            staffNote: "Customer changed their mind",
+            idempotencyKey: "call_1",
+          }),
+        ),
+        layer,
+      ),
+    );
+
+  it("happy path: maps the domain reason to the enum and returns the job id", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        orderCancel: {
+          job: { id: "gid://shopify/Job/abc" },
+          orderCancelUserErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    const exit = await callCancel(layer, true);
+    expect(Exit.isSuccess(exit)).toBe(true);
+
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: Record<string, unknown>;
+    };
+    expect(body.variables["orderId"]).toBe(orderGid);
+    // Domain "customer" → Shopify's OrderCancelReason "CUSTOMER".
+    expect(body.variables["reason"]).toBe("CUSTOMER");
+    expect(body.variables["refund"]).toBe(true);
+    expect(body.variables["restock"]).toBe(true);
+    expect(body.variables["notifyCustomer"]).toBe(false);
+    expect(body.variables["staffNote"]).toBe("Customer changed their mind");
+
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.orderId).toBe(orderGid);
+      expect(exit.value.jobId).toBe("gid://shopify/Job/abc");
+      expect(exit.value.accepted).toBe(true);
+    }
+  });
+
+  it("passes restock=false through to the mutation", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        orderCancel: { job: { id: "gid://shopify/Job/abc" }, orderCancelUserErrors: [] },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    await callCancel(layer, false);
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: Record<string, unknown>;
+    };
+    expect(body.variables["restock"]).toBe(false);
+  });
+
+  it("maps orderCancelUserErrors → OrderCancelFailed", async () => {
+    reset();
+    const errPayload = {
+      data: {
+        orderCancel: {
+          job: null,
+          orderCancelUserErrors: [
+            {
+              field: ["orderId"],
+              code: "CANT_CANCEL",
+              message: "Order has already been fulfilled",
+            },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, errPayload)]));
+    const exit = await callCancel(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderCancelFailed);
+      if (err instanceof OrderCancelFailed) {
+        expect(err.code).toBe("CANT_CANCEL");
+        expect(err.message).toBe("Order has already been fulfilled");
+      }
     }
   });
 });

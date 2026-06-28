@@ -46,7 +46,8 @@ embedded = false
 # read_orders     → shopify.get_order / findOrderByName       (PCD: Level 2)
 # read_customers  → shopify.get_customer / searchByEmail       (PCD: Level 2)
 # read_products   → shopify.get_product (damaged-product photo cross-check)
-# write_orders    → refund.create
+# write_orders    → refund.create, order.cancel (cancel + refund an unshipped
+#                   order — same scope as refunds, no new scope required)
 # write_discounts → discount.create (goodwill coupon codes). Not protected
 #                   customer data; gated per-tenant by the discount policy.
 #

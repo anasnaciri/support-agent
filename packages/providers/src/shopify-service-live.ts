@@ -12,6 +12,7 @@ import {
   type ShopifyLocation,
   type ShopifyMoney,
   type ShopifyOrder,
+  type ShopifyOrderCancellation,
   type ShopifyOrderRefundContext,
   type ShopifyRefundLineItem,
   type ShopifyProduct,
@@ -24,6 +25,7 @@ import {
   CustomerNotFound,
   DiscountFailed,
   NetworkError,
+  OrderCancelFailed,
   OrderId as makeOrderId,
   OrderNotFound,
   ProductNotFound,
@@ -34,6 +36,7 @@ import {
 import {
   ShopifyCredentialStore,
   ShopifyService,
+  type CancelOrderInput,
   type CreateDiscountCodeInput,
   type CustomerRefundHistory,
   type OrderPiiPresence,
@@ -309,6 +312,7 @@ type GqlOrder = {
   readonly customer: { readonly id: string } | null;
   readonly displayFulfillmentStatus: string | null;
   readonly displayFinancialStatus: string | null;
+  readonly cancelledAt: string | null;
   readonly totalPriceSet: { readonly shopMoney: GqlMoney };
   readonly shippingAddress: GqlAddress;
   readonly lineItems: {
@@ -334,6 +338,7 @@ const mapOrder = (o: GqlOrder): ShopifyOrder => ({
   customerId: o.customer ? makeCustomerId(o.customer.id) : null,
   fulfillmentStatus: mapFulfillmentStatus(o.displayFulfillmentStatus),
   financialStatus: mapFinancialStatus(o.displayFinancialStatus),
+  cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
   totalPrice: mapMoney(o.totalPriceSet.shopMoney),
   shippingAddress: mapAddress(o.shippingAddress),
   lineItems: o.lineItems.nodes.map(
@@ -504,6 +509,7 @@ const ORDER_FIELDS = `
   customer { id }
   displayFulfillmentStatus
   displayFinancialStatus
+  cancelledAt
   totalPriceSet { shopMoney { amount currencyCode } }
   shippingAddress {
     name address1 address2 city province country zip phone
@@ -796,6 +802,46 @@ const REFUND_CREATE_MUTATION = `
     }
   }
 `;
+
+// `orderCancel` is async: Shopify queues the cancellation (and the optional
+// refund + restock) and returns a `job` rather than the mutated order. The
+// `reason` is a required `OrderCancelReason!` enum (CUSTOMER / DECLINED /
+// FRAUD / INVENTORY / OTHER / STAFF); `refund`/`restock` are required
+// booleans. Errors come back on `orderCancelUserErrors`, not the generic
+// `userErrors` field. Gated by `write_orders`, same as `refundCreate`.
+const ORDER_CANCEL_MUTATION = `
+  mutation OrderCancel(
+    $orderId: ID!
+    $reason: OrderCancelReason!
+    $refund: Boolean!
+    $restock: Boolean!
+    $notifyCustomer: Boolean
+    $staffNote: String
+  ) {
+    orderCancel(
+      orderId: $orderId
+      reason: $reason
+      refund: $refund
+      restock: $restock
+      notifyCustomer: $notifyCustomer
+      staffNote: $staffNote
+    ) {
+      job { id }
+      orderCancelUserErrors { field message code }
+    }
+  }
+`;
+
+type OrderCancelPayload = {
+  readonly orderCancel: {
+    readonly job: { readonly id: string } | null;
+    readonly orderCancelUserErrors: ReadonlyArray<{
+      readonly field: ReadonlyArray<string> | null;
+      readonly message: string;
+      readonly code: string | null;
+    }>;
+  };
+};
 
 type GqlTransaction = {
   readonly id: string;
@@ -1553,6 +1599,48 @@ export const ShopifyServiceLive = Layer.effect(
               amount: mapMoney(refund.totalRefundedSet.shopMoney),
               note: refund.note,
               createdAt: new Date(refund.createdAt),
+            };
+            return result;
+          }),
+        ),
+
+      cancelOrder: (tenantId, input: CancelOrderInput) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            const data = yield* runQuery<OrderCancelPayload>(
+              http,
+              creds,
+              tenantId,
+              ORDER_CANCEL_MUTATION,
+              {
+                orderId: orderGid(input.orderId),
+                // Domain reason ("customer") → Shopify's OrderCancelReason
+                // enum (CUSTOMER). The tool only ever passes "customer", but
+                // the union is mapped generically so a future caller can pass
+                // FRAUD / INVENTORY / etc.
+                reason: input.reason.toUpperCase(),
+                refund: input.refund,
+                restock: input.restock,
+                notifyCustomer: input.notifyCustomer,
+                staffNote: input.staffNote,
+              },
+            );
+
+            const payload = data.orderCancel;
+            const firstError = payload.orderCancelUserErrors[0];
+            if (firstError) {
+              return yield* Effect.fail(
+                new OrderCancelFailed({
+                  orderId: input.orderId,
+                  code: firstError.code ?? null,
+                  message: firstError.message,
+                }),
+              );
+            }
+            const result: ShopifyOrderCancellation = {
+              orderId: input.orderId,
+              jobId: payload.job?.id ?? null,
+              accepted: true,
             };
             return result;
           }),

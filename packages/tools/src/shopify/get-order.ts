@@ -43,6 +43,10 @@ export const ShopifyOrderOutput = Schema.Struct({
   email: Schema.NullOr(Schema.String),
   fulfillmentStatus: Schema.NullOr(Schema.String),
   financialStatus: Schema.NullOr(Schema.String),
+  // ISO timestamp when the order was cancelled, or null if still open.
+  // Lets a specialist see an already-cancelled order before proposing
+  // another cancellation.
+  cancelledAt: Schema.NullOr(Schema.String),
   totalPrice: Money,
   shippingAddress: Schema.NullOr(
     Schema.Struct({
@@ -82,6 +86,7 @@ export const projectShopifyOrder = (
   email: order.email,
   fulfillmentStatus: order.fulfillmentStatus,
   financialStatus: order.financialStatus,
+  cancelledAt: order.cancelledAt ? order.cancelledAt.toISOString() : null,
   totalPrice: order.totalPrice,
   shippingAddress: order.shippingAddress
     ? {

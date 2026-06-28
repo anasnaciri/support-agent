@@ -214,6 +214,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly supplierEscalationSheet?: unknown;
                 readonly legalAcceptance?: unknown;
                 readonly rephraseModel?: unknown;
+                readonly cancellationRestock?: unknown;
                 readonly resolutionPolicy?: unknown;
                 readonly resolutionAgentEnabled?: unknown;
               }
@@ -250,6 +251,10 @@ export const TenantRepositoryLive = Layer.effect(
           );
           const resolutionAgentEnabled =
             settings?.resolutionAgentEnabled === true;
+          // Default-true: only an explicit `false` disables restock-on-cancel.
+          // Absent (older rows / never configured) ⇒ restock, the safe default
+          // for stores that track inventory.
+          const cancellationRestock = settings?.cancellationRestock !== false;
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -258,6 +263,7 @@ export const TenantRepositoryLive = Layer.effect(
             supplierEscalationSheet,
             legalAcceptance,
             rephraseModel,
+            cancellationRestock,
             resolutionPolicy,
             resolutionAgentEnabled,
           });
@@ -391,6 +397,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setRephraseModel",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setCancellationRestock: (tenantId, restock: boolean) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as the other setters — replaces the
+          // `cancellationRestock` flag, leaves every sibling setting untouched.
+          const json = JSON.stringify({ cancellationRestock: restock });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setCancellationRestock",
                 cause,
               }),
           });

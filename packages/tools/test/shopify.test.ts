@@ -5,6 +5,7 @@ import {
   CaseId,
   CustomerId,
   OrderId,
+  OrderCancelFailed,
   RefundFailed,
   ShopifyAuthMissing,
   TenantId,
@@ -12,6 +13,7 @@ import {
   type ShopifyCustomer,
   type ShopifyError,
   type ShopifyOrder,
+  type ShopifyOrderCancellation,
   type ShopifyProduct,
   type ShopifyProductSearchResult,
   type ToolContext,
@@ -27,6 +29,7 @@ import {
   shopifySearchProducts,
   shopifyRefundCreate,
   shopifyRefundRecommend,
+  shopifyOrderCancel,
   computeRefundRecommendation,
 } from "../src/index.js";
 import {
@@ -34,6 +37,7 @@ import {
   TenantSettings,
   defaultRefundPolicy,
   defaultDiscountPolicy,
+  type CancelOrderInput,
   type CustomerRefundHistory,
   type RefundPolicy,
 } from "@support-agent/services";
@@ -55,6 +59,7 @@ const buildOrder = (id: string): ShopifyOrder => ({
   customerId: CustomerId("gid://shopify/Customer/777"),
   fulfillmentStatus: "in_transit",
   financialStatus: "paid",
+  cancelledAt: null,
   totalPrice: { amount: "29.99", currencyCode: "USD" },
   shippingAddress: {
     name: "Jane Doe",
@@ -941,6 +946,159 @@ describe("refund.create tool", () => {
     expect(shopifyRefundCreate.risk).toBe("money");
     expect(shopifyRefundCreate.sideEffectClass).toBe("financial");
     expect(shopifyRefundCreate.defaultPermission).toBe("ask");
+  });
+});
+
+describe("order.cancel tool", () => {
+  // Layer with a settings row for the tool's restock read + a cancelOrder
+  // capture so we can assert the forced flags (refund:true, notifyCustomer:
+  // false) and the restock value taken from the tenant setting.
+  const envWith = (
+    cancellationRestock: boolean,
+    capture: { input?: CancelOrderInput },
+  ) => {
+    const shopify = ShopifyServiceTest({
+      cancelOrder: (input) => {
+        capture.input = input;
+        return Effect.succeed<ShopifyOrderCancellation>({
+          orderId: input.orderId,
+          jobId: "gid://shopify/Job/xyz",
+          accepted: true,
+        });
+      },
+    });
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [
+          tenantId,
+          new TenantSettings({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
+            retentionDays: 730,
+            supplierEscalationSheet: null,
+            legalAcceptance: null,
+            cancellationRestock,
+          }),
+        ],
+      ]),
+    });
+    return Layer.merge(shopify, tenants);
+  };
+
+  it("cancels with refund forced on, notifyCustomer off, and restock from settings", async () => {
+    const capture: { input?: CancelOrderInput } = {};
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyOrderCancel.execute(
+          {
+            orderId: "gid://shopify/Order/55",
+            amount: { amount: "29.99", currencyCode: "USD" },
+            reason: "Customer changed their mind",
+          } as never,
+          baseCtx("c-cancel-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        envWith(true, capture),
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["orderId"]).toBe("gid://shopify/Order/55");
+    expect(result["jobId"]).toBe("gid://shopify/Job/xyz");
+    expect(result["accepted"]).toBe(true);
+    // The tool forces these — the agent never chooses them.
+    expect(capture.input?.reason).toBe("customer");
+    expect(capture.input?.refund).toBe(true);
+    expect(capture.input?.notifyCustomer).toBe(false);
+    expect(capture.input?.restock).toBe(true);
+    expect(capture.input?.staffNote).toBe("Customer changed their mind");
+  });
+
+  it("passes restock=false when the tenant disabled restock-on-cancel", async () => {
+    const capture: { input?: CancelOrderInput } = {};
+    await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyOrderCancel.execute(
+          {
+            orderId: "gid://shopify/Order/55",
+            amount: { amount: "29.99", currencyCode: "USD" },
+          } as never,
+          baseCtx("c-cancel-2"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        envWith(false, capture),
+      ),
+    );
+    expect(capture.input?.restock).toBe(false);
+  });
+
+  it("maps OrderCancelFailed to ToolOutputInvalid with the tag in issues", async () => {
+    const shopify = ShopifyServiceTest({
+      cancelOrder: () =>
+        Effect.fail(
+          new OrderCancelFailed({
+            orderId: "gid://shopify/Order/55",
+            code: "CANT_CANCEL",
+            message: "Order has already been fulfilled",
+          }),
+        ) as Effect.Effect<never, ShopifyError>,
+    });
+    const tenants = TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [
+          tenantId,
+          new TenantSettings({
+            notificationEmail: null,
+            refundPolicy: defaultRefundPolicy,
+            discountPolicy: defaultDiscountPolicy,
+            retentionDays: 730,
+            supplierEscalationSheet: null,
+            legalAcceptance: null,
+            cancellationRestock: true,
+          }),
+        ],
+      ]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        shopifyOrderCancel.execute(
+          {
+            orderId: "gid://shopify/Order/55",
+            amount: { amount: "29.99", currencyCode: "USD" },
+          } as never,
+          baseCtx("c-cancel-3"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        Layer.merge(shopify, tenants),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("order.cancel");
+        expect(err.issues).toEqual(["OrderCancelFailed"]);
+      }
+    }
+  });
+
+  it("idempotencyKey is stable per order", () => {
+    expect(
+      shopifyOrderCancel.idempotencyKey!({
+        orderId: "gid://shopify/Order/55",
+        amount: { amount: "29.99", currencyCode: "USD" },
+      } as never),
+    ).toBe("cancel:gid://shopify/Order/55");
+  });
+
+  it("declares money risk, write_orders scope, and refund-threshold control", () => {
+    expect(shopifyOrderCancel.risk).toBe("money");
+    expect(shopifyOrderCancel.defaultPermission).toBe("ask");
+    expect(shopifyOrderCancel.tenantControl).toBe("refund-threshold");
+    expect(shopifyOrderCancel.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["write_orders"],
+    });
   });
 });
 

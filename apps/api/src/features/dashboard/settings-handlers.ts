@@ -369,6 +369,7 @@ export const handleDashboardSettings = async (
             retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
             legalAcceptance: null,
+            cancellationRestock: true,
           } as const),
         ),
       ),
@@ -382,6 +383,9 @@ export const handleDashboardSettings = async (
     retentionDays: settings.retentionDays,
     supplierEscalationSheet: settings.supplierEscalationSheet,
     legalAcceptance: settings.legalAcceptance,
+    // Restock-on-cancel flag for the refund-policy page's "Order
+    // cancellations" checkbox. Defaults-on-read in getSettings ⇒ true.
+    cancellationRestock: settings.cancellationRestock !== false,
   });
 };
 

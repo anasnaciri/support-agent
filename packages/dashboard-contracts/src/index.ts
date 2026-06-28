@@ -708,6 +708,12 @@ export interface TenantSettingsView {
   readonly retentionDays: number;
   readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
   readonly legalAcceptance: LegalAcceptanceView | null;
+  /**
+   * Whether `order.cancel` returns the cancelled order's items to inventory.
+   * Backs the refund-policy page's "Order cancellations" restock checkbox.
+   * Defaults-on-read to true.
+   */
+  readonly cancellationRestock: boolean;
 }
 
 // ============================================================

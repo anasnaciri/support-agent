@@ -509,6 +509,7 @@ const scenarioAgent = (): AgentConfig =>
       "refund.recommend",
       "refund.create",
       "discount.create",
+      "order.cancel",
       "supplier.escalate",
     ],
   });
@@ -583,6 +584,30 @@ describe("applyScenarioEnvelope", () => {
     expect(out.permissionOverrides["refund.create"]).toBe("allow");
     expect(out.tools).toContain("discount.create");
     expect(out.permissionOverrides["discount.create"]).toBe("ask");
+  });
+
+  it("exposes order.cancel (ask) for the cancellation scenario, denying other remedies", () => {
+    const out = applyScenarioEnvelope(
+      scenarioAgent(),
+      scenario({
+        key: "order_cancellation",
+        label: "Cancel my order",
+        enabledActions: [{ tool: "order.cancel", permission: "ask" }],
+        supplierMode: "none",
+      }),
+    );
+    expect(out.tools).toContain("order.cancel");
+    expect(out.permissionOverrides["order.cancel"]).toBe("ask");
+    // The other remedy tools are not enabled for this scenario → removed + denied.
+    expect(out.tools).not.toContain("refund.create");
+    expect(out.permissionOverrides["refund.create"]).toBe("deny");
+    expect(out.tools).not.toContain("discount.create");
+  });
+
+  it("denies order.cancel when the scenario doesn't enable it", () => {
+    const out = applyScenarioEnvelope(scenarioAgent(), scenario());
+    expect(out.tools).not.toContain("order.cancel");
+    expect(out.permissionOverrides["order.cancel"]).toBe("deny");
   });
 });
 

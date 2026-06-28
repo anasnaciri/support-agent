@@ -75,6 +75,7 @@ import {
   handleDashboardLlmConnect,
   handleDashboardLlmRevoke,
   handleDashboardRefundPolicy,
+  handleDashboardCancellationRestock,
   handleDashboardDiscountPolicy,
   handleDashboardSupplierSheet,
   handleDashboardSupplierSheetClear,
@@ -426,6 +427,12 @@ export const registerDashboardRoutes = (
     "/dashboard/refund-policy",
     "Set the conditional refund policy",
     handleDashboardRefundPolicy,
+    "settings.refund_policy",
+  );
+  dashboardPost(
+    "/dashboard/cancellation-restock",
+    "Set whether order cancellations restock inventory",
+    handleDashboardCancellationRestock,
     "settings.refund_policy",
   );
   dashboardPost(

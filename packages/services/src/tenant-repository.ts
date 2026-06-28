@@ -245,6 +245,24 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "Check the order and the refund policy. Prefer a replacement or store credit before a full refund when appropriate.",
     },
     {
+      key: "order_cancellation",
+      label: "Cancel my order",
+      recognition:
+        "Customer wants to cancel an order they placed (e.g. changed their mind, ordered by mistake), before it ships.",
+      builtin: true,
+      enabled: true,
+      enabledActions: [{ tool: "order.cancel", permission: "ask" }],
+      supplierMode: "none",
+      notes:
+        "Look up the order and check the store's cancellation policy with knowledge.search. " +
+        "If it has NOT shipped yet (fulfillment unfulfilled and not already cancelled), propose " +
+        "order.cancel to cancel and refund it, and tell the customer the cancellation and refund " +
+        "are being processed. If it has ALREADY shipped (fulfilled / in transit / delivered), do " +
+        "NOT cancel — tell the customer it has already shipped and can no longer be cancelled, and " +
+        "that if they would like a refund they can return the order to us after it arrives and we " +
+        "will refund it per our return policy.",
+    },
+    {
       key: "general_inquiry",
       label: "General question",
       recognition: "A general store, product, or policy question.",
@@ -575,6 +593,16 @@ export class TenantSettings extends Data.Class<{
    */
   readonly rephraseModel?: string | null;
   /**
+   * Whether the `order.cancel` tool returns the cancelled order's items to
+   * inventory (Shopify's `restock` flag). Merchant-configurable via the
+   * dashboard refund-policy page's "Order cancellations" section. Optional
+   * on the class (older construction sites don't ripple); the Live
+   * `getSettings` always populates it, defaulting to `true` when the JSONB
+   * column has no value (absent ⇒ restock, the safe default for stores that
+   * track stock). Readers building settings by hand should default to true.
+   */
+  readonly cancellationRestock?: boolean;
+  /**
    * Merchant-configurable per-scenario playbooks for the scenario-resolution
    * agent. Optional on the class (so existing construction sites don't ripple);
    * the Live `getSettings` ALWAYS populates it via `decodeResolutionPolicy`
@@ -655,6 +683,15 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setRephraseModel: (
       tenantId: TenantId,
       model: string | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Set whether `order.cancel` restocks the cancelled order's items. Same
+     * deep-merge semantics as `setRefundPolicy` — unrelated settings columns
+     * are preserved.
+     */
+    readonly setCancellationRestock: (
+      tenantId: TenantId,
+      restock: boolean,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
      * Replace the tenant's resolution policy (per-scenario playbooks). Same
@@ -751,6 +788,17 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, rephraseModel: model }),
+        );
+        return Effect.void;
+      },
+      setCancellationRestock: (tenantId, restock) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, cancellationRestock: restock }),
         );
         return Effect.void;
       },

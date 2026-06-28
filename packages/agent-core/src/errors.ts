@@ -42,6 +42,21 @@ export class DiscountFailed extends Data.TaggedError("DiscountFailed")<{
   readonly message: string;
 }> {}
 
+/**
+ * Shopify refused to cancel the order. Common causes (from
+ * `orderCancel.orderCancelUserErrors[].code`): the order has already
+ * shipped/been fulfilled, is already cancelled, or can't be refunded.
+ * Mirrors `RefundFailed`'s shape (the cancel optionally refunds, so it's a
+ * money action too) — `code` is Shopify's machine-readable hint when
+ * present; `message` is always populated and surfaces to the operator via
+ * the audit log.
+ */
+export class OrderCancelFailed extends Data.TaggedError("OrderCancelFailed")<{
+  readonly orderId: string;
+  readonly code: string | null;
+  readonly message: string;
+}> {}
+
 export class ShopifyRateLimited extends Data.TaggedError("ShopifyRateLimited")<{
   readonly retryAfterMs: number;
 }> {}
@@ -115,6 +130,7 @@ export type ShopifyError =
   | ProductNotFound
   | RefundFailed
   | DiscountFailed
+  | OrderCancelFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing

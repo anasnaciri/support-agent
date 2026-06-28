@@ -100,6 +100,26 @@ describe("TenantRepositoryTest", () => {
     expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
   });
 
+  it("setCancellationRestock replaces the flag (preserves refundPolicy)", async () => {
+    const initial = settings({ cancellationRestock: true });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setCancellationRestock(tenantId, false);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.cancellationRestock).toBe(false);
+    expect(got.refundPolicy).toEqual(defaultRefundPolicy);
+    expect(got.notificationEmail).toBe("ops@example.com");
+  });
+
   it("setRefundPolicy fails when the tenant is absent (TenantNotFound)", async () => {
     const layer = TenantRepositoryTest({});
     const exit = await Effect.runPromiseExit(
@@ -444,6 +464,31 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
     expect(p.scenarios[0]!.enabledActions).toEqual([
       { tool: "refund.create", permission: "ask" },
     ]);
+  });
+});
+
+describe("order_cancellation built-in scenario", () => {
+  const cancel = defaultResolutionPolicy.scenarios.find(
+    (s) => s.key === "order_cancellation",
+  );
+
+  it("ships as a built-in with order.cancel gated by approval", () => {
+    expect(cancel).toBeDefined();
+    expect(cancel!.builtin).toBe(true);
+    expect(cancel!.enabled).toBe(true);
+    expect(cancel!.supplierMode).toBe("none");
+    expect(cancel!.enabledActions).toEqual([
+      { tool: "order.cancel", permission: "ask" },
+    ]);
+  });
+
+  it("survives the write-path normalizer as a forced built-in", () => {
+    // A merchant can't delete it or strip its remedy by omission; the write
+    // decoder re-seeds every built-in.
+    const p = decodeResolutionPolicyUpdate({ scenarios: [] });
+    const out = p.scenarios.find((s) => s.key === "order_cancellation");
+    expect(out).toBeDefined();
+    expect(out!.builtin).toBe(true);
   });
 });
 
