@@ -26,7 +26,8 @@ Later: skip emails from these domains, add a settings page for domains to skip, 
 
 Resolution-agent-direct + tool-config-once (decided 2026-06-28):
 - STATUS 2026-06-28: slices 1–3 landed in the working tree (TDD, full `pnpm build` green,
-  dashboard `tsc --noEmit` green); NOT yet committed or deployed.
+  dashboard `tsc --noEmit` green); later committed as 33c5100/99692c3 and Fly backend v33
+  verified live on 2026-06-29 (api+worker image deployment-01KW6MGKVW2W72ENCFVC790TGS).
   - Slice 1 (direct routing): `applyResolutionAgentEntry` helper + runtime binding swaps
     support-triage → scenario-resolution-agent at bind time when `resolutionAgentEnabled`
     (agent-runtime.ts ~1178). `applyTriageScenarioRouting` retained + tested but unwired.
@@ -39,7 +40,8 @@ Resolution-agent-direct + tool-config-once (decided 2026-06-28):
     round-tripped via hidden inputs so saving never wipes them.
   - [x] Slice 4: stripped the temporary `routedbg.bound` / `routedbg.decision` audit diagnostics
         from agent-runtime.ts.
-  - [ ] Deploy: Fly backend (api+worker) for slices 1+2+4; Cloudflare dashboard for slice 3.
+  - [x] Deploy: Fly backend (api+worker) for slices 1+2+4.
+  - [ ] Deploy: Cloudflare dashboard for slice 3.
 - WHEN `resolutionAgentEnabled`, route inbound cases DIRECTLY to the
   scenario-resolution-agent (no support-triage hop). The resolution agent picks the matching
   scenario itself (sets `scenarioKey`) and resolves end-to-end. Motivation: the support-triage →
@@ -57,6 +59,28 @@ Resolution-agent-direct + tool-config-once (decided 2026-06-28):
       the dashboard UI for it) once the simpler per-agent model is validated. The envelope code in
       `applyScenarioEnvelope` and the `enabledActions` field are intentionally retained for this.
 - The temporary `routedbg.*` audit diagnostics used to chase the silent-resolve have been removed.
+
+Prod incident 2026-06-29 (case 385a5f43-32c8-4094-bd40-a13e720ff0d3):
+- Root cause: Railway's old `worker` service was still Online while Fly's worker was also Online,
+  both pointing at the same Railway Postgres / pg-boss `workflow.events` queue. The Railway worker's
+  active deployment was from 2026-06-15, before the 2026-06-24 triage final-message guard and the
+  2026-06-28 direct-routing change, so when it won the pg-boss job the case ran stale
+  `support-triage -> final_message -> resolved` behavior instead of the Fly v33 resolution agent path.
+- Evidence: Fly worker imports current `@support-agent/agents`/`services` and `TenantRepositoryLive`
+  returns `resolutionAgentEnabled: true`; prod case audit has no `agent.routed`; Railway `status`
+  showed `worker: Online`; Railway worker logs showed stale missing-`ConnectorCredentialStore` layer;
+  Railway worker deployment fc9f08eb was created 2026-06-15.
+- Mitigation completed: removed the current Railway worker deployment with
+  `railway down --service worker --environment production --yes`. Verified Railway worker now reports
+  `status: FAILED`, `stopped: true`; Fly api+worker remain started.
+- [ ] Disable/delete the obsolete Railway `worker` service permanently (or remove its DB/queue env)
+      so a future Railway redeploy cannot reintroduce a competing queue consumer.
+- [ ] Decide whether the obsolete Railway `api` should also be stopped after confirming all webhook,
+      approval, OAuth, and dashboard origins point at Fly.
+- [ ] Add a deploy/runbook guard for migrations from Railway -> Fly: exactly one production worker may
+      consume `workflow.events`; verify old workers are stopped before enabling the new host.
+- [ ] Consider adding a startup/runtime version marker to worker logs or audit for each workflow job,
+      so future incidents can identify which deployment consumed a job without provider log retention.
 
 Architecture follow-up discussed 2026-06-25:
 - [ ] Evaluate a supervisor/reporting subagent pattern for read-only research and bounded specialist
