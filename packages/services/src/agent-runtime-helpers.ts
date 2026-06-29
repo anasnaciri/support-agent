@@ -338,6 +338,19 @@ export const renderThreadTranscript = (thread: ConversationThread): string =>
     })
     .join("\n\n");
 
+/**
+ * The customer's address for an inbound message. Mail delivered through a
+ * relay — e.g. a Shopify storefront contact form, sent
+ * `From: mailer@shopify.com` with `Reply-To:` set to the shopper — carries
+ * the real customer in `Reply-To`. Prefer it over `from` so the stamped
+ * `customerEmail`, the reply recipient, and identity checks all target the
+ * human rather than the relay. Falls back to `from` for ordinary mail (and
+ * when a Reply-To with an empty address slips through).
+ */
+export const inboundCustomerEmail = (
+  payload: Pick<InboundMessage, "from" | "replyTo">,
+): string => payload.replyTo?.email || payload.from.email;
+
 export const buildInitialMessages = (
   event: DomainEvent,
   caseRow: {
@@ -397,7 +410,7 @@ export const buildInitialMessages = (
     // The runtime-built header (threadId / from) is trusted and stays OUTSIDE
     // the fence so the agent can still wire conversation.* tools from it. The
     // customer-authored subject + body go INSIDE the untrusted fence.
-    const header = `[Thread context: threadId=${event.threadId}, from=${event.payload.from.email}]`;
+    const header = `[Thread context: threadId=${event.threadId}, from=${inboundCustomerEmail(event.payload)}]`;
     const directive =
       orderIdentityDirective(caseRow.context, caseRow.threadId) ||
       boundOrderDirective(caseRow.context);

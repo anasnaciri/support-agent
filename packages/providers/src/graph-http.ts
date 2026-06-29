@@ -118,6 +118,7 @@ interface RawGraphMessage {
   readonly subject?: string | null;
   readonly from?: RawRecipient;
   readonly sender?: RawRecipient;
+  readonly replyTo?: ReadonlyArray<RawRecipient>;
   readonly toRecipients?: ReadonlyArray<RawRecipient>;
   readonly body?: { readonly contentType?: string; readonly content?: string };
   readonly receivedDateTime?: string;
@@ -213,6 +214,11 @@ const normaliseMessage = (
   mailbox: string,
 ): ConversationThread["messages"][number] => {
   const from = toParticipant(raw.from ?? raw.sender);
+  const replyToRaw = raw.replyTo?.[0];
+  const replyTo =
+    replyToRaw && replyToRaw.emailAddress?.address
+      ? toParticipant(replyToRaw)
+      : null;
   const isHtml = (raw.body?.contentType ?? "").toLowerCase() === "html";
   const content = raw.body?.content ?? "";
   const sentAtStr = raw.sentDateTime ?? raw.receivedDateTime ?? null;
@@ -222,6 +228,7 @@ const normaliseMessage = (
     direction:
       from.email.toLowerCase() === mailbox.toLowerCase() ? "outbound" : "inbound",
     from,
+    replyTo,
     to: (raw.toRecipients ?? []).map(toParticipant),
     subject: raw.subject ?? null,
     bodyText: isHtml ? htmlToText(content) : content,
@@ -249,7 +256,11 @@ const buildThread = (
   const seen = new Set<string>();
   const participants: Array<MessageParticipant> = [];
   for (const msg of messages) {
-    for (const p of [msg.from, ...msg.to]) {
+    for (const p of [
+      msg.from,
+      ...(msg.replyTo ? [msg.replyTo] : []),
+      ...msg.to,
+    ]) {
       if (!p.email) continue;
       const key = p.email.toLowerCase();
       if (seen.has(key)) continue;
@@ -270,7 +281,7 @@ export interface GraphHttpCallOptions {
 }
 
 const MESSAGE_SELECT =
-  "id,conversationId,subject,from,sender,toRecipients,body,receivedDateTime,sentDateTime,internetMessageId,isDraft";
+  "id,conversationId,subject,from,sender,replyTo,toRecipients,body,receivedDateTime,sentDateTime,internetMessageId,isDraft";
 
 /**
  * Fetch every message in a conversation, normalised oldest → newest. `mailbox`

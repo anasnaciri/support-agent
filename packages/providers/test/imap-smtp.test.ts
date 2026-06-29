@@ -19,6 +19,7 @@ const raw = (over: Partial<RawImapMessage>): RawImapMessage => ({
   inReplyTo: null,
   references: [],
   from: { name: "Jane", email: "jane@example.com" },
+  replyTo: null,
   to: [{ name: null, email: mailbox }],
   subject: "Order question",
   date: new Date("2026-06-01T10:00:00Z"),
@@ -125,6 +126,56 @@ describe("parseRawImapMessage", () => {
     expect(toConversationMessage(msg, mailbox).threadId).toBe(
       ThreadId("m1@host"),
     );
+  });
+
+  it("parses Reply-To, keeping From literal but exposing the customer as a participant", async () => {
+    const source = Buffer.from(
+      [
+        "Message-ID: <relay-1@shopify.com>",
+        "From: Shopify <mailer@shopify.com>",
+        "Reply-To: Jane Shopper <jane@shopper.com>",
+        "To: support@merchant.com",
+        "Subject: New contact form submission",
+        "Date: Mon, 01 Jun 2026 10:00:00 +0000",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Where is my order?",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
+    const msg = await parseRawImapMessage(7, source);
+    expect(msg.from).toEqual({ name: "Shopify", email: "mailer@shopify.com" });
+    expect(msg.replyTo).toEqual({
+      name: "Jane Shopper",
+      email: "jane@shopper.com",
+    });
+    const thread = buildThread([msg], threadRootId(msg), mailbox);
+    expect(thread.messages[0]!.replyTo).toEqual({
+      name: "Jane Shopper",
+      email: "jane@shopper.com",
+    });
+    expect(thread.participants.map((p) => p.email)).toContain(
+      "jane@shopper.com",
+    );
+  });
+
+  it("leaves replyTo null when there is no Reply-To header", async () => {
+    const source = Buffer.from(
+      [
+        "Message-ID: <m9@host>",
+        "From: Jane <jane@example.com>",
+        "To: support@merchant.com",
+        "Subject: hi",
+        "Date: Mon, 01 Jun 2026 10:00:00 +0000",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
+    const msg = await parseRawImapMessage(9, source);
+    expect(msg.replyTo).toBeNull();
   });
 });
 

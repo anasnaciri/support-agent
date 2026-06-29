@@ -79,6 +79,7 @@ import {
   eventToCaseLookup,
   buildSystemPrompt,
   buildInitialMessages,
+  inboundCustomerEmail,
   derivePreview,
   deriveSubject,
   renderThreadTranscript,
@@ -843,7 +844,10 @@ const AgentRuntimeLayer = Layer.effect(
           // case context. Specialists like refund-review can read these
           // without firing their own searchByEmail per tick.
           if (wasCreated && event.type === "message.received") {
-            const email = event.payload.from.email;
+            // Prefer Reply-To over From: relay-delivered mail (Shopify
+            // contact form) carries the real customer in Reply-To, so the
+            // stamped customerEmail must point at the human, not the relay.
+            const email = inboundCustomerEmail(event.payload);
             if (email) {
               const resolved = yield* shopify
                 .searchByEmail(working.tenantId, email)

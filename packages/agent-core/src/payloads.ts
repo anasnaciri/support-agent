@@ -29,6 +29,15 @@ export interface InboundMessage {
   readonly inReplyTo?: string | null;
   readonly references?: ReadonlyArray<string>;
   readonly from: { readonly name: string | null; readonly email: string };
+  /**
+   * `Reply-To` address when the connector parsed one from the inbound
+   * headers. Relay-delivered mail (e.g. a Shopify contact form sent
+   * `From: mailer@shopify.com`) carries the real customer here. The runtime
+   * stamps the case's `customerEmail` from `replyTo ?? from` so replies and
+   * identity checks target the human, not the relay. See
+   * `ConversationMessage.replyTo`.
+   */
+  readonly replyTo?: { readonly name: string | null; readonly email: string } | null;
   readonly to: ReadonlyArray<{ readonly name: string | null; readonly email: string }>;
   readonly subject: string;
   readonly bodyText: string;

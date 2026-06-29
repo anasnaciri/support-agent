@@ -97,6 +97,9 @@ export const participantEmails = (
   for (const p of thread.participants) add(p.email);
   for (const m of thread.messages) {
     add(m.from.email);
+    // Relay-delivered mail (e.g. a Shopify contact form) puts the real
+    // customer in Reply-To, not From — allow replying to them.
+    if (m.replyTo) add(m.replyTo.email);
     for (const p of m.to) add(p.email);
   }
   return set;

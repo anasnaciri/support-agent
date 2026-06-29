@@ -344,6 +344,10 @@ const normaliseMessage = (
     name: null,
     email: "",
   };
+  // Reply-To, when present, is the address a reply should actually go to —
+  // relay senders (e.g. a Shopify contact form sent From mailer@shopify.com)
+  // set it to the real customer. Kept alongside the literal `from`.
+  const replyTo = firstAddress(headerLookup(headers, "Reply-To"));
   const to = parseAddressList(headerLookup(headers, "To"));
   const subject = headerLookup(headers, "Subject");
   const sentAt = m.internalDate
@@ -355,6 +359,7 @@ const normaliseMessage = (
     threadId,
     direction,
     from,
+    replyTo,
     to,
     subject: subject ?? null,
     bodyText: bodies.text.join("\n").trim(),
@@ -390,7 +395,11 @@ const normaliseThread = (raw: RawThread): NormalisedThread => {
   const seen = new Set<string>();
   const participants: Array<MessageParticipant> = [];
   for (const msg of messages) {
-    for (const p of [msg.from, ...msg.to]) {
+    for (const p of [
+      msg.from,
+      ...(msg.replyTo ? [msg.replyTo] : []),
+      ...msg.to,
+    ]) {
       if (!p.email) continue;
       const key = p.email.toLowerCase();
       if (seen.has(key)) continue;
@@ -709,6 +718,7 @@ export const toInboundMessage = (
   threadId: msg.threadId,
   messageId: msg.id,
   from: msg.from,
+  replyTo: msg.replyTo ?? null,
   to: msg.to,
   subject: msg.subject ?? "(no subject)",
   bodyText: msg.bodyText,

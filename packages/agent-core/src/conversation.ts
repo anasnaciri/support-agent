@@ -41,6 +41,15 @@ export interface ConversationMessage {
   readonly threadId: ThreadId;
   readonly direction: "inbound" | "outbound";
   readonly from: MessageParticipant;
+  /**
+   * `Reply-To` address, when the inbound message carried one. Mail that
+   * arrives via a relay puts the real customer here, not in `from` — e.g. a
+   * Shopify storefront contact form is sent `From: mailer@shopify.com` with
+   * `Reply-To:` set to the shopper. Treat `replyTo ?? from` as "the
+   * customer" for recipient, identity, and participant purposes. Absent for
+   * outbound messages and ordinary mail with no Reply-To header.
+   */
+  readonly replyTo?: MessageParticipant | null;
   readonly to: ReadonlyArray<MessageParticipant>;
   /** `null` for non-first messages that inherit the thread subject. */
   readonly subject: string | null;

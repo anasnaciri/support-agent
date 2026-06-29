@@ -62,6 +62,8 @@ export interface RawImapMessage {
   readonly inReplyTo: string | null;
   readonly references: ReadonlyArray<string>;
   readonly from: MessageParticipant;
+  /** `Reply-To` address when the message carried one; null otherwise. */
+  readonly replyTo: MessageParticipant | null;
   readonly to: ReadonlyArray<MessageParticipant>;
   readonly subject: string | null;
   readonly date: Date;
@@ -198,6 +200,7 @@ export const toConversationMessage = (
       ? "outbound"
       : "inbound",
   from: raw.from,
+  replyTo: raw.replyTo,
   to: raw.to,
   subject: raw.subject,
   bodyText: raw.text,
@@ -218,7 +221,11 @@ export const buildThread = (
   const seen = new Set<string>();
   const participants: Array<MessageParticipant> = [];
   for (const msg of messages) {
-    for (const p of [msg.from, ...msg.to]) {
+    for (const p of [
+      msg.from,
+      ...(msg.replyTo ? [msg.replyTo] : []),
+      ...msg.to,
+    ]) {
       if (!p.email) continue;
       const key = p.email.toLowerCase();
       if (seen.has(key)) continue;
@@ -373,12 +380,14 @@ export const parseRawImapMessage = async (
   source: Buffer,
 ): Promise<RawImapMessage> => {
   const p = await simpleParser(source);
+  const replyTo = firstAddress(p.replyTo);
   return {
     uid,
     messageId: stripBrackets(p.messageId ?? ""),
     inReplyTo: p.inReplyTo ? stripBrackets(p.inReplyTo) : null,
     references: normaliseReferences(p.references),
     from: firstAddress(p.from),
+    replyTo: replyTo.email ? replyTo : null,
     to: allAddresses(p.to),
     subject: p.subject ?? null,
     date: p.date ?? new Date(0),

@@ -103,6 +103,18 @@ const oneInboundMessage = {
   sentDateTime: "2026-06-01T10:00:00Z",
 };
 
+const relayInboundMessage = {
+  id: "m-relay",
+  conversationId: "conv-1",
+  subject: "New contact form submission",
+  from: { emailAddress: { name: "Shopify", address: "mailer@shopify.com" } },
+  replyTo: [{ emailAddress: { name: "Jane", address: "jane@shopper.com" } }],
+  toRecipients: [{ emailAddress: { address: mailbox } }],
+  body: { contentType: "text", content: "Where is my order?" },
+  receivedDateTime: "2026-06-01T10:00:00Z",
+  sentDateTime: "2026-06-01T10:00:00Z",
+};
+
 const laterOutboundMessage = {
   id: "m-2",
   conversationId: "conv-1",
@@ -143,6 +155,23 @@ describe("GraphConversationLive — fetchThread", () => {
     expect(exit.value.messages).toHaveLength(1);
     expect(exit.value.messages[0]!.direction).toBe("inbound");
     expect(exit.value.messages[0]!.bodyText).toBe("Still waiting.");
+  });
+
+  it("parses Reply-To and exposes the customer as a thread participant", async () => {
+    const fetchImpl = vi.fn(async () =>
+      conversationList([relayInboundMessage]),
+    ) as unknown as typeof fetch;
+    const exit = await runFetchThread(fetchImpl, seededStore());
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.messages[0]!.from.email).toBe("mailer@shopify.com");
+    expect(exit.value.messages[0]!.replyTo).toEqual({
+      name: "Jane",
+      email: "jane@shopper.com",
+    });
+    expect(exit.value.participants.map((p) => p.email)).toContain(
+      "jane@shopper.com",
+    );
   });
 
   it("returns ThreadNotFound when the conversation has no messages", async () => {

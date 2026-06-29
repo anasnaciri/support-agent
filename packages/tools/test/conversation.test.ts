@@ -378,6 +378,58 @@ describe("conversation.reply tool", () => {
       expect(handle.sent).toHaveLength(1);
     });
 
+    it("allows the Reply-To address even when it is absent from From/To (relay-delivered mail)", async () => {
+      // Shopify contact-form shape: the inbound message is From the relay
+      // (mailer@shopify.com) and the real customer is only in Reply-To — not
+      // in the thread participants, From, or To. The guard must still let the
+      // agent reply to that customer.
+      const relay: ConversationThread = {
+        id: ThreadId("thread-relay"),
+        subject: "New contact form submission",
+        participants: [
+          { name: null, email: "mailer@shopify.com" },
+          { name: "Support", email: "support@example.com" },
+        ],
+        messages: [
+          {
+            id: "msg-1",
+            threadId: ThreadId("thread-relay"),
+            direction: "inbound",
+            from: { name: null, email: "mailer@shopify.com" },
+            replyTo: { name: "Jane", email: "shopper@example.com" },
+            to: [{ name: "Support", email: "support@example.com" }],
+            subject: "New contact form submission",
+            bodyText: "Where is my order?",
+            bodyHtml: null,
+            sentAt: new Date("2026-06-01T10:00:00.000Z"),
+            attachments: [],
+          },
+        ],
+      };
+      const { layer, handle } = makeConversationServiceTest({
+        threads: new Map([[`${tenantId}:thread-relay`, relay]]),
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.provide(
+          conversationReply.execute(
+            {
+              threadId: "thread-relay",
+              to: [{ name: null, email: "shopper@example.com" }],
+              subject: null,
+              bodyText: "Order details inside.",
+              bodyHtml: null,
+              inReplyToMessageId: "msg-1",
+              draftId: "draft-relay",
+            } as never,
+            baseCtx("c-relay"),
+          ) as Effect.Effect<unknown, unknown, never>,
+          layer,
+        ),
+      );
+      expect(Exit.isSuccess(exit)).toBe(true);
+      expect(handle.sent).toHaveLength(1);
+    });
+
     it("fails open when the thread history is unavailable (connector without fetch support)", async () => {
       // No seeded thread → fetchThread fails. The constraint can only be
       // enforced when history is available; the connector's own send will

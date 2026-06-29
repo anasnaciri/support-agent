@@ -122,6 +122,57 @@ describe("gmailGetThread — normalisation", () => {
     ]);
   });
 
+  it("parses Reply-To and exposes it as a thread participant (Shopify contact-form relay)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        id: "thread-relay",
+        historyId: "9100",
+        messages: [
+          {
+            id: "msg-relay",
+            threadId: "thread-relay",
+            labelIds: ["INBOX"],
+            internalDate: "1747000000000",
+            payload: {
+              headers: [
+                { name: "From", value: "Shopify <mailer@shopify.com>" },
+                { name: "Reply-To", value: '"Jane Shopper" <jane@shopper.com>' },
+                { name: "To", value: "support@merchant.com" },
+                { name: "Subject", value: "New contact form submission" },
+                { name: "Message-ID", value: "<relay-1@shopify.com>" },
+              ],
+              body: { data: b64url("Customer asks: where is my order?") },
+            },
+          },
+        ],
+      }),
+    );
+    const thread = await gmailGetThread({
+      token: "tok",
+      threadId: "thread-relay",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    // `from` stays the literal relay sender for fidelity...
+    expect(thread.messages[0]!.from.email).toBe("mailer@shopify.com");
+    // ...while `replyTo` carries the real customer.
+    expect(thread.messages[0]!.replyTo).toEqual({
+      name: "Jane Shopper",
+      email: "jane@shopper.com",
+    });
+    // The customer is a thread participant so a reply can target them
+    // (the recipient guard allows participants only).
+    expect(thread.participants.map((p) => p.email)).toContain(
+      "jane@shopper.com",
+    );
+    // toInboundMessage carries replyTo to the event boundary so the runtime
+    // can stamp customerEmail from it.
+    const inbound = toInboundMessage(thread.messages[0]!);
+    expect(inbound.replyTo).toEqual({
+      name: "Jane Shopper",
+      email: "jane@shopper.com",
+    });
+  });
+
   it("maps 404 onto GmailHttpError with kind=not_found", async () => {
     const fetchImpl = vi.fn(async () => fail(404));
     await expect(
@@ -381,5 +432,7 @@ describe("gmailGetMessage + toInboundMessage", () => {
     expect(inbound.subject).toBe("Hi");
     expect(inbound.bodyText).toBe("hello");
     expect(inbound.receivedAt.getTime()).toBe(1747000000000);
+    // Ordinary mail with no Reply-To header projects a null replyTo.
+    expect(inbound.replyTo).toBeNull();
   });
 });
