@@ -547,6 +547,55 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     expect(out.fetched.status).toBe("human_takeover");
   });
 
+  it("holds a stale approval.approved delivery after human takeover without executing the tool", async () => {
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([]) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const approvals = yield* ApprovalService;
+        const approval = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 5 },
+          reasoning: "test",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+        yield* repo.transitionStatus(caseId as never, "human_takeover", {
+          reason: "manager takeover",
+          tenantId: TenantId("tenant-acme"),
+        });
+        const before = yield* repo.getById(caseId as never);
+        const result = yield* runtime.handleEvent(
+          approvedEvent(approval.id, caseId),
+        );
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        return { before, result, fetched, entries };
+      }),
+    );
+
+    expect(out.before.status).toBe("human_takeover");
+    expect(counter.count).toBe(0);
+    expect(out.result.type).toBe("PausedForHumanTakeover");
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(
+      out.entries.some(
+        (entry) => entry.action === "approval.stale_delivery_skipped",
+      ),
+    ).toBe(true);
+  });
+
   it("short-circuits a duplicate approval.approved delivery on an already-resolved case", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(

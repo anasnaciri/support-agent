@@ -675,6 +675,25 @@ const AgentRuntimeLayer = Layer.effect(
                 retryable: false,
               } as const;
             }
+            // A manager takeover means the human owns the case now. Approval
+            // events can arrive late or race with takeover/reject/manual-status
+            // actions; never let a stale approval execute tools or try to move
+            // the case out from under the human.
+            if (working.status === "human_takeover") {
+              yield* tx.run(
+                audit.record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "system", id: "runtime" },
+                  action: "approval.stale_delivery_skipped",
+                  details: {
+                    approvalId: trigger.id,
+                    status: working.status,
+                  },
+                }),
+              );
+              return { type: "PausedForHumanTakeover" } as const;
+            }
             // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
             // A re-delivered `approval.approved` for a case that already ran
             // to completion must NOT execute the gated tool(s) a second time —
