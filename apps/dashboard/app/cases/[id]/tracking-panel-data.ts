@@ -25,6 +25,12 @@ export interface ParsedTracking {
   readonly estimatedDeliveryAt: string | null;
   readonly trackingUrl: string | null;
   readonly reason: "no_api_key" | "unsupported_carrier" | null;
+  // Rich fields from the live `caseTracking` endpoint (absent on the narrower
+  // on-case `liveTrackingStatus` stamp → null / []).
+  readonly originCountry: string | null;
+  readonly destinationCountry: string | null;
+  readonly transitDays: number | null;
+  readonly checkpoints: ReadonlyArray<ParsedTrackingScan>;
 }
 
 const STATUS_VALUES: ReadonlySet<string> = new Set([
@@ -46,7 +52,7 @@ const record = (v: unknown): Record<string, unknown> | null =>
 const parseScan = (v: unknown): ParsedTrackingScan | null => {
   const r = record(v);
   const occurredAt = str(r?.["occurredAt"]);
-  if (!r || !occurredAt) return null;
+  if (!r || !occurredAt || Number.isNaN(Date.parse(occurredAt))) return null;
   return {
     occurredAt,
     location: str(r["location"]),
@@ -75,6 +81,11 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
       ? reasonRaw
       : null;
 
+  const checkpointsRaw = Array.isArray(r["checkpoints"]) ? r["checkpoints"] : [];
+  const checkpoints = checkpointsRaw
+    .map(parseScan)
+    .filter((s): s is ParsedTrackingScan => s !== null);
+
   const parsed: ParsedTracking = {
     kind,
     trackingNumber: str(r["trackingNumber"]),
@@ -84,6 +95,13 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
     estimatedDeliveryAt: str(r["estimatedDeliveryAt"]),
     trackingUrl: str(r["trackingUrl"]),
     reason,
+    originCountry: str(r["originCountry"]),
+    destinationCountry: str(r["destinationCountry"]),
+    transitDays:
+      typeof r["transitDays"] === "number" && Number.isFinite(r["transitDays"])
+        ? r["transitDays"]
+        : null,
+    checkpoints,
   };
 
   // Nothing useful to show → no card.

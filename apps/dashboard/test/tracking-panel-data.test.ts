@@ -46,7 +46,44 @@ describe("parseLiveTracking", () => {
       estimatedDeliveryAt: "2026-06-10T00:00:00.000Z",
       trackingUrl: "https://example.test/track",
       reason: null,
+      originCountry: null,
+      destinationCountry: null,
+      transitDays: null,
+      checkpoints: [],
     });
+  });
+
+  it("parses the rich live endpoint shape (origin/destination/transit/checkpoints)", () => {
+    const parsed = parseLiveTracking({
+      kind: "live",
+      status: "in_transit",
+      carrier: "lulu",
+      trackingNumber: "LULU1000509755",
+      originCountry: "China",
+      destinationCountry: "United States",
+      transitDays: 49,
+      checkpoints: [
+        {
+          occurredAt: "2026-05-27T08:32:00.000Z",
+          location: "China",
+          description: "Item in transit to destination",
+        },
+        { occurredAt: "bad-date", location: null, description: "dropped" },
+        {
+          occurredAt: "2026-05-10T03:00:00.000Z",
+          location: "Shenzhen, China",
+          description: "Delayed for postage assessment",
+        },
+      ],
+    });
+    expect(parsed?.originCountry).toBe("China");
+    expect(parsed?.destinationCountry).toBe("United States");
+    expect(parsed?.transitDays).toBe(49);
+    // the malformed checkpoint (no valid occurredAt) is dropped
+    expect(parsed?.checkpoints).toHaveLength(2);
+    expect(parsed?.checkpoints[0]?.description).toBe(
+      "Item in transit to destination",
+    );
   });
 
   it("drops an unknown status and a malformed lastScan but keeps the rest", () => {
@@ -87,6 +124,10 @@ describe("trackingUrlFor / publicTrackingUrl", () => {
         estimatedDeliveryAt: null,
         trackingUrl: "https://carrier.test/x",
         reason: null,
+        originCountry: null,
+        destinationCountry: null,
+        transitDays: null,
+        checkpoints: [],
       }),
     ).toBe("https://carrier.test/x");
     expect(publicTrackingUrl("LULU 1/2")).toBe(

@@ -20,6 +20,7 @@ import type {
   CaseConversationThreadResult,
   CaseDetail,
   CaseEventsResult,
+  CaseTrackingResult,
   CaseListRow,
   CasesFilter,
   CatalogResponse,
@@ -507,6 +508,27 @@ export const api = {
     if (status === 404) return null;
     if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id/shopify`);
     return body as CaseShopifyPanels;
+  },
+
+  // Fresh carrier tracking for the case-detail Tracking card. Best-effort: a
+  // 17track / api hiccup must never break the case page, so any failure or
+  // non-200 resolves to `unavailable` (the page then falls back to the on-case
+  // tracking stamp). Returns the discriminated outcome.
+  caseTracking: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CaseTrackingResult> => {
+    try {
+      const { status, body } = await call(
+        `/cases/${encodeURIComponent(id)}/tracking`,
+        { ctx },
+      );
+      if (status === 404) return { kind: "not_found" };
+      if (status !== 200 || !body) return { kind: "unavailable" };
+      return body as CaseTrackingResult;
+    } catch {
+      return { kind: "unavailable" };
+    }
   },
 
   caseEvents: async (

@@ -591,11 +591,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     refundIssuedBanner(sp.refundIssued) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
-  const [detail, shopify, conversationThread] = await Promise.all([
-    api.caseDetail(ctx, id),
-    api.caseShopify(ctx, id),
-    api.caseConversationThread(ctx, id),
-  ]);
+  const [detail, shopify, conversationThread, trackingResult] =
+    await Promise.all([
+      api.caseDetail(ctx, id),
+      api.caseShopify(ctx, id),
+      api.caseConversationThread(ctx, id),
+      api.caseTracking(ctx, id),
+    ]);
   if (!detail) notFound();
   const caseRow = detail.case;
   const entries = detail.auditEntries;
@@ -635,7 +637,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const requestedResolution = parseRequestedResolution(
     context["requestedResolution"],
   );
-  const tracking = parseLiveTracking(context["liveTrackingStatus"]);
+  // Prefer the fresh live lookup (rich: origin/destination, transit days, full
+  // checkpoint history); fall back to the on-case `liveTrackingStatus` stamp.
+  const liveTracking =
+    trackingResult.kind === "ok"
+      ? parseLiveTracking(trackingResult.tracking)
+      : null;
+  const tracking = liveTracking ?? parseLiveTracking(context["liveTrackingStatus"]);
 
   // The conversation's display name: the linked Shopify customer, else the
   // inbound sender's name from the thread, else the reply-to email.
