@@ -116,20 +116,53 @@ interface RawTrackEvent {
   readonly z?: string;
 }
 
+interface RawAddress {
+  readonly country?: string;
+  readonly state?: string;
+  readonly city?: string;
+}
+
+interface RawProviderEvent {
+  readonly time_iso?: string;
+  readonly time_utc?: string;
+  readonly location?: string;
+  readonly description?: string;
+  readonly address?: RawAddress;
+}
+
+interface RawTrackInfo {
+  readonly latest_event?: {
+    readonly time_iso?: string;
+    readonly location?: string;
+    readonly description?: string;
+  };
+  readonly latest_status?: {
+    readonly status?: string;
+  };
+  readonly estimated_delivery_date?: {
+    readonly source?: string;
+    readonly from?: string;
+    readonly to?: string;
+  };
+  readonly shipping_info?: {
+    readonly shipper_address?: RawAddress;
+    readonly recipient_address?: RawAddress;
+  };
+  readonly time_metrics?: {
+    readonly days_after_order?: number;
+    readonly days_of_transit?: number;
+  };
+  readonly tracking?: {
+    readonly providers?: ReadonlyArray<{
+      readonly events?: ReadonlyArray<RawProviderEvent>;
+    }>;
+  };
+}
+
 interface RawTrack {
   readonly e?: number;
   readonly z0?: RawTrackEvent;
-  readonly track_info?: {
-    readonly latest_event?: {
-      readonly time_iso?: string;
-      readonly location?: string;
-      readonly description?: string;
-    };
-    readonly latest_status?: {
-      readonly status?: string;
-    };
-    readonly estimated_delivery_date?: { readonly source?: string; readonly from?: string; readonly to?: string };
-  };
+  readonly track_info?: RawTrackInfo;
 }
 
 interface RawAccepted {
@@ -233,7 +266,45 @@ export interface SeventeenTrackInfo {
   readonly status: TrackingStatus;
   readonly lastScan: TrackingScanEvent | null;
   readonly estimatedDeliveryAt: Date | null;
+  readonly originCountry: string | null;
+  readonly destinationCountry: string | null;
+  /** Days the shipment has been in transit, per 17track's time metrics. */
+  readonly transitDays: number | null;
+  /** Full carrier checkpoint list, newest-first (17track's event order). */
+  readonly checkpoints: ReadonlyArray<TrackingScanEvent>;
 }
+
+// Compose a human location from a flat string, else the structured address.
+const composeLocation = (
+  flat: string | undefined,
+  address: RawAddress | undefined,
+): string | null => {
+  if (typeof flat === "string" && flat.trim().length > 0) return flat;
+  if (!address) return null;
+  const parts = [address.city, address.state, address.country].filter(
+    (p): p is string => typeof p === "string" && p.trim().length > 0,
+  );
+  return parts.length > 0 ? parts.join(", ") : null;
+};
+
+const parseCheckpoints = (
+  info: RawTrackInfo | undefined,
+): ReadonlyArray<TrackingScanEvent> => {
+  const events = info?.tracking?.providers?.[0]?.events ?? [];
+  const out: TrackingScanEvent[] = [];
+  for (const e of events) {
+    const iso = e.time_iso ?? e.time_utc;
+    if (!iso) continue;
+    const occurredAt = new Date(iso);
+    if (Number.isNaN(occurredAt.getTime())) continue;
+    out.push({
+      occurredAt,
+      location: composeLocation(e.location, e.address),
+      description: e.description ?? "",
+    });
+  }
+  return out;
+};
 
 /**
  * Fetch the latest status for a single registered tracking number.
@@ -301,5 +372,25 @@ export const seventeenTrackGetInfo = async (
     if (!Number.isNaN(d.getTime())) estimatedDeliveryAt = d;
   }
 
-  return { carrier, status, lastScan, estimatedDeliveryAt };
+  const originCountry = info?.shipping_info?.shipper_address?.country ?? null;
+  const destinationCountry =
+    info?.shipping_info?.recipient_address?.country ?? null;
+  const transitDays =
+    typeof info?.time_metrics?.days_of_transit === "number"
+      ? info.time_metrics.days_of_transit
+      : typeof info?.time_metrics?.days_after_order === "number"
+        ? info.time_metrics.days_after_order
+        : null;
+  const checkpoints = parseCheckpoints(info);
+
+  return {
+    carrier,
+    status,
+    lastScan,
+    estimatedDeliveryAt,
+    originCountry,
+    destinationCountry,
+    transitDays,
+    checkpoints,
+  };
 };

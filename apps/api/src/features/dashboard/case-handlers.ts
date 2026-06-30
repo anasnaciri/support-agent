@@ -12,6 +12,7 @@ import {
   LLMService,
   ShopifyService,
   TenantRepository,
+  TrackingService,
   parseThreadId,
   namespaceThreadId,
   ShopifyAppProvisioningStore,
@@ -22,7 +23,13 @@ import {
   TenantId,
   ThreadId,
   UserId,
+  type TrackingLookup,
 } from "@support-agent/agent-core";
+import type {
+  CaseTrackingResult,
+  DashboardTracking,
+  DashboardTrackingScan,
+} from "@support-agent/dashboard-contracts";
 import { randomUUID } from "node:crypto";
 import {
   activeShopifyShopDomain,
@@ -333,6 +340,118 @@ export const handleDashboardCaseShopify = async (
     order: result.order,
     shopDomain: result.shopDomain,
   });
+};
+
+// Serialize a TrackingLookup (Dates → ISO) for the dashboard tracking card.
+const serializeTracking = (t: TrackingLookup): DashboardTracking => {
+  if (t.kind === "no_provider") {
+    return {
+      kind: "no_provider",
+      trackingNumber: t.trackingNumber,
+      carrier: t.carrier,
+      status: null,
+      lastScan: null,
+      estimatedDeliveryAt: null,
+      trackingUrl: t.trackingUrl,
+      originCountry: null,
+      destinationCountry: null,
+      transitDays: null,
+      checkpoints: [],
+      reason: t.reason,
+    };
+  }
+  const scan = (
+    s: { occurredAt: Date; location: string | null; description: string } | null,
+  ): DashboardTrackingScan | null =>
+    s
+      ? {
+          occurredAt: s.occurredAt.toISOString(),
+          location: s.location,
+          description: s.description,
+        }
+      : null;
+  return {
+    kind: "live",
+    trackingNumber: t.trackingNumber,
+    carrier: t.carrier,
+    status: t.status,
+    lastScan: scan(t.lastScan),
+    estimatedDeliveryAt: t.estimatedDeliveryAt
+      ? t.estimatedDeliveryAt.toISOString()
+      : null,
+    trackingUrl: t.trackingUrl,
+    originCountry: t.originCountry ?? null,
+    destinationCountry: t.destinationCountry ?? null,
+    transitDays: t.transitDays ?? null,
+    checkpoints: (t.checkpoints ?? []).flatMap((c) => {
+      const s = scan(c);
+      return s ? [s] : [];
+    }),
+    reason: null,
+  };
+};
+
+// GET /dashboard/cases/:id/tracking — fresh carrier status for the case's
+// shipment, fed to the case-detail Tracking card. The tracking number comes
+// from the agent's `liveTrackingStatus` stamp when present, else the order's
+// fulfillment; a live 17track lookup (TrackingService) returns the rich result.
+// Best-effort: no number → `no_tracking_number`, provider error → `unavailable`
+// (the card falls back to the on-case stamp).
+export const handleDashboardCaseTracking = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const result: CaseTrackingResult = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        const caseRow = yield* Effect.promise(() =>
+          caseContextForTenant(db, auth.tenantId, id),
+        );
+        if (!caseRow) return { kind: "not_found" as const };
+        const context = (caseRow.context ?? {}) as Record<string, unknown>;
+        const stamp =
+          typeof context["liveTrackingStatus"] === "object" &&
+          context["liveTrackingStatus"] !== null
+            ? (context["liveTrackingStatus"] as Record<string, unknown>)
+            : null;
+        let trackingNumber =
+          typeof stamp?.["trackingNumber"] === "string" &&
+          stamp["trackingNumber"]
+            ? (stamp["trackingNumber"] as string)
+            : null;
+        let carrier =
+          typeof stamp?.["carrier"] === "string" && stamp["carrier"]
+            ? (stamp["carrier"] as string)
+            : null;
+        if (!trackingNumber) {
+          const order = yield* resolveOrderForContext(
+            TenantId(auth.tenantId),
+            context,
+          );
+          const f =
+            order?.fulfillments.find((ff) => ff.trackingNumbers.length > 0) ??
+            null;
+          trackingNumber = f?.trackingNumbers[0] ?? null;
+          carrier = carrier ?? f?.trackingCompany ?? null;
+        }
+        if (!trackingNumber) return { kind: "no_tracking_number" as const };
+        const trackingSvc = yield* TrackingService;
+        const tracking = yield* trackingSvc
+          .lookup(TenantId(auth.tenantId), { trackingNumber, carrier })
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        if (!tracking) return { kind: "unavailable" as const };
+        return { kind: "ok" as const, tracking: serializeTracking(tracking) };
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, result.kind === "not_found" ? 404 : 200, result);
 };
 
 // GET /dashboard/usage?start=&end= — raw llm.decision rows in a window for

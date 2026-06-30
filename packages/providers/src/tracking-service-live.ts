@@ -129,6 +129,10 @@ export const TrackingServiceLive: Layer.Layer<
           lastScan: info.lastScan,
           estimatedDeliveryAt: info.estimatedDeliveryAt,
           trackingUrl: publicTrackingUrl(input.trackingNumber),
+          originCountry: info.originCountry,
+          destinationCountry: info.destinationCountry,
+          transitDays: info.transitDays,
+          checkpoints: info.checkpoints,
         } as const;
       });
 

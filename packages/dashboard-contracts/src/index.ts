@@ -227,6 +227,45 @@ export type CaseConversationThreadResult =
       readonly reason: CaseConversationThreadUnavailableReason;
     };
 
+// ============================================================
+// Live tracking (caseTracking endpoint → 17track)
+// ============================================================
+
+export type DashboardTrackingStatus =
+  | "in_transit"
+  | "delivered"
+  | "exception"
+  | "pending"
+  | "unknown";
+
+export interface DashboardTrackingScan {
+  readonly occurredAt: string;
+  readonly location: string | null;
+  readonly description: string;
+}
+
+/** A live carrier lookup, serialized for the dashboard (Dates → ISO strings). */
+export interface DashboardTracking {
+  readonly kind: "live" | "no_provider";
+  readonly trackingNumber: string;
+  readonly carrier: string | null;
+  readonly status: DashboardTrackingStatus | null;
+  readonly lastScan: DashboardTrackingScan | null;
+  readonly estimatedDeliveryAt: string | null;
+  readonly trackingUrl: string;
+  readonly originCountry: string | null;
+  readonly destinationCountry: string | null;
+  readonly transitDays: number | null;
+  readonly checkpoints: ReadonlyArray<DashboardTrackingScan>;
+  readonly reason: "no_api_key" | "unsupported_carrier" | null;
+}
+
+export type CaseTrackingResult =
+  | { readonly kind: "ok"; readonly tracking: DashboardTracking }
+  | { readonly kind: "no_tracking_number" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "unavailable" };
+
 export interface CaseEventsResult {
   readonly events: ReadonlyArray<{
     readonly id: string;

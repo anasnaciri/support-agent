@@ -16,6 +16,9 @@ import {
   ShopifyService,
   TenantAgentOverridesService,
   TenantRepository,
+  TrackingConfig,
+  TrackingService,
+  TrackingServiceNoProvider,
   TransactionRunner,
   UrlFetchService,
 } from "@support-agent/services";
@@ -47,6 +50,7 @@ import {
   ShopifyCredentialStoreFromConnector,
   ShopifyHttpLive,
   ShopifyServiceLive,
+  TrackingServiceLive,
   UrlFetchServiceLive,
 } from "@support-agent/providers";
 import { workosJwksUrl } from "./auth/dashboard-jwt.js";
@@ -561,6 +565,16 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // (SSRF-guarded) backs the "add from URL" / resync paths; it has no deps.
   const knowledge = KnowledgeBaseServiceLive.pipe(Layer.provide(dbLayer));
   const urlFetch = UrlFetchServiceLive;
+  // 17track for the case-detail live tracking card. Platform-managed key
+  // (`SEVENTEENTRACK_API_KEY`, shared across the api + worker process groups);
+  // when unset the api boots with the NoProvider fallback so the endpoint still
+  // answers (every lookup → `no_provider` with a public tracking URL).
+  const trackingApiKey = process.env["SEVENTEENTRACK_API_KEY"];
+  const tracking = trackingApiKey
+    ? TrackingServiceLive.pipe(
+        Layer.provide(Layer.succeed(TrackingConfig, { apiKey: trackingApiKey })),
+      )
+    : TrackingServiceNoProvider;
   return Layer.mergeAll(
     store,
     accountOpenrouterStore,
@@ -579,6 +593,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     customAgentsSvc,
     knowledge,
     urlFetch,
+    tracking,
   );
 };
 
@@ -599,7 +614,8 @@ export type ApiLayer = Layer.Layer<
   | TenantAgentOverridesService
   | CustomAgentService
   | KnowledgeBaseService
-  | UrlFetchService,
+  | UrlFetchService
+  | TrackingService,
   never,
   never
 >;

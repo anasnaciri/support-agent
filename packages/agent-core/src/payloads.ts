@@ -174,6 +174,13 @@ export type TrackingLookup =
       readonly lastScan: TrackingScanEvent | null;
       readonly estimatedDeliveryAt: Date | null;
       readonly trackingUrl: string;
+      // Richer fields surfaced by the dashboard's live tracking card. Optional
+      // (older callers + the test layer don't set them); the agent-facing tool
+      // ignores them, so adding them is backward-compatible.
+      readonly originCountry?: string | null;
+      readonly destinationCountry?: string | null;
+      readonly transitDays?: number | null;
+      readonly checkpoints?: ReadonlyArray<TrackingScanEvent>;
     }
   | {
       readonly kind: "no_provider";

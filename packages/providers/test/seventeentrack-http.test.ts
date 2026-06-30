@@ -102,6 +102,70 @@ describe("seventeenTrackGetInfo", () => {
     );
   });
 
+  it("parses origin/destination country, transit days, and the checkpoint list", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        code: 0,
+        data: {
+          accepted: [
+            {
+              number: "LULU1000509755",
+              carrier: 190271,
+              track_info: {
+                shipping_info: {
+                  shipper_address: { country: "China" },
+                  recipient_address: { country: "United States" },
+                },
+                latest_status: { status: "InTransit" },
+                latest_event: {
+                  time_iso: "2026-05-27T08:32:00.000Z",
+                  location: "China",
+                  description: "Item in transit to destination",
+                },
+                time_metrics: { days_after_order: 49, days_of_transit: 49 },
+                tracking: {
+                  providers: [
+                    {
+                      events: [
+                        {
+                          time_iso: "2026-05-27T08:32:00.000Z",
+                          location: "China",
+                          description: "Item in transit to destination",
+                        },
+                        {
+                          time_iso: "2026-05-10T03:00:00.000Z",
+                          description: "Delayed for postage assessment",
+                          address: { city: "Shenzhen", country: "China" },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      }),
+    );
+    const info = await seventeenTrackGetInfo({
+      apiKey: "k1",
+      trackingNumber: "LULU1000509755",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(info).not.toBeNull();
+    if (!info) return;
+    expect(info.status).toBe("in_transit");
+    expect(info.originCountry).toBe("China");
+    expect(info.destinationCountry).toBe("United States");
+    expect(info.transitDays).toBe(49);
+    expect(info.checkpoints).toHaveLength(2);
+    expect(info.checkpoints[0]?.description).toBe(
+      "Item in transit to destination",
+    );
+    // location falls back to a composed address when the flat field is absent
+    expect(info.checkpoints[1]?.location).toBe("Shenzhen, China");
+  });
+
   it("returns null when the API rejects the number (unsupported carrier)", async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({

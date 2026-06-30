@@ -18,6 +18,7 @@ import {
   handleDashboardRephrase,
   handleDashboardCaseShopify,
   handleDashboardCases,
+  handleDashboardCaseTracking,
   handleDashboardConnections,
   handleDashboardResolveCase,
   handleDashboardResume,
@@ -113,6 +114,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/shopify",
     "Case-detail Shopify customer/order panels",
     handleDashboardCaseShopify,
+    "cases.view",
+  );
+  dashboardGet(
+    "/dashboard/cases/:id/tracking",
+    "Live carrier tracking for the case's shipment",
+    handleDashboardCaseTracking,
     "cases.view",
   );
   dashboardGet(
