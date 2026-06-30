@@ -50,9 +50,24 @@ DEPLOYED 2026-06-30**: Fly `support-agent-backend` rolled (api+worker; `/healthz
 locally (2303 passed, incl. the resolve integration tests against the local DB). NOT pushed to origin
 (local-commit workflow). NOT yet verified by clicking through prod.
 
-Follow-ups (not done): chat doesn't auto-scroll to the newest message (needs a small client effect);
-right column is `hidden lg:block` (no mobile layout); header has `pl-14` to clear the collapsed-sidebar
-expand button (small indent when the sidebar is open).
+**Follow-ups — ALL DONE + redeployed (commit `0cac0ba`, CF v`81f31710`, 2026-06-30):**
+- [x] Chat **auto-scrolls to the newest message** — new `ChatScrollArea` (client) re-pins to the
+      bottom on mount + whenever the last-message `threadKey` changes.
+- [x] **Mobile layout** for the details column — new `CaseDetailsPanel` (client): static aside on
+      `lg+`, off-canvas drawer (right-edge tab + scrim) on smaller screens.
+- [x] **Header indent gap fixed** — AppShell stamps `data-sidebar-state` on a `group/case` wrapper;
+      the chat header pads left (`pl-14`) only when the sidebar is collapsed (the expand button shows),
+      `pl-4` when open.
+- [x] **Folded the status dropdown into the ⋮ menu** (reopen / waiting-on-customer / failed; `resolved`
+      omitted since the ✓ Resolve button is canonical) — `CaseMenuAction` gained optional `fields`;
+      removed the header `<select>` and deleted the orphaned `StatusSelect.tsx`.
+- [x] **Skeleton fixed** — `loading.tsx` rewritten to match the inbox layout (was the old centered
+      page skeleton, which looked broken in the full-bleed main).
+- Virtualization: the **chat is intentionally NOT virtualized** — a case's email thread is bounded
+      (one conversation, typically <50 msgs), unlike the cases LIST (which IS virtualized). Virtualizing
+      variable-height sanitized-HTML bubbles would fight the auto-scroll for negligible gain. The
+      full-audit timeline (right col, opt-in) renders all audit rows un-virtualized — pre-existing;
+      revisit only if a very long-lived case's audit log gets heavy.
 
 ### 2026-06-30 — Out-of-credits is terminal, not a retryable dead-letter (incident `f0a1e242…`)
 
