@@ -40,8 +40,17 @@ alert just wasn't acted on.
       new `apps/worker/test/workflow-dead-letter.test.ts`; full `pnpm build` green; 46 + 93 tests pass.
 - [ ] **Ops:** top up the OpenRouter key on `iktn3e-kd.myshopify.com`, then "Retry last step" on
       `f0a1e242…` (and sweep other `human_takeover` cases from that window).
-- [ ] Deploy api+worker to Fly (the terminal-classification + dead-letter-reason only help cases
-      processed after deploy).
+- [x] Deploy api+worker to Fly (commit `2da2486`, deployed 2026-06-30, version 37). Dashboard label
+      (`llm_insufficient_credits`) still needs a separate Cloudflare deploy.
+
+Telegram prod fix (2026-06-30, ops — no code): the webhook had never been registered, so the
+`/start` linking flow received nothing → 0 chat bindings → every merchant notification was silently
+falling back to email only. Registered it (`setWebhook` → `https://support-agent-backend.fly.dev/webhooks/notifications/telegram`
+with `secret_token=$TELEGRAM_WEBHOOK_SECRET`, run via `node` on the Fly machine — curl isn't in the
+image). Endpoint verified live + auth-enforced (401 without the secret header). The app does NOT
+self-register the webhook; if it's ever cleared (token change / `deleteWebhook`), re-run setWebhook.
+- [ ] Have a merchant actually link Telegram via /settings/notifications to confirm end-to-end (still
+      0 bindings); then approval/takeover/credits pings arrive in Telegram (email stays the fallback).
 
 GPT's `026538e fix(worker): reconcile workflow queue options` (now on `main` HEAD) is related — it adds
 `updateQueue` so pg-boss option changes (deleteAfterSeconds, deadLetter wiring) actually apply to
