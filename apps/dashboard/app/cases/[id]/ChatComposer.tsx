@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
 import type { ModelsResponse } from "@support-agent/dashboard-contracts";
 
@@ -42,6 +42,12 @@ interface ChatComposerProps {
   readonly models: ModelsResponse | null;
   readonly mode: ComposerMode;
 }
+
+// The composer input grows with its content (so a long email draft is readable
+// at a glance) but is capped — past the cap it scrolls instead of pushing the
+// send controls off-screen.
+const COMPOSER_MIN_HEIGHT = 64;
+const COMPOSER_MAX_HEIGHT = 260;
 
 const rephraseErrorText = (kind: string): string => {
   if (kind === "no_llm") return "Connect an AI provider in settings to rephrase.";
@@ -132,6 +138,21 @@ export function ChatComposer({
     models?.rephraseModel ?? null,
   );
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Resize to fit the content, clamped to [MIN, MAX]; scroll past the cap. Runs
+  // on every text change — typing, "Rephrase", and the initial approval draft.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(
+      Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT),
+      COMPOSER_MAX_HEIGHT,
+    );
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }, [text]);
+
   const empty = text.trim().length === 0;
   const showPicker = Boolean(models?.connected && models.entries.length > 0);
 
@@ -173,9 +194,9 @@ export function ChatComposer({
     <div className="space-y-2">
       <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
         <Textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={3}
           placeholder={placeholder}
           className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
         />
