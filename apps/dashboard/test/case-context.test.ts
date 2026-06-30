@@ -94,21 +94,11 @@ describe("buildContextRows", () => {
     expect(row?.text).toBe("3 photos · 1 with location data · 2 had metadata removed");
   });
 
-  it("summarizes live tracking, including the no-provider arm", () => {
-    expect(
-      byKey(
-        buildContextRows({
-          liveTrackingStatus: { kind: "live", status: "in_transit", carrier: "UPS" },
-        }),
-        "liveTrackingStatus",
-      )?.text,
-    ).toBe("In transit · UPS");
-    expect(
-      byKey(
-        buildContextRows({ liveTrackingStatus: { kind: "no_provider" } }),
-        "liveTrackingStatus",
-      )?.text,
-    ).toBe("Live tracking unavailable");
+  it("does not render liveTrackingStatus as a context row (the Tracking card owns it)", () => {
+    const rows = buildContextRows({
+      liveTrackingStatus: { kind: "live", status: "in_transit", carrier: "UPS" },
+    });
+    expect(rows.find((r) => r.key === "liveTrackingStatus")).toBeUndefined();
   });
 
   it("renders notes as a multiline text row", () => {

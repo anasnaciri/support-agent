@@ -64,14 +64,6 @@ const PRODUCT_MATCH: Readonly<Record<string, ContextBadge>> = {
   uncertain: { text: "Can’t tell from photos", variant: "warning" },
 };
 
-const TRACKING_STATUS: Readonly<Record<string, string>> = {
-  in_transit: "In transit",
-  delivered: "Delivered",
-  exception: "Delivery exception",
-  pending: "Label created",
-  unknown: "Status unknown",
-};
-
 const formatPhotoSignals = (v: unknown): string | null => {
   const r = recordOf(v);
   if (!r || typeof r["count"] !== "number") return null;
@@ -82,19 +74,6 @@ const formatPhotoSignals = (v: unknown): string | null => {
   if (typeof r["stripped"] === "number" && r["stripped"] > 0)
     parts.push(`${r["stripped"]} had metadata removed`);
   return parts.join(" · ");
-};
-
-const formatTracking = (v: unknown): string | null => {
-  const r = recordOf(v);
-  if (!r) return null;
-  if (r["kind"] === "no_provider") return "Live tracking unavailable";
-  const status =
-    typeof r["status"] === "string"
-      ? (TRACKING_STATUS[r["status"]] ?? humanizeSlug(r["status"]))
-      : null;
-  const carrier = asString(r["carrier"]);
-  const parts = [status, carrier].filter((p): p is string => p !== null);
-  return parts.length ? parts.join(" · ") : null;
 };
 
 /** Last-resort stringifier for keys we don't have a bespoke row for. */
@@ -215,9 +194,8 @@ export const buildContextRows = (
       badges: flags.map((f) => ({ text: riskFlagLabel(f), variant: "destructive" })),
     });
 
-  const tracking = formatTracking(context["liveTrackingStatus"]);
-  if (tracking)
-    rows.push({ key: "liveTrackingStatus", label: "Shipment", text: tracking });
+  // `liveTrackingStatus` is rendered by the dedicated Tracking card, not here —
+  // it stays in KNOWN_KEYS so the generic fallback below never dumps it as JSON.
 
   const notes = asString(context["notes"]);
   if (notes)

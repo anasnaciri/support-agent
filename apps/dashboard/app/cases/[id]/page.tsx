@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
+import { TrackingPanel } from "./TrackingPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { BundleApprovalBar } from "./BundleApprovalBar";
 import { ChatThread } from "./ChatThread";
@@ -71,6 +72,7 @@ import {
 } from "./return-labels";
 import { riskFlagLabel } from "./risk-flag-label";
 import { buildContextRows } from "./case-context";
+import { parseLiveTracking } from "./tracking-panel-data";
 import { shouldShowRetrySendAction } from "./retry-send-visibility";
 import { cn } from "@/lib/utils";
 
@@ -633,6 +635,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const requestedResolution = parseRequestedResolution(
     context["requestedResolution"],
   );
+  const tracking = parseLiveTracking(context["liveTrackingStatus"]);
 
   // The conversation's display name: the linked Shopify customer, else the
   // inbound sender's name from the thread, else the reply-to email.
@@ -939,6 +942,14 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             verifiedOrderEmail={verifiedOrderEmail}
           />
           <OrderPanel order={order} orderHint={orderHint} shopDomain={shopDomain} />
+
+          {tracking ? (
+            <TrackingPanel
+              tracking={tracking}
+              destinationCountry={order?.shippingAddress?.country ?? null}
+              orderPlacedAt={order?.createdAt ?? null}
+            />
+          ) : null}
 
           {refundToIssue ? (
             <Card className="border-primary/40 bg-primary/5">
