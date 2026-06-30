@@ -31,8 +31,9 @@ import { ApprovalCard } from "./ApprovalCard";
 import { BundleApprovalBar } from "./BundleApprovalBar";
 import { ChatThread } from "./ChatThread";
 import { ChatComposer, type ComposerMode } from "./ChatComposer";
-import { StatusSelect } from "./StatusSelect";
-import { CaseActionsMenu } from "./CaseActionsMenu";
+import { ChatScrollArea } from "./ChatScrollArea";
+import { CaseDetailsPanel } from "./CaseDetailsPanel";
+import { CaseActionsMenu, type CaseMenuAction } from "./CaseActionsMenu";
 import { RefundDialog } from "./RefundDialog";
 import { caseActionMenuItems, type CaseActionKey } from "./case-actions-menu";
 import {
@@ -323,6 +324,21 @@ const RESOLVE_HIDDEN = new Set([
   "waiting_for_supplier",
   "approved_action_running",
 ]);
+// Friendlier labels for the status changes folded into the ⋮ menu.
+const STATUS_MENU_LABEL: Partial<
+  Record<CaseStatus, { readonly label: string; readonly title: string }>
+> = {
+  in_progress: {
+    label: "Reopen (in progress)",
+    title: "Move this case back to in progress",
+  },
+  waiting_for_customer: {
+    label: "Mark waiting on customer",
+    title: "Park this case waiting on the customer",
+  },
+  failed: { label: "Mark as failed", title: "Close this case as failed" },
+};
+
 const toneToVariant = (tone: Banner["tone"]) =>
   tone === "success" ? "success" : tone === "info" ? "info" : "warning";
 
@@ -626,6 +642,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           (m) => m.direction === "inbound",
         )?.from.name ?? null)
       : null;
+  // Re-pins the chat to the bottom whenever the newest message changes.
+  const threadKey =
+    conversationThread?.status === "available"
+      ? `${conversationThread.thread.messages.length}:${
+          conversationThread.thread.messages.at(-1)?.id ?? ""
+        }`
+      : "none";
   const customerName =
     customerFullName(customer) ??
     threadInboundName ??
@@ -636,16 +659,29 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const canResume = caseRow.status === "human_takeover";
   const canResolve = !RESOLVE_HIDDEN.has(caseRow.status);
   // The statuses a person may move this case to by hand (matrix-validated).
+  // Folded into the ⋮ menu (no header dropdown); `resolved` is omitted because
+  // the dedicated ✓ Resolve button is the canonical close (it also works from
+  // takeover, which the plain status path forbids).
   const statusTargets = allowedManualStatusTargets(caseRow.status as CaseStatus);
-  const statusOptions = statusTargets.map((s) => ({
-    value: s,
-    label: caseStatusLabel(s),
-  }));
-  const menuActions = caseActionMenuItems({ canResume }).map((item) => ({
-    ...item,
-    caseId: caseRow.id,
-    action: CASE_MENU_ACTIONS[item.key],
-  }));
+  const statusMenuItems: CaseMenuAction[] = statusTargets
+    .filter((s) => s !== "resolved")
+    .map((s) => ({
+      key: `status-${s}`,
+      label: STATUS_MENU_LABEL[s]?.label ?? `Mark as ${caseStatusLabel(s)}`,
+      pendingLabel: "Updating…",
+      title: STATUS_MENU_LABEL[s]?.title ?? `Set status to ${caseStatusLabel(s)}`,
+      caseId: caseRow.id,
+      action: setStatusAction,
+      fields: { status: s },
+    }));
+  const menuActions: CaseMenuAction[] = [
+    ...statusMenuItems,
+    ...caseActionMenuItems({ canResume }).map((item) => ({
+      ...item,
+      caseId: caseRow.id,
+      action: CASE_MENU_ACTIONS[item.key],
+    })),
+  ];
   const pendingApprovals = allApprovals
     .filter((approval) => approval.status === "pending")
     .slice()
@@ -747,7 +783,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     <div className="flex h-full min-h-0">
       {/* CENTER — conversation */}
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 py-2.5 pl-14 pr-4">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/case:pl-14">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold tracking-tight">
@@ -781,15 +817,6 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            {statusTargets.length > 0 ? (
-              <StatusSelect
-                caseId={caseRow.id}
-                currentValue={caseRow.status}
-                currentLabel={`${caseStatusLabel(caseRow.status)} (current)`}
-                options={statusOptions}
-                action={setStatusAction}
-              />
-            ) : null}
             {canResolve ? (
               <ActionFormButton
                 caseId={caseRow.id}
@@ -854,13 +881,16 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <ChatScrollArea
+          bottomKey={threadKey}
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        >
           <ChatThread
             result={
               conversationThread ?? { status: "unavailable", reason: "no_thread" }
             }
           />
-        </div>
+        </ChatScrollArea>
 
         <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 px-4 py-3">
           {composerMode ? (
@@ -899,8 +929,9 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
         </div>
       </section>
 
-      {/* RIGHT — customer, order, context & timeline */}
-      <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-muted/20 xl:w-96 lg:block">
+      {/* RIGHT — customer, order, context & timeline (static column on lg+,
+          off-canvas drawer on smaller screens) */}
+      <CaseDetailsPanel>
         <div className="space-y-4 p-4">
           <CustomerPanel
             customer={customer}
@@ -1208,7 +1239,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             )}
           </div>
         </div>
-      </aside>
+      </CaseDetailsPanel>
     </div>
   );
 }

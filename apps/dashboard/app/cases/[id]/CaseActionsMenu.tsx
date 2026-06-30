@@ -14,6 +14,8 @@ export interface CaseMenuAction {
   readonly title: string;
   readonly caseId: string;
   readonly action: (formData: FormData) => void | Promise<void>;
+  /** Extra hidden form fields submitted with the action (e.g. `{ status }`). */
+  readonly fields?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -72,6 +74,11 @@ export const CaseActionsMenu = ({
           {actions.map((a) => (
             <form key={a.key} action={a.action}>
               <input type="hidden" name="caseId" value={a.caseId} />
+              {a.fields
+                ? Object.entries(a.fields).map(([name, value]) => (
+                    <input key={name} type="hidden" name={name} value={value} />
+                  ))
+                : null}
               <CaseMenuItem title={a.title} pendingLabel={a.pendingLabel}>
                 {a.label}
               </CaseMenuItem>

@@ -273,7 +273,15 @@ export function AppShell({
               </button>
             ) : null}
             {onCaseDetail ? (
-              <div className="h-full">{children}</div>
+              // `group/case` + the sidebar state lets the case header pad its
+              // left only while the floating expand button is showing (sidebar
+              // collapsed), with no gap when the sidebar is open.
+              <div
+                className="group/case h-full"
+                data-sidebar-state={open ? "open" : "collapsed"}
+              >
+                {children}
+              </div>
             ) : (
               <div className="mx-auto w-full max-w-5xl">{children}</div>
             )}
