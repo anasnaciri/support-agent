@@ -319,6 +319,35 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(await caseStatus(caseHt)).toBe("human_takeover");
   });
 
+  it("resolve 404s for a case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const otherHeaders = dashboardAuthHeaders(
+      otherOrgId,
+      { "content-type": "application/json" },
+      workosUser,
+    );
+    // caseHt is still human_takeover from the 409 test above.
+    const r = await post(
+      `/dashboard/cases/${caseHt}/resolve`,
+      {},
+      otherHeaders,
+    );
+    expect(r.status).toBe(404);
+    expect(await caseStatus(caseHt)).toBe("human_takeover");
+  });
+
+  it("resolve closes a TAKEN-OVER case the status endpoint refuses", async () => {
+    if (!raw) return;
+    // The status endpoint 409s on human_takeover→resolved (test above), but the
+    // dedicated resolve endpoint bridges the close legally for a human actor.
+    const res = await post(`/dashboard/cases/${caseHt}/resolve`, {
+      reason: "manager handled it",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("resolved");
+    expect(await caseStatus(caseHt)).toBe("resolved");
+  });
+
   it("set-status 404s for a case in another tenant (no mutation)", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(

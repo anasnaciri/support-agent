@@ -174,6 +174,58 @@ export const setCaseStatus = async (
   );
 };
 
+export type ResolveCaseManuallyOutcome =
+  | { readonly kind: "resolved" }
+  | { readonly kind: "case_not_found" };
+
+export interface ResolveCaseManuallyInput {
+  readonly caseId: string;
+  readonly tenantId: string;
+  readonly managerId: string;
+  /** Free-text reason saved into the transition + audit details. */
+  readonly reason?: string | undefined;
+}
+
+/**
+ * Resolve a case by an explicit HUMAN action ("Resolve" button on the case
+ * page) — including a case the manager has TAKEN OVER. Goes through
+ * `CaseLifecycleWriter.resolve` with `bridgeFromHumanTakeover`, which makes the
+ * close a legal two-step (`human_takeover → in_progress → resolved`) rather than
+ * the forbidden direct `human_takeover → resolved` jump. Crucially this keeps
+ * the state machine (§10) and the runtime's takeover race guard untouched: the
+ * runtime always short-circuits a `human_takeover` case to `PausedForHumanTakeover`
+ * before any status write, and `resolve` only takes the bridge for a `user`
+ * actor (the agent-side unverified-mismatch park still blocks an agent close).
+ * A case already `resolved` is an idempotent no-op; cross-tenant ids surface as
+ * `case_not_found` (never disclose existence).
+ */
+export const resolveCaseManually = async (
+  db: DrizzleDb,
+  input: ResolveCaseManuallyInput,
+): Promise<ResolveCaseManuallyOutcome> => {
+  const reason = input.reason ?? "case resolved manually from dashboard";
+  return runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle
+        .resolve({
+          caseId: CaseId(input.caseId),
+          tenantId: TenantId(input.tenantId),
+          actor: { type: "user", id: input.managerId },
+          reason,
+          bridgeFromHumanTakeover: true,
+        })
+        .pipe(
+          Effect.map(() => ({ kind: "resolved" as const })),
+          Effect.catchTag("CaseNotFound", () =>
+            Effect.succeed({ kind: "case_not_found" as const }),
+          ),
+        );
+    }),
+  );
+};
+
 /**
  * Self-service FIRST-workspace creation for a signed-in WorkOS org (the
  * onboarding flow). Idempotent by org via the pre-SELECT only — since

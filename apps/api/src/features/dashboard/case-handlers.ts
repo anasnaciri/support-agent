@@ -41,6 +41,7 @@ import {
   parsePageNumber,
   parsePageSize,
   requeueReplyDeliveryNow,
+  resolveCaseManually,
   resumeCase,
   setCaseStatus,
   takeOverCase,
@@ -722,6 +723,37 @@ export const handleDashboardSetCaseStatus = async (
           ? 409
           : 200; // updated | unchanged
   return sendJson(res, status, outcome);
+};
+
+// POST /dashboard/cases/:id/resolve — manager closes a case by hand, including
+// one they've TAKEN OVER ("Resolve" button on the case page). Distinct from the
+// status endpoint: resolving a `human_takeover` case is a legitimate human close
+// (the manager owns it and is done), so this goes through the lifecycle bridge
+// (`human_takeover → in_progress → resolved`) rather than the forbidden direct
+// jump the status endpoint refuses. Gated on the same permission as a manual
+// status change.
+export const handleDashboardResolveCase = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const outcome = await runWithDb(layer, (db) =>
+    resolveCaseManually(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId: auth.userId!,
+      reason,
+    }),
+  );
+  return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
 };
 
 // POST /dashboard/cases/:id/retry — manager hands a taken-over case back

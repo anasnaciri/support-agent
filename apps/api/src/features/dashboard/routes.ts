@@ -19,6 +19,7 @@ import {
   handleDashboardCaseShopify,
   handleDashboardCases,
   handleDashboardConnections,
+  handleDashboardResolveCase,
   handleDashboardResume,
   handleDashboardRetry,
   handleDashboardRetrySend,
@@ -260,6 +261,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/status",
     "Manually set a case's status (manager)",
     handleDashboardSetCaseStatus,
+    "cases.set_status",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/resolve",
+    "Resolve a case by hand, including one under takeover (manager)",
+    handleDashboardResolveCase,
     "cases.set_status",
   );
   dashboardPost(
