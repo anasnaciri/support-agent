@@ -386,6 +386,9 @@ export interface SetCaseStatusOutcomeView {
   readonly status?: string;
   readonly canceledApprovals?: number;
 }
+export interface ResolveCaseOutcomeView {
+  readonly kind: string;
+}
 export interface IssueRefundOutcomeView {
   readonly kind: string;
   readonly refundId?: string;
@@ -1104,6 +1107,23 @@ export const api = {
       ctx,
     });
     return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Resolve a case by hand — including one the manager has TAKEN OVER. Distinct
+  // from `setStatus("resolved")`, which the state machine forbids directly from
+  // human_takeover: this endpoint bridges the close legally for a human actor.
+  // Returns the discriminated outcome (resolved | case_not_found).
+  resolveCase: async (
+    ctx: CallCtx,
+    caseId: string,
+    reason?: string,
+  ): Promise<ResolveCaseOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resolve`, {
+      method: "POST",
+      body: reason !== undefined ? { reason } : {},
+      ctx,
+    });
+    return (body as ResolveCaseOutcomeView | null) ?? { kind: "error" };
   },
 
   // Issue an agent-recommended refund directly on a case. The agent only

@@ -1,22 +1,18 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import type {
-  ApprovalDetail,
-  AuditEntry,
-  CaseConversationThreadResult,
-  DashboardConversationParticipant,
-} from "@support-agent/dashboard-contracts";
+import type { ReactNode } from "react";
+import { Bot, Check, Hand, RefreshCw } from "lucide-react";
+import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 import {
   allowedManualStatusTargets,
   type CaseStatus,
+  type ShopifyCustomer,
 } from "@support-agent/agent-core";
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import {
   auditActionLabel,
   caseStatusLabel,
-  caseSubjectLabel,
-  hasSubject,
   humanizeSlug,
   toolActionLabel,
 } from "@/lib/labels";
@@ -27,24 +23,22 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 import CaseLiveBoundary from "./CaseLiveBoundary";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { ApprovalCard } from "./ApprovalCard";
 import { BundleApprovalBar } from "./BundleApprovalBar";
-import { ReplyComposer } from "./ReplyComposer";
+import { ChatThread } from "./ChatThread";
+import { ChatComposer, type ComposerMode } from "./ChatComposer";
 import { StatusSelect } from "./StatusSelect";
 import { CaseActionsMenu } from "./CaseActionsMenu";
 import { RefundDialog } from "./RefundDialog";
-import {
-  caseActionMenuItems,
-  type CaseActionKey,
-} from "./case-actions-menu";
+import { caseActionMenuItems, type CaseActionKey } from "./case-actions-menu";
 import {
   issueRefundAction,
   loadRefundContextAction,
+  resolveAction,
   resumeAction,
   retryAction,
   retryFromTriageAction,
@@ -54,9 +48,6 @@ import {
 } from "./actions";
 import {
   buildCaseTimelineHref,
-  conversationThreadUnavailableView,
-  formatAttachmentSize,
-  parseCaseTimelineMode,
   curatedTimelineEvent,
   replyDeliveryFailedTimelineItem,
   type CuratedTimelineItem,
@@ -72,7 +63,12 @@ import {
 import {
   parseReturnReason,
   parseRequestedResolution,
+  returnReasonLabel,
+  requestedResolutionLabel,
+  type ReturnReason,
+  type RequestedResolution,
 } from "./return-labels";
+import { riskFlagLabel } from "./risk-flag-label";
 import { buildContextRows } from "./case-context";
 import { shouldShowRetrySendAction } from "./retry-send-visibility";
 import { cn } from "@/lib/utils";
@@ -88,6 +84,7 @@ interface Params {
     readonly retrySend?: string;
     readonly replied?: string;
     readonly statusChanged?: string;
+    readonly caseResolved?: string;
     readonly refundIssued?: string;
     readonly decided?: string;
     readonly action?: string;
@@ -213,22 +210,27 @@ const statusChangedBanner = (kind: string | undefined): Banner | null => {
     };
   }
   if (kind === "unchanged") {
-    return {
-      tone: "info",
-      text: "That's already the case's status — no change.",
-    };
+    return { tone: "info", text: "That's already the case's status — no change." };
   }
   if (kind === "invalid_status") {
-    return {
-      tone: "warn",
-      text: "That status can't be set by hand.",
-    };
+    return { tone: "warn", text: "That status can't be set by hand." };
   }
   if (kind === "transition_not_allowed") {
     return {
       tone: "warn",
       text: "That status change isn't allowed from where this case is now.",
     };
+  }
+  return null;
+};
+
+const caseResolvedBanner = (kind: string | undefined): Banner | null => {
+  if (!kind) return null;
+  if (kind === "resolved") {
+    return { tone: "success", text: "Case resolved." };
+  }
+  if (kind === "case_not_found") {
+    return { tone: "warn", text: "Couldn't find that case to resolve." };
   }
   return null;
 };
@@ -310,6 +312,17 @@ const CASE_MENU_ACTIONS: Record<
 };
 
 const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
+// Manual close ("Resolve" button) is offered while the case is genuinely live
+// and not parked on machinery that owns its own exit (an approval row, a
+// supplier escalation, an in-flight approved action). human_takeover IS
+// included — a manager who owns the case can close it themselves.
+const RESOLVE_HIDDEN = new Set([
+  "resolved",
+  "failed",
+  "waiting_for_approval",
+  "waiting_for_supplier",
+  "approved_action_running",
+]);
 const toneToVariant = (tone: Banner["tone"]) =>
   tone === "success" ? "success" : tone === "info" ? "info" : "warning";
 
@@ -330,11 +343,6 @@ const detailRecord = (
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : null;
-
-const detailString = (details: unknown, key: string): string | null => {
-  const value = detailRecord(details)?.[key];
-  return typeof value === "string" ? value : null;
-};
 
 /**
  * Defensively parse `context.photoSignals` (stamped by the runtime) into
@@ -380,35 +388,6 @@ const BodyBlock = ({ value }: { readonly value: unknown }) => {
   ) : (
     <p className="text-sm text-muted-foreground">No parsed body.</p>
   );
-};
-
-/**
- * Sum input + output tokens across every `llm.decision` audit row on
- * the case. Each row's `details.usage` is populated by `LLMServiceLive`
- * via the Vercel AI SDK; test layers don't populate it (so old or
- * scripted-test cases roll up to zero — which is what we want).
- * Returns null when no usage data is present, so the UI can decide
- * whether to render the rollup at all.
- */
-const sumCaseTokens = (
-  entries: ReadonlyArray<AuditEntry>,
-): { input: number; output: number; total: number } | null => {
-  let input = 0;
-  let output = 0;
-  let saw = false;
-  for (const e of entries) {
-    if (e.action !== "llm.decision") continue;
-    const usage = detailRecord(e.details)?.["usage"];
-    const u = detailRecord(usage);
-    if (!u) continue;
-    saw = true;
-    const i = u["inputTokens"];
-    const o = u["outputTokens"];
-    if (typeof i === "number") input += i;
-    if (typeof o === "number") output += o;
-  }
-  if (!saw) return null;
-  return { input, output, total: input + output };
 };
 
 type SimplifiedTimelineItem =
@@ -461,126 +440,128 @@ const RefundRecommendationBlock = ({
   </div>
 );
 
-const participantLabel = (
-  participant: DashboardConversationParticipant,
-): string =>
-  participant.name
-    ? `${participant.name} <${participant.email}>`
-    : participant.email;
-
-const EmailThreadTimeline = ({
-  result,
-}: {
-  readonly result: CaseConversationThreadResult;
-}) => {
-  if (result.status === "unavailable") {
-    const view = conversationThreadUnavailableView(result.reason);
-    return (
-      <Card>
-        <CardContent className="space-y-2 p-4">
-          <div className="font-medium text-sm">{view.title}</div>
-          <p className="text-sm text-muted-foreground">{view.description}</p>
-          {view.showIntegrationsLink ? (
-            <Button asChild size="sm" variant="outline">
-              <Link href="/settings/integrations">Open integrations</Link>
-            </Button>
-          ) : null}
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (result.thread.messages.length === 0) {
-    return (
-      <Card>
-        <CardContent className="p-4 text-sm text-muted-foreground">
-          The provider returned an empty email thread.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <Card>
-        <CardContent className="space-y-1.5 p-4">
-          <div className="font-medium text-sm">{result.thread.subject}</div>
-          <div className="text-xs text-muted-foreground">
-            {result.thread.participants.map(participantLabel).join(" · ")}
-          </div>
-        </CardContent>
-      </Card>
-      <ol className="relative">
-        {result.thread.messages.map((message) => (
-          <li
-            key={message.id}
-            className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
-          >
-            <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
-            <Card>
-              <CardContent className="space-y-3 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">
-                        {message.direction === "inbound" ? "Received" : "Sent"}
-                      </Badge>
-                      {message.subject ? (
-                        <span className="font-medium text-sm">
-                          {message.subject}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      From {participantLabel(message.from)}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      To {message.to.map(participantLabel).join(", ") || "(none)"}
-                    </div>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {formatDateTime(message.sentAt)}
-                  </div>
-                </div>
-                {message.sanitizedBodyHtml ? (
-                  <div
-                    className="email-html break-words rounded-md bg-muted/30 p-3 text-sm leading-relaxed"
-                    dangerouslySetInnerHTML={{
-                      __html: message.sanitizedBodyHtml,
-                    }}
-                  />
-                ) : (
-                  <p className="whitespace-pre-wrap break-words rounded-md bg-muted/30 p-3 text-sm">
-                    {message.bodyText || "(empty message)"}
-                  </p>
-                )}
-                {message.attachments.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {message.attachments.map((attachment, index) => (
-                      <Badge
-                        key={`${message.id}-attachment-${index}`}
-                        variant="outline"
-                        className="font-normal"
-                      >
-                        {attachment.filename} · {attachment.contentType} ·{" "}
-                        {formatAttachmentSize(attachment.sizeBytes)}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
+const PRODUCT_MATCH_LABEL: Record<"match" | "mismatch" | "uncertain", string> = {
+  match: "Photos match item",
+  mismatch: "Photos may not match item",
+  uncertain: "Photo match uncertain",
 };
+
+/**
+ * Compact decision signals shown above the composer while a single reply draft
+ * awaits approval — the agent's recommendation, photo check, return intent, and
+ * any risk flags — so the manager approves the prose with context. The full
+ * editable review still lives at `/approvals/[id]`.
+ */
+const ApprovalSignalsStrip = ({
+  approvalId,
+  recommendation,
+  productMatch,
+  riskFlags,
+  returnReason,
+  requestedResolution,
+}: {
+  readonly approvalId: string;
+  readonly recommendation: RefundRecommendationSummary | null;
+  readonly productMatch: "match" | "mismatch" | "uncertain" | null;
+  readonly riskFlags: ReadonlyArray<string>;
+  readonly returnReason: ReturnReason | null;
+  readonly requestedResolution: RequestedResolution | null;
+}) => (
+  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+    <span className="text-[11px] font-semibold uppercase tracking-wider text-warning">
+      Awaiting your approval
+    </span>
+    {recommendation ? (
+      <Badge
+        variant={recommendationVariant(recommendation.recommendation)}
+        className="text-xs"
+      >
+        {RECOMMENDATION_LABEL[recommendation.recommendation]}
+        {recommendation.amount
+          ? ` · ${recommendation.amount.amount} ${recommendation.amount.currencyCode}`
+          : ""}
+      </Badge>
+    ) : null}
+    {productMatch ? (
+      <Badge
+        variant={
+          productMatch === "match"
+            ? "success"
+            : productMatch === "mismatch"
+              ? "destructive"
+              : "outline"
+        }
+        className="text-xs"
+      >
+        {PRODUCT_MATCH_LABEL[productMatch]}
+      </Badge>
+    ) : null}
+    {requestedResolution ? (
+      <Badge variant="outline" className="text-xs">
+        Wants: {requestedResolutionLabel(requestedResolution)}
+      </Badge>
+    ) : null}
+    {returnReason ? (
+      <Badge variant="outline" className="text-xs">
+        {returnReasonLabel(returnReason)}
+      </Badge>
+    ) : null}
+    {riskFlags.map((flag) => (
+      <Badge key={flag} variant="destructive" className="text-xs">
+        {riskFlagLabel(flag)}
+      </Badge>
+    ))}
+    <Link
+      href={`/approvals/${approvalId}`}
+      className="text-xs text-primary hover:underline"
+    >
+      Full review
+    </Link>
+  </div>
+);
+
+const customerFullName = (c: ShopifyCustomer | null): string | null => {
+  if (!c) return null;
+  const parts = [c.firstName, c.lastName].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  return parts.length > 0 ? parts.join(" ") : null;
+};
+
+/** Icon-only action button backed by a one-field server-action form. */
+const ActionFormButton = ({
+  caseId,
+  action,
+  title,
+  pendingLabel,
+  variant = "outline",
+  children,
+}: {
+  readonly caseId: string;
+  readonly action: (formData: FormData) => void | Promise<void>;
+  readonly title: string;
+  readonly pendingLabel: string;
+  readonly variant?: "outline" | "success" | "default";
+  readonly children: ReactNode;
+}) => (
+  <form action={action}>
+    <input type="hidden" name="caseId" value={caseId} />
+    <SubmitButton
+      size="icon"
+      variant={variant}
+      pendingLabel={pendingLabel}
+      aria-label={title}
+      title={title}
+    >
+      {children}
+    </SubmitButton>
+  </form>
+);
 
 export default async function CaseDetailPage({ params, searchParams }: Params) {
   const { id } = await params;
   const sp = await searchParams;
-  const timelineMode = parseCaseTimelineMode(sp.timeline);
+  const showFullAudit = sp.timeline === "full";
   const banner =
     takeOverBanner(sp.takenOver) ??
     resumeBanner(sp.resumed) ??
@@ -588,15 +569,14 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     retrySendBanner(sp.retrySend) ??
     replyBanner(sp.replied) ??
     statusChangedBanner(sp.statusChanged) ??
+    caseResolvedBanner(sp.caseResolved) ??
     refundIssuedBanner(sp.refundIssued) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread] = await Promise.all([
     api.caseDetail(ctx, id),
     api.caseShopify(ctx, id),
-    timelineMode === "email"
-      ? api.caseConversationThread(ctx, id)
-      : Promise.resolve(null),
+    api.caseConversationThread(ctx, id),
   ]);
   if (!detail) notFound();
   const caseRow = detail.case;
@@ -638,53 +618,97 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     context["requestedResolution"],
   );
 
+  // The conversation's display name: the linked Shopify customer, else the
+  // inbound sender's name from the thread, else the reply-to email.
+  const threadInboundName =
+    conversationThread?.status === "available"
+      ? (conversationThread.thread.messages.find(
+          (m) => m.direction === "inbound",
+        )?.from.name ?? null)
+      : null;
+  const customerName =
+    customerFullName(customer) ??
+    threadInboundName ??
+    customerEmail ??
+    "Customer";
+
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
+  const canResolve = !RESOLVE_HIDDEN.has(caseRow.status);
   // The statuses a person may move this case to by hand (matrix-validated).
-  // Shown as the "Change status" dropdown — works from any state, including
-  // reopening a resolved/failed case.
   const statusTargets = allowedManualStatusTargets(caseRow.status as CaseStatus);
   const statusOptions = statusTargets.map((s) => ({
     value: s,
     label: caseStatusLabel(s),
   }));
-  // Overflow (⋮) menu actions for the header. The item set is pure-derived from
-  // case state; each item is paired with its server action here.
   const menuActions = caseActionMenuItems({ canResume }).map((item) => ({
     ...item,
     caseId: caseRow.id,
     action: CASE_MENU_ACTIONS[item.key],
   }));
-  // Reply composer's model picker: only fetched when the composer renders (the
-  // case is taken over), and tolerantly (null when the member can't read the
-  // catalog) so a reply-only member still gets the composer without the picker.
-  const replyModels = canResume ? await api.replyModels(ctx) : null;
-  // A drafted customer reply failed to send. The active reply-delivery row is
-  // the source of truth for whether the dashboard can re-send that same draft.
+  const pendingApprovals = allApprovals
+    .filter((approval) => approval.status === "pending")
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // The reply composer's model picker is fetched whenever a composer that can
+  // rephrase will render (taken over, or a draft is awaiting approval), and
+  // tolerantly (null when the member can't read the catalog).
+  const replyModels =
+    canResume || pendingApprovals.length >= 1
+      ? await api.replyModels(ctx)
+      : null;
   const showRetrySend = shouldShowRetrySendAction({
     caseStatus: caseRow.status,
     activeReplyDelivery: detail.activeReplyDelivery,
     riskFlags,
   });
-  const pendingApprovals = allApprovals
-    .filter((approval) => approval.status === "pending")
-    .slice()
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const tokenRollup = sumCaseTokens(entries);
-  // The agent only *recommended* a refund (PATH B) and never issued one — offer
-  // the operator a button to issue it directly. `issuableRefund` returns null
-  // once a refund's been issued, or when the recommendation has no amount.
   const refundToIssue = issuableRefund(entries);
-  // The standalone "Refund" button opens the Shopify-style refund modal. Shown
-  // whenever the case has a Shopify order that isn't already fully refunded —
-  // independent of whether the agent recommended one (that's the card below).
   const refundableOrder =
     order && order.financialStatus !== "refunded" ? order : null;
   const summaryText =
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
-  const timelineHref = (mode: "full" | "simplified" | "email") =>
+  const timelineHref = (mode: "full" | "simplified") =>
     buildCaseTimelineHref(caseRow.id, sp, mode);
+
+  // Composer state. A single reply draft awaiting approval fills the input with
+  // Approve/Reject; a bundle or a non-reply approval keeps its richer card; a
+  // taken-over case lets the manager reply by hand; otherwise it's locked.
+  const singleApproval =
+    pendingApprovals.length === 1 ? pendingApprovals[0]! : null;
+  const singleApprovalDraft =
+    singleApproval &&
+    singleApproval.proposedInput &&
+    typeof singleApproval.proposedInput === "object" &&
+    typeof (singleApproval.proposedInput as Record<string, unknown>)[
+      "bodyText"
+    ] === "string"
+      ? ((singleApproval.proposedInput as Record<string, unknown>)[
+          "bodyText"
+        ] as string)
+      : null;
+  const lockedMessage =
+    caseRow.status === "resolved"
+      ? "This case is resolved. Reopen it from the status menu to reply."
+      : caseRow.status === "failed"
+        ? "This case is closed. Reopen it from the status menu to reply."
+        : caseRow.status === "waiting_for_supplier"
+          ? "Waiting on the supplier. Take over to reply to the customer."
+          : "The agent is handling this conversation. Take over to reply yourself.";
+  const composerMode: ComposerMode | null =
+    singleApproval && singleApprovalDraft !== null
+      ? {
+          kind: "approval",
+          approvalId: singleApproval.id,
+          draftBody: singleApprovalDraft,
+          returnTo: `/cases/${caseRow.id}`,
+        }
+      : pendingApprovals.length > 1 || singleApproval
+        ? null // rendered as BundleApprovalBar / ApprovalCard below
+        : canResume
+          ? { kind: "reply" }
+          : { kind: "locked", message: lockedMessage };
+
   const recommendationTimelineItems: SimplifiedTimelineItem[] = entries.flatMap(
     (entry) => {
       const recommendation = refundRecommendationFromEntry(entry);
@@ -720,36 +744,43 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   ].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
   return (
-    <div className="space-y-6">
-      <PageBreadcrumb
-        items={[{ href: "/cases", label: "Cases" }]}
-        current={caseSubjectLabel(caseRow.subject)}
-      />
+    <div className="flex h-full min-h-0">
+      {/* CENTER — conversation */}
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 py-2.5 pl-14 pr-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-semibold tracking-tight">
+                {customerName}
+              </h1>
+              <CaseLiveBoundary
+                caseId={caseRow.id}
+                initialSince={
+                  entries.length > 0 ? entries[entries.length - 1]!.id : "0"
+                }
+              />
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Badge
+                variant={caseStatusVariant(caseRow.status)}
+                className="px-1.5 py-0"
+              >
+                {caseStatusLabel(caseRow.status)}
+              </Badge>
+              <span>·</span>
+              <span>
+                {caseRow.category ? humanizeSlug(caseRow.category) : "Uncategorized"}
+              </span>
+              {customerEmail && customerEmail !== customerName ? (
+                <>
+                  <span>·</span>
+                  <span className="truncate">{customerEmail}</span>
+                </>
+              ) : null}
+            </div>
+          </div>
 
-      {banner ? (
-        <Alert variant={toneToVariant(banner.tone)}>
-          <AlertDescription>{banner.text}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <div>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1
-            className={cn(
-              "text-2xl font-semibold tracking-tight",
-              !hasSubject(caseRow.subject) &&
-                "font-normal italic text-muted-foreground",
-            )}
-          >
-            {caseSubjectLabel(caseRow.subject)}
-          </h1>
-          <CaseLiveBoundary
-            caseId={caseRow.id}
-            initialSince={
-              entries.length > 0 ? entries[entries.length - 1]!.id : "0"
-            }
-          />
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             {statusTargets.length > 0 ? (
               <StatusSelect
                 caseId={caseRow.id}
@@ -759,45 +790,52 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                 action={setStatusAction}
               />
             ) : null}
+            {canResolve ? (
+              <ActionFormButton
+                caseId={caseRow.id}
+                action={resolveAction}
+                title="Resolve this case"
+                pendingLabel=""
+                variant="success"
+              >
+                <Check aria-hidden />
+              </ActionFormButton>
+            ) : null}
             {canTakeOver ? (
-              <form action={takeOverAction}>
-                <input type="hidden" name="caseId" value={caseRow.id} />
-                <SubmitButton
-                  variant="outline"
-                  pendingLabel="Taking over…"
-                  title="Stop the agent on this case and handle it manually"
-                >
-                  Take over
-                </SubmitButton>
-              </form>
+              <ActionFormButton
+                caseId={caseRow.id}
+                action={takeOverAction}
+                title="Take over — handle this case manually"
+                pendingLabel=""
+              >
+                <Hand aria-hidden />
+              </ActionFormButton>
             ) : null}
             {canResume ? (
               <>
                 {showRetrySend ? (
-                  <form action={retrySendAction}>
-                    <input type="hidden" name="caseId" value={caseRow.id} />
-                    <SubmitButton
-                      pendingLabel="Re-sending…"
-                      title="Re-send the same drafted reply that failed to deliver to the customer"
-                    >
-                      Retry sending email
-                    </SubmitButton>
-                  </form>
-                ) : null}
-                <form action={resumeAction}>
-                  <input type="hidden" name="caseId" value={caseRow.id} />
-                  <SubmitButton
-                    variant="outline"
-                    pendingLabel="Handing back…"
-                    title="Let the agent handle this case again — it resumes on the customer's next reply"
+                  <ActionFormButton
+                    caseId={caseRow.id}
+                    action={retrySendAction}
+                    title="Retry sending the failed reply"
+                    pendingLabel=""
                   >
-                    Hand back to agent
-                  </SubmitButton>
-                </form>
+                    <RefreshCw aria-hidden />
+                  </ActionFormButton>
+                ) : null}
+                <ActionFormButton
+                  caseId={caseRow.id}
+                  action={resumeAction}
+                  title="Hand back to the agent"
+                  pendingLabel=""
+                >
+                  <Bot aria-hidden />
+                </ActionFormButton>
               </>
             ) : null}
             {refundableOrder ? (
               <RefundDialog
+                compact
                 caseId={caseRow.id}
                 orderName={refundableOrder.name}
                 loadContext={loadRefundContextAction}
@@ -806,419 +844,371 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             ) : null}
             <CaseActionsMenu actions={menuActions} />
           </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Badge variant={caseStatusVariant(caseRow.status)}>
-            {caseStatusLabel(caseRow.status)}
-          </Badge>
-          <span>·</span>
-          <span>{caseRow.category ? humanizeSlug(caseRow.category) : "Uncategorized"}</span>
-          <span>·</span>
-          <span>
-            agent:{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              {caseRow.currentAgentId}
-            </code>
-          </span>
-          <span>·</span>
-          <span>
-            opened {caseRow.createdAt.slice(0, 16).replace("T", " ")}
-          </span>
-          {tokenRollup ? (
-            <>
-              <span>·</span>
-              <span
-                title={`${tokenRollup.input.toLocaleString()} input + ${tokenRollup.output.toLocaleString()} output`}
-              >
-                AI usage:{" "}
-                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                  {tokenRollup.total.toLocaleString()} tokens
-                </code>
-              </span>
-            </>
-          ) : null}
-        </div>
-      </div>
+        </header>
 
-      {refundToIssue ? (
-        <Card className="border-primary/40 bg-primary/5">
-          <CardContent className="flex flex-wrap items-start justify-between gap-4 py-4">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold">
-                  Agent recommended a refund
-                </span>
-                <Badge
-                  variant={recommendationVariant(refundToIssue.recommendation)}
-                  className="text-xs"
-                >
-                  {RECOMMENDATION_LABEL[refundToIssue.recommendation]}
-                </Badge>
-                <span className="font-mono text-sm">
-                  {refundToIssue.amount!.amount}{" "}
-                  {refundToIssue.amount!.currencyCode}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {refundToIssue.reasoning
-                  ? refundToIssue.reasoning
-                  : "Issue this refund on the customer's order. Shopify emails them the confirmation."}
-              </p>
-            </div>
-            <form action={issueRefundAction}>
-              <input type="hidden" name="caseId" value={caseRow.id} />
-              <input
-                type="hidden"
-                name="amount"
-                value={refundToIssue.amount!.amount}
-              />
-              <input
-                type="hidden"
-                name="currencyCode"
-                value={refundToIssue.amount!.currencyCode}
-              />
-              <ConfirmSubmitButton
-                title="Issue this refund?"
-                description={`This moves real money: ${refundToIssue.amount!.amount} ${refundToIssue.amount!.currencyCode} is refunded to the customer's original payment method and Shopify emails them the confirmation. This can't be undone from here.`}
-                confirmLabel="Issue refund"
-              >
-                Issue refund
-              </ConfirmSubmitButton>
-            </form>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* A queued BUNDLE (autonomous loop) is decided together via the bundle
-          bar — approving rows one-by-one would fire a per-row event and the
-          runtime could resolve the case while siblings stay pending (slice 4d).
-          A lone approval keeps the rich per-row ApprovalCard. */}
-      {pendingApprovals.length > 1 ? (
-        <BundleApprovalBar caseId={caseRow.id} pending={pendingApprovals} />
-      ) : (
-        pendingApprovals.map((a) => (
-          <ApprovalCard
-            key={a.id}
-            approval={a}
-            returnTo={`/cases/${caseRow.id}`}
-            refundRecommendation={extractRefundRecommendation(entries)}
-            productMatch={productMatch}
-            photoSignals={photoSignals}
-            riskFlags={riskFlags}
-            returnReason={returnReason}
-            requestedResolution={requestedResolution}
-          />
-        ))
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <CustomerPanel
-          customer={customer}
-          customerEmail={customerEmail}
-          verifiedOrderEmail={verifiedOrderEmail}
-        />
-        <OrderPanel
-          order={order}
-          orderHint={orderHint}
-          shopDomain={shopDomain}
-        />
-      </div>
-
-      {canResume ? (
-        <ReplyComposer
-          caseId={caseRow.id}
-          customerEmail={customerEmail}
-          models={replyModels}
-        />
-      ) : null}
-
-      <div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Timeline</h2>
-          <div className="flex gap-2">
-            <Button
-              asChild
-              size="sm"
-              variant={timelineMode === "simplified" ? "default" : "outline"}
-            >
-              <Link href={timelineHref("simplified")}>Activity</Link>
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              variant={timelineMode === "email" ? "default" : "outline"}
-            >
-              <Link href={timelineHref("email")}>Email thread</Link>
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              variant={timelineMode === "full" ? "default" : "outline"}
-            >
-              <Link href={timelineHref("full")}>Full audit</Link>
-            </Button>
+        {banner ? (
+          <div className="shrink-0 px-4 pt-3">
+            <Alert variant={toneToVariant(banner.tone)}>
+              <AlertDescription>{banner.text}</AlertDescription>
+            </Alert>
           </div>
-        </div>
-        {timelineMode === "email" ? (
-          <EmailThreadTimeline
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <ChatThread
             result={
-              conversationThread ?? {
-                status: "unavailable",
-                reason: "no_thread",
-              }
+              conversationThread ?? { status: "unavailable", reason: "no_thread" }
             }
           />
-        ) : timelineMode === "simplified" ? (
-          summaryText || simplifiedTimelineItems.length > 0 ? (
-            <div className="space-y-3">
-              {summaryText ? (
-                <Card>
-                  <CardContent className="space-y-1.5 p-4">
-                    <div className="font-medium text-sm">
-                      {caseRow.summary ? "Summary" : "Triage notes"}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {summaryText}
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : null}
+        </div>
 
+        <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 px-4 py-3">
+          {composerMode ? (
+            <>
+              {composerMode.kind === "approval" ? (
+                <ApprovalSignalsStrip
+                  approvalId={composerMode.approvalId}
+                  recommendation={extractRefundRecommendation(entries)}
+                  productMatch={productMatch}
+                  riskFlags={riskFlags}
+                  returnReason={returnReason}
+                  requestedResolution={requestedResolution}
+                />
+              ) : null}
+              <ChatComposer
+                caseId={caseRow.id}
+                customerEmail={customerEmail}
+                models={replyModels}
+                mode={composerMode}
+              />
+            </>
+          ) : pendingApprovals.length > 1 ? (
+            <BundleApprovalBar caseId={caseRow.id} pending={pendingApprovals} />
+          ) : singleApproval ? (
+            <ApprovalCard
+              approval={singleApproval}
+              returnTo={`/cases/${caseRow.id}`}
+              refundRecommendation={extractRefundRecommendation(entries)}
+              productMatch={productMatch}
+              photoSignals={photoSignals}
+              riskFlags={riskFlags}
+              returnReason={returnReason}
+              requestedResolution={requestedResolution}
+            />
+          ) : null}
+        </div>
+      </section>
+
+      {/* RIGHT — customer, order, context & timeline */}
+      <aside className="hidden w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-muted/20 xl:w-96 lg:block">
+        <div className="space-y-4 p-4">
+          <CustomerPanel
+            customer={customer}
+            customerEmail={customerEmail}
+            verifiedOrderEmail={verifiedOrderEmail}
+          />
+          <OrderPanel order={order} orderHint={orderHint} shopDomain={shopDomain} />
+
+          {refundToIssue ? (
+            <Card className="border-primary/40 bg-primary/5">
+              <CardContent className="space-y-2 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold">
+                    Agent recommended a refund
+                  </span>
+                  <Badge
+                    variant={recommendationVariant(refundToIssue.recommendation)}
+                    className="text-xs"
+                  >
+                    {RECOMMENDATION_LABEL[refundToIssue.recommendation]}
+                  </Badge>
+                  <span className="font-mono text-sm">
+                    {refundToIssue.amount!.amount}{" "}
+                    {refundToIssue.amount!.currencyCode}
+                  </span>
+                </div>
+                {refundToIssue.reasoning ? (
+                  <p className="text-sm text-muted-foreground">
+                    {refundToIssue.reasoning}
+                  </p>
+                ) : null}
+                <form action={issueRefundAction}>
+                  <input type="hidden" name="caseId" value={caseRow.id} />
+                  <input
+                    type="hidden"
+                    name="amount"
+                    value={refundToIssue.amount!.amount}
+                  />
+                  <input
+                    type="hidden"
+                    name="currencyCode"
+                    value={refundToIssue.amount!.currencyCode}
+                  />
+                  <ConfirmSubmitButton
+                    variant="default"
+                    title="Issue this refund?"
+                    description={`This moves real money: ${refundToIssue.amount!.amount} ${refundToIssue.amount!.currencyCode} is refunded to the customer's original payment method and Shopify emails them the confirmation. This can't be undone from here.`}
+                    confirmLabel="Issue refund"
+                  >
+                    Issue refund
+                  </ConfirmSubmitButton>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Context
+            </h2>
+            <CaseContext context={context} />
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Timeline
+              </h2>
+              <div className="flex gap-1">
+                <Button
+                  asChild
+                  size="sm"
+                  variant={!showFullAudit ? "default" : "outline"}
+                >
+                  <Link href={timelineHref("simplified")}>Activity</Link>
+                </Button>
+                <Button
+                  asChild
+                  size="sm"
+                  variant={showFullAudit ? "default" : "outline"}
+                >
+                  <Link href={timelineHref("full")}>Audit</Link>
+                </Button>
+              </div>
+            </div>
+
+            {showFullAudit ? (
               <ol className="relative">
-                {simplifiedTimelineItems.map((item) => (
+                {entries.map((e) => (
                   <li
-                    key={item.id}
+                    key={e.id}
                     className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
                   >
-                    <span
-                      className={cn(
-                        "absolute -left-[5px] top-3 size-2 rounded-full",
-                        item.kind === "deliveryFailed"
-                          ? "bg-destructive"
-                          : "bg-primary",
-                      )}
-                    />
-                    <Card
-                      className={
-                        item.kind === "deliveryFailed"
-                          ? "border-destructive"
-                          : undefined
-                      }
-                    >
-                      {item.kind === "email" ? (
-                        <CardContent className="space-y-1.5 p-4">
-                          <div className="font-medium text-sm">
-                            {item.title}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {item.responsible} ·{" "}
-                            {formatDateTime(item.occurredAt)}
-                          </div>
-                        </CardContent>
-                      ) : item.kind === "note" ? (
-                        <CardContent className="space-y-1.5 p-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-sm">
-                              {item.title}
-                            </div>
-                            <Badge variant="outline">Heads-up to you</Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {item.delivered === false
-                              ? "Not delivered — no notification channel connected"
-                              : "Sent to your notification channel"}{" "}
-                            · {formatDateTime(item.occurredAt)}
-                          </div>
-                          {item.message ? (
-                            <p className="text-sm text-muted-foreground">
-                              {item.message}
-                            </p>
-                          ) : null}
-                        </CardContent>
-                      ) : item.kind === "status" ? (
-                        <CardContent className="space-y-1.5 p-4">
-                          <div className="font-medium text-sm">
-                            {item.title}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatDateTime(item.occurredAt)}
-                          </div>
-                          {item.description ? (
-                            <p className="text-sm text-muted-foreground">
-                              {item.description}
-                            </p>
-                          ) : null}
-                        </CardContent>
-                      ) : item.kind === "refundRecommendation" ? (
+                    <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
+                    <Card>
+                      {refundRecommendationFromEntry(e) ? (
                         <CardContent className="space-y-3 p-4">
-                          <div className="font-medium text-sm">
+                          <div className="text-sm font-medium">
                             Refund recommendation
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Agent assessment ·{" "}
-                            {formatDateTime(item.occurredAt)}
+                            {e.actorType}
+                            {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
+                            {formatDateTime(e.occurredAt)}
                           </div>
                           <RefundRecommendationBlock
-                            recommendation={item.recommendation}
+                            recommendation={refundRecommendationFromEntry(e)!}
                           />
                         </CardContent>
-                      ) : item.kind === "deliveryFailed" ? (
-                        <CardContent className="space-y-2 p-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-sm text-destructive">
-                              {item.title}
-                            </div>
-                            <Badge variant="destructive">Not delivered</Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatDateTime(item.occurredAt)}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            The drafted reply couldn&apos;t be sent to the
-                            customer.
-                            {item.lastError ? ` Last error: ${item.lastError}` : ""}
-                          </p>
-                          <form action={retrySendAction} className="pt-1">
-                            <input
-                              type="hidden"
-                              name="caseId"
-                              value={caseRow.id}
-                            />
-                            <SubmitButton
-                              size="sm"
-                              pendingLabel="Re-sending…"
-                              title="Re-send the same drafted reply that failed to deliver to the customer"
-                            >
-                              Retry sending email
-                            </SubmitButton>
-                          </form>
-                        </CardContent>
                       ) : (
-                        <CardContent className="space-y-3 p-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-medium text-sm">
-                              {approvalStatusLabel(item.approval)}
-                            </div>
-                            <Badge variant="outline">
-                              {toolActionLabel(item.approval.tool)}
-                            </Badge>
+                        <CardContent className="space-y-1.5 p-4">
+                          <div className="text-sm font-medium">
+                            {auditActionLabel(e.action)}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Agent {item.approval.agentId} ·{" "}
-                            {formatDateTime(item.approval.createdAt)}
-                            {item.approval.decidedAt
-                              ? ` · decided ${formatDateTime(
-                                  item.approval.decidedAt,
-                                )}`
-                              : ""}
+                            {e.actorType}
+                            {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
+                            {formatDateTime(e.occurredAt)}
                           </div>
-                          {item.approval.reasoning ? (
-                            <div className="space-y-1">
-                              <div className="text-xs font-medium text-muted-foreground">
-                                Reason
-                              </div>
-                              <p className="text-sm">
-                                {item.approval.reasoning}
-                              </p>
-                            </div>
+                          {e.details ? (
+                            <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
+                              {JSON.stringify(e.details, null, 2)}
+                            </pre>
                           ) : null}
-                          {item.approval.decisionReason ? (
-                            <div className="space-y-1">
-                              <div className="text-xs font-medium text-muted-foreground">
-                                Decision reason
-                              </div>
-                              <p className="text-sm">
-                                {item.approval.decisionReason}
-                              </p>
-                            </div>
-                          ) : null}
-                          <div className="space-y-1">
-                            <div className="text-xs font-medium text-muted-foreground">
-                              Proposed message
-                            </div>
-                            <BodyBlock value={item.approval.proposedInput} />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="text-xs font-medium text-muted-foreground">
-                              Approved message
-                            </div>
-                            {item.approval.approvedInput ? (
-                              <BodyBlock value={item.approval.approvedInput} />
-                            ) : (
-                              <p className="text-sm text-muted-foreground">
-                                {item.approval.status === "approved"
-                                  ? "Not edited; proposed body was approved."
-                                  : "No approved body."}
-                              </p>
-                            )}
-                          </div>
                         </CardContent>
                       )}
                     </Card>
                   </li>
                 ))}
               </ol>
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="p-4 text-sm text-muted-foreground">
-                No activity to show yet — customer messages, the agent's
-                findings and answers, and anything that needs you will appear
-                here.
-              </CardContent>
-            </Card>
-          )
-        ) : (
-          <ol className="relative">
-            {entries.map((e) => (
-              <li
-                key={e.id}
-                className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
-              >
-                <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
-                <Card>
-                  {refundRecommendationFromEntry(e) ? (
-                    <CardContent className="space-y-3 p-4">
-                      <div className="font-medium text-sm">
-                        Refund recommendation
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {e.actorType}
-                        {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
-                        {formatDateTime(e.occurredAt)}
-                      </div>
-                      <RefundRecommendationBlock
-                        recommendation={refundRecommendationFromEntry(e)!}
-                      />
-                    </CardContent>
-                  ) : (
+            ) : summaryText || simplifiedTimelineItems.length > 0 ? (
+              <div className="space-y-3">
+                {summaryText ? (
+                  <Card>
                     <CardContent className="space-y-1.5 p-4">
-                      <div className="font-medium text-sm">
-                        {auditActionLabel(e.action)}
+                      <div className="text-sm font-medium">
+                        {caseRow.summary ? "Summary" : "Triage notes"}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {e.actorType}
-                        {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
-                        {formatDateTime(e.occurredAt)}
-                      </div>
-                      {e.details ? (
-                        <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
-                          {JSON.stringify(e.details, null, 2)}
-                        </pre>
-                      ) : null}
+                      <p className="text-sm text-muted-foreground">
+                        {summaryText}
+                      </p>
                     </CardContent>
-                  )}
-                </Card>
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+                  </Card>
+                ) : null}
 
-      <div>
-        <h2 className="mb-3 text-lg font-semibold">Context</h2>
-        <CaseContext context={context} />
-      </div>
+                <ol className="relative">
+                  {simplifiedTimelineItems.map((item) => (
+                    <li
+                      key={item.id}
+                      className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
+                    >
+                      <span
+                        className={cn(
+                          "absolute -left-[5px] top-3 size-2 rounded-full",
+                          item.kind === "deliveryFailed"
+                            ? "bg-destructive"
+                            : "bg-primary",
+                        )}
+                      />
+                      <Card
+                        className={
+                          item.kind === "deliveryFailed"
+                            ? "border-destructive"
+                            : undefined
+                        }
+                      >
+                        {item.kind === "email" ? (
+                          <CardContent className="space-y-1.5 p-4">
+                            <div className="text-sm font-medium">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.responsible} · {formatDateTime(item.occurredAt)}
+                            </div>
+                          </CardContent>
+                        ) : item.kind === "note" ? (
+                          <CardContent className="space-y-1.5 p-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-medium">
+                                {item.title}
+                              </div>
+                              <Badge variant="outline">Heads-up to you</Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.delivered === false
+                                ? "Not delivered — no notification channel connected"
+                                : "Sent to your notification channel"}{" "}
+                              · {formatDateTime(item.occurredAt)}
+                            </div>
+                            {item.message ? (
+                              <p className="text-sm text-muted-foreground">
+                                {item.message}
+                              </p>
+                            ) : null}
+                          </CardContent>
+                        ) : item.kind === "status" ? (
+                          <CardContent className="space-y-1.5 p-4">
+                            <div className="text-sm font-medium">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDateTime(item.occurredAt)}
+                            </div>
+                            {item.description ? (
+                              <p className="text-sm text-muted-foreground">
+                                {item.description}
+                              </p>
+                            ) : null}
+                          </CardContent>
+                        ) : item.kind === "refundRecommendation" ? (
+                          <CardContent className="space-y-3 p-4">
+                            <div className="text-sm font-medium">
+                              Refund recommendation
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Agent assessment · {formatDateTime(item.occurredAt)}
+                            </div>
+                            <RefundRecommendationBlock
+                              recommendation={item.recommendation}
+                            />
+                          </CardContent>
+                        ) : item.kind === "deliveryFailed" ? (
+                          <CardContent className="space-y-2 p-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-medium text-destructive">
+                                {item.title}
+                              </div>
+                              <Badge variant="destructive">Not delivered</Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDateTime(item.occurredAt)}
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              The drafted reply couldn&apos;t be sent to the
+                              customer.
+                              {item.lastError
+                                ? ` Last error: ${item.lastError}`
+                                : ""}
+                            </p>
+                            <form action={retrySendAction} className="pt-1">
+                              <input
+                                type="hidden"
+                                name="caseId"
+                                value={caseRow.id}
+                              />
+                              <SubmitButton
+                                size="sm"
+                                pendingLabel="Re-sending…"
+                                title="Re-send the same drafted reply that failed to deliver to the customer"
+                              >
+                                Retry sending email
+                              </SubmitButton>
+                            </form>
+                          </CardContent>
+                        ) : (
+                          <CardContent className="space-y-3 p-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-medium">
+                                {approvalStatusLabel(item.approval)}
+                              </div>
+                              <Badge variant="outline">
+                                {toolActionLabel(item.approval.tool)}
+                              </Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Agent {item.approval.agentId} ·{" "}
+                              {formatDateTime(item.approval.createdAt)}
+                              {item.approval.decidedAt
+                                ? ` · decided ${formatDateTime(
+                                    item.approval.decidedAt,
+                                  )}`
+                                : ""}
+                            </div>
+                            {item.approval.reasoning ? (
+                              <div className="space-y-1">
+                                <div className="text-xs font-medium text-muted-foreground">
+                                  Reason
+                                </div>
+                                <p className="text-sm">{item.approval.reasoning}</p>
+                              </div>
+                            ) : null}
+                            {item.approval.decisionReason ? (
+                              <div className="space-y-1">
+                                <div className="text-xs font-medium text-muted-foreground">
+                                  Decision reason
+                                </div>
+                                <p className="text-sm">
+                                  {item.approval.decisionReason}
+                                </p>
+                              </div>
+                            ) : null}
+                            <div className="space-y-1">
+                              <div className="text-xs font-medium text-muted-foreground">
+                                Proposed message
+                              </div>
+                              <BodyBlock value={item.approval.proposedInput} />
+                            </div>
+                          </CardContent>
+                        )}
+                      </Card>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : (
+              <p className="rounded-md border bg-card p-4 text-sm text-muted-foreground">
+                No activity to show yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -1238,22 +1228,18 @@ function CaseContext({
   if (rows.length === 0) {
     return (
       <p className="rounded-md border bg-card p-4 text-sm text-muted-foreground">
-        Nothing recorded yet. As the agent works the case, the facts it gathers
-        — order, customer, reason, risk flags — show up here.
+        Nothing recorded yet.
       </p>
     );
   }
   return (
     <dl className="divide-y divide-border overflow-hidden rounded-md border bg-card">
       {rows.map((row) => (
-        <div
-          key={row.key}
-          className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[11rem_1fr] sm:gap-4"
-        >
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <div key={row.key} className="px-3 py-2.5">
+          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {row.label}
           </dt>
-          <dd className="min-w-0 text-sm text-foreground">
+          <dd className="mt-0.5 min-w-0 text-sm text-foreground">
             {row.badges ? (
               <div className="flex flex-wrap gap-1.5">
                 {row.badges.map((b, i) => (

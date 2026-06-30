@@ -117,6 +117,21 @@ export const setStatusAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?statusChanged=${result.kind}`);
 };
 
+// Resolve a case by hand from the case page — works even while the manager has
+// taken it over ("a case that's with me"). The api bridges the close legally
+// (human_takeover → in_progress → resolved) for this human action; the runtime's
+// takeover guard and the §10 matrix are untouched.
+export const resolveAction = async (formData: FormData): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  const result = await api.resolveCase(ctx, caseId);
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  redirect(`/cases/${caseId}?caseResolved=${result.kind}`);
+};
+
 // Issue an agent-recommended refund directly from the case page. The agent took
 // PATH B (recommend + draft a reply) so there's no approval to approve — this
 // runs the equivalent of refund.create under the operator's authority. The

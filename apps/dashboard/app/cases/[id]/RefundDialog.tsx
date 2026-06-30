@@ -40,6 +40,8 @@ interface Props {
   readonly orderName: string;
   readonly loadContext: (caseId: string) => Promise<RefundContextOutcome>;
   readonly issueAction: (formData: FormData) => void | Promise<void>;
+  /** Render an icon-only trigger (for the case header's action row). */
+  readonly compact?: boolean;
 }
 
 const toNum = (s: string): number => {
@@ -62,6 +64,7 @@ export const RefundDialog = ({
   orderName,
   loadContext,
   issueAction,
+  compact = false,
 }: Props) => {
   const [open, setOpen] = React.useState(false);
   const [outcome, setOutcome] = React.useState<RefundContextOutcome | null>(
@@ -83,12 +86,23 @@ export const RefundDialog = ({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogTrigger asChild>
-        <Button
-          variant="outline"
-          title="Refund this order in Shopify, with restocking"
-        >
-          Refund
-        </Button>
+        {compact ? (
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refund this order"
+            title="Refund this order in Shopify, with restocking"
+          >
+            <RotateCcw aria-hidden />
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            title="Refund this order in Shopify, with restocking"
+          >
+            Refund
+          </Button>
+        )}
       </AlertDialogTrigger>
       <AlertDialogContent className="max-w-3xl gap-0 p-0">
         {/* Always-present accessible title/description for screen readers

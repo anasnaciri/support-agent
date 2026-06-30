@@ -70,9 +70,10 @@ export function AppShell({
   // Section-aware secondary sidebar. Settings was the first section to get
   // one; case-detail pages get a searchable case switcher. Add more entries
   // here as other sections grow sub-navigation.
+  const onCaseDetail = Boolean(caseIdFromPathname(pathname));
   const secondary: SecondarySection | null = pathname.startsWith("/settings")
     ? { title: "Settings", node: <SettingsNav permissions={permissions} /> }
-    : caseIdFromPathname(pathname)
+    : onCaseDetail
       ? { title: "Cases", node: <CasesSidebar /> }
       : null;
 
@@ -241,7 +242,14 @@ export function AppShell({
 
           <main
             className={cn(
-              "relative min-w-0 flex-1 overflow-y-auto px-8 py-8",
+              "relative min-w-0 flex-1",
+              // The case-detail view is a full-height inbox (chat + details
+              // columns that own their own scroll), so it runs edge-to-edge
+              // with no page padding or max-width. Every other route keeps the
+              // centered, scrollable document layout.
+              onCaseDetail
+                ? "overflow-hidden"
+                : "overflow-y-auto px-8 py-8",
               // Content reads as a raised plane casting a soft shadow toward
               // the secondary sidebar — depth at the seam, no hard divider.
               secondary && open
@@ -264,7 +272,11 @@ export function AppShell({
                 <PanelLeftOpen className="size-4" aria-hidden />
               </button>
             ) : null}
-            <div className="mx-auto w-full max-w-5xl">{children}</div>
+            {onCaseDetail ? (
+              <div className="h-full">{children}</div>
+            ) : (
+              <div className="mx-auto w-full max-w-5xl">{children}</div>
+            )}
           </main>
         </div>
       </div>

@@ -14,6 +14,41 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-06-30 — Case detail redesigned as a 3-column inbox (chat + details) + manual "Resolve" (apps/dashboard, NOT committed)
+
+Reworked `/cases/[id]` to mirror a Support-Inbox layout: existing icon rail + **Cases list**
+sidebar (left, unchanged) · **conversation chat** (center) · **details** (right). User-confirmed:
+cases stay left (reference-faithful), redesign the detail page (keep `/cases` list + `CasesSidebar`).
+
+- [x] `AppShell.tsx`: case-detail route renders `<main>` full-bleed (no `max-w-5xl` / padding,
+      `overflow-hidden`) so the chat owns its own scroll; every other route keeps the centered layout.
+- [x] `ChatThread.tsx` (new): the email thread as chat bubbles (inbound left, outbound right;
+      sanitized HTML or text; attachments). Replaces the old `EmailThreadTimeline`.
+- [x] `ChatComposer.tsx` (new, client): one composer with 3 server-decided modes — **approval**
+      (drafted reply fills the input; send control = Approve ✓ / Reject ✗), **reply** (taken-over
+      manual reply; Send ➤), **locked** (agent owns it). Icon-only send controls + Rephrase-with-AI
+      (+ model picker). Absorbs the old `ReplyComposer` (deleted).
+- [x] `page.tsx`: full rewrite into center chat (header = customer name → falls back to reply-to
+      email, + icon-only action buttons) + right details column (Customer, Order, agent-recommended
+      refund, Context, Timeline). **Removed** the token-usage rollup and the "agent: <id>" header line.
+      Header actions are icon-only (Resolve ✓ / Take over ✋ / Hand back 🤖 / Retry send ⟳ / Refund ⟲ / ⋮).
+- [x] Manual **Resolve** that works even on a case "with me" (`human_takeover`): NEW
+      `POST /dashboard/cases/:id/resolve` (gated `cases.set_status`) → `resolveCaseManually`
+      (db dashboard-writes) → `CaseLifecycleWriter.resolve({ actor: user, bridgeFromHumanTakeover: true })`.
+      **No state-machine change**: the §10 matrix + runtime takeover race guard are untouched — the
+      bridge is the already-tested legal two-step `human_takeover → in_progress → resolved`, and the
+      runtime still short-circuits a taken-over case to `PausedForHumanTakeover` before any write.
+- [x] `RefundDialog` gained a `compact` icon trigger for the header.
+- [x] TDD: added two cases to `writes.integration.test.ts` (resolve closes a taken-over case the
+      status endpoint 409s on; resolve 404s cross-tenant). DB-gated → **not run locally** (no
+      `DATABASE_URL`); the underlying `resolve` bridge is already covered by `case-lifecycle-writer.test.ts`.
+- [x] `pnpm build` green; `next build` green (all routes incl. `/cases/[id]`); 418 dashboard+core tests pass.
+
+Follow-ups (not done): chat doesn't auto-scroll to the newest message (needs a small client effect);
+right column is `hidden lg:block` (no mobile layout); header has `pl-14` to clear the collapsed-sidebar
+expand button (small indent when the sidebar is open). **Not committed / not run live** (dashboard
+deploys to CF separately).
+
 ### 2026-06-30 — Out-of-credits is terminal, not a retryable dead-letter (incident `f0a1e242…`)
 
 Prod case `f0a1e242-25a2-4db5-88a6-308a76bdc4f6` dead-lettered to `human_takeover` via
