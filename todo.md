@@ -63,6 +63,16 @@ locally (2303 passed, incl. the resolve integration tests against the local DB).
       removed the header `<select>` and deleted the orphaned `StatusSelect.tsx`.
 - [x] **Skeleton fixed** — `loading.tsx` rewritten to match the inbox layout (was the old centered
       page skeleton, which looked broken in the full-bleed main).
+- [x] **Composer auto-grows** with content, clamped to 64–260px then scrolls (commit `a9a3904`, CF
+      v`702400be`).
+- [x] **17track-style Tracking card** under the Customer + Order cards (commit `0564e58`, CF
+      v`0e70a1ca`): reads `context.liveTrackingStatus` (number + 17track deep link, status +
+      days-in-transit, carrier → destination ship-to country, latest checkpoint, ETA); `no_provider`
+      arm degrades to a note. Pure `tracking-panel-data.ts` (tested); dropped the duplicate "Shipment"
+      Context row. **Only shows when an agent ran `tracking.lookup`** (order-status / missing-package /
+      delivery-issue / damaged-product flows). Origin country + full checkpoint history aren't in our
+      normalized shape — a richer live fetch (expand 17track parsing + a `caseTracking` endpoint) is a
+      possible follow-up.
 - Virtualization: the **chat is intentionally NOT virtualized** — a case's email thread is bounded
       (one conversation, typically <50 msgs), unlike the cases LIST (which IS virtualized). Virtualizing
       variable-height sanitized-HTML bubbles would fight the auto-scroll for negligible gain. The
