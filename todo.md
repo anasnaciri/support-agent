@@ -69,10 +69,17 @@ locally (2303 passed, incl. the resolve integration tests against the local DB).
       v`0e70a1ca`): reads `context.liveTrackingStatus` (number + 17track deep link, status +
       days-in-transit, carrier → destination ship-to country, latest checkpoint, ETA); `no_provider`
       arm degrades to a note. Pure `tracking-panel-data.ts` (tested); dropped the duplicate "Shipment"
-      Context row. **Only shows when an agent ran `tracking.lookup`** (order-status / missing-package /
-      delivery-issue / damaged-product flows). Origin country + full checkpoint history aren't in our
-      normalized shape — a richer live fetch (expand 17track parsing + a `caseTracking` endpoint) is a
-      possible follow-up.
+      Context row. (Originally only showed when an agent ran `tracking.lookup`.)
+- [x] **Full LIVE tracking** (commits `5cabcaa` api + `28e9b2d` dashboard; Fly + CF v`5511285e`):
+      NEW `GET /dashboard/cases/:id/tracking` (gated `cases.view`) → resolves the number (stamp →
+      else order fulfillment) → fresh `TrackingService` (17track) lookup. Expanded the 17track parser +
+      `TrackingLookup.live` with **origin/destination country, days-in-transit, and the full checkpoint
+      list** (optional fields, backward-compatible). `TrackingService` wired into the api layer
+      (`SEVENTEENTRACK_API_KEY` already a shared Fly secret; NoProvider fallback otherwise). The card
+      live-fetches (parallel with the other case reads, best-effort — `caseTracking` never throws) and
+      falls back to the on-case stamp; renders origin → destination, transit-days, and the checkpoint
+      timeline (newest-first, capped with a "full history" 17track link). So the card now shows for ANY
+      case with a tracking number, not just agent-looked-up ones.
 - Virtualization: the **chat is intentionally NOT virtualized** — a case's email thread is bounded
       (one conversation, typically <50 msgs), unlike the cases LIST (which IS virtualized). Virtualizing
       variable-height sanitized-HTML bubbles would fight the auto-scroll for negligible gain. The
