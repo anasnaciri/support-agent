@@ -44,10 +44,15 @@ cases stay left (reference-faithful), redesign the detail page (keep `/cases` li
       `DATABASE_URL`); the underlying `resolve` bridge is already covered by `case-lifecycle-writer.test.ts`.
 - [x] `pnpm build` green; `next build` green (all routes incl. `/cases/[id]`); 418 dashboard+core tests pass.
 
+**Committed (2 commits on main: `0b1da30` api resolve endpoint, `23ab470` dashboard inbox) and
+DEPLOYED 2026-06-30**: Fly `support-agent-backend` rolled (api+worker; `/healthz` 200, `/resolve`
+401=registered) + CF `support-agent-dashboard` version `86f5a335` (`/cases` 307). `ci:local` green
+locally (2303 passed, incl. the resolve integration tests against the local DB). NOT pushed to origin
+(local-commit workflow). NOT yet verified by clicking through prod.
+
 Follow-ups (not done): chat doesn't auto-scroll to the newest message (needs a small client effect);
 right column is `hidden lg:block` (no mobile layout); header has `pl-14` to clear the collapsed-sidebar
-expand button (small indent when the sidebar is open). **Not committed / not run live** (dashboard
-deploys to CF separately).
+expand button (small indent when the sidebar is open).
 
 ### 2026-06-30 — Out-of-credits is terminal, not a retryable dead-letter (incident `f0a1e242…`)
 
