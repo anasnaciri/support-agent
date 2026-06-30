@@ -14,6 +14,76 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-06-30 — Out-of-credits is terminal, not a retryable dead-letter (incident `f0a1e242…`)
+
+Prod case `f0a1e242-25a2-4db5-88a6-308a76bdc4f6` dead-lettered to `human_takeover` via
+`workflow_retries_exhausted`. Root cause (confirmed by decrypting the tenant's BYOK key on the Fly
+machine and hitting OpenRouter `/credits`): the workspace OpenRouter key on
+`iktn3e-kd.myshopify.com` (tenant `477168f6…`) was at **$0.03 / $10** — effectively out of credits.
+An out-of-credits 402 was mapped to `NetworkError` → retryable `Failed` → 5 retries → dead-letter →
+opaque `human_takeover`. The credits cron had already fired (`llmCreditsAlertActive: true`); the
+alert just wasn't acted on.
+
+- [x] New `InsufficientCredits` LLMError tag (agent-core/errors.ts) + in the `LLMError` union.
+- [x] `mapError` (providers/llm-service-live.ts): 402 / "insufficient credit" / "requires more credit"
+      / "negative credit" / "insufficient_quota" / "payment required" → `InsufficientCredits`, checked
+      BEFORE the 429/5xx branch.
+- [x] `handleLlmFailure` (services/agent-runtime.ts): `InsufficientCredits` → terminal
+      `escalateToHuman` reason `llm_insufficient_credits` + merchant notify (mirrors the credential-gap
+      branch). No more wasted retries.
+- [x] Dead-letter now persists the underlying cause: consumer registers with `includeMetadata: true`,
+      reads the dead-lettered job's `output` (pg-boss copies the last failed attempt's serialize-error
+      payload across), and threads `details.underlyingError` into the escalation audit. `escalateDeadLetteredEvent`
+      gained an optional `underlyingError` param.
+- [x] Dashboard reason label `llm_insufficient_credits` (case-timeline.ts).
+- [x] TDD: providers mapError test, agent-runtime-recovery `InsufficientCredits → human_takeover`,
+      new `apps/worker/test/workflow-dead-letter.test.ts`; full `pnpm build` green; 46 + 93 tests pass.
+- [ ] **Ops:** top up the OpenRouter key on `iktn3e-kd.myshopify.com`, then "Retry last step" on
+      `f0a1e242…` (and sweep other `human_takeover` cases from that window).
+- [ ] Deploy api+worker to Fly (the terminal-classification + dead-letter-reason only help cases
+      processed after deploy).
+
+GPT's `026538e fix(worker): reconcile workflow queue options` (now on `main` HEAD) is related — it adds
+`updateQueue` so pg-boss option changes (deleteAfterSeconds, deadLetter wiring) actually apply to
+already-existing prod queues; `createQueue` alone no-ops on an existing queue.
+
+---
+
+### 2026-06-29 — Honor `Reply-To`: route replies to the real customer, not the relay (branch `fix/honor-reply-to-header`)
+
+Fixes the prod bug where a case created from a Shopify storefront **contact form** (inbound
+`From: mailer@shopify.com`, `Reply-To:` the shopper) would have its reply addressed to
+`mailer@shopify.com` — a send-only Shopify address — so the customer never received it. Root cause:
+the connectors parsed only `From`/`To` and never `Reply-To`, so the relay became the stamped
+`customerEmail`, the thread-context header target, AND the only address that passed the reply
+recipient guard. Resolves the inline note "fix: emails sent via the shopify mailer should be routed
+to their respective customer."
+
+- [x] `ConversationMessage.replyTo?` + `InboundMessage.replyTo?` added (agent-core; optional, `from`
+      stays the literal sender for fidelity).
+- [x] All three connectors parse `Reply-To` and fold it into thread `participants`: Gmail
+      (`gmail-http.ts` `normaliseMessage`/`normaliseThread`/`toInboundMessage`), IMAP (`imap-smtp.ts`
+      `RawImapMessage`/`parseRawImapMessage`/`toConversationMessage`/`buildThread`), Graph
+      (`graph-http.ts` `RawGraphMessage`/`normaliseMessage`/`buildThread` + `replyTo` added to
+      `MESSAGE_SELECT`).
+- [x] Reply recipient guard: `participantEmails` (tools `reply.ts`) now allows `m.replyTo.email`, so
+      the agent can actually send to the Reply-To customer (was rejected `recipient_not_in_thread`).
+- [x] Runtime: new pure helper `inboundCustomerEmail(payload) = replyTo?.email || from.email`
+      (agent-runtime-helpers.ts) used at case-creation stamping (agent-runtime.ts ~846) and the
+      thread-context header (~400).
+- [x] TDD: red→green across 5 suites (gmail-http, imap-smtp, graph-conversation-live, tools
+      conversation guard, services reply-to-routing); full `pnpm build` green; providers+tools+services
+      unit + api/mailbox suites all pass.
+- [ ] **Verify live** against the prod contact-form case `c9c4c8f3-168d-4ceb-aad5-c2d0139a219f`: this
+      fix only helps cases created AFTER deploy — the existing case already stamped
+      `customerEmail = mailer@shopify.com`. A reply on the OLD case still needs a manual recipient or a
+      backfill of its `customerEmail`.
+- [ ] Deploy api+worker to Fly (connector parse + runtime stamping live there).
+- [ ] Follow-up (the next inline note): settings page to **skip newsletter/relay domains** so the agent
+      doesn't burn tokens; agent can suggest `suggest ignore domain: true` for owner approval.
+
+---
+
 DONE: draft-email feature on cases/:id — **all 4 slices LANDED 2026-06-22** (composer that drafts +
 sends a customer reply while in human_takeover, "Rephrase with AI", a workspace-configurable rephrase
 model, and a minimalistic model dropdown atop the composer). See the session entries below. Still
@@ -22,9 +92,14 @@ model, and a minimalistic model dropdown atop the composer). See the session ent
 NEXT (the "Later" item): skip emails from these domains — a settings page for domains to skip so the
 agent doesn't lose tokens on newsletters etc.; the agent can suggest skipping by adding
 `suggest ignore domain: true` to the case context, which the owner approves on the case page.
+fix: emails sent via the shopify mailer should be routed to their respective customer — DONE 2026-06-29 (honor Reply-To; see dated entry at top, branch fix/honor-reply-to-header)
 Later: skip emails from these domains, add a settings page for domains to skip, so the agent dont lose tokens on newsletter emails etc.. and make the agent able to suggest skipping, on the context it adds a suggest ignore domain : true, so on the case page the owner can approve skipping this domain
-
+later: show tracking status in the order card
+later: check better auth migration
+feat: add search cases via email
+fix: cases that are escalated to the supplier should be marked as waiting for supplier even if the user approves and email
 Resolution-agent-direct + tool-config-once (decided 2026-06-28):
+
 - STATUS 2026-06-28: slices 1–3 landed in the working tree (TDD, full `pnpm build` green,
   dashboard `tsc --noEmit` green); later committed as 33c5100/99692c3 and Fly backend v33
   verified live on 2026-06-29 (api+worker image deployment-01KW6MGKVW2W72ENCFVC790TGS).
@@ -61,6 +136,7 @@ Resolution-agent-direct + tool-config-once (decided 2026-06-28):
 - The temporary `routedbg.*` audit diagnostics used to chase the silent-resolve have been removed.
 
 Prod incident 2026-06-29 (case 385a5f43-32c8-4094-bd40-a13e720ff0d3):
+
 - Root cause: Railway's old `worker` service was still Online while Fly's worker was also Online,
   both pointing at the same Railway Postgres / pg-boss `workflow.events` queue. The Railway worker's
   active deployment was from 2026-06-15, before the 2026-06-24 triage final-message guard and the
@@ -83,6 +159,7 @@ Prod incident 2026-06-29 (case 385a5f43-32c8-4094-bd40-a13e720ff0d3):
       so future incidents can identify which deployment consumed a job without provider log retention.
 
 Architecture follow-up discussed 2026-06-25:
+
 - [ ] Evaluate a supervisor/reporting subagent pattern for read-only research and bounded specialist
       analysis, without moving final side-effect decisions out of the runtime permission/audit/state
       machine. Candidate shape: `agent.delegate` creates an audited bounded subtask; the child returns a
@@ -105,7 +182,7 @@ tools' `requiredConnectorScopes`. Two problems found from a real connection
   scope (a scopeless capability belongs in neither the scope→tool mapping nor the
   re-OAuth signal). Runtime `checkRequiredScopes` was already correct (it iterates
   `req.scopes`, so an empty array is vacuously "ok" — never passes `""`).
-- **Forgotten scopes.** Four requested scopes were invisible because no *tool*
+- **Forgotten scopes.** Four requested scopes were invisible because no _tool_
   claims them: `write_inventory`/`read_inventory` (refund-modal restock — an
   operator dashboard action) and `read_legal_policies`/`read_online_store_pages`
   (post-connect KB import job). Added `platformCapabilitiesForProvider` + a
@@ -192,6 +269,7 @@ fallback and would also render blank for an empty thread subject — route it th
 ### 2026-06-28 — Cases status filter + case-sidebar "Needs attention" mode (apps/dashboard)
 
 **What:** two case-navigation UX upgrades on the live Next dashboard (`apps/dashboard`).
+
 1. **Cases list (`/cases`)** gets a status filter — a `MultiSelect` over `<form method="get">`
    (mirrors the approvals page), default = no filter (all statuses), carries through pagination.
 2. **Case-detail secondary sidebar** (the virtualized switcher) gets an **icon-only segmented
@@ -201,6 +279,7 @@ fallback and would also render blank for an empty thread subject — route it th
    row keeps its elevated look.
 
 **Cross-stack:**
+
 - `dashboard-contracts`: `CasesFilter` gained `status?` (include) + `excludeStatus?` (exclude).
 - `packages/db` `casesList`: `inArray(cases.status,…)` / `notInArray(…)` whereParts (mirrors
   `approvalsList`); added `notInArray` import.
@@ -215,6 +294,7 @@ fallback and would also render blank for an empty thread subject — route it th
   `pnpm build` (tsc -b) green; 383 dashboard tests green.
 
 **Follow-ups:**
+
 - [ ] NOT committed; dashboard changes need their own CF/OpenNext deploy.
 - [ ] Optional `casesList` status/excludeStatus **integration** test (needs dev Postgres; the SQL
       mirrors the already-tested `approvalsList` path, pure helpers carry deterministic coverage).
@@ -230,6 +310,7 @@ staff-only "Reason for refund". Separate from the existing agent-recommendation 
 (that card still exists, amount-only). Supplier escalation was explicitly deferred.
 
 **Cross-stack (all 5 layers), TDD where pure:**
+
 - `agent-core/shopify.ts`: new `ShopifyRefundLineItem`, `ShopifyLocation`, `ShopifyOrderRefundContext`
   types; `RefundOrderInput` gained optional `lineItems` (restock) + `shipping`.
 - `services`: `ShopifyService.getOrderRefundContext` Tag + Test fixture (`orderRefundContext` map);
@@ -273,6 +354,7 @@ the deterministic check (`replyProvesOrderIdentity`); it now also stamps the **t
 untrusted reply body. Enforcement unchanged; this is purely additive (no gate loosened).
 
 **Done (TDD red→green, `pnpm build` green, full non-spa suite green 1811 passed):**
+
 - [x] New pure helper `orderIdentityVerificationPatch(replyText, context)` in `agent-runtime-helpers.ts`
       → `{ identityVerified, verifiedCustomerEmail }` | null (5 unit tests in `order-identity.test.ts`,
       incl. "saves the order's email, never a stray token the customer typed")
@@ -285,9 +367,10 @@ untrusted reply body. Enforcement unchanged; this is purely additive (no gate lo
       (typo) branch and the full-customer branch; wired from `page.tsx` (live `apps/dashboard`)
 
 **Follow-ups:**
+
 - [ ] `apps/dashboard-spa` (WIP, untracked) has no case-detail surface yet → mirror the Context-panel +
       Customer-card rows there if/when it goes live.
-- [ ] Natural next step (was "move #1" in the handoff): resolve the Customer *card itself* from the
+- [ ] Natural next step (was "move #1" in the handoff): resolve the Customer _card itself_ from the
       verified email / the resolved order's `customerId` so the full Shopify customer populates (today
       `resolveCustomerForContext` only does exact-email and still shows "no matching customer").
 
@@ -298,14 +381,15 @@ decision endpoint returned 410 because the approval row was past its 24h `expire
 Fly found a deeper prod bug: the `approval.maintenance` cron's expiry sweep had **never worked** —
 `expireOverdue` / `listDecidedUnresumed` interpolated a raw JS `Date` into a drizzle `sql` fragment
 (`sql`${col} < ${date}``), which the postgres driver rejects with `TypeError: ... Received an
-instance of Date`; the error was masked by `wrap` + the cron's `catchAll`. Result: 24 approvals stuck
-`pending` past expiry, zero rows ever reaching `expired`, and the L3b republish recovery also dead.
+instance of Date`; the error was masked by `wrap`+ the cron's`catchAll`. Result: 24 approvals stuck
+`pending`past expiry, zero rows ever reaching`expired`, and the L3b republish recovery also dead.
 
 **Decision (user):** approval drafts no longer expire by age for ANY tool (not just replies). Keep
 only the emailed **link** TTL as a bearer-credential bound (bumped 24h → **30 days**); the
 authenticated dashboard never blocks on age.
 
 **Done (TDD, build + tests green):**
+
 - [x] Removed the row-expiry block in `applyApprovalDecision` (dropped the `expired` decision kind)
 - [x] Removed the resume-time `approval_expired` escalation in `agent-runtime.ts`
 - [x] Removed `expireOverdue` (ApprovalService Tag + Test + Live) and the cron's expire arm; kept +
@@ -317,7 +401,7 @@ authenticated dashboard never blocks on age.
       never hit drizzle, which is why this shipped — integration suite is gated on `DATABASE_URL`)
 
 **Deviation from audit L7 (recorded):** L7 ("expiresAt must be enforced; stale drafts can't be
-decided") is intentionally reverted for the row/tool. The *intent* (don't act on a stale draft) is
+decided") is intentionally reverted for the row/tool. The _intent_ (don't act on a stale draft) is
 now meant to be served by a non-blocking **staleness warning** in the dashboard — see TODO below.
 
 **Deploy + data recovery (USER):** redeploy **api + worker** to Fly. Once the api ships, the 24
@@ -327,11 +411,11 @@ memory `project_approval_tool_expiry_removed`.
 - [x] **The "C" half — staleness warning (2026-06-27):** non-blocking "Drafted N days ago — the
       order, policy, or conversation may have changed since. Review before sending." banner on the
       case-page `ApprovalCard` AND the `/approvals/:id` full view. Pure `apps/dashboard/lib/draft-
-      staleness.ts` (24h threshold, all tools, `createdAt`-driven, Path-B string-date safe via
+staleness.ts` (24h threshold, all tools, `createdAt`-driven, Path-B string-date safe via
       `asDate`) + 5 unit tests. Built on the CURRENT Next dashboard (`apps/dashboard`) per the user;
       the WIP `apps/dashboard-spa` still needs its own copy if/when it goes live.
 - [ ] **CI gap:** the db integration suite (`*.integration.test.ts`) is gated `DATABASE_URL ?
-      describe : describe.skip`. If CI doesn't set `DATABASE_URL`, the new regression (and the whole
+describe : describe.skip`. If CI doesn't set `DATABASE_URL`, the new regression (and the whole
       real-drizzle seam) is skipped — this is exactly how the raw-Date bug shipped. Ensure CI runs it.
 
 ### DESIGNED, not yet built — merchant-configurable Resolution Policy (per-scenario playbooks)
@@ -345,6 +429,7 @@ rules, not have them hardcoded into the agent** — and this must apply to **eve
 refund/returns, while **tools stay hard-gated**.
 
 **Core principle — three layers, each choice goes in the layer that can enforce it:**
+
 - **Guardrails** (hard, already exists): spending caps + auto-vs-ask via `PermissionService` +
   `RefundPolicy`/`DiscountPolicy` modes (thresholds/always_ask/always_deny). Never let the LLM exceed a cap.
 - **Capabilities** (hard, mostly exists): which tools/channels exist — supplier configured? coupon program?
@@ -357,21 +442,28 @@ already a `defineTool`. So "generalize to every scenario" = one uniform model wh
 **which tools the agent may use**, and that allow-list IS the hard gate. Refund/return is just one instance.
 
 **Storage** — in `tenants.settings` JSONB, defaults-on-read, NO migration (exactly like `RefundPolicy`):
+
 ```ts
-interface ScenarioAction { tool: string; permission: "allow" | "ask"; } // absent from list = denied
+interface ScenarioAction {
+  tool: string;
+  permission: "allow" | "ask";
+} // absent from list = denied
 interface ScenarioPolicy {
-  key: string;            // "delivery_issue" … (fixed built-in) OR merchant-defined
-  label: string;          // merchant-facing name
-  recognition?: string;   // "when this applies" — fed to triage; REQUIRED for custom scenarios
-  builtin: boolean;       // seeded + tuned specialist, vs merchant-defined + generic agent
+  key: string; // "delivery_issue" … (fixed built-in) OR merchant-defined
+  label: string; // merchant-facing name
+  recognition?: string; // "when this applies" — fed to triage; REQUIRED for custom scenarios
+  builtin: boolean; // seeded + tuned specialist, vs merchant-defined + generic agent
   enabledActions: ScenarioAction[];
   supplierMode: "escalate_and_wait" | "notify_and_proceed" | "none";
-  notes?: string;         // free-text nuance, injected verbatim into the prompt (SOFT layer)
+  notes?: string; // free-text nuance, injected verbatim into the prompt (SOFT layer)
 }
-interface ResolutionPolicy { scenarios: ScenarioPolicy[]; }
+interface ResolutionPolicy {
+  scenarios: ScenarioPolicy[];
+}
 ```
 
 **How tools stay gated (3 stacked layers, none trust the prompt), per scenario at tick time:**
+
 1. **Tool visibility:** `presentedTools = specialist.tools ∩ scenario.enabledActions[].tool` — the LLM is
    only handed the intersection; it can't call a tool it can't see.
 2. **Permission backstop:** disabled tools → `permissionOverrides[tool] = "deny"`; enabled tools carry the
@@ -385,6 +477,7 @@ specialists become GENERIC skill providers (delete the hardcoded B1/B2/B3 branch
 same `buildSystemPrompt` seam that already adds the supplier sheet + knowledge roster).
 
 **Merchant-facing input** — a card per scenario (`/settings/resolution-policy`), NO jargon/tool-ids:
+
 - a **checklist of plain-language actions** ("Issue a refund", "Offer a discount coupon", "Ask the customer
   to return it first", "Send a replacement", "Escalate to my supplier") = the hard gate
 - per checked action, an **Auto / Ask-me-first dropdown** = `enabledActions[].permission`
@@ -393,18 +486,19 @@ same `buildSystemPrompt` seam that already adds the supplier sheet + knowledge r
 - baseline actions (look up order, reply, search knowledge) are "Always on", never toggles
 - built-ins ship PRE-FILLED with defaults matching today's behavior (do-nothing keeps working)
 
-**The cards are DATA, not hardcoded.** Built-in cards are a fixed *seeded* starting set (5, because they
+**The cards are DATA, not hardcoded.** Built-in cards are a fixed _seeded_ starting set (5, because they
 have hand-tuned specialists + reliable curated classification); merchants can ALSO **add their own** cards.
 A custom card = the same card + one extra field "when should the agent treat a message as this?"
 (`recognition`). Two engine changes enable custom scenarios:
+
 1. **Triage classifies into the scenario list, not a hardcoded enum** — inject each scenario's
    `label` + `recognition` into triage's prompt (built-ins + custom are just entries).
 2. **A generic, policy-driven resolution agent** handles any scenario with no bespoke specialist — tools =
    union of remedy tools gated down by `enabledActions`; behavior = the injected playbook. Built-ins keep
    their tuned specialists; everything custom routes here.
 
-Relationship to existing features: a custom *scenario* is the lightweight middle tier (merchant answers
-when/what/supplier/notes); a custom *agent* (`tenant_custom_agents`, already shipped) stays the escape hatch
+Relationship to existing features: a custom _scenario_ is the lightweight middle tier (merchant answers
+when/what/supplier/notes); a custom _agent_ (`tenant_custom_agents`, already shipped) stays the escape hatch
 for genuinely bespoke multi-step flows. Honest tradeoff: custom-scenario classification leans on the
 merchant's `recognition` wording (softer than a curated enum) and the generic agent lacks domain-tuned
 multi-step skills (e.g. the careful tracking-verify flow) — hence built-ins stay tuned.
@@ -414,6 +508,7 @@ supplier channel (for `notify_and_proceed`). Everything else reuses existing too
 `supplier.escalate` (parks `waiting_for_supplier`) exists.
 
 **Proposed build sequence** (TDD red→green each slice):
+
 1. [ ] `supplier.notify` tool (non-blocking supplier heads-up).
 2. [ ] `ResolutionPolicy` in `tenants.settings` + defaults-on-read + dashboard contract.
 3. [ ] Runtime: classification → policy lookup → `presentedTools` intersection + derived
@@ -439,6 +534,7 @@ drop. Philosophy: tools are non-blocking; the agent runs reason→act→observe 
 gated actions are QUEUED (not stop-at-first-gate) and approved together as one bundle.
 
 Slice status (commits on the branch):
+
 - [x] **Slice 1** — `ResolutionPolicy` in `tenants.settings` (5 seeded built-ins, `decodeResolutionPolicy`
       defaults-on-read, `setResolutionPolicy`/`setResolutionAgentEnabled`). `6fcbc51`
 - [x] **Slice 2** — `merchant.notify` multi-channel (`290e32f`): ALWAYS emails the operator
@@ -495,30 +591,25 @@ Slice status (commits on the branch):
 - [x] **"Add scenario" — merchant-authored custom scenarios** (2026-06-28, NOT committed): the engine was
       already generic (runtime `withScenario` looks up `resolutionPolicy.scenarios` by `context.scenarioKey`,
       and `applyTriageScenarioRouting` lists ALL enabled scenarios — built-in + custom — to triage), so this
-      was UI + a server-authoritative write decoder, no runtime change.
-      - **Services:** new `decodeResolutionPolicyUpdate` (write path, distinct from the trusting read-path
-        `decodeResolutionPolicy`): built-ins ALWAYS present with immutable fields (key/label/recognition/
-        builtin) FORCED from `defaultResolutionPolicy` (a merchant can't rename/delete one); customs get
-        `builtin:false` + a stable, unique, `custom_`-namespaced key (existing `custom_*` key kept as-is so a
-        label rename never re-keys an in-flight scenario; else slugged from the label; deduped; can never
-        collide with a built-in). `builtin` is NEVER trusted from the body — derived by key membership.
-        Extracted `decodeScenarioActions`, exported `CUSTOM_SCENARIO_KEY_PREFIX`.
-      - **API:** `POST /dashboard/resolution-policy` now uses `decodeResolutionPolicyUpdate` (was the read
-        decoder) → custom scenarios persist; built-in immutability enforced server-side (the dashboard is a
-        pure api client, so this is the real boundary).
-      - **Dashboard:** `resolution-policy-form.tsx` is now a client component (discount-policy-form pattern):
-        static built-in cards + stateful custom cards with editable name + "when does this apply" +
-        Add/Remove. A hidden `__scenarioKeys` manifest lists every card's form key; the parser derives
-        built-in vs existing-custom (`custom_*`) vs freshly-added (`__new_*`, key blanked so the server
-        assigns) from the key prefix. `parse-resolution.ts` rewritten (no longer needs the re-read `stored`);
-        `actions.ts` no longer re-reads stored (server is authority).
-      - Tests: `decodeResolutionPolicyUpdate` units (9) in `tenant-repository.test.ts`; rewritten
-        `resolution-policy-form.test.ts` (7) for the manifest parser. Build + dashboard typecheck green; the
-        53-test scenario e2e + 14-test worker loop unaffected.
-      - **Follow-up:** custom scenarios route through the GENERIC scenario agent only when
-        `resolutionAgentEnabled` is on (legacy triage routing has a hardcoded enum and ignores
-        `resolutionPolicy` keys). The WIP `apps/dashboard-spa` has no resolution-policy page yet — it'll need
-        its own copy when it goes live.
+      was UI + a server-authoritative write decoder, no runtime change. - **Services:** new `decodeResolutionPolicyUpdate` (write path, distinct from the trusting read-path
+      `decodeResolutionPolicy`): built-ins ALWAYS present with immutable fields (key/label/recognition/
+      builtin) FORCED from `defaultResolutionPolicy` (a merchant can't rename/delete one); customs get
+      `builtin:false` + a stable, unique, `custom_`-namespaced key (existing `custom_*` key kept as-is so a
+      label rename never re-keys an in-flight scenario; else slugged from the label; deduped; can never
+      collide with a built-in). `builtin` is NEVER trusted from the body — derived by key membership.
+      Extracted `decodeScenarioActions`, exported `CUSTOM_SCENARIO_KEY_PREFIX`. - **API:** `POST /dashboard/resolution-policy` now uses `decodeResolutionPolicyUpdate` (was the read
+      decoder) → custom scenarios persist; built-in immutability enforced server-side (the dashboard is a
+      pure api client, so this is the real boundary). - **Dashboard:** `resolution-policy-form.tsx` is now a client component (discount-policy-form pattern):
+      static built-in cards + stateful custom cards with editable name + "when does this apply" +
+      Add/Remove. A hidden `__scenarioKeys` manifest lists every card's form key; the parser derives
+      built-in vs existing-custom (`custom_*`) vs freshly-added (`__new_*`, key blanked so the server
+      assigns) from the key prefix. `parse-resolution.ts` rewritten (no longer needs the re-read `stored`);
+      `actions.ts` no longer re-reads stored (server is authority). - Tests: `decodeResolutionPolicyUpdate` units (9) in `tenant-repository.test.ts`; rewritten
+      `resolution-policy-form.test.ts` (7) for the manifest parser. Build + dashboard typecheck green; the
+      53-test scenario e2e + 14-test worker loop unaffected. - **Follow-up:** custom scenarios route through the GENERIC scenario agent only when
+      `resolutionAgentEnabled` is on (legacy triage routing has a hardcoded enum and ignores
+      `resolutionPolicy` keys). The WIP `apps/dashboard-spa` has no resolution-policy page yet — it'll need
+      its own copy when it goes live.
 
 Tests: `apps/worker/test/scenario-resolution-loop.test.ts` (queue+mapping, bundle resume, envelope clamp),
 `packages/agents/test/scenario-resolution-agent.test.ts`, `applyScenarioEnvelope` units in
@@ -534,7 +625,7 @@ shared-dev-DB `ci:local` flake), each slice's targeted tests + the 53-test legac
 Production incident (case `ba2880a0-2b3a-4db4-8e93-f1085b9c9a1e`, 2026-06-24): an automated Shopify
 marketing email from `email@email.shopify.com` ("give it another try") was **misread by triage as a real
 customer question**, handed off to general-inquiry, which **drafted a `conversation.reply` — a human then
-approved it and it SENT** to the no-reply address. Only the *later* bounce messages got correctly
+approved it and it SENT** to the no-reply address. Only the _later_ bounce messages got correctly
 classified "Out of scope: Automated delivery status notification" and resolved without replying.
 
 Root cause: there is **no deterministic filter for automated/bulk/no-reply/bounce mail** — the entire
@@ -546,6 +637,7 @@ prompt judgment, NOT a guarantee (`general-inquiry-agent.ts:51-54,88`). No `Auto
 Outlook/IMAP don't retain them.
 
 Proposed fix (deterministic, two layers — design recorded, user said diagnose-only for now):
+
 1. **Pre-triage skip** before any LLM runs: detect automated mail (sender patterns `no-reply@`/`noreply@`/
    `mailer-daemon@`/`postmaster@`/`bounce@`/`*.email.shopify.com` — connector-agnostic since `from.email`
    is on every message — plus RFC headers `Auto-Submitted: auto-*`, `Precedence: bulk`, `List-Unsubscribe`,
@@ -566,7 +658,7 @@ and a fresh `rg` audit on 2026-06-23:
 
 Prod case `3428f154` (Elva Labs) drafted "I cannot locate an order under #Q537JR5JA … please double-check"
 to a customer **whose case already had an order bound**. Root cause = the scatter the user flagged: the case
-stored a *fuzzy reference string* in `identifiedOrderId` (whatever was first written — triage's verbatim
+stored a _fuzzy reference string_ in `identifiedOrderId` (whatever was first written — triage's verbatim
 customer-quoted confirmation code), and every consumer (the agent's `get_order`, the dashboard panel's
 `resolveOrderForContext`, the Issue-refund button) **re-searched that string independently**. A mistyped /
 non-matching confirmation code missed in the agent's `get_order` while the case was bound another way → the
@@ -574,15 +666,16 @@ agent contradicted the system. Plus a precedence bug: triage's unverified string
 "won forever" (`stamp only when absent`), so a concretely-resolved order never superseded it.
 
 Fix (full canonical binding, TDD):
+
 - **`identifiedOrderId` is now always the stable Shopify GID** (single source of truth). `orderContextRef`
   returns the GID only — never a fuzzy name (supersedes the dc9bdfd "prefer name" choice below).
 - **`quotedOrderRef`** = NEW untrusted hint field on `CaseContext`. Triage's `case.update_context` writes
   THIS (renamed from `identifiedOrderId`, which agents can no longer set — closed-schema mitigation intact);
-  it drives the specialist's *first* `get_order` only.
+  it drives the specialist's _first_ `get_order` only.
 - **Precedence inverted**: a concretely-resolved order PROMOTES an empty/legacy non-GID value; a bound GID is
   never rebound (first concrete order wins; identity-gate intent preserved). `agent-runtime.ts` stamping block.
 - **Agent stops re-searching**: new `boundOrderDirective` injects `[This case already has an identified
-  order: <GID> … do NOT search again]` on `customer.replied` / `message.received` / `case.resumed` (after the
+order: <GID> … do NOT search again]` on `customer.replied` / `message.received` / `case.resumed` (after the
   identity directive, which still wins). `ORDER_RESOLUTION_LINES` rewritten: load the bound GID if present;
   else try `quotedOrderRef`; **on a `get_order` miss, fall back to `find_customer_order` by email** before
   ever telling the customer "can't find it" (this is what actually recovers Susan's case).
@@ -692,15 +785,17 @@ records a `case.refund_issued` audit row, and retires the button. Gated on the e
 **`refunds.issue`** RBAC permission (route-level; open-mode/owner pass via `decideAuthz`). Does NOT
 change case status. TDD: pure DI core `apps/api/.../case-refund.ts` (`issueCaseRefund`, outcomes
 `issued | invalid_amount | order_not_found | already_refunded | currency_mismatch | refund_failed`)
-+ pure `issuableRefund`/`refundAlreadyIssued` helpers in `refund-recommendation.ts`; 13 new unit
-tests; `tsc -b` + dashboard `tsc --noEmit` green; 330 dashboard/contracts + 20 api-unit tests green.
-Files: `apps/api/.../case-refund.ts` (+test), `case-handlers.ts` (`handleDashboardIssueRefund`),
-`routes.ts` (`POST /dashboard/cases/:id/refund`), `apps/dashboard/lib/api-client.ts` (`issueRefund`),
-`app/cases/[id]/{actions.ts,page.tsx,refund-recommendation.ts}`, `lib/labels.ts`,
-`packages/dashboard-contracts/.../rbac-permissions.ts` (broadened `refunds.issue` description).
-**NOT committed.**
+
+- pure `issuableRefund`/`refundAlreadyIssued` helpers in `refund-recommendation.ts`; 13 new unit
+  tests; `tsc -b` + dashboard `tsc --noEmit` green; 330 dashboard/contracts + 20 api-unit tests green.
+  Files: `apps/api/.../case-refund.ts` (+test), `case-handlers.ts` (`handleDashboardIssueRefund`),
+  `routes.ts` (`POST /dashboard/cases/:id/refund`), `apps/dashboard/lib/api-client.ts` (`issueRefund`),
+  `app/cases/[id]/{actions.ts,page.tsx,refund-recommendation.ts}`, `lib/labels.ts`,
+  `packages/dashboard-contracts/.../rbac-permissions.ts` (broadened `refunds.issue` description).
+  **NOT committed.**
 
 FOLLOW-UPS (deliberately out of scope — user scoped this to the button only):
+
 - [ ] **Prompt fix (recurrence):** the PATH B reply over-promised — it claimed a refund was "submitted
       for approval" when PATH B submits nothing. Tighten `refund-review-agent` so PATH B replies only
       say "pending confirmation" (its own example already does), and/or prefer PATH A (`refund.create`,
@@ -739,7 +834,7 @@ layers:
 
 1. **Triage prompt fallback** told the agent to "respond with plain text only" when an order-requiring
    category had no `identifiedOrderId`. That plain text is a `final_message`, which the runtime resolves.
-2. **Runtime** auto-resolves on *any* `final_message`, with no notion that a router must never be terminal.
+2. **Runtime** auto-resolves on _any_ `final_message`, with no notion that a router must never be terminal.
 
 Fix:
 
@@ -751,7 +846,7 @@ Fix:
   `mode: "primary"` agent with no handoffs is a legitimate resolver). `agent-runtime.ts` final_message block.
 - **Single-order inference (user ask: "if the customer has only one order, infer it; don't ask for the
   number"):** new `ShopifyService.findOrdersByEmail` (Live: `orders(query: "email:…", sortKey CREATED_AT,
-  reverse)`) + new read-only tool `shopify.find_customer_order` (returns `single` w/ the order | `none` |
+reverse)`) + new read-only tool `shopify.find_customer_order` (returns `single` w/ the order | `none` |
   `multiple`). The four order specialists share `ORDER_RESOLUTION_LINES`
   (`packages/agents/src/order-resolution.ts`): use `identifiedOrderId` if present, else look the customer
   up by email — exactly one order → use it silently; zero/many → `conversation.ask_customer`. Added
@@ -773,13 +868,13 @@ photo request — fine on the common single-order path; revisit if it bites.
 
 ### ✅ FOLLOW-UP FIX — bind the inferred order to the case (2026-06-25)
 
-Prod case `e161d86e` (Elva Labs) exposed the gap the single-order patch left open: the agent *found* the
+Prod case `e161d86e` (Elva Labs) exposed the gap the single-order patch left open: the agent _found_ the
 order via `shopify.find_customer_order` (single match on the sender's email), recommended a correct
 `full_refund $24.92`, and parked for approval — but the **dashboard showed no order** and the **"Issue
 refund" button had nothing to act on**. Root cause: `find_customer_order` returns the order to the LLM but
 nothing wrote it back to `case.context.identifiedOrderId`, which is the ONLY field both the order panel and
 the Issue-refund `loadOrder` resolve from (`resolveOrderForContext`). It was only ever stamped by triage's
-`case.update_context` when the customer *quoted* an order number — which this customer didn't.
+`case.update_context` when the customer _quoted_ an order number — which this customer didn't.
 
 Fix (runtime, TDD): after a successful `shopify.get_order` OR `shopify.find_customer_order` (`status:
 "single"`), the runtime stamps `identifiedOrderId` **only when absent** (triage's customer-quoted id still
@@ -800,7 +895,7 @@ or ask for photos. A verified-damage REPLACEMENT needs the warehouse/supplier to
 item — so it now escalates, mirroring `missing-package-agent`'s supplier loop.
 
 - **New tool + override:** `supplier.escalate` added to its tools; `permissionOverrides["supplier.escalate"]
-  = "allow"` so the escalation PARKS the case in `waiting_for_supplier` (the runtime producer) instead of
+= "allow"` so the escalation PARKS the case in `waiting_for_supplier` (the runtime producer) instead of
   creating an approval. The runtime parking on `supplier.escalate` (→ `escalated:true` + resolved `allow`)
   and the `supplier.updated` re-engage are agent-agnostic — no runtime change was needed.
 - **BRANCH A rework** — Turn 4 became a resolution decision with two paths:
@@ -872,12 +967,13 @@ through triage. Fix: two retry shapes on a `human_takeover` case.
   has no message-replay, so it re-classifies from `notes`).
 
 Layers: `CaseLifecycleWriter.resume` gains `restartFromTriage` (rebind to `PRIMARY_AGENT_ID = support-triage`
-+ drop classification + audit detail); `dashboard-writes.resumeCase` + `case-retry.retryCaseNow` (trigger) +
-`handleDashboardRetry` (reads `fromTriage` from body) thread it through; api-client `retry({fromTriage})`;
-dashboard overflow menu now offers both items (`retryNow` "Retry last step" + `retryFromTriage` "Restart from
-triage"), new `retryFromTriageAction`. TDD: `+1` case-retry unit (full-retry trigger), `+1` lifecycle-writer
-(rebind + classification-clear + audit), `case-actions-menu` test updated. `pnpm build` green; full suite
-green (1748). **Backend NOT committed/deployed; dashboard UI needs its own Cloudflare deploy for the buttons.**
+
+- drop classification + audit detail); `dashboard-writes.resumeCase` + `case-retry.retryCaseNow` (trigger) +
+  `handleDashboardRetry` (reads `fromTriage` from body) thread it through; api-client `retry({fromTriage})`;
+  dashboard overflow menu now offers both items (`retryNow` "Retry last step" + `retryFromTriage` "Restart from
+  triage"), new `retryFromTriageAction`. TDD: `+1` case-retry unit (full-retry trigger), `+1` lifecycle-writer
+  (rebind + classification-clear + audit), `case-actions-menu` test updated. `pnpm build` green; full suite
+  green (1748). **Backend NOT committed/deployed; dashboard UI needs its own Cloudflare deploy for the buttons.**
 
 ### ✅ Enhanced — resume now replays the FULL thread (2026-06-26)
 
@@ -903,7 +999,7 @@ gone). `pnpm build` green; runtime + messages + e2e + lifecycle suites green. Co
 ### 🔴 Incident + fix — silent auto-resolve on unverified identity mismatch (2026-06-26)
 
 Prod case `3428f154` (Susan Terranova): a `where_is_order` with an email typo on the ORDER (order email ≠ the
-customer's real email → `order_customer_mismatch` flag). On a *Restart from triage* (after a manager rejected the
+customer's real email → `order_customer_mismatch` flag). On a _Restart from triage_ (after a manager rejected the
 agent's earlier `ask_customer` identity challenge), the order-status-agent — on **v17** — gathered order +
 tracking (in transit) + knowledge, then emitted a **bare `final_message`** (7.8k output tokens; it wrote the
 answer as prose) and the runtime **auto-resolved a live case with NOTHING sent to the customer**. Two defects:
@@ -926,7 +1022,7 @@ order_customer_mismatch must never auto-resolve on a bare final_message.** Commi
 ### ✅ Identity mismatch → judgment hint, not a hard block (2026-06-26)
 
 Follow-on to the above: a customer whose ORDER has an email typo (Susan: order under `sueterrranova@`, writes
-from `sueterranova@`) could never satisfy the old hard gate — it demanded she confirm the *order's* (typo'd)
+from `sueterranova@`) could never satisfy the old hard gate — it demanded she confirm the _order's_ (typo'd)
 email, which she'd never type. Per merchant ask: **the mismatch is now a HINT for the agent's judgment, not an
 automatic refusal.** `orderIdentityDirective` (helpers) softened from "Identity check REQUIRED / Do NOT share"
 to "Possible identity mismatch" — it shows BOTH emails and tells the agent to decide: obvious typo (same
@@ -973,6 +1069,7 @@ triage→handoff→get_order→update_context→final_message flow). Two real bu
 
 3428f154 STILL auto-resolved on a v21 restart (the resumeToken fix did NOT stop it). Deep forensics (live prod
 DB reads of `cases` + `audit_log` + `tool_executions`, AND executing the deployed module on the Fly worker):
+
 - The case carries ONE **pre-scoping, UNSCOPED** reply marker from its ORIGINAL June-22 reply:
   `conversation.reply:order-status-reply-gmail:19ef1062ebc15c9b` (no `scope:` prefix). It's permanent and matches
   any future **bare** key for the same stable `draftId`.

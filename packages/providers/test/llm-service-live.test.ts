@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ContextTooLarge,
+  InsufficientCredits,
   NetworkError,
   ProviderUnavailable,
   SafetyBlocked,
@@ -609,6 +610,41 @@ describe("LLMServiceLive — error mapping", () => {
     expect(exit._tag).toBe("Success");
     if (exit._tag !== "Success") return;
     expect(exit.value).toBeInstanceOf(SafetyBlocked);
+  });
+
+  it("maps a 402 / insufficient-credit error → InsufficientCredits (terminal, NOT a retryable provider error)", async () => {
+    // A prepaid OpenRouter key at zero balance is rejected with HTTP 402.
+    // This must NOT map to ProviderUnavailable/NetworkError (which the runtime
+    // treats as retryable and would burn 5 retries → opaque dead-letter); it is
+    // deterministic until the merchant tops up, so it parks for a human.
+    const byStatus = new Error("Payment Required");
+    (byStatus as unknown as { statusCode: number }).statusCode = 402;
+    generateText.mockReset();
+    generateText.mockRejectedValueOnce(byStatus);
+    let exit = await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s.runToolCalling(baseRequest).pipe(Effect.catchAll((err) => Effect.succeed(err))),
+      ),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value).toBeInstanceOf(InsufficientCredits);
+
+    // Providers that don't stamp a statusCode still surface a credit message.
+    generateText.mockReset();
+    generateText.mockRejectedValueOnce(
+      new Error(
+        "This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 0.",
+      ),
+    );
+    exit = await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s.runToolCalling(baseRequest).pipe(Effect.catchAll((err) => Effect.succeed(err))),
+      ),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value).toBeInstanceOf(InsufficientCredits);
   });
 
   it("maps unknown errors → NetworkError", async () => {

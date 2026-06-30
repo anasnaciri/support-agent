@@ -1342,6 +1342,33 @@ const AgentRuntimeLayer = Layer.effect(
                   reason,
                 } as const;
               }
+              // Out of LLM credits (prepaid key at zero → provider 402). Like a
+              // credential gap, this is a BILLING problem only the merchant can
+              // fix: retrying just replays a request that can't succeed and
+              // would dead-letter as opaque `workflow_retries_exhausted`. Park
+              // for a human with a precise reason and ping the merchant to top
+              // up. (Previously a 402 mapped to NetworkError → retryable.)
+              if (err._tag === "InsufficientCredits") {
+                current = yield* lifecycle.escalateToHuman({
+                  caseId: current.id,
+                  tenantId: current.tenantId,
+                  actor: { type: "system", id: "agent-runtime" },
+                  reason: "llm_insufficient_credits",
+                  details: { provider: err.provider },
+                });
+                yield* notifyMerchant(
+                  current.tenantId,
+                  humanTakeoverNotification({
+                    caseId: current.id,
+                    subject: current.subject,
+                    reason: "llm_insufficient_credits",
+                  }),
+                );
+                return {
+                  type: "HumanTakeoverRequired",
+                  reason: "llm_insufficient_credits",
+                } as const;
+              }
               // Deterministic LLM failures: retrying replays the exact same
               // request, so park the case for a human instead of burning
               // retries (audit C1).

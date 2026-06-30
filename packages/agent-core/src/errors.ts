@@ -91,6 +91,19 @@ export class SafetyBlocked extends Data.TaggedError("SafetyBlocked")<{
   readonly reason: string;
 }> {}
 
+/**
+ * The provider rejected the call for lack of funds — a prepaid OpenRouter key
+ * at (or near) zero balance returns HTTP 402. Deterministic until the merchant
+ * tops up, so the runtime treats it as TERMINAL (park `human_takeover` with
+ * reason `llm_insufficient_credits`), NOT a transient/retryable provider error.
+ * Distinguished from `ProviderUnavailable` (5xx/429) and `LLMCredentialMissing`
+ * (no key at all) precisely so retrying doesn't burn the queue's retry budget
+ * on a request that cannot succeed.
+ */
+export class InsufficientCredits extends Data.TaggedError("InsufficientCredits")<{
+  readonly provider: ProviderName;
+}> {}
+
 export class PermissionDenied extends Data.TaggedError("PermissionDenied")<{
   readonly tool: string;
   readonly reason: string;
@@ -155,6 +168,7 @@ export type LLMError =
   | InvalidToolCall
   | SafetyBlocked
   | NetworkError
+  | InsufficientCredits
   | LLMCredentialMissing
   | LLMCredentialRevoked;
 

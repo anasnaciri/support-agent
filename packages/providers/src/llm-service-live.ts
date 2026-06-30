@@ -5,6 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   ContextTooLarge,
+  InsufficientCredits,
   InvalidToolCall,
   NetworkError,
   ProviderUnavailable,
@@ -232,6 +233,20 @@ const mapError = (cause: unknown, providerName: LLMProvider): LLMError => {
       msg.includes("blocked by")
     ) {
       return new SafetyBlocked({ reason: cause.message });
+    }
+    // Out of funds (prepaid OpenRouter key at zero → HTTP 402). Terminal, not
+    // transient: retrying replays the same rejected request. Checked BEFORE the
+    // 429/5xx branch so a 402 is never misclassified as a retryable provider
+    // blip. Message fallbacks cover providers that don't stamp a statusCode.
+    if (
+      status === 402 ||
+      msg.includes("insufficient credit") ||
+      msg.includes("requires more credit") ||
+      msg.includes("negative credit") ||
+      msg.includes("insufficient_quota") ||
+      msg.includes("payment required")
+    ) {
+      return new InsufficientCredits({ provider: providerName });
     }
     if (status === 429 || (status !== undefined && status >= 500)) {
       return new ProviderUnavailable({ provider: providerName });

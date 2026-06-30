@@ -72,6 +72,7 @@ const eventCaseRef = (
  */
 export const escalateDeadLetteredEvent = (
   event: DomainEvent,
+  underlyingError?: string,
 ): Effect.Effect<
   void,
   never,
@@ -121,6 +122,14 @@ export const escalateDeadLetteredEvent = (
         reason: "workflow_retries_exhausted",
         details: {
           eventType: event.type,
+          // The underlying tick error that exhausted the retries (e.g.
+          // "llm transient error: ProviderUnavailable"). pg-boss copies the
+          // last failed attempt's serialized error into the dead-letter job's
+          // `output`; surfacing it here is the only durable record — the
+          // worker's stdout has rotated by the time anyone looks.
+          ...(underlyingError
+            ? { underlyingError: underlyingError.slice(0, 500) }
+            : {}),
         },
       })
       .pipe(
@@ -161,21 +170,43 @@ export const registerWorkflowDeadLetterConsumer = async (opts: {
   >;
 }): Promise<string> => {
   const { boss, runtimeLayer } = opts;
+  // `includeMetadata: true` makes pg-boss return the job's `output` column —
+  // for a dead-lettered job that's the serialized error from the last failed
+  // attempt (pg-boss copies it across when dead-lettering). We thread its
+  // message into the escalation audit so the cause is recoverable.
   return boss.work<DeadLetterJobData, void>(
     WORKFLOW_DEAD_LETTER_QUEUE,
+    { includeMetadata: true },
     async (jobs) => {
       for (const job of jobs) {
         const event = reviveDomainEvent(job.data.event);
+        const underlyingError = extractOutputMessage(
+          (job as { output?: unknown }).output,
+        );
         console.warn(
-          `[dead-letter] workflow event exhausted retries: ${event.type} eventId=${job.data.eventId} key=${job.data.key}`,
+          `[dead-letter] workflow event exhausted retries: ${event.type} eventId=${job.data.eventId} key=${job.data.key} reason=${underlyingError ?? "unknown"}`,
         );
         await Effect.runPromise(
           Effect.provide(
-            escalateDeadLetteredEvent(event),
+            escalateDeadLetteredEvent(event, underlyingError),
             runtimeLayer,
           ) as Effect.Effect<void, never, never>,
         );
       }
     },
   );
+};
+
+/**
+ * Pull a human-readable message out of a pg-boss job `output`. A handler that
+ * threw is serialized by `serialize-error` to `{ name, message, stack }`; a
+ * non-Error throw is wrapped as `{ value }`. Returns undefined when there's
+ * nothing useful (so the escalation omits the field rather than logging noise).
+ */
+const extractOutputMessage = (output: unknown): string | undefined => {
+  if (!output || typeof output !== "object") return undefined;
+  const o = output as { message?: unknown; value?: unknown };
+  if (typeof o.message === "string" && o.message.length > 0) return o.message;
+  if (typeof o.value === "string" && o.value.length > 0) return o.value;
+  return undefined;
 };

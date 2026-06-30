@@ -116,6 +116,8 @@ const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
   "approval rejected": "A draft was rejected, so the case moved to you.",
   llm_credential_missing: "The AI provider key is missing.",
   llm_credential_revoked: "The AI provider key was revoked.",
+  llm_insufficient_credits:
+    "The AI provider account is out of credits — top up to continue.",
   workflow_retries_exhausted:
     "Processing kept failing and was stopped after several retries.",
   llm_context_too_large: "The conversation grew too large for the AI model.",

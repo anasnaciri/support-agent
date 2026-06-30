@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AgentId,
   ContextTooLarge,
+  InsufficientCredits,
   PermissionServiceDefault,
   ProviderUnavailable,
   TenantId,
@@ -236,6 +237,41 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
     expect(out.entries.map((e) => e.action)).toContain(
       "case.escalated_to_human",
     );
+  });
+
+  it("escalates to human_takeover (NOT a retryable Failed) when the LLM key is out of credits", async () => {
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceFromFn(() =>
+        Effect.fail(new InsufficientCredits({ provider: "openrouter" as never })),
+      ) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const result = yield* runtime.handleEvent(customerReplied(caseId));
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        return { result, fetched, entries };
+      }),
+    );
+
+    // Terminal — retrying replays the same out-of-credits request, so the
+    // worker must NOT retry. Park for a human with a precise reason.
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    if (out.result.type === "HumanTakeoverRequired") {
+      expect(out.result.reason).toBe("llm_insufficient_credits");
+    }
+    expect(out.fetched.status).toBe("human_takeover");
+    const escalation = out.entries.find(
+      (e) => e.action === "case.escalated_to_human",
+    );
+    expect(escalation?.details["reason"]).toBe("llm_insufficient_credits");
   });
 });
 
