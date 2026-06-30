@@ -75,6 +75,13 @@ const createQueueOptions = (
   return out;
 };
 
+const updateQueueOptions = (
+  opts: Omit<PgBossQueue, "name">,
+): Omit<PgBossQueue, "name" | "partition" | "policy"> => {
+  const { partition: _partition, policy: _policy, ...updatable } = opts;
+  return updatable;
+};
+
 const sendOptions = (
   enqueued: EnqueuedWorkflowEvent,
   opts: WorkflowEnqueueOptions,
@@ -156,18 +163,30 @@ export const ensureWorkflowQueue = (
     const queueOpts = createQueueOptions(opts);
     // The dead-letter target must exist before a queue can reference it.
     if (queueOpts.deadLetter) {
+      const deadLetterOpts = {
+        policy: "standard" as const,
+        retryLimit: 3,
+        retryBackoff: true,
+      };
       yield* wrap(
         "ensure_queue",
-        boss.createQueue(queueOpts.deadLetter, {
-          policy: "standard",
-          retryLimit: 3,
-          retryBackoff: true,
-        }),
+        boss.createQueue(queueOpts.deadLetter, deadLetterOpts),
+      );
+      yield* wrap(
+        "ensure_queue",
+        boss.updateQueue(
+          queueOpts.deadLetter,
+          updateQueueOptions(deadLetterOpts),
+        ),
       );
     }
     yield* wrap(
       "ensure_queue",
       boss.createQueue(queueName(opts), queueOpts),
+    );
+    yield* wrap(
+      "ensure_queue",
+      boss.updateQueue(queueName(opts), updateQueueOptions(queueOpts)),
     );
   });
 
