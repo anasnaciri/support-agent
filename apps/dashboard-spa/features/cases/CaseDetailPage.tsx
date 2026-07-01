@@ -24,6 +24,7 @@ import {
 import {
   RECOMMENDATION_LABEL,
   extractRefundRecommendation,
+  issuableRefund,
   recommendationVariant,
   refundRecommendationFromEntry,
   type RefundRecommendationSummary,
@@ -47,6 +48,8 @@ import { ChatComposer } from "./ChatComposer";
 import { ApprovalCard } from "./ApprovalCard";
 import { ApprovalSignalsStrip } from "./ApprovalSignalsStrip";
 import { BundleApprovalBar } from "./BundleApprovalBar";
+import { IssueRefundCard } from "./IssueRefundCard";
+import { RetrySendButton } from "./RetrySendButton";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { TrackingPanel } from "./TrackingPanel";
@@ -395,6 +398,8 @@ export function CaseDetailPage() {
       ? (singleApprovalProposed["bodyText"] as string)
       : null;
   const refundRecommendation = extractRefundRecommendation(entries);
+  // The agent's issuable refund recommendation (PATH B), if any.
+  const refundToIssue = issuableRefund(entries);
   const composerMode =
     singleApproval && singleApprovalDraft !== null
       ? {
@@ -563,6 +568,14 @@ export function CaseDetailPage() {
               tracking={tracking}
               destinationCountry={order?.shippingAddress?.country ?? null}
               orderPlacedAt={order?.createdAt ?? null}
+            />
+          ) : null}
+
+          {refundToIssue && refundToIssue.amount ? (
+            <IssueRefundCard
+              workspaceId={ctx.workspaceId}
+              caseId={id}
+              refund={{ ...refundToIssue, amount: refundToIssue.amount }}
             />
           ) : null}
 
@@ -751,6 +764,10 @@ export function CaseDetailPage() {
                                 ? ` Last error: ${item.lastError}`
                                 : ""}
                             </p>
+                            <RetrySendButton
+                              workspaceId={ctx.workspaceId}
+                              caseId={id}
+                            />
                           </CardContent>
                         ) : (
                           <CardContent className="space-y-3 p-4">
