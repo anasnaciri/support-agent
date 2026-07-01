@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, List, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 import type { CaseListRow, Page } from "@support-agent/dashboard-contracts";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,16 @@ import {
 // Only the visible window of rows is rendered; the next page is prefetched as
 // the merchant nears the bottom. All the windowing/paging math is pure and
 // unit-tested in cases-sidebar-data.ts.
+
+/** The reference-style filter tabs. Two real modes today (Open/Pending/
+ *  Resolved would need per-status api filtering + counts). */
+const SIDEBAR_TABS: ReadonlyArray<{
+  readonly mode: SidebarMode;
+  readonly label: string;
+}> = [
+  { mode: "all", label: "All" },
+  { mode: "attention", label: "Needs attention" },
+];
 
 export function CasesSidebar() {
   const pathname = usePathname() ?? "";
@@ -244,43 +254,7 @@ export function CasesSidebar() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="space-y-2 px-3 pb-3">
-        <div
-          className="inline-flex rounded-md border border-border bg-muted/40 p-0.5"
-          role="group"
-          aria-label="Filter cases"
-        >
-          <button
-            type="button"
-            onClick={() => setMode("all")}
-            aria-pressed={mode === "all"}
-            aria-label="All cases"
-            title="All cases"
-            className={cn(
-              "inline-flex size-7 items-center justify-center rounded transition-colors",
-              mode === "all"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <List className="size-4" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("attention")}
-            aria-pressed={mode === "attention"}
-            aria-label="Needs attention"
-            title="Needs attention"
-            className={cn(
-              "inline-flex size-7 items-center justify-center rounded transition-colors",
-              mode === "attention"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Inbox className="size-4" aria-hidden />
-          </button>
-        </div>
+      <div className="px-3 pb-2 pt-1">
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -292,15 +266,41 @@ export function CasesSidebar() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search cases…"
             aria-label="Search cases"
-            className="w-full rounded-md border border-border bg-background py-2 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
+      </div>
+      <div
+        role="tablist"
+        aria-label="Filter cases"
+        className="flex items-center gap-4 border-b border-border px-4"
+      >
+        {SIDEBAR_TABS.map((tab) => {
+          const selected = mode === tab.mode;
+          return (
+            <button
+              key={tab.mode}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setMode(tab.mode)}
+              className={cn(
+                "-mb-px whitespace-nowrap border-b-2 py-2.5 text-[13px] font-medium transition-colors",
+                selected
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
+        className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2"
       >
         {initialLoading ? (
           <ul className="space-y-1" aria-hidden>
@@ -351,7 +351,7 @@ export function CasesSidebar() {
                       href={`/cases/${row.id}`}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex h-full flex-col justify-center gap-1 rounded-lg px-3 transition-colors",
+                        "flex h-full flex-col justify-center gap-1 rounded-lg border border-transparent px-3 transition-colors",
                         appearance.container,
                       )}
                     >
@@ -371,7 +371,7 @@ export function CasesSidebar() {
                         >
                           {caseStatusLabel(row.status)}
                         </Badge>
-                        <span className="ml-auto shrink-0 tabular-nums text-xs text-muted-foreground">
+                        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
                           {row.updatedAt.slice(5, 10)}
                         </span>
                       </span>

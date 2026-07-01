@@ -155,9 +155,10 @@ export const caseRowClasses = (args: {
   readonly active: boolean;
 }): CaseRowClasses => {
   if (args.active) {
+    // Selected row: a bordered white card (no shadow — borders over shadows for
+    // consistency with the rest of the case view).
     return {
-      container:
-        "bg-card shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10",
+      container: "border-primary bg-card",
       subject: "font-medium text-foreground",
     };
   }

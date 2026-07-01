@@ -212,7 +212,9 @@ describe("caseRowClasses", () => {
     const a = caseRowClasses({ status: "resolved", active: true });
     expect(a.subject).toContain("font-medium");
     expect(a.container).toContain("bg-card");
-    expect(a.container).toContain("ring-1");
+    // Selected state is a border, not a shadow/ring.
+    expect(a.container).toContain("border-primary");
+    expect(a.container).not.toContain("shadow");
     // active wins over the resolved de-emphasis
     expect(a.container).not.toContain("opacity-");
     expect(a.subject).not.toContain("font-light");
