@@ -2469,6 +2469,58 @@ const AgentRuntimeLayer = Layer.effect(
           } as const;
         });
 
+        // Resolve the case's Shopify customer from its stamped identifiers
+        // (email → phone → name) and stamp the canonical `shopifyCustomerId`
+        // when it isn't set yet — on EVERY tick, not just at creation. So a case
+        // whose customer was identified only by phone/name (a merchant
+        // pencil-edit, or a RESTART of an old case where the creation-time email
+        // lookup missed because the order was placed under a different address)
+        // gets the id that `shopify.find_customer_order` and the
+        // order/customer-mismatch guard both key on. Idempotent (skips once
+        // stamped) + best-effort (each leg fails to null; a write failure just
+        // leaves it unstamped and the tick proceeds).
+        const ensureCustomerResolved = Effect.gen(function* () {
+          const ctx = working.context as Record<string, unknown>;
+          const existing = ctx["shopifyCustomerId"];
+          if (typeof existing === "string" && existing.length > 0) return;
+          const ctxStr = (k: string): string | null => {
+            const v = ctx[k];
+            return typeof v === "string" && v.trim().length > 0
+              ? v.trim()
+              : null;
+          };
+          const cEmail = ctxStr("customerEmail");
+          const cPhone = ctxStr("customerPhone");
+          const cName = ctxStr("customerName");
+          if (!cEmail && !cPhone && !cName) return;
+          const orNull = (
+            eff: Effect.Effect<
+              { readonly id: string } | null,
+              unknown,
+              never
+            >,
+          ) => eff.pipe(Effect.catchAll(() => Effect.succeed(null)));
+          let customer = cEmail
+            ? yield* orNull(shopify.searchByEmail(working.tenantId, cEmail))
+            : null;
+          if (!customer && cPhone) {
+            customer = yield* orNull(
+              shopify.searchByPhone(working.tenantId, cPhone),
+            );
+          }
+          if (!customer && cName) {
+            customer = yield* orNull(
+              shopify.searchByName(working.tenantId, cName),
+            );
+          }
+          if (!customer) return;
+          working = yield* cases
+            .update(working.id, {
+              context: { ...ctx, shopifyCustomerId: customer.id } as never,
+            })
+            .pipe(Effect.catchAll(() => Effect.succeed(working)));
+        });
+
         if (event.type === "approval.approved") {
           return yield* resumeApprovedTool(event);
         }
@@ -2476,6 +2528,7 @@ const AgentRuntimeLayer = Layer.effect(
           return yield* handleApprovalRejected(event);
         }
         yield* enrichCase;
+        yield* ensureCustomerResolved;
         const held = yield* checkParkGuards;
         if (held) {
           return held;

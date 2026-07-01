@@ -2970,6 +2970,97 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found?.context["shopifyCustomerId"]).toBeUndefined();
   });
 
+  it("resolves + stamps shopifyCustomerId from a phone in context on a RESUME tick (old case, no email match)", async () => {
+    // Restarting an old case whose customer was identified only by phone (the
+    // order was placed under a different email). enrichCase's creation-time
+    // lookup never runs on a resume, so the runtime must resolve the customer
+    // from the stamped phone and stamp shopifyCustomerId — the id that
+    // find_customer_order + the order/customer-mismatch guard key on.
+    const customerId = CustomerId("gid://shopify/Customer/5150");
+    const byPhone = {
+      id: customerId,
+      email: "placed-under@other.com",
+      firstName: "Mary",
+      lastName: "Goins",
+      phone: "2158019255",
+      ordersCount: 1,
+      totalSpent: { amount: "50.00", currencyCode: "USD" },
+      defaultAddress: null,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    const specialist: AgentConfig = {
+      id: AgentId("order-status-agent"),
+      name: "Order status",
+      description: "Looks up orders.",
+      mode: "primary",
+      provider: "openrouter",
+      model: "google/gemini-3.5-flash",
+      promptTemplate: "Answer.",
+      tools: [],
+      permissionOverrides: {},
+      handoffs: [],
+      maxTurnsPerTick: 2,
+      temperature: 0,
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "final_message", text: "Looking into it." },
+    ];
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([specialist]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      // Seed the customer under the PHONE only — the email won't match, proving
+      // the resume-tick resolution fell through email → phone.
+      ShopifyServiceTest({
+        customersByPhone: new Map([["2158019255", byPhone]]),
+      }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      env,
+    );
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: specialist.id,
+            context: {
+              customerEmail: "sender@nomatch.com",
+              customerPhone: "2158019255",
+            },
+          });
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+          return { found: yield* repo.getById(created.id) };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.found.context["shopifyCustomerId"]).toBe(customerId);
+  });
+
   it("projects inbound image attachments into the turn-0 user message as multimodal parts", async () => {
     // When a customer emails with photos (damaged-product flow), the
     // runtime must hand them to the LLM as image content parts so the
