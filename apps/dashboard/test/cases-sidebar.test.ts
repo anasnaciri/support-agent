@@ -268,18 +268,19 @@ describe("caseRowClasses", () => {
     const a = caseRowClasses({ status: "resolved", active: true });
     expect(a.subject).toContain("font-medium");
     expect(a.container).toContain("bg-card");
-    // Selected state is a border, not a shadow/ring.
-    expect(a.container).toContain("border-primary");
+    // Selected state is a left accent bar, not a shadow/ring.
+    expect(a.container).toContain("border-l-primary");
     expect(a.container).not.toContain("shadow");
     // active wins over the resolved de-emphasis
     expect(a.container).not.toContain("opacity-");
     expect(a.subject).not.toContain("font-light");
   });
 
-  it("bumps inactive non-resolved rows: semibold on a filled background", () => {
+  it("bumps inactive non-resolved rows: semibold, no fill", () => {
     const r = caseRowClasses({ status: "in_progress", active: false });
     expect(r.subject).toContain("font-semibold");
-    expect(r.container).toContain("bg-muted/40");
+    // No background fill — flush rows split by dividers; weight carries it.
+    expect(r.container).not.toContain("bg-muted");
     expect(r.container).not.toContain("opacity-");
   });
 

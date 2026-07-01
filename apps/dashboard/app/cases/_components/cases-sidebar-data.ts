@@ -204,10 +204,9 @@ export const caseRowClasses = (args: {
   readonly active: boolean;
 }): CaseRowClasses => {
   if (args.active) {
-    // Selected row: a bordered white card (no shadow — borders over shadows for
-    // consistency with the rest of the case view).
+    // Selected row: a left accent bar + white fill (no rounded card, no shadow).
     return {
-      container: "border-primary bg-card",
+      container: "border-l-primary bg-card",
       subject: "font-medium text-foreground",
     };
   }
@@ -217,8 +216,11 @@ export const caseRowClasses = (args: {
       subject: "font-light text-muted-foreground",
     };
   }
+  // Inactive, still needs work: bolder text, no fill — rows are flush and split
+  // by dividers, so the weight/opacity contrast against receded resolved rows
+  // (not a background) carries the distinction.
   return {
-    container: "bg-muted/40 hover:bg-accent",
+    container: "hover:bg-accent",
     subject: "font-semibold text-foreground",
   };
 };

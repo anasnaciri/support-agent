@@ -304,7 +304,7 @@ export function CasesSidebar() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2"
+        className="thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-4"
       >
         {initialLoading ? (
           <ul className="space-y-1" aria-hidden>
@@ -353,12 +353,16 @@ export function CasesSidebar() {
                 const title = name ?? caseSubjectLabel(row.subject);
                 const orderRef = formatOrderRef(row.orderRef);
                 return (
-                  <li key={row.id} style={{ height: ROW_HEIGHT }} className="py-1">
+                  <li
+                    key={row.id}
+                    style={{ height: ROW_HEIGHT }}
+                    className="border-b border-border"
+                  >
                     <Link
                       href={`/cases/${row.id}`}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex h-full gap-2.5 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 transition-colors",
+                        "flex h-full gap-2.5 overflow-hidden border-l-2 border-l-transparent px-4 py-2 transition-colors",
                         appearance.container,
                       )}
                     >
