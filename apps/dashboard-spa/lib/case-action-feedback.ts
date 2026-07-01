@@ -142,6 +142,36 @@ export const caseActionFeedback = (
   kind: string,
 ): ActionFeedback => FEEDBACK[action][kind] ?? GENERIC_ERROR;
 
+/** A whole-case approval BUNDLE decision (approve all / reject remaining). */
+export const bundleDecisionFeedback = (
+  action: "approve" | "reject",
+  kind: string,
+  count?: number,
+): ActionFeedback => {
+  if (kind === "decided") {
+    const n = typeof count === "number" ? count : 0;
+    return action === "approve"
+      ? {
+          tone: "success",
+          text:
+            n > 0
+              ? `Approved ${n} action${n === 1 ? "" : "s"} — they'll run in order.`
+              : "Approved — the queued actions will run in order.",
+        }
+      : {
+          tone: "success",
+          text: "Rejected the remaining actions. The case moved to human takeover.",
+        };
+  }
+  if (kind === "no_pending") {
+    return {
+      tone: "info",
+      text: "No queued actions were left to decide — no change.",
+    };
+  }
+  return GENERIC_ERROR;
+};
+
 /** Approve/reject success copy differs; other kinds mirror the shared map. */
 export const approvalDecisionFeedback = (
   action: "approve" | "reject",

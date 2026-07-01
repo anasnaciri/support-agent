@@ -1,23 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Check, ChevronDown, SendHorizontal, Sparkles } from "lucide-react";
+import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
 import type { ModelsResponse } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
-import { useCaseMutation } from "@/lib/use-case-mutation";
+import { useApprovalDecision, useCaseMutation } from "@/lib/use-case-mutation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { ConfirmButton } from "./ConfirmButton";
 
 /**
  * What the composer is for, decided by the case's state:
+ *  - `approval`: a drafted agent reply is awaiting the manager's call. The draft
+ *    fills the input; the controls become a gray Reject (✗) and the blue Send,
+ *    which approves and sends the (possibly edited) draft.
  *  - `reply`: the manager took the case over and writes the reply by hand.
  *  - `locked`: the agent owns the conversation — a read-only hint to take over.
- *
- * (The `approval` mode — a drafted agent reply awaiting the manager's call —
- * lands in Phase 4c alongside the ApprovalCard / BundleApprovalBar.)
  */
 export type ComposerMode =
+  | {
+      readonly kind: "approval";
+      readonly approvalId: string;
+      readonly draftBody: string;
+      /** The approval's proposedInput — edited bodyText is merged onto it. */
+      readonly proposedInput: unknown;
+    }
   | { readonly kind: "reply" }
   | { readonly kind: "locked"; readonly message: string };
 
@@ -102,8 +110,9 @@ function RephraseModelPicker({
 }
 
 /**
- * The bottom-of-chat composer for a taken-over case: a blank reply that sends on
- * the existing email thread, or a read-only hint while the agent is working.
+ * The bottom-of-chat composer. One control that adapts to who owns the case:
+ * it carries the drafted reply for an approval (Approve/Reject), a blank reply
+ * for a taken-over case (Send), or a read-only hint while the agent is working.
  * "Rephrase with AI" rewrites the current text in place against the tenant's own
  * LLM credential.
  */
@@ -115,11 +124,14 @@ export function ChatComposer({
   mode,
 }: ChatComposerProps) {
   const ctx = { workspaceId };
-  const [text, setText] = useState("");
+  const [text, setText] = useState(
+    mode.kind === "approval" ? mode.draftBody : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(
     models?.rephraseModel ?? null,
   );
+  const approvalId = mode.kind === "approval" ? mode.approvalId : "";
 
   const sendM = useCaseMutation({
     workspaceId,
@@ -129,6 +141,30 @@ export function ChatComposer({
     onDone: (kind) => {
       if (kind === "sent") setText("");
     },
+  });
+
+  // Edit-and-Approve: merge the edited bodyText onto the approval's original
+  // proposedInput so the shape stays valid for the gated tool (no extra fetch —
+  // the case detail already carries proposedInput). Non-reply approvals send no
+  // override and run against the original at resume time.
+  const approvedInput = (): unknown => {
+    if (mode.kind !== "approval") return undefined;
+    const p = mode.proposedInput;
+    return p && typeof p === "object" && "bodyText" in (p as object)
+      ? { ...(p as Record<string, unknown>), bodyText: text }
+      : undefined;
+  };
+  const approveM = useApprovalDecision({
+    workspaceId,
+    caseId,
+    action: "approve",
+    mutationFn: () => api.approveApproval(ctx, approvalId, approvedInput()),
+  });
+  const rejectM = useApprovalDecision({
+    workspaceId,
+    caseId,
+    action: "reject",
+    mutationFn: () => api.rejectApproval(ctx, approvalId),
   });
 
   const rephraseM = useMutation({
@@ -173,9 +209,13 @@ export function ChatComposer({
 
   const empty = text.trim().length === 0;
   const showPicker = Boolean(models?.connected && models.entries.length > 0);
-  const placeholder = customerEmail
-    ? `Write a reply to ${customerEmail}…`
-    : "Write a reply to the customer…";
+  const busy = approveM.isPending || rejectM.isPending || sendM.isPending;
+  const placeholder =
+    mode.kind === "approval"
+      ? "Edit the drafted reply before approving…"
+      : customerEmail
+        ? `Write a reply to ${customerEmail}…`
+        : "Write a reply to the customer…";
 
   const onPickModel = (id: string) => {
     setSelectedModel(id);
@@ -215,16 +255,44 @@ export function ChatComposer({
             ) : null}
           </div>
 
-          <Button
-            type="button"
-            size="icon"
-            onClick={() => sendM.mutate()}
-            disabled={empty || sendM.isPending}
-            aria-label="Send reply"
-            title="Send this reply to the customer on the existing email thread"
-          >
-            <SendHorizontal aria-hidden />
-          </Button>
+          {mode.kind === "approval" ? (
+            <div className="flex items-center gap-2">
+              <ConfirmButton
+                size="icon"
+                variant="secondary"
+                className="rounded-full"
+                aria-label="Reject this draft and take over"
+                title="Reject this approval?"
+                confirmLabel="Reject & take over"
+                description="No customer reply goes out, and the case escalates to human takeover — you'll handle it manually from there."
+                pending={rejectM.isPending}
+                onConfirm={() => rejectM.mutate()}
+              >
+                <X aria-hidden />
+              </ConfirmButton>
+              <Button
+                type="button"
+                size="icon"
+                onClick={() => approveM.mutate()}
+                disabled={busy}
+                aria-label="Approve and send"
+                title="Approve and send this reply to the customer"
+              >
+                <SendHorizontal aria-hidden />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              size="icon"
+              onClick={() => sendM.mutate()}
+              disabled={empty || sendM.isPending}
+              aria-label="Send reply"
+              title="Send this reply to the customer on the existing email thread"
+            >
+              <SendHorizontal aria-hidden />
+            </Button>
+          )}
         </div>
       </div>
       {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}

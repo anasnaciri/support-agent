@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   approvalDecisionFeedback,
+  bundleDecisionFeedback,
   caseActionFeedback,
 } from "../lib/case-action-feedback.js";
 
@@ -45,5 +46,24 @@ describe("approvalDecisionFeedback", () => {
       "warning",
     );
     expect(approvalDecisionFeedback("approve", "boom").tone).toBe("warning");
+  });
+});
+
+describe("bundleDecisionFeedback", () => {
+  it("counts approved actions and describes a reject", () => {
+    expect(bundleDecisionFeedback("approve", "decided", 3).text).toMatch(
+      /Approved 3 actions/,
+    );
+    expect(bundleDecisionFeedback("approve", "decided", 1).text).toMatch(
+      /Approved 1 action —/,
+    );
+    expect(bundleDecisionFeedback("reject", "decided", 2).text).toMatch(
+      /Rejected the remaining/,
+    );
+  });
+
+  it("treats no_pending as an info no-op and unknown as a generic error", () => {
+    expect(bundleDecisionFeedback("approve", "no_pending").tone).toBe("info");
+    expect(bundleDecisionFeedback("approve", "boom").tone).toBe("warning");
   });
 });

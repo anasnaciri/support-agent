@@ -23,10 +23,15 @@ import {
 } from "@/lib/case-timeline";
 import {
   RECOMMENDATION_LABEL,
+  extractRefundRecommendation,
   recommendationVariant,
   refundRecommendationFromEntry,
   type RefundRecommendationSummary,
 } from "@/lib/refund-recommendation";
+import {
+  parseRequestedResolution,
+  parseReturnReason,
+} from "@/lib/return-labels";
 import { buildContextRows } from "@/lib/case-context";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
@@ -39,6 +44,9 @@ import { ChatScrollArea } from "./ChatScrollArea";
 import { CaseDetailsPanel } from "./CaseDetailsPanel";
 import { CaseHeaderActions } from "./CaseHeaderActions";
 import { ChatComposer } from "./ChatComposer";
+import { ApprovalCard } from "./ApprovalCard";
+import { ApprovalSignalsStrip } from "./ApprovalSignalsStrip";
+import { BundleApprovalBar } from "./BundleApprovalBar";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { TrackingPanel } from "./TrackingPanel";
@@ -75,6 +83,33 @@ const detailRecord = (
 const parsedBody = (value: unknown): string | null => {
   const body = detailRecord(value)?.["bodyText"];
   return typeof body === "string" && body.trim() ? body : null;
+};
+
+// Defensively parse `context.photoSignals` (stamped by the runtime) for the
+// ApprovalCard; null for absent/malformed values so a bad row never crashes.
+const parsePhotoSignals = (
+  value: unknown,
+): {
+  readonly count: number;
+  readonly withExif: number;
+  readonly stripped: number;
+  readonly anyStripped: boolean;
+} | null => {
+  const r = detailRecord(value);
+  if (!r) return null;
+  const count = r["count"];
+  const withExif = r["withExif"];
+  const stripped = r["stripped"];
+  const anyStripped = r["anyStripped"];
+  if (
+    typeof count !== "number" ||
+    typeof withExif !== "number" ||
+    typeof stripped !== "number" ||
+    typeof anyStripped !== "boolean"
+  ) {
+    return null;
+  }
+  return { count, withExif, stripped, anyStripped };
 };
 
 const BodyBlock = ({ value }: { readonly value: unknown }) => {
@@ -275,6 +310,18 @@ export function CaseDetailPage() {
         (f): f is string => typeof f === "string",
       )
     : [];
+  // Approval-decision signals (surfaced above the composer + on the ApprovalCard).
+  const productMatch =
+    context["productMatch"] === "match" ||
+    context["productMatch"] === "mismatch" ||
+    context["productMatch"] === "uncertain"
+      ? context["productMatch"]
+      : null;
+  const photoSignals = parsePhotoSignals(context["photoSignals"]);
+  const returnReason = parseReturnReason(context["returnReason"]);
+  const requestedResolution = parseRequestedResolution(
+    context["requestedResolution"],
+  );
 
   // Prefer the fresh live lookup (rich: origin/destination, transit days, full
   // checkpoint history); fall back to the on-case `liveTrackingStatus` stamp.
@@ -309,7 +356,10 @@ export function CaseDetailPage() {
   const customerName =
     customerFullName ?? threadInboundName ?? customerEmail ?? "Customer";
 
-  const pendingApprovals = allApprovals.filter((a) => a.status === "pending");
+  const pendingApprovals = allApprovals
+    .filter((a) => a.status === "pending")
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
   const canResolve = !RESOLVE_HIDDEN.has(caseRow.status);
@@ -331,6 +381,33 @@ export function CaseDetailPage() {
         : caseRow.status === "waiting_for_supplier"
           ? "Waiting on the supplier. Take over to reply to the customer."
           : "The agent is handling this conversation. Take over to reply yourself.";
+
+  // Composer routing: a single reply draft awaiting approval fills the input
+  // with Approve/Reject; a bundle or a non-reply approval keeps its richer card;
+  // a taken-over case lets the manager reply by hand; else it's locked.
+  const singleApproval =
+    pendingApprovals.length === 1 ? pendingApprovals[0]! : null;
+  const singleApprovalProposed = singleApproval
+    ? detailRecord(singleApproval.proposedInput)
+    : null;
+  const singleApprovalDraft =
+    singleApprovalProposed && typeof singleApprovalProposed["bodyText"] === "string"
+      ? (singleApprovalProposed["bodyText"] as string)
+      : null;
+  const refundRecommendation = extractRefundRecommendation(entries);
+  const composerMode =
+    singleApproval && singleApprovalDraft !== null
+      ? {
+          kind: "approval" as const,
+          approvalId: singleApproval.id,
+          draftBody: singleApprovalDraft,
+          proposedInput: singleApproval.proposedInput,
+        }
+      : pendingApprovals.length > 1 || singleApproval
+        ? null // rendered as BundleApprovalBar / ApprovalCard
+        : canResume
+          ? { kind: "reply" as const }
+          : { kind: "locked" as const, message: lockedMessage };
 
   const recommendationTimelineItems: SimplifiedTimelineItem[] = entries.flatMap(
     (entry) => {
@@ -426,29 +503,48 @@ export function CaseDetailPage() {
           </div>
         </ChatScrollArea>
 
-        <div className="shrink-0 border-t border-border/60 bg-card px-4 py-3">
+        <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
-            {pendingApprovals.length > 0 ? (
-              // Approval decisions (approve/reject the drafted reply) land in
-              // Phase 4c; until then the drafted reply is visible in the timeline.
-              <p className="text-center text-sm text-muted-foreground">
-                A reply is drafted and awaiting your approval — review it in the
-                timeline.
-              </p>
-            ) : (
-              <ChatComposer
-                key={id}
+            {composerMode ? (
+              <>
+                {composerMode.kind === "approval" ? (
+                  <ApprovalSignalsStrip
+                    approvalId={composerMode.approvalId}
+                    recommendation={refundRecommendation}
+                    productMatch={productMatch}
+                    riskFlags={riskFlags}
+                    returnReason={returnReason}
+                    requestedResolution={requestedResolution}
+                  />
+                ) : null}
+                <ChatComposer
+                  key={id}
+                  workspaceId={ctx.workspaceId}
+                  caseId={id}
+                  customerEmail={customerEmail}
+                  models={replyModelsQuery.data ?? null}
+                  mode={composerMode}
+                />
+              </>
+            ) : pendingApprovals.length > 1 ? (
+              <BundleApprovalBar
                 workspaceId={ctx.workspaceId}
                 caseId={id}
-                customerEmail={customerEmail}
-                models={replyModelsQuery.data ?? null}
-                mode={
-                  canResume
-                    ? { kind: "reply" }
-                    : { kind: "locked", message: lockedMessage }
-                }
+                pending={pendingApprovals}
               />
-            )}
+            ) : singleApproval ? (
+              <ApprovalCard
+                workspaceId={ctx.workspaceId}
+                caseId={id}
+                approval={singleApproval}
+                refundRecommendation={refundRecommendation}
+                productMatch={productMatch}
+                photoSignals={photoSignals}
+                riskFlags={riskFlags}
+                returnReason={returnReason}
+                requestedResolution={requestedResolution}
+              />
+            ) : null}
           </div>
         </div>
       </section>
