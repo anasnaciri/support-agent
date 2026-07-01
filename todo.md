@@ -14,7 +14,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-### 2026-07-01 — Case detail page polish pass (apps/dashboard, NOT committed)
+### 2026-07-01 — Case detail page polish pass (apps/dashboard, committed `dd452fd` + DEPLOYED to CF Workers)
 
 Adopted the palette-independent polish techniques from a reference "Support Inbox"
 design (warm-toned; we kept our locked blue/off-white theme — only the *structure/
@@ -46,7 +46,9 @@ AI-suggest chips, avatars-on-bubbles, and the order/case timeline rail.
       tracking footer band. Removed the old `<dl>` + unused `Row` helper.
 - [x] Verified: `pnpm --filter @support-agent/dashboard typecheck` green; `pnpm vitest run
       apps/dashboard/test` 405/405 green; `pnpm build` (`tsc -b`) green.
-- [ ] **Needs its own Cloudflare dashboard deploy** (dashboard-only changes).
+- [x] Committed `dd452fd` (pre-commit local CI green — 2332 tests) + DEPLOYED to
+      Cloudflare Workers via OpenNext (version `360ec02e`,
+      https://support-agent-dashboard.12anas2000.workers.dev).
 - [ ] Deferred from the reviewed set (not built): AI-suggest reply chips, bubble avatars,
       order/case timeline rail. Tier 4 beyond thin-scrollbars (tinted status/priority pills,
       full radius-scale audit) left as future polish.
