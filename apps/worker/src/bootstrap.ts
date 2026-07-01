@@ -435,9 +435,14 @@ export const buildWorker = async (
   const approvalLinkLayer = Layer.succeed(ApprovalLinkConfig, {
     baseUrl: approvalBaseUrl,
     signingKey: approvalSigningKey,
-    // 24h — matches the approval row's expiresAt so an emailed link can
-    // never outlive the approval it points at (audit S3; was 7 days).
-    ttlMs: 24 * 60 * 60 * 1000,
+    // 30 days. Approvals are human-latency objects — a draft proposed on a
+    // Friday must still be one-click approvable the following week. The row
+    // never expires (there is no age-based expiry sweep), the token is a
+    // bearer credential bound to a single approval id + action, and
+    // `ApprovalService.approve` rejects already-decided rows — so a long-lived
+    // link can only ever act on the one pending draft it was minted for.
+    // Matches the "expire after 30 days" copy on the api's link pages.
+    ttlMs: 30 * 24 * 60 * 60 * 1000,
   });
 
   // Conversation connector. The worker boots ONE `ConversationService`, but

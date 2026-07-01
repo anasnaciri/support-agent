@@ -12,10 +12,14 @@ import { Context } from "effect";
 //   - signingKey: HMAC secret used by `approval-tokens.ts`. Same value
 //     in the runtime (signing) and the api (verifying); separate from
 //     SHOPIFY/GOOGLE secrets so it can be rotated independently.
-//   - ttlMs: how long the link stays valid. Default 7 days = comfortably
-//     longer than the approval row's own `expiresAt` (24h) — the token
-//     outliving the row is harmless because `ApprovalService.approve`
-//     rejects already-decided / expired rows.
+//   - ttlMs: how long the emailed link stays valid (production: 30 days).
+//     Approvals are human-latency objects, so the link must outlive a
+//     weekend/holiday. The approval row itself has no age-based expiry
+//     sweep, so the token TTL is the only thing that ages a link out. A
+//     long-lived token is safe because it is a bearer credential bound to a
+//     single approval id + action, and `ApprovalService.approve` rejects
+//     already-decided rows — so an old link can only ever act on the one
+//     still-pending draft it was minted for.
 //
 // Abstract Tag in services; `ApprovalLinkConfigFromEnv` lives in
 // providers (or wherever the env-reader naturally sits).
