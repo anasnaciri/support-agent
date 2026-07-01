@@ -351,6 +351,22 @@ export const inboundCustomerEmail = (
   payload: Pick<InboundMessage, "from" | "replyTo">,
 ): string => payload.replyTo?.email || payload.from.email;
 
+/**
+ * The customer's display name from an inbound message, if the From/Reply-To
+ * header carried one ("Maya Chen" <maya@…>). Mirrors {@link inboundCustomerEmail}:
+ * when Reply-To is present it's the human (relay-delivered mail), so trust ONLY
+ * its name — never fall back to the relay's From name. Null when no usable name
+ * is present. Stamped onto `context.customerName` so cases are searchable by
+ * name, not just email.
+ */
+export const inboundCustomerName = (
+  payload: Pick<InboundMessage, "from" | "replyTo">,
+): string | null => {
+  const raw = payload.replyTo ? payload.replyTo.name : payload.from.name;
+  const name = raw?.trim();
+  return name ? name : null;
+};
+
 export const buildInitialMessages = (
   event: DomainEvent,
   caseRow: {

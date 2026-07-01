@@ -353,8 +353,17 @@ export const casesList = async (
         ilike(cases.subject, term),
         ilike(cases.summary, term),
         ilike(cases.category, term),
-        // Whatever order identifier was extracted onto the case — often the
-        // human order name like "#1001", which a merchant would type.
+        // Customer identity, stamped on the case context.
+        ilike(sql`${cases.context}->>'customerEmail'`, term),
+        ilike(sql`${cases.context}->>'customerName'`, term),
+        // Order references. `shopify_order_id` holds the RESOLVED id and is
+        // often set on only one thread of an order, so searching an order
+        // number there returns a single case. `quotedOrderRef` is the number
+        // the customer wrote — stamped per thread — so matching it surfaces
+        // EVERY email thread tied to that order. `identifiedOrderId` lets a
+        // pasted GID match too.
+        ilike(sql`${cases.context}->>'quotedOrderRef'`, term),
+        ilike(sql`${cases.context}->>'identifiedOrderId'`, term),
         ilike(cases.shopifyOrderId, term),
       )!,
     );

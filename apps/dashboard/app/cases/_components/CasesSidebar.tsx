@@ -268,7 +268,7 @@ export function CasesSidebar() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search cases…"
+            placeholder="Search by name, email, order #…"
             aria-label="Search cases"
             className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />

@@ -80,6 +80,7 @@ import {
   buildSystemPrompt,
   buildInitialMessages,
   inboundCustomerEmail,
+  inboundCustomerName,
   derivePreview,
   deriveSubject,
   renderThreadTranscript,
@@ -862,6 +863,11 @@ const AgentRuntimeLayer = Layer.effect(
                 ...working.context,
                 customerEmail: email,
               };
+              // Capture the sender's display name too, so cases are searchable
+              // by customer name (not just email). Best-effort — many emails
+              // carry no name.
+              const name = inboundCustomerName(event.payload);
+              if (name) contextPatch["customerName"] = name;
               if (resolved._tag === "Right" && resolved.right) {
                 contextPatch["shopifyCustomerId"] = resolved.right.id;
               }
