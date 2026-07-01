@@ -352,15 +352,22 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         by a 15-agent workflow fan-out (one page-group each, no shared-file edits), then a 10-agent
         adversarial review — only 2 low findings (atomic-render gaps on supplier-escalation +
         permissions), both fixed. **Build + 356 SPA tests green. NOT live-verified** (needs api+WorkOS).
-  - [ ] **DEFERRED — WorkOS admin-SDK server-side moves** (blocks a few flows from being fully live):
-        `apps/api` has **no WorkOS admin org client** (its `WORKOS_API_KEY` is verified-email lookup
-        only; member/supplier invites are stored locally with a **client-minted** `workosInvitationId`).
-        So under Option B the SPA can't: (a) **send** member/supplier invitations — the ported
-        Members/Suppliers pages record the pending binding but no WorkOS invite email goes out yet;
-        (b) **onboard a brand-new org** (needs `createOrganization` + membership + `switchToOrganization`
-        cookie re-mint — `refreshAccessToken` already accepts `organizationId`, so the re-mint
-        primitive exists). Both need a net-new additive `apps/api` WorkOS-admin surface (TDD). The
-        SPA `OnboardingPage` (`features/auth/pages.tsx`) stays a placeholder until (b) lands.
+  - [x] **WorkOS admin-SDK server-side moves LANDED** (`720773a` + `5f45c84` api, `528a446` SPA,
+        `8b875e0` fix; TDD): new `WorkosOrgAdminDirectory` (create org / add membership / list
+        memberships / send invitation) — raw fetch, soft-fail, static test double — wired through
+        StartServerOptions→AppDecorations→`getWorkosOrgAdminDirectory`. (a) **Invites now send
+        server-side**: both handlers resolve the id via pure `resolveInvitationId` (caller-minted =
+        Next; else the api sends; missing key/failed send → local-only pending invite). Added
+        `organizationId` to `DashboardAuthResult`. (b) **Onboarding**: `GET /dashboard/auth/session`
+        returns `needsOnboarding` (200, not 401) for an org-less cookie; new `POST
+        /dashboard/auth/onboard` (cookie-only) resolves/creates the org + re-mints the cookie via
+        `refreshAccessToken(organizationId)` + `createTenantForOrg` (idempotent). SPA: `needsOnboarding`
+        whoami union + SessionProvider short-circuit + real OnboardingPage form. Trust model: the JWE
+        cookie is the auth proof (only api can mint it). 25 unit + 6 onboarding-integration tests;
+        115 auth/member/supplier green. **Adversarial review found + fixed** the inviter-id bug
+        (`8b875e0`: must pass `auth.workosUserId`, not the decision UUID, or WorkOS rejects the send).
+        **NOT verified live.** Review note: 2 facets (auth-trust/CSRF, spa-flow) didn't finish (subagent
+        session-limit) — re-run when convenient.
   - [ ] **Not ported (optional parity):** the Next "edit customer / assign order" pencil
         (`CardEditPopover`, `d226ee9`) — needs `editCaseDetails` added to the SPA `api-client` +
         a `headerAction` slot on the Customer/Order panels. `editCaseDetails` already exists in
