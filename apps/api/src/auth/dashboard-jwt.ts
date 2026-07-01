@@ -109,6 +109,12 @@ export const makeStaticDashboardTokenVerifier = (
   async verify(token) {
     if (!token) return { ok: false, reason: "missing_token" };
     const claims = resolve(token);
-    return claims ? { ok: true, claims } : { ok: false, reason: "invalid_token" };
+    if (!claims) return { ok: false, reason: "invalid_token" };
+    // Mirror the JWKS verifier: a token that resolves but lacks an org/user
+    // claim is `missing_claims` (e.g. a brand-new org-less user), not invalid.
+    if (!claims.organizationId || !claims.workosUserId) {
+      return { ok: false, reason: "missing_claims" };
+    }
+    return { ok: true, claims };
   },
 });

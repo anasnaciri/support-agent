@@ -27,7 +27,10 @@ const workosFetch = (async (url: string | URL, init?: RequestInit) => {
     const grant = JSON.parse(String(init?.body)) as {
       organization_id?: string;
     };
-    const org = grant.organization_id ?? "";
+    // A refresh WITH an org echoes it (onboard re-mint). A refresh WITHOUT one
+    // (the /session recovery of an expired/rotated-kid token) resolves to the
+    // user's existing org — modeled as "org_refreshed".
+    const org = grant.organization_id ?? "org_refreshed";
     return new Response(
       JSON.stringify({
         access_token: `dash|${org}|user_new`,
@@ -52,6 +55,7 @@ const makeRecordingAdmin = () => {
   const memberships = new Map<string, string[]>();
   const created: string[] = [];
   let counter = 0;
+  let failList = false; // simulate a transient WorkOS lookup failure (null)
   const dir: WorkosOrgAdminDirectory = {
     createOrganization: async () => {
       counter += 1;
@@ -66,16 +70,20 @@ const makeRecordingAdmin = () => {
       return true;
     },
     listOrganizationMemberships: async (userId) =>
-      memberships.get(userId) ?? [],
+      failList ? null : (memberships.get(userId) ?? []),
     sendInvitation: async () => ({ id: "inv_x" }),
   };
   const reset = () => {
     memberships.clear();
     created.length = 0;
+    failList = false;
   };
   const seed = (userId: string, orgId: string) =>
     memberships.set(userId, [orgId]);
-  return { dir, created, reset, seed };
+  const setFailList = (v: boolean) => {
+    failList = v;
+  };
+  return { dir, created, reset, seed, setFailList };
 };
 
 const setCookieValue = (headers: Headers, name: string): string | undefined => {
@@ -127,6 +135,20 @@ describeIfDb("apps/api — dashboard onboarding (org provision + re-mint)", () =
     `sa-dash-session=${await codec.seal({
       accessToken: "dash||user_new",
       refreshToken: "rt_1",
+      user: {
+        id: "user_new",
+        email: "new@ex.com",
+        firstName: "Nova",
+        lastName: null,
+      },
+    })}`;
+
+  // A cookie whose access token is malformed → the verifier returns
+  // `invalid_token` (a dead / rotated-kid credential), NOT `missing_claims`.
+  const invalidCookie = async (refreshToken = "rt_1"): Promise<string> =>
+    `sa-dash-session=${await codec.seal({
+      accessToken: "not-a-valid-dash-token",
+      refreshToken,
       user: {
         id: "user_new",
         email: "new@ex.com",
@@ -265,5 +287,46 @@ describeIfDb("apps/api — dashboard onboarding (org provision + re-mint)", () =
       body: JSON.stringify(goodBody),
     });
     expect(res.status).toBe(401);
+  });
+
+  // Review finding 1: a cryptographically-INVALID (non-expired) token — e.g. a
+  // token signed by a rotated-out JWKS key — must be REFRESHED, not reported as
+  // needsOnboarding. With a live refresh it resolves to the user's org session.
+  it("session refreshes an invalid (rotated-kid) token instead of reporting needsOnboarding", async () => {
+    const res = await fetch(`${base}/dashboard/auth/session`, {
+      headers: { cookie: await invalidCookie("rt_1") },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      organizationId?: string;
+      needsOnboarding?: boolean;
+    };
+    expect(body.needsOnboarding).toBeUndefined();
+    expect(body.organizationId).toBe("org_refreshed");
+  });
+
+  it("session 401s an invalid token that can't be refreshed (never a 200 needsOnboarding)", async () => {
+    const res = await fetch(`${base}/dashboard/auth/session`, {
+      headers: { cookie: await invalidCookie("") },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("onboard 401s an invalid token instead of provisioning an org", async () => {
+    admin.reset();
+    const res = await onboard(await invalidCookie(""), goodBody);
+    expect(res.status).toBe(401);
+    expect(admin.created).toEqual([]);
+  });
+
+  // Review finding 2: a membership LOOKUP failure (null, not []) must NOT be
+  // treated as "no orgs" — provisioning then would fork an already-onboarded
+  // user into a second org. Fail retryably (503) and create nothing.
+  it("onboard fails retryably (503) on a membership lookup failure — never forks a duplicate org", async () => {
+    admin.reset();
+    admin.setFailList(true);
+    const res = await onboard(await noOrgCookie(), goodBody);
+    expect(res.status).toBe(503);
+    expect(admin.created).toEqual([]);
   });
 });

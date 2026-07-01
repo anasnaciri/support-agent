@@ -12,7 +12,10 @@ import { dashboardUserDecisionUuid } from "../../auth/dashboard-user-id.js";
 // user a `/dashboard/*` request resolves to, without minting signed tokens.
 // Pass it via `startServer(cfg, { dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER })`.
 
-const TOKEN_RE = /^dash\|([^|]+)\|([^|]*)$/u;
+// Org slot may be EMPTY (`dash||user_new`) to model an authenticated user with
+// no org yet → the verifier maps that to `missing_claims` (like production),
+// distinct from a malformed token (no match → `invalid_token`).
+const TOKEN_RE = /^dash\|([^|]*)\|([^|]*)$/u;
 
 export const TEST_DASHBOARD_VERIFIER: DashboardTokenVerifier =
   makeStaticDashboardTokenVerifier((token) => {

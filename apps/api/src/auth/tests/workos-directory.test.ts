@@ -223,13 +223,17 @@ describe("makeWorkosOrgAdminDirectory (live)", () => {
     );
   });
 
-  it("listOrganizationMemberships returns [] on failure", async () => {
-    const dir = makeWorkosOrgAdminDirectory("sk", {
+  it("listOrganizationMemberships returns null on a LOOKUP FAILURE (not []), so onboarding can't mistake it for 'no orgs'", async () => {
+    const threw = makeWorkosOrgAdminDirectory("sk", {
       fetchImpl: (async () => {
         throw new Error("network");
       }) as unknown as typeof fetch,
     });
-    expect(await dir.listOrganizationMemberships("user_1")).toEqual([]);
+    expect(await threw.listOrganizationMemberships("user_1")).toBeNull();
+    const non2xx = makeWorkosOrgAdminDirectory("sk", {
+      fetchImpl: (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch,
+    });
+    expect(await non2xx.listOrganizationMemberships("user_1")).toBeNull();
   });
 
   it("sendInvitation POSTs /user_management/invitations and returns the id", async () => {

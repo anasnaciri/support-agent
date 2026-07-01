@@ -163,13 +163,16 @@ export const registerDashboardAuthRoutes = (
     if (!sealed) return sendJson(res, 401, { error: "unauthenticated" });
 
     let verified = await verifier.verify(sealed.accessToken);
-    if (!verified.ok && verified.reason === "expired") {
-      // Expired token: try to refresh in place. A dead refresh token (revoked /
-      // expired) means the session is genuinely over → 401 (re-login), NOT
-      // onboarding.
-      if (!sealed.refreshToken) {
-        return sendJson(res, 401, { error: "unauthenticated" });
-      }
+    // A RECOVERABLE failure — expired, or a live token signed by a rotated-out
+    // JWKS key (`invalid_token`) — is refreshed in place with the refresh token.
+    // A dead refresh (revoked / expired) means the session is genuinely over →
+    // 401. `missing_claims` is NOT refreshed here: it's a validly-signed token
+    // that simply carries no org (the onboarding signal), handled below.
+    if (
+      !verified.ok &&
+      verified.reason !== "missing_claims" &&
+      sealed.refreshToken
+    ) {
       const refreshed = await refreshAccessToken({
         clientId: ready.clientId,
         apiKey: ready.apiKey,
@@ -193,15 +196,19 @@ export const registerDashboardAuthRoutes = (
         user: sealed.user,
       });
     }
-    // The cookie is ours (it unsealed) and its token is fresh (not expired) but
-    // carries no organization — a brand-new self-service user who signed in
-    // before creating/joining an org. Report `needsOnboarding` (authenticated,
-    // no org) so the SPA routes to /onboarding instead of bouncing to sign-in.
-    return sendJson(res, 200, {
-      needsOnboarding: true,
-      userId: dashboardUserDecisionUuid(sealed.user.id),
-      user: sealed.user,
-    });
+    // ONLY a validly-signed token that lacks an org claim (`missing_claims`) is a
+    // brand-new self-service user who signed in before creating/joining an org →
+    // report `needsOnboarding` so the SPA routes to /onboarding. Any OTHER
+    // failure (invalid signature, still-unverifiable after refresh, no refresh
+    // token) is a dead credential → 401 (re-login), never a 200.
+    if (!verified.ok && verified.reason === "missing_claims") {
+      return sendJson(res, 200, {
+        needsOnboarding: true,
+        userId: dashboardUserDecisionUuid(sealed.user.id),
+        user: sealed.user,
+      });
+    }
+    return sendJson(res, 401, { error: "unauthenticated" });
   });
 
   // ---- Refresh: re-mint the session from its refresh token (SPA calls on 401) ----
@@ -279,15 +286,24 @@ export const registerDashboardAuthRoutes = (
     const verified = await verifier.verify(sealed.accessToken);
     let organizationId: string;
     if (verified.ok) {
+      // Already org-scoped (a retry after tenant-create failed) → reuse, no re-mint.
       organizationId = verified.claims.organizationId;
-    } else {
+    } else if (verified.reason === "missing_claims") {
+      // Validly-signed token that carries no org → the genuine provision case.
+      // Any OTHER failure (invalid / expired / dead) is NOT a signal to create an
+      // org — 401 so the SPA re-syncs the session (which refreshes) and retries.
       const admin = getWorkosOrgAdminDirectory(req);
       if (!admin) {
         return sendJson(res, 503, { error: "workos_admin_not_configured" });
       }
-      const existing = (
-        await admin.listOrganizationMemberships(workosUserId)
-      )[0];
+      // A LOOKUP FAILURE (null) is NOT "no orgs": provisioning then would fork an
+      // already-onboarded user into a second org. Fail retryably instead.
+      const memberships =
+        await admin.listOrganizationMemberships(workosUserId);
+      if (memberships === null) {
+        return sendJson(res, 503, { error: "org_lookup_failed" });
+      }
+      const existing = memberships[0];
       if (existing) {
         organizationId = existing;
       } else {
@@ -314,6 +330,10 @@ export const registerDashboardAuthRoutes = (
           secure,
         }),
       );
+    } else {
+      // Invalid / expired / otherwise unverifiable token — NOT an onboarding
+      // signal. Re-sync via /session (which refreshes) then retry.
+      return sendJson(res, 401, { error: "unauthenticated" });
     }
 
     const userId = dashboardUserDecisionUuid(workosUserId);

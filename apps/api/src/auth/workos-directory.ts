@@ -121,10 +121,14 @@ export interface WorkosOrgAdminDirectory {
     organizationId: string,
     workosUserId: string,
   ): Promise<boolean>;
-  /** The user's ACTIVE org membership ids (order preserved), or [] on failure. */
+  /**
+   * The user's ACTIVE org membership ids (order preserved). `[]` means the user
+   * genuinely belongs to no org; `null` means the LOOKUP failed — callers must
+   * NOT treat a failed lookup as "no orgs" (that would provision a duplicate).
+   */
   listOrganizationMemberships(
     workosUserId: string,
-  ): Promise<ReadonlyArray<string>>;
+  ): Promise<ReadonlyArray<string> | null>;
   /** Send a WorkOS invitation; returns its id, or null on failure. */
   sendInvitation(input: {
     readonly email: string;
@@ -189,7 +193,7 @@ export const makeWorkosOrgAdminDirectory = (
           )}&statuses=active`,
           { headers: authHeaders },
         );
-        if (!res.ok) return [];
+        if (!res.ok) return null; // lookup failed — NOT "no orgs"
         const body = (await res.json()) as {
           data?: ReadonlyArray<{ organization_id?: unknown }>;
         };
@@ -197,7 +201,7 @@ export const makeWorkosOrgAdminDirectory = (
           .map((m) => m.organization_id)
           .filter((id): id is string => typeof id === "string" && id.length > 0);
       } catch {
-        return [];
+        return null; // lookup failed — NOT "no orgs"
       }
     },
     async sendInvitation({ email, organizationId, inviterUserId }) {
@@ -233,7 +237,7 @@ export const makeStaticWorkosOrgAdminDirectory = (impl: {
   ) => boolean;
   readonly listOrganizationMemberships?: (
     workosUserId: string,
-  ) => ReadonlyArray<string>;
+  ) => ReadonlyArray<string> | null;
   readonly sendInvitation?: (input: {
     readonly email: string;
     readonly organizationId: string;
