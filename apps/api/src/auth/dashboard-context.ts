@@ -24,6 +24,7 @@ import {
 import { type DashboardTokenVerifier } from "./dashboard-jwt.js";
 import { type SessionCodec } from "./dashboard-session.js";
 import {
+  type WorkosOrgAdminDirectory,
   type WorkosOrganizationDirectory,
   type WorkosUserDirectory,
 } from "./workos-directory.js";
@@ -53,6 +54,9 @@ export type DashboardAuthResult =
   | {
       readonly ok: true;
       readonly tenantId: string;
+      /** The verified WorkOS organization id — for server-side WorkOS writes
+       *  (e.g. sendInvitation needs the org, not our tenant id). */
+      readonly organizationId: string;
       readonly userId: string | undefined;
       /** Verified WorkOS user id (`sub`) — for the verified-email lookup. */
       readonly workosUserId: string | undefined;
@@ -114,6 +118,19 @@ export const getWorkosOrganizationDirectory = (
     workosOrganizationDirectory: WorkosOrganizationDirectory | null;
   }).workosOrganizationDirectory;
 
+/**
+ * The WorkOS org-admin (WRITE) directory — create org / add member / list
+ * memberships / send invitation. `null` → no `WORKOS_API_KEY`, so the SPA
+ * onboarding + server-side invite paths respond 503. Decorated alongside the
+ * read directories.
+ */
+export const getWorkosOrgAdminDirectory = (
+  req: FastifyRequest,
+): WorkosOrgAdminDirectory | null =>
+  (req.server as unknown as {
+    workosOrgAdminDirectory: WorkosOrgAdminDirectory | null;
+  }).workosOrgAdminDirectory;
+
 export const resolveDashboardAuth = async (
   layer: ApiLayer,
   req: FastifyRequest,
@@ -143,6 +160,7 @@ export const resolveDashboardAuth = async (
     return {
       ok: true,
       tenantId: workspace.id,
+      organizationId: parsed.organizationId,
       userId: parsed.userId,
       workosUserId: parsed.workosUserId,
       userEmail: parsed.userEmail,
@@ -157,6 +175,7 @@ export const resolveDashboardAuth = async (
   return {
     ok: true,
     tenantId,
+    organizationId: parsed.organizationId,
     userId: parsed.userId,
     workosUserId: parsed.workosUserId,
     userEmail: parsed.userEmail,

@@ -101,3 +101,157 @@ export const makeStaticWorkosOrganizationDirectory = (
     return workosOrganizationId ? resolve(workosOrganizationId) : null;
   },
 });
+
+// WRITE side of WorkOS: create an organization for a self-service signup, add
+// the founder to it, resolve the user's existing memberships (so onboarding is
+// idempotent — an invited user reuses their org), and send member/supplier
+// invitations. The Vite SPA (Option B) has no WORKOS_API_KEY, so these admin-SDK
+// operations — which the Next dashboard ran in a server action — must run in the
+// api. Raw fetch (no @workos-inc/node dep) keeps every call trivially testable
+// via `fetchImpl`, matching the read directories above.
+//
+// Soft-fail like the read directories: a failed create/invite returns null and a
+// failed membership returns false, so the caller decides (503 / retry / degrade)
+// rather than the layer throwing.
+export interface WorkosOrgAdminDirectory {
+  /** Create an organization; returns its id, or null on failure. */
+  createOrganization(name: string): Promise<{ readonly id: string } | null>;
+  /** Add a user to an org; returns true on success, false on failure. */
+  addOrganizationMembership(
+    organizationId: string,
+    workosUserId: string,
+  ): Promise<boolean>;
+  /** The user's ACTIVE org membership ids (order preserved), or [] on failure. */
+  listOrganizationMemberships(
+    workosUserId: string,
+  ): Promise<ReadonlyArray<string>>;
+  /** Send a WorkOS invitation; returns its id, or null on failure. */
+  sendInvitation(input: {
+    readonly email: string;
+    readonly organizationId: string;
+    readonly inviterUserId?: string;
+  }): Promise<{ readonly id: string } | null>;
+}
+
+export const makeWorkosOrgAdminDirectory = (
+  apiKey: string,
+  opts: { readonly baseUrl?: string; readonly fetchImpl?: FetchFn } = {},
+): WorkosOrgAdminDirectory => {
+  const base = (opts.baseUrl ?? "https://api.workos.com").replace(/\/+$/u, "");
+  const doFetch = opts.fetchImpl ?? fetch;
+  const authHeaders = {
+    authorization: `Bearer ${apiKey}`,
+    "content-type": "application/json",
+  };
+  return {
+    async createOrganization(name) {
+      if (!name) return null;
+      try {
+        const res = await doFetch(`${base}/organizations`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ name }),
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { id?: unknown };
+        return typeof body.id === "string" && body.id.length > 0
+          ? { id: body.id }
+          : null;
+      } catch {
+        return null;
+      }
+    },
+    async addOrganizationMembership(organizationId, workosUserId) {
+      if (!organizationId || !workosUserId) return false;
+      try {
+        const res = await doFetch(
+          `${base}/user_management/organization_memberships`,
+          {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({
+              organization_id: organizationId,
+              user_id: workosUserId,
+            }),
+          },
+        );
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    async listOrganizationMemberships(workosUserId) {
+      if (!workosUserId) return [];
+      try {
+        const res = await doFetch(
+          `${base}/user_management/organization_memberships?user_id=${encodeURIComponent(
+            workosUserId,
+          )}&statuses=active`,
+          { headers: authHeaders },
+        );
+        if (!res.ok) return [];
+        const body = (await res.json()) as {
+          data?: ReadonlyArray<{ organization_id?: unknown }>;
+        };
+        return (body.data ?? [])
+          .map((m) => m.organization_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0);
+      } catch {
+        return [];
+      }
+    },
+    async sendInvitation({ email, organizationId, inviterUserId }) {
+      if (!email || !organizationId) return null;
+      try {
+        const res = await doFetch(`${base}/user_management/invitations`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            email,
+            organization_id: organizationId,
+            ...(inviterUserId ? { inviter_user_id: inviterUserId } : {}),
+          }),
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { id?: unknown };
+        return typeof body.id === "string" && body.id.length > 0
+          ? { id: body.id }
+          : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+};
+
+/** Test / injection admin directory backed by plain resolvers (safe defaults). */
+export const makeStaticWorkosOrgAdminDirectory = (impl: {
+  readonly createOrganization?: (name: string) => { readonly id: string } | null;
+  readonly addOrganizationMembership?: (
+    organizationId: string,
+    workosUserId: string,
+  ) => boolean;
+  readonly listOrganizationMemberships?: (
+    workosUserId: string,
+  ) => ReadonlyArray<string>;
+  readonly sendInvitation?: (input: {
+    readonly email: string;
+    readonly organizationId: string;
+    readonly inviterUserId?: string;
+  }) => { readonly id: string } | null;
+}): WorkosOrgAdminDirectory => ({
+  async createOrganization(name) {
+    return impl.createOrganization?.(name) ?? { id: `org_${name}` };
+  },
+  async addOrganizationMembership(organizationId, workosUserId) {
+    return impl.addOrganizationMembership?.(organizationId, workosUserId) ?? true;
+  },
+  async listOrganizationMemberships(workosUserId) {
+    return impl.listOrganizationMemberships?.(workosUserId) ?? [];
+  },
+  async sendInvitation(input) {
+    return (
+      impl.sendInvitation?.(input) ?? { id: `invitation_${input.email}` }
+    );
+  },
+});

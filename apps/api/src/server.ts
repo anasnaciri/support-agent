@@ -8,8 +8,10 @@ import {
   type DashboardTokenVerifier,
 } from "./auth/dashboard-jwt.js";
 import {
+  makeWorkosOrgAdminDirectory,
   makeWorkosOrganizationDirectory,
   makeWorkosUserDirectory,
+  type WorkosOrgAdminDirectory,
   type WorkosOrganizationDirectory,
   type WorkosUserDirectory,
 } from "./auth/workos-directory.js";
@@ -70,6 +72,13 @@ export interface StartServerOptions {
    */
   readonly workosOrganizationDirectory?: WorkosOrganizationDirectory;
   /**
+   * Override the WorkOS org-admin directory (create org / add member / list
+   * memberships / send invitation). Production builds it from
+   * `cfg.workos.apiKey`; the SPA onboarding + invite-send paths use it so the
+   * browser never holds `WORKOS_API_KEY`. Tests inject a static impl.
+   */
+  readonly workosOrgAdminDirectory?: WorkosOrgAdminDirectory;
+  /**
    * Override the SPA BFF session codec. Production builds it from
    * `cfg.dashboardBff.sessionPassword`; tests inject one so they can seal a
    * cookie and exercise the cookie-credential path.
@@ -116,6 +125,16 @@ export const startServer = async (
       ? makeWorkosOrganizationDirectory(cfg.workos.apiKey)
       : null);
 
+  // Org-admin (WRITE) directory — org provisioning + server-side invitations for
+  // the SPA. Same key + soft-fail contract; `null` → no `WORKOS_API_KEY`, so the
+  // SPA onboarding + invite-send paths respond 503 (the Next bearer path is
+  // unaffected because it still mints invitations client-side).
+  const workosOrgAdminDirectory: WorkosOrgAdminDirectory | null =
+    opts.workosOrgAdminDirectory ??
+    (cfg.workos?.apiKey
+      ? makeWorkosOrgAdminDirectory(cfg.workos.apiKey)
+      : null);
+
   // SPA BFF session codec — seals/unseals the httpOnly cookie. `null` unless the
   // BFF is configured (API_SESSION_PASSWORD). The credential seam + auth routes
   // read it off `req.server`.
@@ -129,6 +148,7 @@ export const startServer = async (
     dashboardTokenVerifier,
     workosUserDirectory,
     workosOrganizationDirectory,
+    workosOrgAdminDirectory,
     dashboardSessionCodec,
     dashboardBffOrigins: cfg.dashboardBff?.spaOrigins ?? [],
   });

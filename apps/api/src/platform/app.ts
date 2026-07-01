@@ -16,6 +16,7 @@ import { TAGS } from "./schemas.js";
 import type { DashboardTokenVerifier } from "../auth/dashboard-jwt.js";
 import { csrfRejected, type SessionCodec } from "../auth/dashboard-session.js";
 import type {
+  WorkosOrgAdminDirectory,
   WorkosOrganizationDirectory,
   WorkosUserDirectory,
 } from "../auth/workos-directory.js";
@@ -24,6 +25,7 @@ export interface AppDecorations {
   readonly dashboardTokenVerifier: DashboardTokenVerifier | null;
   readonly workosUserDirectory: WorkosUserDirectory | null;
   readonly workosOrganizationDirectory: WorkosOrganizationDirectory | null;
+  readonly workosOrgAdminDirectory: WorkosOrgAdminDirectory | null;
   /**
    * SPA BFF session codec (seal/unseal the httpOnly cookie). `null` when the
    * BFF isn't configured — the cookie credential is then unavailable and only
@@ -59,6 +61,10 @@ export const buildApp = async (
   app.decorate(
     "workosOrganizationDirectory",
     decorations.workosOrganizationDirectory,
+  );
+  app.decorate(
+    "workosOrgAdminDirectory",
+    decorations.workosOrgAdminDirectory,
   );
   app.decorate("dashboardSessionCodec", decorations.dashboardSessionCodec);
 

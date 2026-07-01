@@ -26,8 +26,10 @@ import { bodyStr, parseJsonBody, sendJson } from "../../platform/http.js";
 import {
   authenticateDashboard,
   getWorkosDirectory,
+  getWorkosOrgAdminDirectory,
   runWithDb,
 } from "../../auth/dashboard-context.js";
+import { resolveInvitationId } from "../../auth/invite-send.js";
 
 // POST /dashboard/me/session — reconcile any pending invite for this user,
 // then return their effective access for the active workspace. The dashboard
@@ -140,7 +142,16 @@ export const handleDashboardMemberInvite = async (
   const email = bodyStr(req, "email");
   const roleId = bodyStr(req, "roleId");
   if (!email || !roleId) return sendJson(res, 400, { error: "invalid_request" });
-  const workosInvitationId = bodyStr(req, "workosInvitationId");
+  // Caller-minted id (Next) is used as-is; otherwise the api sends the WorkOS
+  // invitation itself (the SPA has no WORKOS_API_KEY). A missing key / failed
+  // send falls back to a local-only pending invite that reconciles on email.
+  const workosInvitationId = await resolveInvitationId({
+    provided: bodyStr(req, "workosInvitationId"),
+    adminDir: getWorkosOrgAdminDirectory(req),
+    email,
+    organizationId: auth.organizationId,
+    inviterUserId: invitedByUuid,
+  });
   await claimOwnerIfOpen(layer, auth.tenantId, invitedByUuid, auth.userEmail);
   const result = await runWithDb(layer, (db) =>
     createInvitation(db, auth.tenantId, {

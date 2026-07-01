@@ -17,8 +17,10 @@ import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { bodyStr, sendJson } from "../../platform/http.js";
 import {
   authenticateDashboard,
+  getWorkosOrgAdminDirectory,
   runWithDb,
 } from "../../auth/dashboard-context.js";
+import { resolveInvitationId } from "../../auth/invite-send.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 
 const WORKFLOW_QUEUE = "workflow.events";
@@ -184,7 +186,16 @@ export const handleSupplierInvite = async (
   const email = bodyStr(req, "email");
   if (!email) return sendJson(res, 400, { error: "invalid_request" });
   const name = bodyStr(req, "name") ?? email;
-  const workosInvitationId = bodyStr(req, "workosInvitationId");
+  // Caller-minted id (Next) is used as-is; otherwise the api sends the WorkOS
+  // invitation itself (the SPA has no WORKOS_API_KEY), falling back to a
+  // local-only pending invite that reconciles on the supplier's verified email.
+  const workosInvitationId = await resolveInvitationId({
+    provided: bodyStr(req, "workosInvitationId"),
+    adminDir: getWorkosOrgAdminDirectory(req),
+    email,
+    organizationId: auth.organizationId,
+    inviterUserId: invitedByUuid,
+  });
 
   const result = await runWithDb(layer, async (db) => {
     await ensureActingOwnerInOpenMode(
