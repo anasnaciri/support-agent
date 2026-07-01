@@ -3,6 +3,7 @@ import {
   classifyOrderRef,
   normalizeCustomerEmail,
   normalizeCustomerName,
+  normalizeCustomerPhone,
 } from "../case-details-input.js";
 
 describe("normalizeCustomerEmail", () => {
@@ -32,6 +33,19 @@ describe("normalizeCustomerName", () => {
     expect(normalizeCustomerName("")).toBeNull();
     expect(normalizeCustomerName(null)).toBeNull();
     expect(normalizeCustomerName(undefined)).toBeNull();
+  });
+});
+
+describe("normalizeCustomerPhone", () => {
+  it("trims a non-empty phone (kept permissive on format)", () => {
+    expect(normalizeCustomerPhone("  +1 555 123 4567 ")).toBe("+1 555 123 4567");
+  });
+
+  it("returns null for empty / non-string", () => {
+    expect(normalizeCustomerPhone("   ")).toBeNull();
+    expect(normalizeCustomerPhone("")).toBeNull();
+    expect(normalizeCustomerPhone(null)).toBeNull();
+    expect(normalizeCustomerPhone(undefined)).toBeNull();
   });
 });
 

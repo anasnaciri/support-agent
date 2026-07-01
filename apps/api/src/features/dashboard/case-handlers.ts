@@ -84,6 +84,7 @@ import {
   classifyOrderRef,
   normalizeCustomerEmail,
   normalizeCustomerName,
+  normalizeCustomerPhone,
 } from "./case-details-input.js";
 import { makePgBossApprovalPublisher } from "../approvals/endpoints.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
@@ -918,6 +919,10 @@ export const handleDashboardEditCaseDetails = async (
     typeof body["customerName"] === "string"
       ? (normalizeCustomerName(body["customerName"]) ?? undefined)
       : undefined;
+  const customerPhone =
+    typeof body["customerPhone"] === "string"
+      ? (normalizeCustomerPhone(body["customerPhone"]) ?? undefined)
+      : undefined;
   const rawOrderRef =
     typeof body["orderRef"] === "string" ? body["orderRef"].trim() : "";
   const orderRef = rawOrderRef.length > 0 ? rawOrderRef : undefined;
@@ -925,6 +930,7 @@ export const handleDashboardEditCaseDetails = async (
   if (
     customerEmail === undefined &&
     customerName === undefined &&
+    customerPhone === undefined &&
     orderRef === undefined
   ) {
     return sendJson(res, 400, { kind: "nothing_to_update" });
@@ -964,6 +970,7 @@ export const handleDashboardEditCaseDetails = async (
             managerId: auth.userId!,
             ...(customerEmail ? { customerEmail } : {}),
             ...(customerName !== undefined ? { customerName } : {}),
+            ...(customerPhone !== undefined ? { customerPhone } : {}),
             ...(identifiedOrderId !== undefined ? { identifiedOrderId } : {}),
             ...(orderRef !== undefined ? { quotedOrderRef: orderRef } : {}),
           }),

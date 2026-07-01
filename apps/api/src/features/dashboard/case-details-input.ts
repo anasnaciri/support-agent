@@ -33,6 +33,17 @@ export const normalizeCustomerName = (raw: unknown): string | null => {
 };
 
 /**
+ * Trim a customer phone; null when empty or not a string. Kept permissive (no
+ * format check) — phones arrive in many shapes and Shopify normalizes on its
+ * side; the provider strips non-`[\d+]` before the `phone:` lookup.
+ */
+export const normalizeCustomerPhone = (raw: unknown): string | null => {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+/**
  * Which Shopify lookup resolves a merchant-typed order ref — mirrors
  * `resolveOrderForContext`: a GID is fetched exactly, a `#1001`/`1001` name is
  * searched by name, anything else is treated as a confirmation code.

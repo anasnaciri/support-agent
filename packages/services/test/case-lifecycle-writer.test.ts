@@ -936,6 +936,7 @@ describe("CaseLifecycleWriter", () => {
           actor: { type: "user", id: UserId("mgr-1") },
           customerEmail: "jane@shopper.com",
           customerName: "Jane Shopper",
+          customerPhone: "+15551234567",
           identifiedOrderId: "gid://shopify/Order/12345",
           quotedOrderRef: "#1001",
         });
@@ -951,6 +952,7 @@ describe("CaseLifecycleWriter", () => {
     // The corrected values overwrite the relay email; untouched keys survive.
     expect(out.fetched.context["customerEmail"]).toBe("jane@shopper.com");
     expect(out.fetched.context["customerName"]).toBe("Jane Shopper");
+    expect(out.fetched.context["customerPhone"]).toBe("+15551234567");
     expect(out.fetched.context["identifiedOrderId"]).toBe(
       "gid://shopify/Order/12345",
     );
@@ -964,7 +966,13 @@ describe("CaseLifecycleWriter", () => {
       actor: { type: "user", id: "mgr-1" },
       action: "case.details_edited",
       details: {
-        changed: ["customerEmail", "customerName", "identifiedOrderId", "quotedOrderRef"],
+        changed: [
+          "customerEmail",
+          "customerName",
+          "customerPhone",
+          "identifiedOrderId",
+          "quotedOrderRef",
+        ],
       },
     });
   });

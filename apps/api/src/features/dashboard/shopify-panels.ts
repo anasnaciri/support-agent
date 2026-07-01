@@ -88,8 +88,18 @@ export const resolveShopCurrencyCode = (
  *   3. `searchByEmail(customerEmail)` — the sender address, in case Shopify
  *      creds were connected only after the case was created (so step 1 never
  *      ran) and the addresses do line up.
- *   4. `identifiedCustomerId` — the UNTRUSTED hint an agent recorded via
+ *   4. `searchByPhone(customerPhone)` — when the email matched no account
+ *      (guest checkout, or a personal reply-to that differs from the store
+ *      email). Phone is fairly unique, so a hit is a reasonable identification.
+ *   5. `searchByName(customerName)` — LAST-resort, deliberately fuzzy: returns
+ *      the first customer Shopify matches by name. May be the wrong person for
+ *      a common name, so it's only ever used to populate the display panel,
+ *      never as an identity gate.
+ *   6. `identifiedCustomerId` — the UNTRUSTED hint an agent recorded via
  *      `case.update_context`. Last resort, never ahead of the verified id.
+ *
+ * Steps 3–5 (email → phone → name) are the merchant-fillable identifiers on the
+ * Customer-card pencil: whatever they know, tried in order of reliability.
  *
  * `boundOrder` is the already-resolved order from `resolveOrderForContext`
  * (the caller resolves it first), passed in so we don't fetch it twice. Every
@@ -123,6 +133,22 @@ export const resolveCustomerForContext = (
     if (isNonEmptyString(email)) {
       const c = yield* shopify
         .searchByEmail(tenantId, email)
+        .pipe(Effect.catchAll(() => Effect.succeed(null)));
+      if (c) return c;
+    }
+
+    const phone = context["customerPhone"];
+    if (isNonEmptyString(phone)) {
+      const c = yield* shopify
+        .searchByPhone(tenantId, phone)
+        .pipe(Effect.catchAll(() => Effect.succeed(null)));
+      if (c) return c;
+    }
+
+    const name = context["customerName"];
+    if (isNonEmptyString(name)) {
+      const c = yield* shopify
+        .searchByName(tenantId, name)
         .pipe(Effect.catchAll(() => Effect.succeed(null)));
       if (c) return c;
     }

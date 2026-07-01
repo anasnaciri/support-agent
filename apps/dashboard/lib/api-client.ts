@@ -1150,6 +1150,7 @@ export const api = {
     fields: {
       readonly customerEmail?: string;
       readonly customerName?: string;
+      readonly customerPhone?: string;
       readonly orderRef?: string;
     },
   ): Promise<EditCaseDetailsOutcomeView> => {

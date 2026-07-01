@@ -1303,6 +1303,48 @@ export const ShopifyServiceLive = Layer.effect(
           ),
         ),
 
+      searchByPhone: (tenantId, phone) =>
+        withCreds(tenantId, (creds) => {
+          // Strip formatting a merchant might paste (spaces, dashes, parens)
+          // so the `phone:` filter sees just the digits/`+`. Shopify stores
+          // E.164, so an exact match still isn't guaranteed — best-effort.
+          const normalized = phone.replace(/[^\d+]/g, "");
+          if (normalized.length === 0) return Effect.succeed(null);
+          return runQuery<{ customers: { nodes: ReadonlyArray<GqlCustomer> } }>(
+            http,
+            creds,
+            tenantId,
+            SEARCH_CUSTOMER_QUERY,
+            { q: `phone:${normalized}` },
+          ).pipe(
+            Effect.map((data) => {
+              const first = data.customers.nodes[0];
+              return first ? mapCustomer(first) : null;
+            }),
+          );
+        }),
+
+      searchByName: (tenantId, name) =>
+        withCreds(tenantId, (creds) => {
+          // Free-text name search — Shopify matches it against the customer's
+          // first/last name. Fuzzy by design (last-resort fallback); returns
+          // the first hit. Quote the term so a multi-word name is one phrase.
+          const trimmed = name.trim();
+          if (trimmed.length === 0) return Effect.succeed(null);
+          return runQuery<{ customers: { nodes: ReadonlyArray<GqlCustomer> } }>(
+            http,
+            creds,
+            tenantId,
+            SEARCH_CUSTOMER_QUERY,
+            { q: `"${trimmed.replace(/"/g, "")}"` },
+          ).pipe(
+            Effect.map((data) => {
+              const first = data.customers.nodes[0];
+              return first ? mapCustomer(first) : null;
+            }),
+          );
+        }),
+
       findOrderByName: (tenantId, name) =>
         withCreds(tenantId, (creds) => {
           // Shopify's `orders` query expects names with the leading `#`.

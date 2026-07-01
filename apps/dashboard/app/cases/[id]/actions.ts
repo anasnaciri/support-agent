@@ -135,11 +135,13 @@ export const editCaseDetailsAction = async (
   };
   const customerEmail = field("customerEmail");
   const customerName = field("customerName");
+  const customerPhone = field("customerPhone");
   const orderRef = field("orderRef");
 
   const result = await api.editCaseDetails(ctx, caseId, {
     ...(customerEmail !== undefined ? { customerEmail } : {}),
     ...(customerName !== undefined ? { customerName } : {}),
+    ...(customerPhone !== undefined ? { customerPhone } : {}),
     ...(orderRef !== undefined ? { orderRef } : {}),
   });
 

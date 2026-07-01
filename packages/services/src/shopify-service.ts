@@ -232,6 +232,30 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     ) => Effect.Effect<ShopifyCustomer | null, ShopifyError>;
 
     /**
+     * Look up a customer by phone number. Backs the customer-panel fallback
+     * chain (email → phone → name) when the sender's email matched no Shopify
+     * account. Shopify normalizes stored phones to E.164, so a merchant-typed
+     * number may not match exactly — best-effort, returns null on a miss (a
+     * search, not a lookup, so a miss isn't an error).
+     */
+    readonly searchByPhone: (
+      tenantId: TenantId,
+      phone: string,
+    ) => Effect.Effect<ShopifyCustomer | null, ShopifyError>;
+
+    /**
+     * Look up a customer by name (free-text). The LAST resort in the customer
+     * fallback chain (email → phone → name) and deliberately fuzzy: it returns
+     * the first customer Shopify matches, which for a common name may not be
+     * the right person. Used only to populate the display panel (never an
+     * identity gate). Returns null on a miss.
+     */
+    readonly searchByName: (
+      tenantId: TenantId,
+      name: string,
+    ) => Effect.Effect<ShopifyCustomer | null, ShopifyError>;
+
+    /**
      * Look up an order by its merchant-facing name (e.g. "#1001" or
      * "1001"). Returns null when no match exists — Shopify's `orders`
      * query is a search, not a lookup, so a miss isn't an error. Use this
@@ -496,6 +520,8 @@ export interface ShopifyTestFixtures {
   readonly orders?: ReadonlyMap<OrderId, ShopifyOrder>;
   readonly customers?: ReadonlyMap<CustomerId, ShopifyCustomer>;
   readonly customersByEmail?: ReadonlyMap<string, ShopifyCustomer>;
+  readonly customersByPhone?: ReadonlyMap<string, ShopifyCustomer>;
+  readonly customersByName?: ReadonlyMap<string, ShopifyCustomer>;
   /**
    * Map from product id (GID or bare numeric, exactly as the caller
    * passes it) to ShopifyProduct. A miss fails with `ProductNotFound`,
@@ -673,6 +699,10 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         Effect.succeed(fixtures.pickupLocations ?? []),
       searchByEmail: (_tenantId, email) =>
         Effect.succeed(fixtures.customersByEmail?.get(email) ?? null),
+      searchByPhone: (_tenantId, phone) =>
+        Effect.succeed(fixtures.customersByPhone?.get(phone) ?? null),
+      searchByName: (_tenantId, name) =>
+        Effect.succeed(fixtures.customersByName?.get(name) ?? null),
       findOrderByName: (_tenantId, name) => {
         const normalized = name.startsWith("#") ? name : `#${name}`;
         return Effect.succeed(

@@ -242,6 +242,8 @@ export interface SetCaseDetailsInput {
   readonly customerEmail?: string;
   /** Corrected customer display name; merged into `context.customerName`. */
   readonly customerName?: string | null;
+  /** Corrected customer phone; merged into `context.customerPhone`. */
+  readonly customerPhone?: string | null;
   /** Resolved order GID (present only when the ref resolved in Shopify). */
   readonly identifiedOrderId?: string;
   /** The raw order ref the merchant typed (untrusted hint). */
@@ -1031,6 +1033,13 @@ export const CaseLifecycleWriterLive = Layer.effect(
             ) {
               nextContext["customerName"] = input.customerName;
               changed.push("customerName");
+            }
+            if (
+              input.customerPhone !== undefined &&
+              input.customerPhone !== null
+            ) {
+              nextContext["customerPhone"] = input.customerPhone;
+              changed.push("customerPhone");
             }
             if (input.identifiedOrderId !== undefined) {
               nextContext["identifiedOrderId"] = input.identifiedOrderId;

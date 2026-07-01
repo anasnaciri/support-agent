@@ -710,6 +710,12 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const editCustomerNameDefault =
     contextCustomerName ?? customerFullName(customer) ?? threadInboundName ?? "";
   const editCustomerEmailDefault = customerEmail ?? customer?.email ?? "";
+  const editCustomerPhoneDefault =
+    (typeof context["customerPhone"] === "string"
+      ? (context["customerPhone"] as string)
+      : null) ??
+    customer?.phone ??
+    "";
   const editOrderRefDefault =
     order?.name ??
     (typeof context["quotedOrderRef"] === "string"
@@ -1010,7 +1016,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                 action={editCaseDetailsAction}
                 label="Edit customer"
                 title="Edit customer"
-                description="Set the customer the agent couldn't identify. Replies and lookups will use this address."
+                description="Set the customer the agent couldn't identify. We look them up by email, then phone, then name."
                 fields={[
                   {
                     name: "customerName",
@@ -1024,6 +1030,13 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                     type: "email",
                     placeholder: "jane@example.com",
                     defaultValue: editCustomerEmailDefault,
+                  },
+                  {
+                    name: "customerPhone",
+                    label: "Phone",
+                    type: "tel",
+                    placeholder: "+1 555 123 4567",
+                    defaultValue: editCustomerPhoneDefault,
                   },
                 ]}
               />

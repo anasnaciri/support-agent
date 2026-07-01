@@ -171,6 +171,74 @@ describe("resolveCustomerForContext (single source of truth, with fallbacks)", (
     expect(result?.id).toBe("gid://shopify/Customer/888");
   });
 
+  it("falls back to searchByPhone when the email matched no customer", async () => {
+    const cust = buildCustomer("gid://shopify/Customer/555", "on-file@example.com");
+    const env = ShopifyServiceTest({
+      // The sender email is absent from customersByEmail (miss); the phone hits.
+      customersByPhone: new Map([["+15551234567", cust]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          {
+            customerEmail: "not-on-file@example.com",
+            customerPhone: "+15551234567",
+          },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/555");
+  });
+
+  it("falls back to searchByName when email and phone both miss", async () => {
+    const cust = buildCustomer("gid://shopify/Customer/321", "jane@example.com");
+    const env = ShopifyServiceTest({
+      customersByName: new Map([["Jane Shopper", cust]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          {
+            customerEmail: "nope@example.com",
+            customerPhone: "+10000000000",
+            customerName: "Jane Shopper",
+          },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/321");
+  });
+
+  it("prefers a phone match over a name match (email → phone → name order)", async () => {
+    const byPhone = buildCustomer("gid://shopify/Customer/700", "p@example.com");
+    const byName = buildCustomer("gid://shopify/Customer/701", "n@example.com");
+    const env = ShopifyServiceTest({
+      customersByPhone: new Map([["+15550001111", byPhone]]),
+      customersByName: new Map([["Jane Shopper", byName]]),
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        resolveCustomerForContext(
+          TenantId("t1"),
+          {
+            customerEmail: "miss@example.com",
+            customerPhone: "+15550001111",
+            customerName: "Jane Shopper",
+          },
+          null,
+        ),
+        env,
+      ),
+    );
+    expect(result?.id).toBe("gid://shopify/Customer/700");
+  });
+
   it("falls back to the agent-provided identifiedCustomerId hint as a last resort", async () => {
     const cust = buildCustomer("gid://shopify/Customer/999", "hint@example.com");
     const env = ShopifyServiceTest({

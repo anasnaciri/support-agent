@@ -243,6 +243,8 @@ export interface EditCaseDetailsInput {
   readonly customerEmail?: string | undefined;
   /** Corrected customer display name. */
   readonly customerName?: string | null | undefined;
+  /** Corrected customer phone (fallback identifier for the customer lookup). */
+  readonly customerPhone?: string | null | undefined;
   /** Resolved order GID — set only when the merchant's ref resolved in Shopify. */
   readonly identifiedOrderId?: string | undefined;
   /** The raw order ref the merchant typed (untrusted hint). */
@@ -278,6 +280,9 @@ export const editCaseDetails = async (
             : {}),
           ...(input.customerName !== undefined && input.customerName !== null
             ? { customerName: input.customerName }
+            : {}),
+          ...(input.customerPhone !== undefined && input.customerPhone !== null
+            ? { customerPhone: input.customerPhone }
             : {}),
           ...(input.identifiedOrderId !== undefined
             ? { identifiedOrderId: input.identifiedOrderId }
