@@ -14,6 +14,53 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Approval delivery reliability: 30-day link TTL + pending-approval reminders (branch `fix/approval-link-ttl-and-reminder`, NOT merged/deployed)
+
+Audited the drafted-action approval → delivery path for anything that slows down or
+fails getting an approved reply to the customer. Two real gaps, both fixed:
+
+- [x] **(a) Emailed approve/reject links expired after 24h** (`apps/worker/src/bootstrap.ts`
+      `ttlMs`), while the api's link pages already said "expire after 30 days" — a draft
+      proposed before a weekend couldn't be one-click approved by Monday (manager saw "this
+      link can't be used"), and the approval **row has no age-based expiry sweep**, so the
+      draft was only recoverable from the dashboard. Bumped to **30 days** to match the copy.
+      A long-lived token is safe: bearer credential bound to one approval id + action, and
+      `ApprovalService.approve` rejects already-decided rows. Also fixed the stale
+      `approval-link-config.ts` doc (claimed 7-day default + that approve rejects "expired"
+      rows — there's no expiry check). Commit `4ca2aad`.
+- [x] **(b) A pending approval's first notification is best-effort** (email + merchant ping
+      both `Effect.either`/ignored) — a Resend outage, a missing `notificationEmail`, or an
+      unlinked chat channel silently drops it, stranding the draft in `waiting_for_approval`
+      with **nothing nudging the manager** (the maintenance cron only re-published DECIDED-
+      but-unresumed rows, never still-pending ones). Added a **reminder pass** to the same
+      2-min `approval.maintenance` cron: re-sends the SAME notification on a spaced cadence —
+      30-min grace (never races the first send) → ≤1/24h → stop after a 7-day window (the
+      dashboard stays the durable surface). New nullable `approvals.last_reminded_at`
+      (migration `0031_thin_wong.sql`) spaces reminders; due-query is operator-based
+      (`lt`/`gte`/`isNull`) for the same Date-encoding safety as `listDecidedUnresumed`.
+      First-send + reminder now share `buildApprovalNotification` (services) so signed links
+      + preview can't drift. Commit `0a12b23`.
+- [x] **TDD:** `packages/services/test/approval-notification.test.ts` (3), 5 reminder-pass
+      tests in `apps/worker/test/approval-maintenance.test.ts`, 1 real-PG test in
+      `packages/db/test/approval-service-live.integration.test.ts`. Full suite green (2341).
+- [x] **Prod check (read-only, via `fly ssh` on `support-agent-backend`):** **49 pending**
+      approvals (48 >1h, **9 >24h, 3 >7d**, oldest 2026-06-17), **36 cases** parked in
+      `waiting_for_approval`. The republish safety net is **healthy** — `approval.maintenance`
+      cron running `*/2` (5630 completed jobs, latest current), and **ALL 36 parked cases
+      have ≥1 pending row** (zero orphaned approved-but-no-pending cases → no lost-publish
+      breakage). The 2 "decided-but-parked" rows (`9b02ba90`, `c7d7815c`) are the benign
+      bundles from the line-56 serial-consumer incident: an approved row + a still-pending
+      sibling the merchant never decided. **This is exactly what (b) fixes** — those pending
+      drafts will now be re-notified instead of sitting silently.
+- [ ] **Caveat / follow-up:** the reminder's **7-day window** means the **3 approvals older
+      than 7 days** (incl. the 2-week-old one) won't be re-nudged by the new cron — a
+      pre-existing backlog to clear from the dashboard. Window/interval are tunable constants
+      in `approval-maintenance-schedule.ts` if we want to widen coverage.
+- [ ] **Not yet done:** merge to `main` + `fly deploy` (worker; migration `0031` runs on
+      deploy). Branched off `main` (not the active `feat/dashboard-spa`) so it lands
+      independently. Bundle reminders link per-row (`/approvals/:id`) not to the case page —
+      acceptable (single-row decisions are supported) but a nicety to revisit.
+
 ### 2026-07-01 — Case detail page polish pass (apps/dashboard, committed `dd452fd` + DEPLOYED to CF Workers)
 
 Adopted the palette-independent polish techniques from a reference "Support Inbox"
