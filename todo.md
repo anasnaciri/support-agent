@@ -14,6 +14,61 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Timeline "Proposed message" card: long URL overflow fix (apps/dashboard, committed)
+
+A drafted customer reply containing a long unbreakable tracking URL
+(`https://t.17track.net/en#nums=1ST0433206695...`) overflowed its container horizontally in the
+right-column case Timeline's approval card.
+
+- [x] `BodyBlock` (`app/cases/[id]/page.tsx`) `<p>` was `whitespace-pre-wrap …` with no word-breaking
+      → added `break-words`, matching the already-shipped `ChatThread.tsx` bubble pattern
+      (`whitespace-pre-wrap break-words`).
+- [x] **Adjacent free-text blocks fixed too (same overflow class):** the timeline's note / status /
+      delivery-failed text blocks (`page.tsx` ~1142/1154/1182) and the supplier page problem / note
+      blocks (`app/supplier/cases/[id]/page.tsx` ~84/98) all gained `break-words`.
+- [x] `pnpm --filter @support-agent/dashboard typecheck` green (pure className change; no logic/test).
+- [ ] Needs its own Cloudflare dashboard deploy.
+
+### 2026-07-01 — Elva Labs Gmail shows connected but is revoked at Google (prod check, no code changes)
+
+User reported the case-thread panel showing **"Reconnect the mailbox — The connected mailbox must be
+reconnected before its email thread can be loaded"** while Settings → Integrations still looked
+connected for the Elva Labs workspace.
+
+- [x] Checked prod via Fly read-only DB query for the Elva Labs workspace.
+- [x] Connector rows: Gmail `contact@elvalabs.com` is `status='active'`, has Gmail scopes,
+      `watchExpiresAt=2026-07-06T00:00:27.166Z`, and `metadata.connectorHealth` is unset; old IMAP
+      `contact@elvalabs.com` is `revoked`.
+- [x] Live check from the Fly machine decrypted only in-process and attempted the same Gmail refresh
+      path for the active mailbox credential; Google returned `400 invalid_grant — Token has been
+      expired or revoked`. The active Gmail row is therefore unusable even though the dashboard card
+      still reads as active.
+- [x] Likely cause is Google OAuth consent screen still being **External + Testing**: Gmail scopes are
+      broader than basic profile/email scopes, so Google-issued refresh tokens expire after 7 days in
+      that publishing state. Elva's Gmail row was installed more than 7 days before the failure; the
+      other active Gmail row in prod was installed only a few days before this check, so it had not hit
+      the same expiry window yet.
+- [x] Confirmed current Gmail case rows are stamped with `provider='gmail'` and
+      `mailbox='contact@elvalabs.com'`; the user-visible error is not caused by a missing case
+      mailbox on the current Gmail connector path.
+- [x] Also found many older resolved cases stamped `provider='imap'` for the same mailbox; those
+      cannot load through the newer Gmail connection because provider thread ids are connector-specific.
+- [ ] **Ops:** Elva Labs must reconnect Gmail for `contact@elvalabs.com`; then verify a recent Gmail
+      case loads its thread.
+- [ ] **Code follow-up:** when a dashboard live thread load or manual reply hits
+      `ConversationAuthMissing` / `ConversationAuthFailed` for a known mailbox, stamp connector
+      health metadata as broken (same shape as `apps/worker/src/connector-health.ts`) so the
+      integrations page stops showing a green active card before the renewal cron observes the failure.
+- [ ] **Ops:** move the Google OAuth consent screen out of Testing / complete required verification
+      before onboarding more external Gmail tenants, otherwise every external Gmail connector using
+      these scopes will need reconnecting after roughly 7 days.
+- [ ] **Data/UX follow-up:** decide how to present old revoked-IMAP cases now that the mailbox is on
+      Gmail; active Gmail cannot fetch old IMAP provider thread ids, so the dashboard should explain
+      "this case used a previous mailbox connector" instead of a generic reconnect prompt.
+- [x] `pnpm build` green after this session note.
+
+---
+
 ### 2026-06-30 — Case detail redesigned as a 3-column inbox (chat + details) + manual "Resolve" (apps/dashboard, NOT committed)
 
 Reworked `/cases/[id]` to mirror a Support-Inbox layout: existing icon rail + **Cases list**

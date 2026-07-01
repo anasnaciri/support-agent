@@ -400,7 +400,7 @@ const parsedBody = (value: unknown): string | null => {
 const BodyBlock = ({ value }: { readonly value: unknown }) => {
   const body = parsedBody(value);
   return body ? (
-    <p className="whitespace-pre-wrap rounded-md bg-muted/50 p-2 text-sm">
+    <p className="whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 text-sm">
       {body}
     </p>
   ) : (
@@ -1139,7 +1139,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                               · {formatDateTime(item.occurredAt)}
                             </div>
                             {item.message ? (
-                              <p className="text-sm text-muted-foreground">
+                              <p className="break-words text-sm text-muted-foreground">
                                 {item.message}
                               </p>
                             ) : null}
@@ -1151,7 +1151,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                               {formatDateTime(item.occurredAt)}
                             </div>
                             {item.description ? (
-                              <p className="text-sm text-muted-foreground">
+                              <p className="break-words text-sm text-muted-foreground">
                                 {item.description}
                               </p>
                             ) : null}
@@ -1179,7 +1179,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
                             <div className="text-xs text-muted-foreground">
                               {formatDateTime(item.occurredAt)}
                             </div>
-                            <p className="text-sm text-muted-foreground">
+                            <p className="break-words text-sm text-muted-foreground">
                               The drafted reply couldn&apos;t be sent to the
                               customer.
                               {item.lastError

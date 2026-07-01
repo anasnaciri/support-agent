@@ -81,7 +81,7 @@ export default async function SupplierCasePage({ params, searchParams }: Params)
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             What&apos;s needed
           </dt>
-          <dd className="whitespace-pre-wrap pt-0.5 text-sm">
+          <dd className="whitespace-pre-wrap break-words pt-0.5 text-sm">
             {detail.problem}
           </dd>
         </div>
@@ -95,7 +95,7 @@ export default async function SupplierCasePage({ params, searchParams }: Params)
       {resolved ? (
         <section className="space-y-2 rounded-lg border border-border bg-background p-5">
           <h2 className="text-sm font-semibold">Your update</h2>
-          <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+          <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
             {detail.note ?? "(no note recorded)"}
           </p>
           {detail.proposedResolution ? (
