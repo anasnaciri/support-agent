@@ -14,6 +14,34 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Phone capture + email→phone→name customer resolution (committed + DEPLOYED Fly v47 + CF dcef78d4, on main)
+
+Follow-on to the manual case-details edit. When a case's email matches no Shopify
+customer account (guest checkout / relay), the customer panel now falls back
+**email → phone → name**:
+
+- [x] `ShopifyService.searchByPhone` + `searchByName`; `resolveCustomerForContext`
+      chains them after `searchByEmail`. Name is fuzzy/first-hit and
+      **display-only** — never stamps the trusted canonical `shopifyCustomerId`,
+      so a common name can't misbind identity. (`05db379`)
+- [x] Deterministic ingest capture: `inboundCustomerPhone` label-parser
+      (`Phone Number:`/`Phone:`/`Tel:`/`Mobile:`, 7–15 digits) → stamped into
+      `context.customerPhone` in `enrichCase`. Regex over LLM: the Shopify
+      contact-form format is rigid/machine-generated → no per-email model call,
+      no hallucinated digits. (`0dcc39d`)
+- [x] LLM backstop: `customerPhone` added to the CLOSED `case.update_context`
+      schema, so the agent can record a phone the regex missed. Benign contact
+      field — safe to open, unlike `customerEmail`. (`40d95f6`)
+- [x] Pencil gains a Phone field; the resolver + manual edit read `context.customerPhone`.
+
+All on `main` (fast-forward, origin/main = daa35b7); Fly v47 + CF `dcef78d4`.
+**Follow-up:** `enrichCase` canonical stamping stays email-only; agent-side
+phone/name *stamping* (vs display resolution) is a separate change with
+identity-gate considerations. Unstructured/prose phones aren't auto-captured
+(labelled-only) — the LLM backstop covers those.
+
+---
+
 ### 2026-07-01 — "Restart from triage" now drops every pending approval (packages/services + packages/db, NOT committed)
 
 **Why:** a `restartFromTriage` resume rebinds the case to triage and clears the
@@ -241,7 +269,30 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         read-only pass now would be ~90% rewritten in Phase 4, so they are folded into
         **Phase 4** (read + `useMutation` together, per page). Until then the
         `/settings/$` splat route renders a Placeholder for them.
-- [ ] **Phase 4 — mutations** (63 server actions → `useMutation`).
+- [~] **Phase 4 — mutations** (server actions → `useMutation`). **Case-page mutations DONE**
+      (2026-07-01, commits `d95da76` 4a → `6efb7d7` 4d). Shared infra: `use-case-mutation`
+      (`useCaseMutation`/`useApprovalDecision`/`useBundleDecision` — run api call, toast the
+      outcome via the tested `case-action-feedback`, invalidate case + cases/approvals) +
+      `ConfirmButton` (callback-driven AlertDialog).
+  - [x] **4a** (`d95da76`) — header actions (Resolve/Take over/Resume/Retry-send) + ⋮ menu
+        (Retry / Restart-from-triage + hand-settable status changes). To avoid duplicating the
+        §10 matrix in the SPA, added `CaseDetailCase.manualStatusTargets` (agent-core
+        `allowedManualStatusTargets`) to the contract + dashboard-reads; the ⋮ status items
+        render straight from it (+1 integration assertion).
+  - [x] **4b** (`cf023ed`) — reply composer (send on the thread) + locked mode + Rephrase-with-AI
+        + model picker.
+  - [x] **4c** (`a2d423a`) — approve/reject: composer approval mode (edit-and-approve), the rich
+        single ApprovalCard, and BundleApprovalBar (approve-all / reject-remaining + per-row
+        Accept). ApprovalSignalsStrip. `bundleDecisionFeedback` (+ tests).
+  - [x] **4d** (`daa35b7` + `6efb7d7`) — IssueRefundCard (agent-recommended refund),
+        RetrySendButton (deliveryFailed timeline), and the line-item RefundDialog (lazy
+        refundContext → issueRefund with line items/restock/shipping).
+  - [ ] **Remaining Phase 4** (NOT done): the approval-DETAIL page approve/reject
+        (`/approvals/:id`, still read-only), the supplier update form (`/supplier/cases/:id`),
+        and the form-heavy **settings** pages (read+mutation together per page — see 3e).
+        Also NOT ported: the Next "edit customer / assign order" pencil (CardEditPopover,
+        committed `d226ee9` on `apps/dashboard`) — a SPA `headerAction` slot on Customer/Order
+        panels + `api.editCaseDetails` would mirror it. **NOT live-verified** (needs api+WorkOS).
 - [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
 - [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
 
