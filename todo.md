@@ -14,6 +14,66 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Manual "edit customer / assign order" pencil on the case cards (apps/dashboard + backend, committed `d226ee9` on `feat/dashboard-spa` + DEPLOYED: Fly v45 + CF Workers `05ff05bd`)
+
+**Why:** a customer reported the agent no longer resolves the customer on case
+`2f636312-62b4-4e89-a9fc-00c145c77792`. Root cause is NOT an extraction bug — that
+case predates the deploy of `3c27e72` ("honor Reply-To"), which only stamps
+`customerEmail` from `Reply-To` for cases created AFTER deploy (existing relay cases
+keep `mailer@shopify.com`). Fix = a manual override so a manager is never blocked:
+a pencil on the Customer + Order cards to hand-assign the customer and the order the
+agent couldn't find.
+
+**Done (TDD red→green; `pnpm build` green, dashboard `tsc --noEmit` clean; new unit tests pass, integration DB-gated):**
+
+- [x] `CaseLifecycleWriter.setCaseDetails` (packages/services) — merges ONLY the
+      provided `customerEmail` / `customerName` / `identifiedOrderId` / `quotedOrderRef`
+      into `context` + one `case.details_edited` audit row, in a tx. No status change
+      (details are metadata → works in any status). 2 new writer tests.
+- [x] `editCaseDetails` wrapper (packages/db `dashboard-writes.ts`) over the writer;
+      `CaseNotFound` → `case_not_found`.
+- [x] Pure input helpers (`apps/api/.../case-details-input.ts`): `normalizeCustomerEmail`
+      (trim+lowercase+validate), `normalizeCustomerName`, `classifyOrderRef`. 7 tests.
+- [x] `POST /dashboard/cases/:id/details` (`handleDashboardEditCaseDetails`), gated on
+      `cases.set_status`. Resolves the typed order ref to its CANONICAL Shopify order in
+      the handler (holds ShopifyService, mirrors `resolveOrderForContext`): stamps the
+      GID as `identifiedOrderId` when found, else records the raw ref as `quotedOrderRef`.
+      Outcomes: `saved` (+`orderResolved`/`orderName`) | `invalid_email` |
+      `nothing_to_update` | `case_not_found`. +5 integration tests in `writes.integration.test.ts`.
+- [x] `api.editCaseDetails` client + `editCaseDetailsAction` server action + `detailsEdited`
+      banner in the case page.
+- [x] Sleek UI: `CardEditPopover` client component (muted pencil trigger → compact
+      click-away popover with minimal labelled inputs). Wired into `CustomerPanel`
+      (name+email) and `OrderPanel` (order number) via a `headerAction` slot; pencil shows
+      in every card state, including the empty ("no customer/order") states.
+
+**Invariant respected:** `identifiedOrderId` stays the resolved Shopify GID (server-side
+lookup, like the runtime) — this human path does NOT fabricate a GID from raw text.
+
+**Single-source-of-truth audit (asked mid-task): where do email/order actually live?**
+- Customer email/name: ONLY `context.customerEmail` / `context.customerName`. No column.
+  Case page, cases-list display, AND cases-list search all read those JSON paths → my edit
+  keeps every consumer in sync. Customer PANEL resolves the Shopify customer via
+  `searchByEmail(customerEmail)`, so setting the email lights it up too (I never fabricate
+  the canonical `shopifyCustomerId`).
+- Order: canonical source is `context.identifiedOrderId` (+ `quotedOrderRef`). Panel, refund,
+  tracking, and list SEARCH read context → synced. The ONE stale copy was the cases-LIST
+  order chip, which read the legacy `cases.shopifyOrderId` COLUMN — which the runtime itself
+  stopped maintaining once `identifiedOrderId` became canonical (agent-resolved orders never
+  showed in the chip). **Fixed:** `casesList` now derives `orderRef` from context
+  (`coalesce(quotedOrderRef, identifiedOrderId, shopify_order_id)`), so the chip reflects the
+  single source — my edit AND the runtime's own stamping now both reach the list. Nothing else
+  reads `Case.orderId`/`shopify_order_id`, so the column is now fully vestigial.
+
+**Follow-ups (noted, not done):**
+- [x] Committed `d226ee9` (on `feat/dashboard-spa`; NOT yet on `main`) + deployed api+worker → Fly v45, dashboard → CF Workers version `05ff05bd`. Full `ci:local` suite green (2669 tests).
+- [ ] Legacy relay cases: setting `customerEmail` fixes the panels + manual-composer target,
+      but the connector `ConversationService.reply` still threads to the original recipients
+      — replying to a pre-fix `mailer@shopify.com` thread may not reach the corrected address.
+      Separate connector concern; revisit if reports come in.
+
+---
+
 ### 2026-07-01 — Case view: conversation polish, cases-list reference redesign + richer search (apps/dashboard + backend, committed to `main` + DEPLOYED)
 
 Follow-on to the "Case detail page polish pass" below. Adopted the structure/
