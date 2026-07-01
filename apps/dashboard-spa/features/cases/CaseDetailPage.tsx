@@ -44,6 +44,7 @@ import { ChatThread } from "./ChatThread";
 import { ChatScrollArea } from "./ChatScrollArea";
 import { CaseDetailsPanel } from "./CaseDetailsPanel";
 import { CaseHeaderActions } from "./CaseHeaderActions";
+import { CaseLiveBoundary } from "./CaseLiveBoundary";
 import { ChatComposer } from "./ChatComposer";
 import { ApprovalCard } from "./ApprovalCard";
 import { ApprovalSignalsStrip } from "./ApprovalSignalsStrip";
@@ -481,6 +482,8 @@ export function CaseDetailPage() {
                   <span className="truncate">{customerEmail}</span>
                 </>
               ) : null}
+              <span>·</span>
+              <CaseLiveBoundary caseId={id} />
             </div>
           </div>
 
