@@ -13,11 +13,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
+import { ApprovalDecisionCard } from "./ApprovalDecisionCard";
 
-// ⚠️ Phase 3 = READ-ONLY. The approve/reject decision controls (the Next page's
-// server-action forms) land in Phase 4; a pending approval shows a read-only
-// note in their place. Everything else — reasoning, proposed input, staleness,
-// the decided summary — is the faithful display port.
+// The standalone approval-detail page: reasoning, proposed input, staleness,
+// and the decision surface (ApprovalDecisionCard — edit-and-approve / reject,
+// wired to api.approveApproval / rejectApproval; Phase 4). A settled approval
+// shows a read-only decided summary.
 
 export function ApprovalDetailPage() {
   const ctx = useWorkspaceCtx();
@@ -124,36 +125,7 @@ export function ApprovalDetailPage() {
         </CardContent>
       </Card>
 
-      {isPending ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Decision</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Approve / reject controls arrive in a later update. Until then,
-              decide this approval from the case view.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">
-              Decided{" "}
-              {row.decidedAt
-                ? row.decidedAt.slice(0, 19).replace("T", " ")
-                : "(no timestamp)"}
-              {row.decidedBy ? ` by ${row.decidedBy}` : ""}.
-              {row.approvedInput &&
-              typeof row.approvedInput === "object" &&
-              "bodyText" in (row.approvedInput as Record<string, unknown>)
-                ? " Manager edited the body text before approving."
-                : null}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      <ApprovalDecisionCard approval={row} workspaceId={ctx.workspaceId} />
     </div>
   );
 }
