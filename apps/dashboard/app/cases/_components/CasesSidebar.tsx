@@ -21,6 +21,10 @@ import {
   applyFreshPage,
   caseIdFromPathname,
   caseRowClasses,
+  displayNameFromEmail,
+  formatOrderRef,
+  initialsFrom,
+  isPriorityCase,
   mergeDedupeById,
   parseStoredMode,
   shouldLoadMore,
@@ -307,7 +311,7 @@ export function CasesSidebar() {
             {Array.from({ length: 7 }).map((_, i) => (
               <li
                 key={i}
-                className="h-16 animate-pulse rounded-md bg-muted/60"
+                className="h-[88px] animate-pulse rounded-lg bg-muted/60"
               />
             ))}
           </ul>
@@ -345,36 +349,76 @@ export function CasesSidebar() {
                   status: row.status,
                   active,
                 });
+                const name = displayNameFromEmail(row.customerEmail);
+                const title = name ?? caseSubjectLabel(row.subject);
+                const orderRef = formatOrderRef(row.orderRef);
                 return (
                   <li key={row.id} style={{ height: ROW_HEIGHT }} className="py-1">
                     <Link
                       href={`/cases/${row.id}`}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex h-full flex-col justify-center gap-1 rounded-lg border border-transparent px-3 transition-colors",
+                        "flex h-full gap-2.5 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 transition-colors",
                         appearance.container,
                       )}
                     >
-                      <span
-                        className={cn(
-                          "truncate text-sm",
-                          appearance.subject,
-                          !hasSubject(row.subject) && "italic opacity-70",
-                        )}
+                      <div
+                        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary"
+                        aria-hidden
                       >
-                        {caseSubjectLabel(row.subject)}
-                      </span>
-                      <span className="flex items-center gap-2 overflow-hidden">
-                        <Badge
-                          variant={caseStatusVariant(row.status)}
-                          className="shrink-0 px-1.5 py-0 text-[10px]"
-                        >
-                          {caseStatusLabel(row.status)}
-                        </Badge>
-                        <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
-                          {row.updatedAt.slice(5, 10)}
-                        </span>
-                      </span>
+                        {initialsFrom(row.customerEmail ?? row.subject)}
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <div className="flex items-baseline gap-2">
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-[13px]",
+                              appearance.subject,
+                              !name &&
+                                !hasSubject(row.subject) &&
+                                "italic opacity-70",
+                            )}
+                          >
+                            {title}
+                          </span>
+                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                            {row.updatedAt.slice(5, 10)}
+                          </span>
+                        </div>
+                        {name ? (
+                          <span
+                            className={cn(
+                              "truncate text-xs text-muted-foreground",
+                              !hasSubject(row.subject) && "italic opacity-70",
+                            )}
+                          >
+                            {caseSubjectLabel(row.subject)}
+                          </span>
+                        ) : null}
+                        {row.preview ? (
+                          <span className="truncate text-xs text-muted-foreground">
+                            {row.preview}
+                          </span>
+                        ) : null}
+                        <div className="mt-auto flex items-center gap-1.5 overflow-hidden pt-0.5">
+                          <Badge
+                            variant={caseStatusVariant(row.status)}
+                            className="shrink-0 px-1.5 py-0 text-[10px]"
+                          >
+                            {caseStatusLabel(row.status)}
+                          </Badge>
+                          {isPriorityCase(row.priority) ? (
+                            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary">
+                              Priority
+                            </span>
+                          ) : null}
+                          {orderRef ? (
+                            <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                              {orderRef}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                     </Link>
                   </li>
                 );

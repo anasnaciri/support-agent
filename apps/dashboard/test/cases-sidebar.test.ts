@@ -4,6 +4,10 @@ import {
   applyFreshPage,
   caseIdFromPathname,
   caseRowClasses,
+  displayNameFromEmail,
+  formatOrderRef,
+  initialsFrom,
+  isPriorityCase,
   mergeDedupeById,
   parseStoredMode,
   shouldLoadMore,
@@ -204,6 +208,58 @@ describe("parseStoredMode", () => {
     expect(parseStoredMode(null)).toBe("all");
     expect(parseStoredMode("")).toBe("all");
     expect(parseStoredMode("garbage")).toBe("all");
+  });
+});
+
+describe("initialsFrom", () => {
+  it("takes up to two initials from a name or email", () => {
+    expect(initialsFrom("Jane Lin")).toBe("JL");
+    expect(initialsFrom("jane.lin@shop.com")).toBe("JL");
+    expect(initialsFrom("sam@acme.co")).toBe("SA");
+    expect(initialsFrom("madonna")).toBe("M");
+  });
+  it("falls back to '?' for empty input", () => {
+    expect(initialsFrom(null)).toBe("?");
+    expect(initialsFrom("")).toBe("?");
+    expect(initialsFrom("   ")).toBe("?");
+  });
+});
+
+describe("displayNameFromEmail", () => {
+  it("title-cases the local part, split on separators", () => {
+    expect(displayNameFromEmail("jane.lin@shop.com")).toBe("Jane Lin");
+    expect(displayNameFromEmail("sam_okoro@x.io")).toBe("Sam Okoro");
+    expect(displayNameFromEmail("orders@shop.com")).toBe("Orders");
+  });
+  it("is null without an email", () => {
+    expect(displayNameFromEmail(null)).toBeNull();
+    expect(displayNameFromEmail(undefined)).toBeNull();
+  });
+});
+
+describe("isPriorityCase", () => {
+  it("is true only for a non-normal priority", () => {
+    expect(isPriorityCase("high")).toBe(true);
+    expect(isPriorityCase("urgent")).toBe(true);
+    expect(isPriorityCase("normal")).toBe(false);
+    expect(isPriorityCase(null)).toBe(false);
+    expect(isPriorityCase(undefined)).toBe(false);
+    expect(isPriorityCase("")).toBe(false);
+  });
+});
+
+describe("formatOrderRef", () => {
+  it("keeps a human order name as-is", () => {
+    expect(formatOrderRef("#1001")).toBe("#1001");
+  });
+  it("collapses a GID or bare numeric id to #<n>", () => {
+    expect(formatOrderRef("gid://shopify/Order/1234567")).toBe("#1234567");
+    expect(formatOrderRef("1044")).toBe("#1044");
+  });
+  it("is null when there's no order", () => {
+    expect(formatOrderRef(null)).toBeNull();
+    expect(formatOrderRef("")).toBeNull();
+    expect(formatOrderRef("   ")).toBeNull();
   });
 });
 

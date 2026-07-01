@@ -380,6 +380,14 @@ export const casesList = async (
       status: cases.status,
       category: cases.category,
       currentAgentId: cases.currentAgentId,
+      priority: cases.priority,
+      orderRef: cases.shopifyOrderId,
+      preview: cases.summary,
+      // Requester email lives in the agent-stamped context JSONB (same row —
+      // no join). NULL when the case has no customer email yet.
+      customerEmail: sql<
+        string | null
+      >`${cases.context}->>'customerEmail'`,
       createdAt: cases.createdAt,
       updatedAt: cases.updatedAt,
     })
@@ -398,6 +406,10 @@ export const casesList = async (
       status: r.status,
       category: r.category,
       currentAgentId: r.currentAgentId,
+      priority: r.priority,
+      orderRef: r.orderRef,
+      preview: r.preview,
+      customerEmail: r.customerEmail,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     })),

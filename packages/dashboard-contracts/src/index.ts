@@ -98,6 +98,18 @@ export interface CaseListRow {
   readonly currentAgentId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  // Row-display enrichments (all same-row on `cases`, no joins). Optional so a
+  // dashboard built against a newer contract still renders against an older api
+  // that doesn't send them yet.
+  /** Requester email (from the case context) — powers the row avatar + name. */
+  readonly customerEmail?: string | null;
+  /** Whatever order identifier was stamped on the case (name like "#1001",
+   *  or a GID/numeric id); formatted for display in the row. */
+  readonly orderRef?: string | null;
+  /** Case priority ("normal" | "high" | …); drives the PRIORITY tag. */
+  readonly priority?: string | null;
+  /** The agent's short case summary, used as the row's preview snippet. */
+  readonly preview?: string | null;
 }
 
 export interface CasesFilter {

@@ -2,8 +2,9 @@
 // React component so the virtualization window math, infinite-scroll trigger,
 // and page-merge dedup are unit-testable (mirrors settings-nav-items.ts).
 
-/** Compact fixed row height, in px — uniform rows make windowing trivial. */
-export const ROW_HEIGHT = 64;
+/** Fixed row height, in px — uniform rows make windowing trivial. Tall enough
+ *  for the avatar + name/time, subject, preview, and status/order meta line. */
+export const ROW_HEIGHT = 96;
 /** Rows rendered above/below the viewport to hide scroll seams. */
 export const OVERSCAN = 6;
 /** Distance from the bottom (px) at which the next page is prefetched. */
@@ -136,6 +137,54 @@ export const sidebarRequestSignature = (
 /** A persisted mode value, defaulting to "all" for anything unrecognized. */
 export const parseStoredMode = (raw: string | null): SidebarMode =>
   raw === "attention" ? "attention" : "all";
+
+// ── Row display helpers (avatar / name / priority / order ref) ──────────────
+
+/** Up to two initials from a name or email; "?" when there's nothing to show. */
+export const initialsFrom = (source: string | null | undefined): string => {
+  const words = (source ?? "").trim().split(/[\s@._-]+/).filter(Boolean);
+  const letters =
+    (words[0]?.[0] ?? "") + (words.length > 1 ? (words[1]![0] ?? "") : "");
+  return letters.toUpperCase() || "?";
+};
+
+/**
+ * A friendly display name derived from an email's local part
+ * (`"jane.lin@shop.com"` → `"Jane Lin"`). Best-effort — role addresses read a
+ * little oddly (`"orders@…"` → `"Orders"`) but it's closer to the reference's
+ * customer-name row than a raw address. Null when there's no email.
+ */
+export const displayNameFromEmail = (
+  email: string | null | undefined,
+): string | null => {
+  const local = (email ?? "").split("@")[0] ?? "";
+  const words = local.split(/[._-]+/).filter(Boolean);
+  if (words.length === 0) return null;
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+};
+
+/** Whether a case's priority should surface the PRIORITY tag. */
+export const isPriorityCase = (
+  priority: string | null | undefined,
+): boolean =>
+  typeof priority === "string" && priority.length > 0 && priority !== "normal";
+
+/**
+ * A compact, customer-facing order ref for a row: a human order name like
+ * `"#1001"` is shown as-is; a `gid://shopify/Order/123` or a bare numeric id
+ * collapses to `"#123"`; null when there's no order.
+ */
+export const formatOrderRef = (
+  raw: string | null | undefined,
+): string | null => {
+  const s = (raw ?? "").trim();
+  if (!s) return null;
+  if (s.startsWith("#")) return s;
+  const gid = /\/Order\/(\d+)/.exec(s);
+  if (gid) return `#${gid[1]}`;
+  if (/^\d+$/.test(s)) return `#${s}`;
+  return s;
+};
 
 export interface CaseRowClasses {
   /** Classes for the row link container (background / elevation / opacity). */
