@@ -45,7 +45,7 @@ const Row = ({
  * (stamped when an agent ran `tracking.lookup`); degrades gracefully for the
  * `no_provider` arm. Sits under the Customer + Order cards.
  */
-const MAX_CHECKPOINTS = 8;
+const MAX_CHECKPOINTS = 3;
 
 export const TrackingPanel = ({
   tracking,
