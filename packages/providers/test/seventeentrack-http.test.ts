@@ -30,7 +30,8 @@ describe("seventeenTrackRegister", () => {
       expect(url).toBe("https://api.17track.net/track/v2.2/register");
       expect((init?.headers as Record<string, string>)["17token"]).toBe("k1");
       const body = JSON.parse(String(init?.body ?? "[]"));
-      expect(body).toEqual([{ number: "1Z999", carrier: "UPS" }]);
+      // Always request English event translations (lang defaults to "en").
+      expect(body).toEqual([{ number: "1Z999", carrier: "UPS", lang: "en" }]);
       return okJson({ code: 0, data: { accepted: [{ number: "1Z999" }] } });
     });
     await seventeenTrackRegister({
@@ -45,13 +46,28 @@ describe("seventeenTrackRegister", () => {
   it("omits carrier when null", async () => {
     const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "[]"));
-      expect(body).toEqual([{ number: "1Z999" }]);
+      expect(body).toEqual([{ number: "1Z999", lang: "en" }]);
       return okJson({});
     });
     await seventeenTrackRegister({
       apiKey: "k1",
       trackingNumber: "1Z999",
       carrier: null,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  });
+
+  it("honors an explicit lang override", async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "[]"));
+      expect(body).toEqual([{ number: "1Z999", lang: "fr" }]);
+      return okJson({});
+    });
+    await seventeenTrackRegister({
+      apiKey: "k1",
+      trackingNumber: "1Z999",
+      carrier: null,
+      lang: "fr",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
   });

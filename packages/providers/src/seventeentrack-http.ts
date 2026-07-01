@@ -226,6 +226,13 @@ export interface SeventeenTrackRegisterInput {
   readonly apiKey: string;
   readonly trackingNumber: string;
   readonly carrier?: string | number | null;
+  /**
+   * Language code 17track translates logistics events into. Defaults to `en`
+   * so a Chinese-origin shipment's checkpoints come back in English. 17track
+   * translates at registration time (on the next event change), so this must be
+   * set when the number is registered — which our lookup flow always does first.
+   */
+  readonly lang?: string;
   readonly fetchImpl?: typeof fetch;
 }
 
@@ -245,6 +252,7 @@ export const seventeenTrackRegister = async (
     {
       number: input.trackingNumber,
       ...(input.carrier ? { carrier: input.carrier } : {}),
+      lang: input.lang ?? "en",
     },
   ];
   await post({
