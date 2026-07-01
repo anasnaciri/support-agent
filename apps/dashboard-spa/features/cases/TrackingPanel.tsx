@@ -140,7 +140,7 @@ export const TrackingPanel = ({
               className={cn(
                 "relative space-y-2.5",
                 shownCheckpoints.length > 1 &&
-                  "before:absolute before:bottom-1 before:left-1 before:top-1 before:w-0.5 before:bg-border",
+                  "before:absolute before:bottom-1 before:left-1 before:top-1 before:w-0.5 before:-translate-x-1/2 before:bg-border",
               )}
             >
               {shownCheckpoints.map((scan, i) => (
