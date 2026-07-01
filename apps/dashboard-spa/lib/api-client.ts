@@ -1,0 +1,1247 @@
+import type {
+  ShopifyCustomer,
+  ShopifyOrder,
+  ShopifyOrderRefundContext,
+} from "@support-agent/agent-core";
+import type {
+  AgentOverrideRow,
+  ApprovalDetail,
+  ApprovalsFilter,
+  RefundPolicyMode,
+  DiscountPolicyMode,
+  ApprovalsListResult,
+  AuditEntry,
+  AuditFilter,
+  CaseConversationThreadResult,
+  CaseDetail,
+  CaseEventsResult,
+  CaseTrackingResult,
+  CaseListRow,
+  CasesFilter,
+  CatalogResponse,
+  CustomAgentView,
+  CustomAgentWriteBody,
+  ConnectorConnectionView,
+  KnowledgeDocumentSummaryView,
+  KnowledgeDocumentView,
+  LlmCredentialStatusResponse,
+  ModelsResponse,
+  OnboardingResult,
+  Page,
+  ResolutionPolicyView,
+  ResolutionScenarioView,
+  ShopifyAppGateView,
+  CreateWorkspaceResult,
+  TenantInfo,
+  TenantSettingsView,
+  TodaySummary,
+  UsageDecisionRow,
+  WorkspaceSummary,
+  WorkspacesResponse,
+  MePermissionsResponse,
+  MembersResponse,
+  RolesResponse,
+  RbacPermissionDef,
+  RbacPermissionId,
+} from "@support-agent/dashboard-contracts";
+import { parseMintDenial } from "./connect-denial";
+import {
+  ApiConfigError,
+  ApiError,
+  LegalRequiredError,
+  NoTenantError,
+  UnauthorizedError,
+} from "./errors";
+
+// ============================================================
+// Dashboard SPA → apps/api client (Path B, BFF cookie session)
+// ============================================================
+//
+// The Vite SPA calls apps/api directly from the browser with the httpOnly
+// session cookie apps/api minted at OAuth callback (`credentials:"include"`).
+// It holds NO token in JS. This is the transport port of apps/dashboard's
+// lib/api-client.ts: the ~60 typed endpoint methods below are unchanged; only
+// `call()` moved from an RSC server-fetch (server-only + forwarded bearer +
+// redirect()) to a browser fetch (cookie + typed thrown errors). Auth/tenant
+// failures THROW (see ./errors); a global TanStack Query handler maps them to
+// router navigations. The only per-call context is the active workspace id.
+
+const trimSlash = (s: string): string => s.replace(/\/+$/u, "");
+
+const apiBase = (): string => {
+  const v = import.meta.env.VITE_API_BASE_URL;
+  if (!v || v.trim().length === 0) {
+    throw new Error("VITE_API_BASE_URL is required (SPA → api origin)");
+  }
+  return trimSlash(v.trim());
+};
+
+/** The only per-call context now: which workspace (tenant) to pin the call to. */
+export interface CallCtx {
+  readonly workspaceId?: string;
+}
+
+interface CallResult {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+// Refresh the session at most once concurrently: on a 401 the api can re-mint
+// the cookie from its sealed refresh token (POST /dashboard/auth/refresh), so a
+// lapsed access token self-heals instead of bouncing the user to sign-in (U1).
+let refreshInFlight: Promise<boolean> | null = null;
+const tryRefresh = (): Promise<boolean> => {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${apiBase()}/dashboard/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { origin: window.location.origin },
+    })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+};
+
+const rawCall = async (
+  path: string,
+  opts: {
+    readonly method?: "GET" | "POST";
+    readonly body?: unknown;
+    readonly ctx: CallCtx;
+  },
+): Promise<CallResult> => {
+  const headers: Record<string, string> = {};
+  if (opts.ctx.workspaceId) headers["x-workspace-id"] = opts.ctx.workspaceId;
+  if (opts.body !== undefined) headers["content-type"] = "application/json";
+
+  const res = await fetch(`${apiBase()}/dashboard${path}`, {
+    method: opts.method ?? "GET",
+    headers,
+    credentials: "include",
+    ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
+  });
+  const text = await res.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  return { status: res.status, body };
+};
+
+/**
+ * Low-level call: sends the cookie, retries once after a silent refresh on 401,
+ * then maps auth/tenant/config/server failures to thrown typed errors. 4xx
+ * bodies the caller interprets (404 not-found, 400 validation, write result
+ * codes) are returned. A 403 THROWS by default (NoTenant → onboarding /
+ * LegalRequired → legal); `on403:"return"` hands the body back instead.
+ */
+const call = async (
+  path: string,
+  opts: {
+    readonly method?: "GET" | "POST";
+    readonly body?: unknown;
+    readonly ctx: CallCtx;
+    readonly on403?: "throw" | "return";
+  },
+): Promise<CallResult> => {
+  let res = await rawCall(path, opts);
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) res = await rawCall(path, opts);
+  }
+  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 503) throw new ApiConfigError();
+  if (res.status >= 500) {
+    throw new ApiError(`dashboard api error ${res.status} on ${path}`, res.status);
+  }
+  if (res.status === 403 && (opts.on403 ?? "throw") === "throw") {
+    const err = (res.body as { error?: string } | null)?.error;
+    if (err === "legal_acceptance_required") throw new LegalRequiredError();
+    throw new NoTenantError();
+  }
+  return res;
+};
+
+const okBody = async (path: string, ctx: CallCtx): Promise<unknown> => {
+  const { status, body } = await call(path, { ctx });
+  if (status !== 200) {
+    throw new ApiError(`dashboard api ${status} on ${path}`, status);
+  }
+  return body;
+};
+
+// ---- Bootstrap helpers (the RSC auth gate's job, now client-side) ----
+
+/** The org's tenant (or null) — for the onboarding gate. */
+export const getTenant = async (ctx: CallCtx = {}): Promise<TenantInfo | null> => {
+  const { status, body } = await call("/tenant", { ctx, on403: "return" });
+  if (status !== 200) throw new ApiError(`dashboard api ${status} on /tenant`, status);
+  return (body as { tenant: TenantInfo | null }).tenant;
+};
+
+/** Every workspace the org owns (default first) — for the switcher + gate. */
+export const getWorkspaces = async (
+  ctx: CallCtx = {},
+): Promise<WorkspacesResponse> =>
+  okBody("/workspaces", ctx) as Promise<WorkspacesResponse>;
+
+/**
+ * Reconcile any pending invite + load the member's effective permissions for
+ * the active workspace (POST because it may write the reconcile). Seeds the
+ * permission set the nav gates on.
+ */
+export const getMeSession = async (
+  ctx: CallCtx,
+): Promise<MePermissionsResponse> => {
+  const { status, body } = await call("/me/session", { method: "POST", ctx });
+  if (status !== 200) {
+    throw new ApiError(`dashboard api ${status} on /me/session`, status);
+  }
+  return body as MePermissionsResponse;
+};
+
+// Write-result shapes (the action reads `.kind`; the api owns the union).
+export interface ApprovalDecisionResultView {
+  readonly kind: string;
+}
+export interface CaseBundleDecisionResultView {
+  readonly kind: string;
+  readonly action?: "approve" | "reject";
+  readonly count?: number;
+}
+export interface TakeOverOutcomeView {
+  readonly kind: string;
+  readonly canceledApprovals?: number;
+}
+export interface ResumeOutcomeView {
+  readonly kind: string;
+  readonly toStatus?: string;
+  readonly status?: string;
+}
+export interface SetCaseStatusOutcomeView {
+  readonly kind: string;
+  readonly fromStatus?: string;
+  readonly toStatus?: string;
+  readonly status?: string;
+  readonly canceledApprovals?: number;
+}
+export interface ResolveCaseOutcomeView {
+  readonly kind: string;
+}
+export interface IssueRefundOutcomeView {
+  readonly kind: string;
+  readonly refundId?: string;
+  readonly amount?: { readonly amount: string; readonly currencyCode: string };
+  readonly createdAt?: string;
+  readonly orderCurrency?: string;
+  readonly requestedCurrency?: string;
+  readonly error?: string;
+}
+
+// One restock/refund line the dashboard refund modal sends to the issue-refund
+// endpoint. Mirrors the api's `RefundLineItemInput` (resolved client-side:
+// restockType + locationId already decided from the order's fulfillment state +
+// the operator's restock toggle).
+export interface RefundLineItemPayload {
+  readonly lineItemId: string;
+  readonly quantity: number;
+  readonly restockType: "RETURN" | "CANCEL" | "NO_RESTOCK";
+  readonly locationId: string | null;
+}
+
+// Outcome of fetching the refund modal's context. `ok` carries the Shopify
+// refund context (line items + pricing); the others tell the modal why it can't
+// render (no order resolved, or Shopify wouldn't return the calculation).
+export type RefundContextOutcome =
+  | { readonly kind: "ok"; readonly context: ShopifyOrderRefundContext }
+  | { readonly kind: "order_not_found" }
+  | { readonly kind: "context_unavailable" }
+  | { readonly kind: "case_not_found" }
+  | { readonly kind: "error" };
+
+export interface CaseShopifyPanels {
+  readonly customer: ShopifyCustomer | null;
+  readonly order: ShopifyOrder | null;
+  readonly shopDomain: string | null;
+}
+
+// Supplier portal — the minimal privacy projection the api returns (no customer
+// PII). Mirrors the db's SupplierEscalation{ListItem,Detail} shapes; redefined
+// here because the dashboard (Path B) imports only agent-core + contracts.
+export interface SupplierEscalationListItemView {
+  readonly id: string;
+  readonly caseId: string;
+  readonly problem: string;
+  readonly orderRef: string | null;
+  readonly shipCity: string | null;
+  readonly shipCountry: string | null;
+  readonly trackingNumber: string | null;
+  readonly status: string;
+  readonly createdAt: string;
+}
+export interface SupplierEscalationDetailView
+  extends SupplierEscalationListItemView {
+  readonly note: string | null;
+  readonly proposedResolution: string | null;
+}
+
+// ============================================================
+// Typed endpoint methods. Reads take a Ctx (org); writes take org + decision
+// UUID (DashboardContext satisfies both).
+// ============================================================
+
+export const api = {
+  // ---- Reads ----
+  today: (ctx: CallCtx): Promise<TodaySummary> =>
+    okBody("/today", ctx) as Promise<TodaySummary>,
+
+  cases: (
+    ctx: CallCtx,
+    filter: CasesFilter,
+    page: number,
+    limit: number,
+  ): Promise<Page<CaseListRow>> => {
+    const qs = new URLSearchParams();
+    const trimmed = filter.q?.trim();
+    if (trimmed) qs.set("q", trimmed);
+    for (const v of filter.status ?? []) qs.append("status", v);
+    for (const v of filter.excludeStatus ?? []) qs.append("excludeStatus", v);
+    qs.set("page", String(page));
+    qs.set("limit", String(limit));
+    return okBody(`/cases?${qs.toString()}`, ctx) as Promise<Page<CaseListRow>>;
+  },
+
+  caseDetail: async (ctx: CallCtx, id: string): Promise<CaseDetail | null> => {
+    const { status, body } = await call(`/cases/${encodeURIComponent(id)}`, { ctx });
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id`);
+    return body as CaseDetail;
+  },
+
+  caseConversationThread: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CaseConversationThreadResult | null> => {
+    const { status, body } = await call(
+      `/cases/${encodeURIComponent(id)}/conversation-thread`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) {
+      throw new Error(
+        `dashboard api ${status} on /cases/:id/conversation-thread`,
+      );
+    }
+    return body as CaseConversationThreadResult;
+  },
+
+  caseShopify: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CaseShopifyPanels | null> => {
+    const { status, body } = await call(
+      `/cases/${encodeURIComponent(id)}/shopify`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id/shopify`);
+    return body as CaseShopifyPanels;
+  },
+
+  // Fresh carrier tracking for the case-detail Tracking card. Best-effort: a
+  // 17track / api hiccup must never break the case page, so any failure or
+  // non-200 resolves to `unavailable` (the page then falls back to the on-case
+  // tracking stamp). Returns the discriminated outcome.
+  caseTracking: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CaseTrackingResult> => {
+    try {
+      const { status, body } = await call(
+        `/cases/${encodeURIComponent(id)}/tracking`,
+        { ctx },
+      );
+      if (status === 404) return { kind: "not_found" };
+      if (status !== 200 || !body) return { kind: "unavailable" };
+      return body as CaseTrackingResult;
+    } catch {
+      return { kind: "unavailable" };
+    }
+  },
+
+  caseEvents: async (
+    ctx: CallCtx,
+    id: string,
+    since: string,
+  ): Promise<CaseEventsResult | null> => {
+    const { status, body } = await call(
+      `/cases/${encodeURIComponent(id)}/events?since=${encodeURIComponent(since)}`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id/events`);
+    return body as CaseEventsResult;
+  },
+
+  approvals: (
+    ctx: CallCtx,
+    filter: ApprovalsFilter,
+    page: number,
+    limit: number,
+  ): Promise<ApprovalsListResult> => {
+    const qs = new URLSearchParams();
+    for (const v of filter.status ?? []) qs.append("status", v);
+    for (const v of filter.risk ?? []) qs.append("risk", v);
+    for (const v of filter.tool ?? []) qs.append("tool", v);
+    for (const v of filter.agent ?? []) qs.append("agent", v);
+    qs.set("page", String(page));
+    qs.set("limit", String(limit));
+    return okBody(`/approvals?${qs.toString()}`, ctx) as Promise<ApprovalsListResult>;
+  },
+
+  approvalDetail: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<ApprovalDetail | null> => {
+    const { status, body } = await call(`/approvals/${encodeURIComponent(id)}`, {
+      ctx,
+    });
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /approvals/:id`);
+    return body as ApprovalDetail;
+  },
+
+  audit: (
+    ctx: CallCtx,
+    filter: AuditFilter,
+    page: number,
+    limit: number,
+  ): Promise<Page<AuditEntry>> => {
+    const qs = new URLSearchParams();
+    if (filter.action) qs.set("action", filter.action);
+    if (filter.actor) qs.set("actor", filter.actor);
+    qs.set("page", String(page));
+    qs.set("limit", String(limit));
+    return okBody(`/audit?${qs.toString()}`, ctx) as Promise<Page<AuditEntry>>;
+  },
+
+  connections: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<ConnectorConnectionView>> =>
+    (
+      (await okBody("/connections", ctx)) as {
+        connections: ReadonlyArray<ConnectorConnectionView>;
+      }
+    ).connections,
+
+  shopifyApp: (ctx: CallCtx): Promise<ShopifyAppGateView> =>
+    okBody("/shopify-app", ctx) as Promise<ShopifyAppGateView>,
+
+  usage: async (
+    ctx: CallCtx,
+    start: string,
+    end: string,
+  ): Promise<ReadonlyArray<UsageDecisionRow>> =>
+    (
+      (await okBody(
+        `/usage?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+        ctx,
+      )) as { rows: ReadonlyArray<UsageDecisionRow> }
+    ).rows,
+
+  agentOverrides: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<AgentOverrideRow>> =>
+    (
+      (await okBody("/agent-overrides", ctx)) as {
+        overrides: ReadonlyArray<AgentOverrideRow>;
+      }
+    ).overrides,
+
+  catalog: (ctx: CallCtx): Promise<CatalogResponse> =>
+    okBody("/catalog", ctx) as Promise<CatalogResponse>,
+
+  models: (ctx: CallCtx): Promise<ModelsResponse> =>
+    okBody("/models", ctx) as Promise<ModelsResponse>,
+
+  // Like `models`, but tolerant: returns null instead of redirecting/throwing
+  // when the member can't read the catalog (403 — lacks settings.agents) or the
+  // call otherwise fails. The case-page reply composer renders the model picker
+  // only when this resolves, so a reply-only member still gets the composer
+  // (minus the picker) rather than being bounced to /onboarding.
+  replyModels: async (ctx: CallCtx): Promise<ModelsResponse | null> => {
+    const { status, body } = await call("/models", { ctx, on403: "return" });
+    return status === 200 ? (body as ModelsResponse) : null;
+  },
+
+  llmStatus: (ctx: CallCtx): Promise<LlmCredentialStatusResponse> =>
+    okBody("/llm", ctx) as Promise<LlmCredentialStatusResponse>,
+
+  settings: (ctx: CallCtx): Promise<TenantSettingsView> =>
+    okBody("/settings", ctx) as Promise<TenantSettingsView>,
+
+  resolutionPolicy: (ctx: CallCtx): Promise<ResolutionPolicyView> =>
+    okBody("/resolution-policy", ctx) as Promise<ResolutionPolicyView>,
+
+  shopCurrency: (
+    ctx: CallCtx,
+  ): Promise<{ readonly currencyCode: string | null }> =>
+    okBody("/shop-currency", ctx) as Promise<{
+      readonly currencyCode: string | null;
+    }>,
+
+  // ---- Writes ----
+  onboarding: async (
+    ctx: CallCtx,
+    input: {
+      readonly name: string;
+      readonly notificationEmail: string;
+      readonly legalAccepted: boolean;
+    },
+  ): Promise<{ status: number; result: OnboardingResult | null }> => {
+    const { status, body } = await call("/onboarding", {
+      method: "POST",
+      body: input,
+      ctx,
+    });
+    return { status, result: status === 200 ? (body as OnboardingResult) : null };
+  },
+
+  acceptLegal: (ctx: CallCtx): Promise<CallResult> =>
+    call("/legal-acceptance", { method: "POST", ctx }),
+
+  /**
+   * Irreversibly delete the whole account: EVERY workspace the org owns,
+   * then the WorkOS org + deletion email (worker).
+   */
+  deleteAccount: (ctx: CallCtx): Promise<CallResult> =>
+    call("/account/delete", { method: "POST", ctx }),
+
+  // ---- Workspaces ----
+  workspaces: (ctx: CallCtx): Promise<WorkspacesResponse> =>
+    okBody("/workspaces", ctx) as Promise<WorkspacesResponse>,
+
+  createWorkspace: async (
+    ctx: CallCtx,
+    input: { readonly name: string; readonly notificationEmail: string },
+  ): Promise<{
+    status: number;
+    result: CreateWorkspaceResult | null;
+    error: string | null;
+  }> => {
+    const { status, body } = await call("/workspaces", {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return", // legal_acceptance_required — caller routes to legal
+    });
+    return {
+      status,
+      result: status === 200 ? (body as CreateWorkspaceResult) : null,
+      error:
+        status === 200
+          ? null
+          : ((body as { error?: string } | null)?.error ?? "unknown"),
+    };
+  },
+
+  renameWorkspace: (
+    ctx: CallCtx,
+    workspaceId: string,
+    name: string,
+  ): Promise<CallResult> =>
+    call(`/workspaces/${encodeURIComponent(workspaceId)}/rename`, {
+      method: "POST",
+      body: { name },
+      ctx,
+    }),
+
+  /** Delete ONE workspace; the org and sibling workspaces survive. */
+  deleteWorkspace: (ctx: CallCtx, workspaceId: string): Promise<CallResult> =>
+    call(`/workspaces/${encodeURIComponent(workspaceId)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
+
+  setAgentModel: (ctx: CallCtx, agentId: string, model: string): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/model`, {
+      method: "POST",
+      body: { model },
+      ctx,
+    }),
+
+  clearAgentModel: (ctx: CallCtx, agentId: string): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/model/clear`, {
+      method: "POST",
+      ctx,
+    }),
+
+  setAgentSystemPrompt: (
+    ctx: CallCtx,
+    agentId: string,
+    systemPrompt: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/system-prompt`, {
+      method: "POST",
+      body: { systemPrompt },
+      ctx,
+    }),
+
+  clearAgentSystemPrompt: (
+    ctx: CallCtx,
+    agentId: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/system-prompt/clear`, {
+      method: "POST",
+      ctx,
+    }),
+
+  setAgentToolPermission: (
+    ctx: CallCtx,
+    agentId: string,
+    tool: string,
+    permission: "ask" | "allow",
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/tool-permission`, {
+      method: "POST",
+      body: { tool, permission },
+      ctx,
+    }),
+
+  clearAgentToolPermission: (
+    ctx: CallCtx,
+    agentId: string,
+    tool: string,
+  ): Promise<CallResult> =>
+    call(`/agents/${encodeURIComponent(agentId)}/tool-permission/clear`, {
+      method: "POST",
+      body: { tool },
+      ctx,
+    }),
+
+  // ---- Custom (merchant-authored) agents ----
+  createCustomAgent: (
+    ctx: CallCtx,
+    body: CustomAgentWriteBody,
+  ): Promise<{ status: number; body: unknown }> =>
+    call("/custom-agents", { method: "POST", body, ctx, on403: "return" }),
+
+  getCustomAgent: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<CustomAgentView | null> => {
+    const { status, body } = await call(
+      `/custom-agents/${encodeURIComponent(id)}`,
+      { ctx, on403: "return" },
+    );
+    return status === 200 ? (body as CustomAgentView) : null;
+  },
+
+  updateCustomAgent: (
+    ctx: CallCtx,
+    id: string,
+    body: CustomAgentWriteBody,
+  ): Promise<{ status: number; body: unknown }> =>
+    call(`/custom-agents/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body,
+      ctx,
+      on403: "return",
+    }),
+
+  deleteCustomAgent: (ctx: CallCtx, id: string): Promise<CallResult> =>
+    call(`/custom-agents/${encodeURIComponent(id)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
+
+  knowledge: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<KnowledgeDocumentSummaryView>> =>
+    (
+      (await okBody("/knowledge", ctx)) as {
+        documents: ReadonlyArray<KnowledgeDocumentSummaryView>;
+      }
+    ).documents,
+
+  knowledgeDoc: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<KnowledgeDocumentView | null> => {
+    const { status, body } = await call(
+      `/knowledge/${encodeURIComponent(id)}`,
+      { ctx },
+    );
+    if (status !== 200) return null;
+    return (body as { document: KnowledgeDocumentView }).document;
+  },
+
+  createKnowledge: (
+    ctx: CallCtx,
+    input:
+      | { readonly title: string; readonly sourceType: "text"; readonly content: string }
+      | { readonly title: string; readonly sourceType: "url"; readonly sourceUrl: string },
+  ): Promise<CallResult> =>
+    call("/knowledge", { method: "POST", body: input, ctx }),
+
+  updateKnowledge: (
+    ctx: CallCtx,
+    id: string,
+    input: { readonly title?: string; readonly content?: string },
+  ): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: input,
+      ctx,
+    }),
+
+  deleteKnowledge: (ctx: CallCtx, id: string): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
+
+  resyncKnowledge: (ctx: CallCtx, id: string): Promise<CallResult> =>
+    call(`/knowledge/${encodeURIComponent(id)}/resync`, {
+      method: "POST",
+      ctx,
+    }),
+
+  connectLlm: (
+    ctx: CallCtx,
+    input: {
+      readonly provider: string;
+      readonly apiKey: string;
+      readonly baseURL?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/llm", { method: "POST", body: input, ctx }),
+
+  revokeLlm: (ctx: CallCtx): Promise<CallResult> =>
+    call("/llm/revoke", { method: "POST", ctx }),
+
+  setRefundPolicy: (
+    ctx: CallCtx,
+    input: {
+      readonly currencyCode: string;
+      readonly askAboveMinorUnits: number;
+      readonly denyAboveMinorUnits: number;
+      readonly mode: RefundPolicyMode;
+    },
+  ): Promise<CallResult> =>
+    call("/refund-policy", { method: "POST", body: input, ctx }),
+
+  setCancellationRestock: (
+    ctx: CallCtx,
+    restock: boolean,
+  ): Promise<CallResult> =>
+    call("/cancellation-restock", { method: "POST", body: { restock }, ctx }),
+
+  setDiscountPolicy: (
+    ctx: CallCtx,
+    input: {
+      readonly currencyCode: string;
+      readonly askAbovePercentage: number;
+      readonly maxPercentage: number;
+      readonly askAboveFixedAmountMinorUnits: number;
+      readonly maxFixedAmountMinorUnits: number;
+      readonly maxValidityDays: number;
+      readonly mode: DiscountPolicyMode;
+    },
+  ): Promise<CallResult> =>
+    call("/discount-policy", { method: "POST", body: input, ctx }),
+
+  setResolutionPolicy: (
+    ctx: CallCtx,
+    scenarios: ReadonlyArray<ResolutionScenarioView>,
+  ): Promise<CallResult> =>
+    call("/resolution-policy", { method: "POST", body: { scenarios }, ctx }),
+
+  setResolutionAgentEnabled: (
+    ctx: CallCtx,
+    enabled: boolean,
+  ): Promise<CallResult> =>
+    call("/resolution-agent", { method: "POST", body: { enabled }, ctx }),
+
+  setSupplierSheet: (
+    ctx: CallCtx,
+    input: {
+      readonly spreadsheetId: string;
+      readonly range: string;
+      readonly description: string | null;
+    },
+  ): Promise<CallResult> =>
+    call("/supplier-sheet", { method: "POST", body: input, ctx }),
+
+  clearSupplierSheet: (ctx: CallCtx): Promise<CallResult> =>
+    call("/supplier-sheet/clear", { method: "POST", ctx }),
+
+  disconnect: (ctx: CallCtx, provider: string): Promise<CallResult> =>
+    call(`/connections/${encodeURIComponent(provider)}/disconnect`, {
+      method: "POST",
+      ctx,
+    }),
+
+  // Connect a generic IMAP/SMTP mailbox. Unlike the OAuth connectors there's
+  // no redirect: the credentials are POSTed to the api, which connectivity-
+  // checks both servers before storing. Plaintext app-password transits
+  // dashboard → api over TLS; the api encrypts it at rest.
+  connectImap: (
+    ctx: CallCtx,
+    input: {
+      readonly mailbox: string;
+      readonly password: string;
+      readonly imapHost: string;
+      readonly imapPort?: number;
+      readonly imapSecure?: boolean;
+      readonly smtpHost: string;
+      readonly smtpPort?: number;
+      readonly smtpSecure?: boolean;
+      readonly user?: string;
+    },
+  ): Promise<CallResult> =>
+    // on403 return: the action maps it to its legal_acceptance_required
+    // message (the blanket /onboarding redirect made that branch dead code).
+    call("/connections/imap", {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return",
+    }),
+
+  // Autodiscover a mailbox's IMAP/SMTP server settings from just the
+  // address (api-side: ISPDB + MX heuristics + DNS-checked guesses), so the
+  // connect form can hide host/port fields from non-technical merchants.
+  // Read-only — nothing is persisted.
+  discoverImap: (
+    ctx: CallCtx,
+    input: { readonly email: string },
+  ): Promise<CallResult> =>
+    call("/connections/imap/discover", { method: "POST", body: input, ctx }),
+
+  // Mint a signed Telegram linking deep link (t.me/<bot>?start=<token>)
+  // for the authenticated tenant. The merchant opens it and presses
+  // Start; the api's bot webhook binds their chat. 503 → bot not
+  // configured on this deployment.
+  connectTelegram: (ctx: CallCtx): Promise<CallResult> =>
+    call("/connections/telegram", {
+      method: "POST",
+      ctx,
+      on403: "return",
+    }),
+
+  // Mint a signed install grant for the authenticated tenant and get the
+  // provider OAuth install URL (5th-audit #2). The tenant is derived
+  // server-side from the session, never client-supplied.
+  connectUrl: async (
+    ctx: CallCtx,
+    provider: string,
+  ): Promise<
+    | { readonly url: string }
+    | { readonly alreadyConnected: { readonly mailbox: string | null } }
+    | { readonly denied: string }
+  > => {
+    const { status, body } = await call(
+      `/connect/${encodeURIComponent(provider)}`,
+      { method: "POST", ctx },
+    );
+    // One mailbox per provider per store — the api refuses to mint an
+    // install grant while one is connected.
+    if (
+      status === 409 &&
+      (body as { error?: unknown })?.error === "already_connected"
+    ) {
+      const mailbox = (body as { mailbox?: unknown }).mailbox;
+      return {
+        alreadyConnected: {
+          mailbox: typeof mailbox === "string" ? mailbox : null,
+        },
+      };
+    }
+    // The api refuses to mint a Shopify grant for a workspace with no app
+    // credentials of its own (pilot not provisioned / revoked / no app
+    // configured). Surfaced as a friendly banner, not a 500 page.
+    const denied = parseMintDenial(status, body);
+    if (denied) return { denied };
+    if (status !== 200 || typeof (body as { url?: unknown })?.url !== "string") {
+      throw new Error(`dashboard api ${status} on /connect/${provider}`);
+    }
+    return body as { url: string };
+  },
+
+  approveApproval: async (
+    ctx: CallCtx,
+    id: string,
+    approvedInput?: unknown,
+  ): Promise<ApprovalDecisionResultView> => {
+    const { body } = await call(`/approvals/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: approvedInput !== undefined ? { approvedInput } : {},
+      ctx,
+    });
+    return (body as ApprovalDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  rejectApproval: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<ApprovalDecisionResultView> => {
+    const { body } = await call(`/approvals/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      ctx,
+    });
+    return (body as ApprovalDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  // Decide a whole case's pending approval BUNDLE in one click (autonomous
+  // loop). The api approves/rejects every pending row then publishes one event
+  // so the runtime runs the bundle in order. `edits` carries manager-edited
+  // tool inputs keyed by approval id (e.g. the edited reply), honored only on
+  // approve.
+  approveCaseBundle: async (
+    ctx: CallCtx,
+    caseId: string,
+    edits?: Record<string, unknown>,
+  ): Promise<CaseBundleDecisionResultView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/approvals/approve`,
+      {
+        method: "POST",
+        body: edits !== undefined ? { edits } : {},
+        ctx,
+      },
+    );
+    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  rejectCaseBundle: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<CaseBundleDecisionResultView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/approvals/reject`,
+      { method: "POST", ctx },
+    );
+    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
+  },
+
+  takeover: async (
+    ctx: CallCtx,
+    caseId: string,
+    reason?: string,
+  ): Promise<TakeOverOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/takeover`, {
+      method: "POST",
+      body: reason !== undefined ? { reason } : {},
+      ctx,
+    });
+    return (body as TakeOverOutcomeView | null) ?? { kind: "error" };
+  },
+
+  resume: async (
+    ctx: CallCtx,
+    caseId: string,
+    reason?: string,
+  ): Promise<ResumeOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resume`, {
+      method: "POST",
+      body: reason !== undefined ? { reason } : {},
+      ctx,
+    });
+    return (body as ResumeOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Manually set a case's status (mark resolved, reopen, park waiting on the
+  // customer …). The api validates the move against the case state machine and
+  // returns the discriminated outcome (updated | unchanged | invalid_status |
+  // transition_not_allowed | case_not_found).
+  setStatus: async (
+    ctx: CallCtx,
+    caseId: string,
+    status: string,
+    reason?: string,
+  ): Promise<SetCaseStatusOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/status`, {
+      method: "POST",
+      body: reason !== undefined ? { status, reason } : { status },
+      ctx,
+    });
+    return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Resolve a case by hand — including one the manager has TAKEN OVER. Distinct
+  // from `setStatus("resolved")`, which the state machine forbids directly from
+  // human_takeover: this endpoint bridges the close legally for a human actor.
+  // Returns the discriminated outcome (resolved | case_not_found).
+  resolveCase: async (
+    ctx: CallCtx,
+    caseId: string,
+    reason?: string,
+  ): Promise<ResolveCaseOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resolve`, {
+      method: "POST",
+      body: reason !== undefined ? { reason } : {},
+      ctx,
+    });
+    return (body as ResolveCaseOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Issue an agent-recommended refund directly on a case. The agent only
+  // *recommended* the refund (read-only), so there's no approval to approve;
+  // this runs the equivalent of refund.create under the operator's authority
+  // (gated on the refunds.issue permission). Returns the discriminated outcome
+  // (issued | order_not_found | invalid_amount | already_refunded |
+  // currency_mismatch | refund_failed | case_not_found).
+  issueRefund: async (
+    ctx: CallCtx,
+    caseId: string,
+    amount: { readonly amount: string; readonly currencyCode: string },
+    opts: {
+      readonly reason?: string | null;
+      readonly lineItems?: ReadonlyArray<RefundLineItemPayload>;
+      readonly shipping?: {
+        readonly amount: string;
+        readonly currencyCode: string;
+      } | null;
+    } = {},
+  ): Promise<IssueRefundOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/refund`, {
+      method: "POST",
+      body: {
+        amount,
+        ...(opts.reason ? { reason: opts.reason } : {}),
+        ...(opts.lineItems && opts.lineItems.length > 0
+          ? { lineItems: opts.lineItems }
+          : {}),
+        ...(opts.shipping ? { shipping: opts.shipping } : {}),
+      },
+      ctx,
+    });
+    return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Refundable line items + pricing for the case's order, powering the
+  // Shopify-style refund modal. Read-only (gated on `refunds.issue` like the
+  // issue endpoint). Returns the discriminated outcome so the modal can explain
+  // why it can't render (no order / Shopify wouldn't calculate).
+  refundContext: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<RefundContextOutcome> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/refund-context`,
+      { ctx },
+    );
+    return (body as RefundContextOutcome | null) ?? { kind: "error" };
+  },
+
+  // Resume + an immediate `case.resumed` tick — the agent retries now
+  // instead of waiting for the customer's next reply. `fromTriage` does a FULL
+  // retry: it rebinds the case to triage so the tick re-classifies + re-routes
+  // (default re-runs the bound specialist's last step).
+  retry: async (
+    ctx: CallCtx,
+    caseId: string,
+    opts: { readonly fromTriage?: boolean } = {},
+  ): Promise<ResumeOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/retry`, {
+      method: "POST",
+      ctx,
+      ...(opts.fromTriage ? { body: { fromTriage: true } } : {}),
+    });
+    return (body as ResumeOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Re-send the SAME drafted reply whose delivery failed (NOT a re-run of the
+  // agent): requeues the failed reply-delivery so the worker sweep sends it.
+  retrySend: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<{ readonly kind: string }> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/retry-send`,
+      { method: "POST", ctx },
+    );
+    return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
+  // Send a human-drafted customer reply while driving a taken-over case. Goes
+  // out on the same connector/thread the agent uses; the case stays in
+  // human_takeover. Returns the discriminated outcome (sent | not_in_takeover |
+  // no_thread | send_failed | …).
+  sendReply: async (
+    ctx: CallCtx,
+    caseId: string,
+    bodyText: string,
+  ): Promise<{ readonly kind: string }> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/reply`, {
+      method: "POST",
+      body: { bodyText },
+      ctx,
+    });
+    return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
+  // Persist the workspace "Rephrase with AI" model (blank string clears it →
+  // the rephrase handler falls back to its default). Gated on settings.agents.
+  setRephraseModel: async (
+    ctx: CallCtx,
+    model: string,
+  ): Promise<{ readonly ok: boolean }> => {
+    const { body } = await call(`/settings/rephrase-model`, {
+      method: "POST",
+      body: { model },
+      ctx,
+    });
+    return (body as { ok: boolean } | null) ?? { ok: false };
+  },
+
+  // AI-polish a reply draft. Returns the rewritten text on success, or a
+  // discriminated reason (empty_input | no_llm | failed) the composer maps to a
+  // friendly message. Spent against the tenant's own LLM credential.
+  rephrase: async (
+    ctx: CallCtx,
+    text: string,
+  ): Promise<{ readonly kind: string; readonly text?: string }> => {
+    const { body } = await call(`/rephrase`, {
+      method: "POST",
+      body: { text },
+      ctx,
+    });
+    return (body as { kind: string; text?: string } | null) ?? { kind: "error" };
+  },
+
+  // ---- Members & roles (members.manage) ----
+  members: async (ctx: CallCtx): Promise<MembersResponse> =>
+    okBody("/members", ctx) as Promise<MembersResponse>,
+
+  roles: async (ctx: CallCtx): Promise<RolesResponse> =>
+    okBody("/roles", ctx) as Promise<RolesResponse>,
+
+  permissionCatalog: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<RbacPermissionDef>> =>
+    (
+      (await okBody("/permission-catalog", ctx)) as {
+        permissions: ReadonlyArray<RbacPermissionDef>;
+      }
+    ).permissions,
+
+  inviteMember: (
+    ctx: CallCtx,
+    input: {
+      readonly email: string;
+      readonly roleId: string;
+      readonly workosInvitationId?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/members/invite", { method: "POST", body: input, ctx }),
+
+  setMemberRole: (
+    ctx: CallCtx,
+    userDecisionUuid: string,
+    roleId: string,
+  ): Promise<CallResult> =>
+    call(`/members/${encodeURIComponent(userDecisionUuid)}/role`, {
+      method: "POST",
+      body: { roleId },
+      ctx,
+    }),
+
+  removeMember: (ctx: CallCtx, userDecisionUuid: string): Promise<CallResult> =>
+    call(`/members/${encodeURIComponent(userDecisionUuid)}/remove`, {
+      method: "POST",
+      ctx,
+    }),
+
+  revokeInvitation: (ctx: CallCtx, invitationId: string): Promise<CallResult> =>
+    call(`/invitations/${encodeURIComponent(invitationId)}/revoke`, {
+      method: "POST",
+      ctx,
+    }),
+
+  createRole: (ctx: CallCtx, name: string): Promise<CallResult> =>
+    call("/roles", { method: "POST", body: { name }, ctx }),
+
+  renameRole: (ctx: CallCtx, roleId: string, name: string): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/rename`, {
+      method: "POST",
+      body: { name },
+      ctx,
+    }),
+
+  setRolePermissions: (
+    ctx: CallCtx,
+    roleId: string,
+    permissionIds: ReadonlyArray<RbacPermissionId>,
+  ): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/permissions`, {
+      method: "POST",
+      body: { permissionIds },
+      ctx,
+    }),
+
+  deleteRole: (ctx: CallCtx, roleId: string): Promise<CallResult> =>
+    call(`/roles/${encodeURIComponent(roleId)}/delete`, {
+      method: "POST",
+      ctx,
+    }),
+
+  // ---- Supplier portal ----
+  supplierCases: async (
+    ctx: CallCtx,
+  ): Promise<ReadonlyArray<SupplierEscalationListItemView>> =>
+    (
+      (await okBody("/supplier/cases", ctx)) as {
+        cases: ReadonlyArray<SupplierEscalationListItemView>;
+      }
+    ).cases,
+
+  supplierCase: async (
+    ctx: CallCtx,
+    id: string,
+  ): Promise<SupplierEscalationDetailView | null> => {
+    const { status, body } = await call(
+      `/supplier/cases/${encodeURIComponent(id)}`,
+      { ctx },
+    );
+    if (status === 404) return null;
+    if (status !== 200) {
+      throw new Error(`dashboard api ${status} on /supplier/cases/:id`);
+    }
+    return body as SupplierEscalationDetailView;
+  },
+
+  supplierUpdate: (
+    ctx: CallCtx,
+    id: string,
+    input: {
+      readonly note: string;
+      readonly proposedResolution?: string | null;
+    },
+  ): Promise<CallResult> =>
+    call(`/supplier/cases/${encodeURIComponent(id)}/update`, {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return",
+    }),
+
+  inviteSupplier: (
+    ctx: CallCtx,
+    input: {
+      readonly email: string;
+      readonly name?: string;
+      readonly workosInvitationId?: string;
+    },
+  ): Promise<CallResult> =>
+    call("/supplier/invite", { method: "POST", body: input, ctx }),
+};

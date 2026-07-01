@@ -53,8 +53,23 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
       (http dev) auto-derived. **DEFERRED to the flows that need them:** the admin-SDK server-side
       moves (onboarding `createOrganization`/`switchToOrganization`; member/supplier `sendInvitation`)
       land in Phase 2 (onboarding) / Phase 4 (invites), since only new-user + invite flows need them.
-- [ ] **Phase 2 — SPA auth + shell + workspace context** (SessionProvider, WorkspaceProvider,
-      AppShell, TanStack Router tree + `beforeLoad` guards from `resolveDashboardRedirect`).
+- [~] **Phase 2 — SPA auth + shell + workspace context** — CORE DONE (SPA build green, 185 tests):
+      ported `lib/api-client.ts` (browser transport: `credentials:include`, 401→refresh-retry,
+      typed thrown errors in `lib/errors.ts`; kept the ~60 method bodies verbatim, `CallCtx` now
+      just `{workspaceId}`). `SessionProvider` (`lib/session-context.tsx`) = the client `getDashboardContext`
+      gate: BFF whoami (`/dashboard/auth/session`) → workspaces → active (localStorage via
+      `pickActiveWorkspace`) → `me/session` permissions; `setActiveWorkspace` invalidates scoped
+      caches. `lib/auth/session-api.ts` (login redirect / POST logout / whoami). `lib/query-client.ts`
+      (global typed-error → nav) + `lib/query-keys.ts` (workspaceId in every scoped key). Nav shims
+      `components/ui/link.tsx` (next/link) + `lib/navigation.ts` (usePathname/navigate over TanStack
+      Router, route-tree UNregistered so `to` stays loose). Ported shell (`components/shell/`):
+      AppShell/IconRail/WorkspaceSwitcher/SignOutButton/settings-nav — server actions → `logout()`/
+      `setActiveWorkspace()`, `next/image`→`<img>`, sidebar prefs → localStorage. `router.tsx`
+      (code-based tree: `authed` layout = SessionProvider+shell; Home/Today real page + placeholders
+      for cases/approvals/audit/settings; public sign-in/goodbye/no-access/onboarding). `main.tsx`
+      = RouterProvider + QueryClientProvider + Toaster. **REMAINING in Phase 2/3:** full `CasesSidebar`
+      (stubbed) + real onboarding form + `beforeLoad` route guards (currently gated inside SessionProvider,
+      not per-route) — fold into Phase 3. NOT live-verified (needs a running api with WorkOS).
 - [ ] **Phase 3 — read pages via `useQuery`** (Cases, Approvals, Audit, Usage, all Settings, supplier).
 - [ ] **Phase 4 — mutations** (63 server actions → `useMutation`).
 - [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
