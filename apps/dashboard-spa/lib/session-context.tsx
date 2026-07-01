@@ -14,7 +14,12 @@ import type {
 } from "@support-agent/dashboard-contracts";
 
 import { getMeSession, getWorkspaces } from "./api-client";
-import { getAuthSession, login, type AuthSession } from "./auth/session-api";
+import {
+  getAuthSession,
+  isOnboardingRequired,
+  login,
+  type Whoami,
+} from "./auth/session-api";
 import type { SessionUser } from "./auth/types";
 import { qk, workspaceScopedKeyPrefixes } from "./query-keys";
 import { WORKSPACE_COOKIE, pickActiveWorkspace } from "./workspace";
@@ -71,17 +76,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     readStoredWorkspace,
   );
 
-  const authQuery = useQuery<AuthSession>({
+  const authQuery = useQuery<Whoami>({
     queryKey: qk.authSession,
     queryFn: getAuthSession,
     retry: false,
     staleTime: 60_000,
   });
 
+  // Authenticated but org-less → onboarding. Detected before the workspaces
+  // fetch (which would 401 without an org).
+  const needsOnboarding =
+    authQuery.isSuccess && isOnboardingRequired(authQuery.data);
+
   const workspacesQuery = useQuery({
     queryKey: qk.workspaces,
     queryFn: () => getWorkspaces(),
-    enabled: authQuery.isSuccess,
+    enabled: authQuery.isSuccess && !needsOnboarding,
   });
 
   const workspaces = workspacesQuery.data?.workspaces ?? [];
@@ -119,21 +129,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (authQuery.isError) login();
   }, [authQuery.isError]);
 
-  // Signed in but the org has no workspace yet → onboarding.
+  // Authenticated but no org yet (brand-new self-service user) → onboarding,
+  // before the workspace fetch that would 401 without an org.
   useEffect(() => {
-    if (authQuery.isSuccess && workspacesQuery.isSuccess && !active) {
+    if (needsOnboarding) nav.replace("/onboarding");
+  }, [needsOnboarding, nav]);
+
+  // Signed in WITH an org but no workspace yet → onboarding.
+  useEffect(() => {
+    if (
+      authQuery.isSuccess &&
+      !needsOnboarding &&
+      workspacesQuery.isSuccess &&
+      !active
+    ) {
       nav.replace("/onboarding");
     }
-  }, [authQuery.isSuccess, workspacesQuery.isSuccess, active, nav]);
+  }, [authQuery.isSuccess, needsOnboarding, workspacesQuery.isSuccess, active, nav]);
 
   if (authQuery.isLoading) return <Splash label="Signing in…" />;
   if (authQuery.isError) return <Splash label="Redirecting to sign-in…" />;
+  if (needsOnboarding) return <Splash label="Setting up your workspace…" />;
   if (workspacesQuery.isLoading || meQuery.isLoading) {
     return <Splash label="Loading your workspace…" />;
   }
   if (!active) return <Splash label="Setting up your workspace…" />;
 
   const auth = authQuery.data!;
+  // Narrowed: the needsOnboarding branches returned above.
+  if (isOnboardingRequired(auth)) {
+    return <Splash label="Setting up your workspace…" />;
+  }
   const value: SessionValue = {
     organizationId: auth.organizationId,
     userId: auth.userId,
