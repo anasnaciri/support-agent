@@ -857,9 +857,6 @@ const AgentRuntimeLayer = Layer.effect(
             // stamped customerEmail must point at the human, not the relay.
             const email = inboundCustomerEmail(event.payload);
             if (email) {
-              const resolved = yield* shopify
-                .searchByEmail(working.tenantId, email)
-                .pipe(Effect.either);
               const contextPatch: Record<string, unknown> = {
                 ...working.context,
                 customerEmail: email,
@@ -870,14 +867,36 @@ const AgentRuntimeLayer = Layer.effect(
               const name = inboundCustomerName(event.payload);
               if (name) contextPatch["customerName"] = name;
               // A structured inbound email (Shopify contact form) carries the
-              // shopper's phone as a labelled field — capture it so the customer
-              // panel can fall back email → phone → name. Deterministic parse,
-              // no LLM (see inboundCustomerPhone).
+              // shopper's phone as a labelled field — capture it. Deterministic
+              // parse, no LLM (see inboundCustomerPhone).
               const phone = inboundCustomerPhone(event.payload);
               if (phone) contextPatch["customerPhone"] = phone;
-              if (resolved._tag === "Right" && resolved.right) {
-                contextPatch["shopifyCustomerId"] = resolved.right.id;
+              // Resolve the Shopify customer by email → phone → name and stamp
+              // the canonical `shopifyCustomerId` from the first hit. Order
+              // lookup + the order/customer-mismatch guard then match orders to
+              // THIS customer, not just the thread email (the "trust any match"
+              // decision). Best-effort: each leg fails to null.
+              const orNull = (
+                eff: Effect.Effect<
+                  { readonly id: string } | null,
+                  unknown,
+                  never
+                >,
+              ) => eff.pipe(Effect.catchAll(() => Effect.succeed(null)));
+              let customer = yield* orNull(
+                shopify.searchByEmail(working.tenantId, email),
+              );
+              if (!customer && phone) {
+                customer = yield* orNull(
+                  shopify.searchByPhone(working.tenantId, phone),
+                );
               }
+              if (!customer && name) {
+                customer = yield* orNull(
+                  shopify.searchByName(working.tenantId, name),
+                );
+              }
+              if (customer) contextPatch["shopifyCustomerId"] = customer.id;
               working = yield* cases
                 .update(working.id, { context: contextPatch as never })
                 .pipe(
@@ -2024,8 +2043,13 @@ const AgentRuntimeLayer = Layer.effect(
                   // model). Additive + best-effort — a write failure never blocks
                   // the tick, and a fail-open (null) result leaves the case alone.
                   if (current.context["classification"] === "where_is_order") {
+                    const orderCustomerId =
+                      typeof o["customerId"] === "string"
+                        ? (o["customerId"] as string)
+                        : null;
                     const mismatchFlag = orderCustomerMismatchFlag(
                       email,
+                      orderCustomerId,
                       current.context,
                     );
                     if (mismatchFlag) {

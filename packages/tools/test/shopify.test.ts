@@ -18,7 +18,11 @@ import {
   type ShopifyProductSearchResult,
   type ToolContext,
 } from "@support-agent/agent-core";
-import { ShopifyServiceTest } from "@support-agent/services";
+import {
+  CaseRepository,
+  CaseRepositoryTest,
+  ShopifyServiceTest,
+} from "@support-agent/services";
 import {
   shopifyGetCustomer,
   shopifyGetOrder,
@@ -1387,14 +1391,21 @@ describe("refund.recommend — tool wire-up", () => {
 });
 
 describe("shopify.find_customer_order tool", () => {
-  const run = (email: string, env: ReturnType<typeof ShopifyServiceTest>) =>
+  // The tool reads the case's resolved customer via CaseRepository, so provide
+  // an (empty) test repo alongside Shopify. With no seeded case, the context
+  // read fails-open to the by-email path these cases exercise.
+  const run = (
+    email: string,
+    env: ReturnType<typeof ShopifyServiceTest>,
+    caseId = "c-fco",
+  ) =>
     Effect.runPromiseExit(
       Effect.provide(
         shopifyFindCustomerOrder.execute(
           { email } as never,
-          baseCtx("c-fco"),
+          baseCtx(caseId),
         ) as Effect.Effect<unknown, unknown, never>,
-        env,
+        Layer.merge(env, CaseRepositoryTest),
       ),
     );
 
@@ -1447,6 +1458,41 @@ describe("shopify.find_customer_order tool", () => {
     expect(result["status"]).toBe("multiple");
     expect(result["orderCount"]).toBe(2);
     expect(result["order"]).toBeNull();
+  });
+
+  it("looks up by the case's RESOLVED customer (not the email) when one is bound", async () => {
+    // The case resolved the customer (by email/phone/name → shopifyCustomerId).
+    // The by-EMAIL fixture is empty on purpose: a hit proves the tool used the
+    // customer-id lookup, finding an order placed under a DIFFERENT email.
+    const custId = "gid://shopify/Customer/777";
+    const orderId = OrderId("gid://shopify/Order/950");
+    const env = ShopifyServiceTest({
+      ordersByEmail: new Map(),
+      ordersByCustomerId: new Map([[custId, [buildOrder(orderId)]]]),
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId,
+            channel: "email",
+            currentAgentId: AgentId("order-status-agent"),
+            context: { shopifyCustomerId: custId },
+          });
+          return yield* shopifyFindCustomerOrder.execute(
+            { email: "writes-from@different.com" } as never,
+            baseCtx(created.id),
+          );
+        }) as Effect.Effect<unknown, unknown, never>,
+        Layer.merge(env, CaseRepositoryTest),
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["status"]).toBe("single");
+    expect((result["order"] as Record<string, unknown>)["id"]).toBe(orderId);
   });
 
   it("fails with ToolOutputInvalid when the email is blank", async () => {

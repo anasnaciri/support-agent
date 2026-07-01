@@ -703,6 +703,20 @@ const LIST_ORDERS_BY_EMAIL_QUERY = `
   }
 `;
 
+// Orders belonging to ONE customer account, newest first — the identity-safe
+// "which orders does this customer have?" lookup once a case has resolved the
+// customer. Uses the customer node's orders connection (not a `customer_id:`
+// filter) so it's exactly the account's orders.
+const LIST_ORDERS_BY_CUSTOMER_QUERY = `
+  query ListOrdersByCustomer($id: ID!, $n: Int!) {
+    customer(id: $id) {
+      orders(first: $n, sortKey: CREATED_AT, reverse: true) {
+        nodes { ${ORDER_FIELDS} }
+      }
+    }
+  }
+`;
+
 // PCD probe: pull the most recent orders and inspect the Level-2 PII
 // fields most reliably present on a real order — `email` and the
 // `shippingAddress`. A custom-distribution app that hasn't declared its
@@ -1402,6 +1416,21 @@ export const ShopifyServiceLive = Layer.effect(
             LIST_ORDERS_BY_EMAIL_QUERY,
             { q: `email:${normalized}`, n },
           ).pipe(Effect.map((data) => data.orders.nodes.map(mapOrder)));
+        }),
+
+      findOrdersByCustomerId: (tenantId, customerId, limit) =>
+        withCreds(tenantId, (creds) => {
+          const n = Math.max(1, Math.min(limit, 50));
+          return runQuery<{
+            customer: { orders: { nodes: ReadonlyArray<GqlOrder> } } | null;
+          }>(http, creds, tenantId, LIST_ORDERS_BY_CUSTOMER_QUERY, {
+            id: customerGid(customerId),
+            n,
+          }).pipe(
+            Effect.map((data) =>
+              data.customer ? data.customer.orders.nodes.map(mapOrder) : [],
+            ),
+          );
         }),
 
       getFulfillment: (tenantId, orderId) =>

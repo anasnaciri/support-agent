@@ -41,6 +41,13 @@ export const ShopifyOrderOutput = Schema.Struct({
   name: Schema.String,
   confirmationNumber: Schema.NullOr(Schema.String),
   email: Schema.NullOr(Schema.String),
+  /**
+   * The Shopify customer GID the order was placed under, or null for a guest
+   * order. Exposed so the runtime can match the order to the case's resolved
+   * customer (order → customer, not order-email → thread-email) when deciding
+   * the order/customer-mismatch flag. An opaque id — harmless to the model.
+   */
+  customerId: Schema.NullOr(Schema.String),
   fulfillmentStatus: Schema.NullOr(Schema.String),
   financialStatus: Schema.NullOr(Schema.String),
   // ISO timestamp when the order was cancelled, or null if still open.
@@ -84,6 +91,7 @@ export const projectShopifyOrder = (
   name: order.name,
   confirmationNumber: order.confirmationNumber,
   email: order.email,
+  customerId: order.customerId,
   fulfillmentStatus: order.fulfillmentStatus,
   financialStatus: order.financialStatus,
   cancelledAt: order.cancelledAt ? order.cancelledAt.toISOString() : null,

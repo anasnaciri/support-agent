@@ -1047,12 +1047,36 @@ export const hasUnverifiedOrderMismatch = (
  */
 export const orderCustomerMismatchFlag = (
   orderEmail: unknown,
+  orderCustomerId: unknown,
   caseContext: Record<string, unknown>,
 ): string | null => {
+  // The order belongs to the person writing in if EITHER holds:
+  //  - CUSTOMER match: it's under the case's resolved customer account
+  //    (`shopifyCustomerId`, resolved by email/phone/name). Per the "trust any
+  //    match" decision this clears the flag even when the order's email column
+  //    differs (they ordered under a second address) — order↔customer, not
+  //    order-email↔thread-email.
+  //  - EMAIL match: the order's email is the thread sender's address. Kept as a
+  //    parallel signal so a strong email match still clears the flag even if a
+  //    FUZZY name-resolved customer disagrees (email is sender-controlled).
+  const resolvedCustomer =
+    typeof caseContext["shopifyCustomerId"] === "string"
+      ? caseContext["shopifyCustomerId"].trim()
+      : "";
+  const orderCustomer =
+    typeof orderCustomerId === "string" ? orderCustomerId.trim() : "";
+  const haveCustomerBasis = resolvedCustomer !== "" && orderCustomer !== "";
+  const customerMatch = haveCustomerBasis && resolvedCustomer === orderCustomer;
+
   const order = normalizeEmailForMatch(orderEmail);
   const caseEmail = normalizeEmailForMatch(caseContext["customerEmail"]);
-  if (!order || !caseEmail) return null;
-  return order === caseEmail ? null : "order_customer_mismatch";
+  const haveEmailBasis = order !== null && caseEmail !== null;
+  const emailMatch = haveEmailBasis && order === caseEmail;
+
+  if (customerMatch || emailMatch) return null;
+  // Only flag when we actually had something to compare; otherwise fail OPEN
+  // (an unknown order customer / unidentified case never raises a false alarm).
+  return haveCustomerBasis || haveEmailBasis ? "order_customer_mismatch" : null;
 };
 
 /**

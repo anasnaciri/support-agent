@@ -105,9 +105,9 @@ describe("boundOrderDirective", () => {
 });
 
 describe("orderCustomerMismatchFlag", () => {
-  it("flags when the order's customer email differs from the case customer", () => {
+  it("flags when the order's customer email differs and no resolved customer links them", () => {
     expect(
-      orderCustomerMismatchFlag("victim@example.com", {
+      orderCustomerMismatchFlag("victim@example.com", null, {
         customerEmail: "asker@somewhere.com",
       }),
     ).toBe("order_customer_mismatch");
@@ -115,24 +115,55 @@ describe("orderCustomerMismatchFlag", () => {
 
   it("does not flag when the emails match (case-insensitive, trimmed)", () => {
     expect(
-      orderCustomerMismatchFlag(" Victim@Example.com ", {
+      orderCustomerMismatchFlag(" Victim@Example.com ", null, {
         customerEmail: "victim@example.com",
       }),
     ).toBeNull();
   });
 
-  it("fails open (null) when the case has no known customer email", () => {
+  it("matches by CUSTOMER: order under the case's resolved customer clears the flag even when emails differ", () => {
+    // The customer ordered under a second email but is the same Shopify account
+    // the case resolved (by email/phone/name → shopifyCustomerId). Order → customer,
+    // not order-email → thread-email.
     expect(
-      orderCustomerMismatchFlag("victim@example.com", {}),
+      orderCustomerMismatchFlag(
+        "other-email@example.com",
+        "gid://shopify/Customer/777",
+        {
+          customerEmail: "asker@somewhere.com",
+          shopifyCustomerId: "gid://shopify/Customer/777",
+        },
+      ),
     ).toBeNull();
   });
 
-  it("fails open (null) when the order has no customer email", () => {
+  it("still flags when the order belongs to a DIFFERENT customer than the case resolved", () => {
     expect(
-      orderCustomerMismatchFlag(null, { customerEmail: "asker@somewhere.com" }),
+      orderCustomerMismatchFlag(
+        "victim@example.com",
+        "gid://shopify/Customer/999",
+        {
+          customerEmail: "asker@somewhere.com",
+          shopifyCustomerId: "gid://shopify/Customer/777",
+        },
+      ),
+    ).toBe("order_customer_mismatch");
+  });
+
+  it("fails open (null) when the case has no known customer email or id", () => {
+    expect(orderCustomerMismatchFlag("victim@example.com", null, {})).toBeNull();
+  });
+
+  it("fails open (null) when the order has no customer email or id to compare", () => {
+    expect(
+      orderCustomerMismatchFlag(null, null, {
+        customerEmail: "asker@somewhere.com",
+      }),
     ).toBeNull();
     expect(
-      orderCustomerMismatchFlag("", { customerEmail: "asker@somewhere.com" }),
+      orderCustomerMismatchFlag("", null, {
+        customerEmail: "asker@somewhere.com",
+      }),
     ).toBeNull();
   });
 });

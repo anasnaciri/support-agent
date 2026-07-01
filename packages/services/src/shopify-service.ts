@@ -301,6 +301,22 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
       limit: number,
     ) => Effect.Effect<ReadonlyArray<ShopifyOrder>, ShopifyError>;
 
+    /**
+     * List a customer's orders by their Shopify customer id, most recent first.
+     * The identity-safe way to answer "which orders does this customer have?"
+     * once the case has resolved the customer (by email/phone/name → a
+     * `shopifyCustomerId`): every order returned belongs to that ONE account,
+     * regardless of which email each order was placed under. Backs
+     * `shopify.find_customer_order`'s by-customer path. `limit` caps the result
+     * (we only need to tell "one" from "many"). Empty array on no orders — a
+     * miss isn't an error.
+     */
+    readonly findOrdersByCustomerId: (
+      tenantId: TenantId,
+      customerId: CustomerId,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<ShopifyOrder>, ShopifyError>;
+
     readonly getFulfillment: (
       tenantId: TenantId,
       orderId: OrderId,
@@ -557,6 +573,15 @@ export interface ShopifyTestFixtures {
    * map the default Test impl returns an empty list.
    */
   readonly ordersByEmail?: ReadonlyMap<string, ReadonlyArray<ShopifyOrder>>;
+  /**
+   * Map from a customer *id* to that customer's orders (most recent first),
+   * backing `findOrdersByCustomerId`. Seeded by tests to exercise the
+   * by-customer lookup path (single / none / multiple).
+   */
+  readonly ordersByCustomerId?: ReadonlyMap<
+    string,
+    ReadonlyArray<ShopifyOrder>
+  >;
   readonly fulfillments?: ReadonlyMap<
     OrderId,
     ReadonlyArray<ShopifyFulfillment>
@@ -720,6 +745,13 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
       findOrdersByEmail: (_tenantId, email, limit) =>
         Effect.succeed(
           (fixtures.ordersByEmail?.get(email) ?? []).slice(
+            0,
+            Math.max(0, limit),
+          ),
+        ),
+      findOrdersByCustomerId: (_tenantId, customerId, limit) =>
+        Effect.succeed(
+          (fixtures.ordersByCustomerId?.get(customerId) ?? []).slice(
             0,
             Math.max(0, limit),
           ),
