@@ -39,6 +39,45 @@ export const parsePageNumber = (value: string | undefined): number => {
 export const totalPagesFor = (totalRows: number, pageSize: number): number =>
   Math.max(1, Math.ceil(totalRows / pageSize));
 
+export type PageOption =
+  | { readonly kind: "page"; readonly value: number }
+  | { readonly kind: "ellipsis"; readonly id: string };
+
+/**
+ * The page-selector options for a table: every page when there are nine or
+ * fewer, otherwise first + last + a window of ±2 around the current page, with
+ * ellipsis markers filling the gaps. Ported verbatim from the Next
+ * TablePagination (was inline + untested there); now a tested pure helper the
+ * SPA's callback-driven pagination renders.
+ */
+export const pageOptionsFor = (
+  page: number,
+  totalPages: number,
+): PageOption[] => {
+  if (totalPages <= 9) {
+    return Array.from({ length: totalPages }, (_, i) => ({
+      kind: "page",
+      value: i + 1,
+    }));
+  }
+
+  const pages = new Set<number>([1, totalPages]);
+  const start = Math.max(2, page - 2);
+  const end = Math.min(totalPages - 1, page + 2);
+  for (let p = start; p <= end; p += 1) pages.add(p);
+
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const options: PageOption[] = [];
+  for (const p of sorted) {
+    const previous = options[options.length - 1];
+    if (previous?.kind === "page" && p - previous.value > 1) {
+      options.push({ kind: "ellipsis", id: `ellipsis-${previous.value}-${p}` });
+    }
+    options.push({ kind: "page", value: p });
+  }
+  return options;
+};
+
 export const clampPage = (
   page: number,
   totalRows: number,

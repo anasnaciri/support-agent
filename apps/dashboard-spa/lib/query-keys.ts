@@ -11,23 +11,24 @@ import type {
 export const qk = {
   authSession: ["auth-session"] as const,
   workspaces: ["workspaces"] as const, // NOT workspace-scoped
+  openRouterPricing: ["openrouter-pricing"] as const, // NOT workspace-scoped
   me: (w: string) => ["me", w] as const,
 
   today: (w: string) => ["today", w] as const,
-  cases: (w: string, f: CasesFilter, page: number) =>
-    ["cases", w, f, page] as const,
+  cases: (w: string, f: CasesFilter, page: number, limit: number) =>
+    ["cases", w, f, page, limit] as const,
   case: (w: string, id: string) => ["case", w, id] as const,
   caseThread: (w: string, id: string) => ["case", w, id, "thread"] as const,
   caseShopify: (w: string, id: string) => ["case", w, id, "shopify"] as const,
   caseTracking: (w: string, id: string) => ["case", w, id, "tracking"] as const,
   caseEvents: (w: string, id: string) => ["case-events", w, id] as const,
 
-  approvals: (w: string, f: ApprovalsFilter, page: number) =>
-    ["approvals", w, f, page] as const,
+  approvals: (w: string, f: ApprovalsFilter, page: number, limit: number) =>
+    ["approvals", w, f, page, limit] as const,
   approval: (w: string, id: string) => ["approval", w, id] as const,
 
-  audit: (w: string, f: AuditFilter, page: number) =>
-    ["audit", w, f, page] as const,
+  audit: (w: string, f: AuditFilter, page: number, limit: number) =>
+    ["audit", w, f, page, limit] as const,
 
   catalog: (w: string) => ["catalog", w] as const,
   models: (w: string) => ["models", w] as const,

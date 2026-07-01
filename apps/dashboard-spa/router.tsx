@@ -7,6 +7,8 @@ import {
 
 import { AuthedLayout } from "@/components/shell/DashboardShell";
 import { HomePage } from "@/features/home/HomePage";
+import { AuditPage } from "@/features/audit/AuditPage";
+import { UsagePage } from "@/features/usage/UsagePage";
 import { Placeholder } from "@/features/placeholder";
 import {
   GoodbyePage,
@@ -26,18 +28,21 @@ const authedRoute = createRoute({
   component: AuthedLayout,
 });
 
-const authedChild = (path: string, component: () => React.JSX.Element) =>
-  createRoute({ getParentRoute: () => authedRoute, path, component });
+const authedChild = (
+  path: string,
+  component: () => React.JSX.Element | null,
+) => createRoute({ getParentRoute: () => authedRoute, path, component });
 
 const homeRoute = authedChild("/", HomePage);
 const casesRoute = authedChild("/cases", () => <Placeholder title="Cases" />);
 const approvalsRoute = authedChild("/approvals", () => (
   <Placeholder title="Approvals" />
 ));
-const auditRoute = authedChild("/audit", () => <Placeholder title="Audit" />);
+const auditRoute = authedChild("/audit", AuditPage);
 const settingsRoute = authedChild("/settings", () => (
   <Placeholder title="Settings" />
 ));
+const settingsUsageRoute = authedChild("/settings/usage", UsagePage);
 // Catch every settings subpage (agents, refund-policy, …) until they're ported.
 const settingsSplatRoute = authedChild("/settings/$", () => (
   <Placeholder title="Settings" />
@@ -58,6 +63,7 @@ const routeTree = rootRoute.addChildren([
     approvalsRoute,
     auditRoute,
     settingsRoute,
+    settingsUsageRoute,
     settingsSplatRoute,
   ]),
   signInRoute,
