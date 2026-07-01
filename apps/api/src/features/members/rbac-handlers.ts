@@ -150,7 +150,12 @@ export const handleDashboardMemberInvite = async (
     adminDir: getWorkosOrgAdminDirectory(req),
     email,
     organizationId: auth.organizationId,
-    inviterUserId: invitedByUuid,
+    // WorkOS attributes the invite by the inviter's WorkOS user id (`sub`), not
+    // our SHA256 decision UUID — the latter isn't a real member id and the send
+    // would fail.
+    ...(auth.workosUserId !== undefined
+      ? { inviterUserId: auth.workosUserId }
+      : {}),
   });
   await claimOwnerIfOpen(layer, auth.tenantId, invitedByUuid, auth.userEmail);
   const result = await runWithDb(layer, (db) =>

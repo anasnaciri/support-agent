@@ -19,7 +19,7 @@ export const resolveInvitationId = async (input: {
   readonly adminDir: WorkosOrgAdminDirectory | null;
   readonly email: string;
   readonly organizationId: string;
-  readonly inviterUserId?: string;
+  readonly inviterUserId?: string | undefined;
 }): Promise<string | undefined> => {
   if (input.provided) return input.provided;
   if (!input.adminDir) return undefined;

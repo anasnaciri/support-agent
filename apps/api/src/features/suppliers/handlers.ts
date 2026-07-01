@@ -194,7 +194,10 @@ export const handleSupplierInvite = async (
     adminDir: getWorkosOrgAdminDirectory(req),
     email,
     organizationId: auth.organizationId,
-    inviterUserId: invitedByUuid,
+    // WorkOS needs the inviter's WorkOS user id (`sub`), not our decision UUID.
+    ...(auth.workosUserId !== undefined
+      ? { inviterUserId: auth.workosUserId }
+      : {}),
   });
 
   const result = await runWithDb(layer, async (db) => {

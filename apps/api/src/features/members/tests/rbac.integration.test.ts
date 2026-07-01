@@ -15,7 +15,10 @@ import {
   dashboardAuthHeaders,
   decisionUuidFor,
 } from "../../../tests/support/dashboard-auth.js";
-import { makeStaticWorkosUserDirectory } from "../../../auth/workos-directory.js";
+import {
+  makeStaticWorkosOrgAdminDirectory,
+  makeStaticWorkosUserDirectory,
+} from "../../../auth/workos-directory.js";
 import type { ApiConfig } from "../../../bootstrap.js";
 
 const databaseUrl = process.env["DATABASE_URL"];
@@ -57,6 +60,15 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
   const directory = makeStaticWorkosUserDirectory(
     (id) => verifiedEmailByWorkos[id] ?? null,
   );
+  // Records the WorkOS invitation the api sends server-side (the SPA path). The
+  // inviter_user_id MUST be the WorkOS user id (`sub`), not the decision UUID.
+  let lastInviteInviter: string | undefined;
+  const recordingAdmin = makeStaticWorkosOrgAdminDirectory({
+    sendInvitation: (i) => {
+      lastInviteInviter = i.inviterUserId;
+      return { id: `srv_${i.email}` };
+    },
+  });
 
   const cfg = {
     port: 0,
@@ -129,6 +141,7 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
       workosUserDirectory: directory,
+      workosOrgAdminDirectory: recordingAdmin,
     });
     baseUrl = `http://localhost:${handle.port}`;
   });
@@ -227,6 +240,10 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
       "admin@acme.com",
     );
     expect(invite.status).toBe(200);
+    // The server-side WorkOS send must attribute the inviter by their WorkOS
+    // user id (`sub`), NOT the SHA256 decision UUID — WorkOS rejects the latter
+    // and the invitation email would never go out.
+    expect(lastInviteInviter).toBe(adminWorkos);
 
     // SPOOF: Mallory (verified mallory@acme.com) hits /me/session while spoofing
     // the x-user-email header as sam@acme.com. The api reconciles against her
