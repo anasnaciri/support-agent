@@ -287,8 +287,10 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
   - [x] **4d** (`daa35b7` + `6efb7d7`) — IssueRefundCard (agent-recommended refund),
         RetrySendButton (deliveryFailed timeline), and the line-item RefundDialog (lazy
         refundContext → issueRefund with line items/restock/shipping).
-  - [ ] **Remaining Phase 4** (NOT done): the approval-DETAIL page approve/reject
-        (`/approvals/:id`, still read-only), the supplier update form (`/supplier/cases/:id`),
+  - [x] **Approval-detail approve/reject** (`bd96d5d`) — `/approvals/:id` decision surface
+        (ApprovalDecisionCard: edit-and-approve / reject → api.approveApproval/rejectApproval,
+        returns to the list on decision).
+  - [ ] **Remaining Phase 4** (NOT done): the supplier update form (`/supplier/cases/:id`)
         and the form-heavy **settings** pages (read+mutation together per page — see 3e).
         Also NOT ported: the Next "edit customer / assign order" pencil (CardEditPopover,
         committed `d226ee9` on `apps/dashboard`) — a SPA `headerAction` slot on Customer/Order
