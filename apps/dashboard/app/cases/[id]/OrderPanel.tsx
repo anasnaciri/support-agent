@@ -1,5 +1,5 @@
 import type { ShopifyOrder } from "@support-agent/agent-core";
-import { ExternalLink, Package } from "lucide-react";
+import { ExternalLink, Package, Truck } from "lucide-react";
 
 import { formatRelativeTime } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,21 +51,6 @@ const formatAddress = (
   ].filter((s): s is string => typeof s === "string" && s.length > 0);
   return parts.length > 0 ? parts.join("\n") : null;
 };
-
-const Row = ({
-  label,
-  children,
-}: {
-  readonly label: string;
-  readonly children: React.ReactNode;
-}) => (
-  <>
-    <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
-      {label}
-    </dt>
-    <dd className="text-sm">{children}</dd>
-  </>
-);
 
 const fulfillmentBadgeVariant = (
   status: string | null,
@@ -185,90 +170,90 @@ export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
           ) : null}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4 pt-0">
-        <dl className="grid grid-cols-[max-content_1fr] items-start gap-x-3 gap-y-1.5">
-          <Row label="Placed">{formatRelativeTime(order.createdAt)}</Row>
-          <Row label="Total">
-            {total.amount} {total.currencyCode}
-          </Row>
+      <CardContent className="space-y-3 pt-0">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Placed {formatRelativeTime(order.createdAt)}</span>
           {shipTo ? (
-            <Row label="Ship to">
-              <pre className="whitespace-pre-wrap font-sans text-sm">
-                {shipTo}
-              </pre>
-            </Row>
+            <span
+              className="max-w-[60%] truncate"
+              title={shipTo.replace(/\n/g, ", ")}
+            >
+              {[
+                order.shippingAddress?.city,
+                order.shippingAddress?.province ?? order.shippingAddress?.country,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            </span>
           ) : null}
-          {fulfillment ? (
-            <Row label="Tracking">
-              <div className="space-y-0.5">
-                <div>
-                  {fulfillment.trackingCompany ?? "Carrier unknown"}
-                  {fulfillment.trackingNumbers.length > 0 ? (
-                    <>
-                      {" — "}
-                      {fulfillment.trackingUrls[0] ? (
-                        <a
-                          href={fulfillment.trackingUrls[0]}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary hover:underline"
-                        >
-                          {fulfillment.trackingNumbers[0]}
-                        </a>
-                      ) : (
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                          {fulfillment.trackingNumbers[0]}
-                        </code>
-                      )}
-                    </>
-                  ) : null}
-                </div>
-                {fulfillment.estimatedDeliveryAt ? (
-                  <div className="text-xs text-muted-foreground">
-                    ETA {fulfillmentDay(fulfillment.estimatedDeliveryAt)}
-                  </div>
-                ) : null}
-                {fulfillment.deliveredAt ? (
-                  <div className="text-xs text-muted-foreground">
-                    Delivered {fulfillmentDay(fulfillment.deliveredAt)}
-                  </div>
-                ) : null}
-              </div>
-            </Row>
-          ) : null}
-        </dl>
+        </div>
 
         {order.lineItems.length > 0 ? (
-          <div>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Line items
-            </div>
-            <ul className="divide-y divide-dashed divide-border text-sm">
-              {order.lineItems.map((li) => (
-                <li
-                  key={li.id}
-                  className="flex items-baseline gap-2 py-1.5 first:pt-0 last:pb-0"
+          <ul className="space-y-0.5">
+            {order.lineItems.map((li) => (
+              <li key={li.id} className="flex items-center gap-2.5 py-1">
+                <div
+                  className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                  aria-hidden
                 >
-                  <span className="min-w-[2rem] tabular-nums text-muted-foreground">
-                    ×{li.quantity}
-                  </span>
-                  <span className="flex-1">
+                  <Package className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-medium">
                     {li.title}
-                    {li.variantTitle ? (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        — {li.variantTitle}
-                      </span>
-                    ) : null}
-                  </span>
-                  {li.sku ? (
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                      {li.sku}
-                    </code>
+                  </div>
+                  {li.variantTitle ? (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {li.variantTitle}
+                    </div>
                   ) : null}
-                </li>
-              ))}
-            </ul>
+                </div>
+                <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                  ×{li.quantity}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="flex items-center justify-between border-t border-border/70 pt-2.5">
+          <span className="text-[13px] font-medium text-muted-foreground">
+            Total
+          </span>
+          <span className="font-mono text-sm font-medium">
+            {total.amount} {total.currencyCode}
+          </span>
+        </div>
+
+        {fulfillment ? (
+          <div className="flex items-center gap-2.5 rounded-lg bg-muted/40 px-3 py-2.5">
+            <Truck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs">
+                {fulfillment.trackingCompany ?? "Carrier unknown"}
+                {fulfillment.deliveredAt
+                  ? ` · Delivered ${fulfillmentDay(fulfillment.deliveredAt)}`
+                  : fulfillment.estimatedDeliveryAt
+                    ? ` · ETA ${fulfillmentDay(fulfillment.estimatedDeliveryAt)}`
+                    : ""}
+              </div>
+              {fulfillment.trackingNumbers.length > 0 ? (
+                <div className="truncate font-mono text-[11px] text-muted-foreground">
+                  {fulfillment.trackingUrls[0] ? (
+                    <a
+                      href={fulfillment.trackingUrls[0]}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {fulfillment.trackingNumbers[0]}
+                    </a>
+                  ) : (
+                    fulfillment.trackingNumbers[0]
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </CardContent>

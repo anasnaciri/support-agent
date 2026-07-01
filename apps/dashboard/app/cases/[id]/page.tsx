@@ -793,8 +793,8 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   return (
     <div className="flex h-full min-h-0">
       {/* CENTER — conversation */}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/case:pl-14">
+      <section className="flex min-w-0 flex-1 flex-col bg-background">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-card py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/case:pl-14">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold tracking-tight">
@@ -894,7 +894,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
         <ChatScrollArea
           bottomKey={threadKey}
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+          className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4"
         >
           <ChatThread
             result={
@@ -903,7 +903,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           />
         </ChatScrollArea>
 
-        <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 px-4 py-3">
+        <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
           {composerMode ? (
             <>
               {composerMode.kind === "approval" ? (

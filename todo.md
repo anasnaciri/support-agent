@@ -14,6 +14,43 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Case detail page polish pass (apps/dashboard, NOT committed)
+
+Adopted the palette-independent polish techniques from a reference "Support Inbox"
+design (warm-toned; we kept our locked blue/off-white theme — only the *structure/
+typography* was borrowed, not the terracotta colors). Dropped from the reviewed set:
+AI-suggest chips, avatars-on-bubbles, and the order/case timeline rail.
+
+- [x] **Tier 1 — mono numerals for data.** Added a curated `--font-mono` system stack
+      to `@theme inline` in `globals.css` (no webfont dep) so the existing `font-mono`
+      utility upgrades everywhere; applied `font-mono` to the chat timestamp
+      (`ChatThread.tsx`, was `tabular-nums`) and throughout the new panels (order #,
+      total, tracking, line-item qty, customer stats).
+- [x] **Tier 1 — layered surfaces + header/composer bands.** Center `<section>` is now
+      explicit `bg-background` (the off-white canvas); the conversation header and the
+      composer band are `bg-card` (white chrome) with their existing hairline borders,
+      so the column reads as top/bottom chrome around an off-white transcript. Details
+      column bumped `bg-muted/20`→`/40` (`CaseDetailsPanel.tsx`).
+- [x] **Tier 1 — thin scrollbars.** New scoped `.thin-scrollbar` utility in `globals.css`
+      (tone-matched to `--border`, opt-in so app-wide scrollbars are untouched); applied
+      to the chat scroll area, composer overflow, and the details column.
+- [x] **Tier 2 — customer stat triplet.** `CustomerPanel.tsx` rewritten: initials avatar +
+      name/email header, a 3-up LIFETIME / ORDERS / SINCE mono-number stat grid, then
+      compact contact rows. New pure `customer-panel-data.ts` (`customerStats` +
+      `formatMoneyAmount` — strips `.00`, adds separators, keeps cents; year via `asDate`
+      so the Path-B JSON string doesn't crash). TDD: `test/customer-panel-data.test.ts`
+      (5 tests).
+- [x] **Tier 2 — order card upgrade.** `OrderPanel.tsx` present-order branch restructured:
+      placed/ship-to meta line → line items with a neutral swatch (Package icon; the lean
+      `ShopifyLineItem` has no image/price) + qty → Total row → a `bg-muted/40` carrier/ETA/
+      tracking footer band. Removed the old `<dl>` + unused `Row` helper.
+- [x] Verified: `pnpm --filter @support-agent/dashboard typecheck` green; `pnpm vitest run
+      apps/dashboard/test` 405/405 green; `pnpm build` (`tsc -b`) green.
+- [ ] **Needs its own Cloudflare dashboard deploy** (dashboard-only changes).
+- [ ] Deferred from the reviewed set (not built): AI-suggest reply chips, bubble avatars,
+      order/case timeline rail. Tier 4 beyond thin-scrollbars (tinted status/priority pills,
+      full radius-scale audit) left as future polish.
+
 ### 2026-07-01 — Approvals stuck in `waiting_for_approval`: workflow.events serial-consumer starvation (apps/worker, merged to main `01994f9` + DEPLOYED Fly v41)
 
 **Symptom (prod):** a case stayed `waiting_for_approval` after its draft was approved, and the approved reply was never sent. Found **6** such cases (tenant `477168f6`; `scenario-resolution-agent` ×5 + `order-status-agent`), one stuck since 2026-06-29.

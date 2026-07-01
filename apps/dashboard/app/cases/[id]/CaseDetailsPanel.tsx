@@ -43,7 +43,7 @@ export function CaseDetailsPanel({ children }: { readonly children: ReactNode })
 
       <aside
         className={cn(
-          "overflow-y-auto border-l border-border/60 bg-muted/20",
+          "thin-scrollbar overflow-y-auto border-l border-border/60 bg-muted/40",
           // Mobile: fixed off-canvas drawer toggled by `open`.
           "fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] shadow-xl transition-transform duration-300 ease-in-out",
           open ? "translate-x-0" : "translate-x-full",

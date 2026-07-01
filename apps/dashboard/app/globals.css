@@ -42,6 +42,12 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* Data type — order #, money, counts, dates, ids, tracking. A monospace
+     stack sets tabular data apart from prose (the `font-mono` utility reads
+     this). System fonts only; no webfont dependency. */
+  --font-mono:
+    ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", "Consolas",
+    "Liberation Mono", monospace;
 }
 
 /* Light is the default scheme — a 60/30/10 system:
@@ -262,4 +268,25 @@
 .email-html blockquote {
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;
+}
+
+/* Thin, tone-matched scrollbars for the case view's scroll panes — the chat
+   transcript, the composer overflow, and the details column. Scoped to an
+   opt-in class so the app's default scrollbars are untouched. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }

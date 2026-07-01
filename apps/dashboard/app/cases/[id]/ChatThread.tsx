@@ -39,7 +39,7 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
           {senderLabel(message.from)}
         </span>
         <span>·</span>
-        <span className="tabular-nums">{formatDateTime(message.sentAt)}</span>
+        <span className="font-mono">{formatDateTime(message.sentAt)}</span>
       </div>
       <div
         className={cn(
