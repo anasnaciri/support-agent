@@ -14,6 +14,24 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Approvals stuck in `waiting_for_approval`: workflow.events serial-consumer starvation (apps/worker, fix branch `fix/workflow-consumer-concurrency`, NOT merged/deployed)
+
+**Symptom (prod):** a case stayed `waiting_for_approval` after its draft was approved, and the approved reply was never sent. Found **6** such cases (tenant `477168f6`; `scenario-resolution-agent` ×5 + `order-status-agent`), one stuck since 2026-06-29.
+
+**Root cause (confirmed via prod pg-boss tables):** the `workflow.events` queue is policy `key_strict_fifo` but the consumer ran as a **single serial `boss.work()`** (default `localConcurrency` 1). pg-boss processed one event at a time globally; slow/hung `message.received` autonomous runs (one observed `active` 5+ min — there is **no wall-clock timeout on a tick**, only per-tool `Effect.timeout`) held the only work slot, so `approval.approved`/`approval.rejected` events for other cases sat in `created` (started_on NULL, retry_count 0 — never attempted) and never dispatched. The approval-maintenance sweep re-published every 2 min without dedup → 15–76 duplicate jobs per case (`republished=12` each cycle). The `key_strict_fifo` unique index `job_i8 (name, singleton_key) WHERE state IN (active,retry,failed)` guarantees one active job per case-key, so raising concurrency is safe (same-case stays ordered; different cases run in parallel).
+
+- [x] Diagnosed against prod (Fly `fly logs`/`fly releases`/`fly status` + read-only Railway pg-boss queries). Sweep fix `667550f` was already deployed (v24+); this is a *different* bug one layer down.
+- [x] New `apps/worker/src/workflow-consumer.ts`: `workflowConsumerConfig(env)` (concurrency default **4**, `WORKFLOW_CONSUMER_CONCURRENCY`; tick timeout default **180s**, `WORKFLOW_TICK_TIMEOUT_MS`; both clamped), `processWorkflowEvent` (wraps `handleEvent` in `Effect.timeoutTo` → hung tick becomes a retryable `Failed` instead of holding the slot), `registerWorkflowConsumer` (passes `localConcurrency`).
+- [x] `apps/worker/src/index.ts` rewired to the concurrent consumer (kept the raw-`work()` + rich `[worker] … -> …` logging; dropped the local serial loop).
+- [x] TDD: `apps/worker/test/workflow-consumer.test.ts` (9 tests) — config defaults/override/clamp, complete/retry/**timeout→retry**/defect settlement, `localConcurrency` is set. `pnpm build` + workflow test files green.
+- [ ] **INVARIANT (do not regress):** the `workflow.events` consumer must stay concurrent (`localConcurrency > 1`) — a serial consumer re-introduces this outage. Per-case ordering is guaranteed by `key_strict_fifo`, NOT by serial processing.
+- [ ] **Deferred follow-up (top priority):** approval-maintenance sweep dedup — don't re-publish a `case:*` event when one is already `created`/`active` for that key (needs a per-key existence seam; low-risk now because duplicate deliveries are idempotently skipped by `resumeApprovedTool`).
+- [ ] **Deploy:** `fly deploy` the worker (v40+). PREVENTION — the fix stops recurrence; it does not need to run to recover this incident (see next).
+- [x] **Incident self-drained ~00:45** (2026-07-01): once the 5-min hung `message.received` job finished, the serial consumer caught up and processed the whole backlog before we intervened. Queue is now empty (0 created/active). Outcomes: `17826b3b` + `3de407bb` → resolved (their approved reply finally sent, ~40 min stale — correct, just late); `ae0cdb01` + `3428f154` → human_takeover (mixed approve/reject escalated); `9b02ba90` + `c7d7815c` → still waiting_for_approval with a genuine PENDING draft for the merchant to decide (their old approved reply re-executes as `tool.execution_deduped` every 2 min — no re-send, benign; loop stops when the merchant decides the pending draft). No stale duplicate sends confirmed (runtime + connector idempotency deduped the old approved replies).
+- [ ] **No DB writes taken** — nothing to reset (drafts already sent or legitimately pending). Do NOT reset the resolved cases (would risk a re-send).
+- [ ] **Investigate the trigger:** why `message.received` autonomous runs for tenant `477168f6` are so slow/hung (many `shopify.get_order OrderNotFound` retries per tick; the tick timeout only contains it — root cause of the slow runs is separate).
+- [ ] Consider prioritizing approval events over `message.received` (merchant is actively waiting) and sizing the worker Postgres pool if concurrency is raised much above 4.
+
 ### 2026-07-01 — Timeline "Proposed message" card: long URL overflow fix (apps/dashboard, committed)
 
 A drafted customer reply containing a long unbreakable tracking URL

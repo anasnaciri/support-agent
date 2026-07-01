@@ -1,13 +1,15 @@
-import { Cause, Effect, Exit, ManagedRuntime } from "effect";
-import type { DomainEvent } from "@support-agent/agent-core";
-import { AgentRuntime } from "@support-agent/services";
+import { Effect, ManagedRuntime } from "effect";
 import { buildWorker } from "./bootstrap.js";
 import {
   DEFAULT_WORKFLOW_QUEUE_NAME,
   ensureWorkflowQueue,
   reviveDomainEvent,
 } from "./workflow-queue-live.js";
-import { settleWorkflowResult } from "./workflow-job.js";
+import {
+  processWorkflowEvent,
+  registerWorkflowConsumer,
+  workflowConsumerConfig,
+} from "./workflow-consumer.js";
 import {
   WORKFLOW_DEAD_LETTER_QUEUE,
   registerWorkflowDeadLetterConsumer,
@@ -54,13 +56,6 @@ import {
   registerReplyDeliveryRetrySweep,
 } from "./reply-delivery-retry-schedule.js";
 
-interface WorkflowJobData {
-  readonly eventId: string;
-  readonly event: DomainEvent;
-  readonly key: string;
-  readonly enqueuedAt: string;
-}
-
 const main = async (): Promise<void> => {
   const { boss, runtimeLayer, credentialEncryptionKeys, shutdown } =
     await buildWorker();
@@ -78,59 +73,59 @@ const main = async (): Promise<void> => {
   // get the same error mapping path as the EventBus side.
   await Effect.runPromise(ensureWorkflowQueue(boss));
 
-  // Raw pg-boss work() — deliberately bypasses WorkflowQueuePgBossLive on
-  // the consumer side. The Layer-composed consumer has a known flake where
-  // the run() poll loop never starts (see event-bus-workflow-queue
-  // integration test). We sidestep it by feeding each message into a
-  // freshly-provided AgentRuntime here.
-  const workerId = await boss.work<WorkflowJobData, void>(
-    DEFAULT_WORKFLOW_QUEUE_NAME,
-    async (jobs) => {
-      for (const job of jobs) {
-        const event = reviveDomainEvent(job.data.event);
+  // Concurrent pg-boss consumer. Deliberately a raw work() (bypasses
+  // WorkflowQueuePgBossLive on the consumer side — the Layer-composed consumer
+  // has a known flake where the poll loop never starts). `key_strict_fifo`
+  // keeps same-case events strictly ordered while distinct cases/threads run in
+  // parallel; the old SINGLE serial worker threw that away and let one slow
+  // message.received run starve every approval behind it. See
+  // ./workflow-consumer.ts.
+  const consumerConfig = workflowConsumerConfig(process.env);
+  const workerId = await registerWorkflowConsumer({
+    boss,
+    concurrency: consumerConfig.concurrency,
+    onJob: async (job) => {
+      const event = reviveDomainEvent(job.data.event);
+      console.log(
+        `[worker] ${event.type} eventId=${job.data.eventId} key=${job.data.key}`,
+      );
+      const settlement = await processWorkflowEvent({
+        runtime: managedRuntime,
+        event,
+        tickTimeoutMs: consumerConfig.tickTimeoutMs,
+      });
+      if (settlement.kind === "complete") {
+        const r = settlement.result;
         console.log(
-          `[worker] ${event.type} eventId=${job.data.eventId} key=${job.data.key}`,
+          `[worker] ${event.type} -> ${r.type}` +
+            (r.type === "Failed"
+              ? ` (reason: ${r.reason})`
+              : r.type === "HumanTakeoverRequired"
+                ? ` (reason: ${r.reason})`
+                : r.type === "PausedWaitingForApproval"
+                  ? ` (approvalId: ${r.approvalId})`
+                  : r.type === "PausedForHumanTakeover"
+                    ? ` (held — case under human takeover)`
+                    : ""),
         );
-        const exit = await managedRuntime.runPromiseExit(
-          Effect.flatMap(AgentRuntime, (r) => r.handleEvent(event)),
-        );
-        if (Exit.isSuccess(exit)) {
-          console.log(
-            `[worker] ${event.type} -> ${exit.value.type}` +
-              (exit.value.type === "Failed"
-                ? ` (reason: ${exit.value.reason})`
-                : exit.value.type === "HumanTakeoverRequired"
-                  ? ` (reason: ${exit.value.reason})`
-                  : exit.value.type === "PausedWaitingForApproval"
-                    ? ` (approvalId: ${exit.value.approvalId})`
-                    : exit.value.type === "PausedForHumanTakeover"
-                      ? ` (held — case under human takeover)`
-                      : ""),
-          );
-          // Retryable failures must surface as a thrown error so pg-boss
-          // applies its retry policy; completing the job here would drop
-          // the event forever (audit C1). Exhausted retries land on the
-          // dead-letter queue, whose consumer parks the case for a human.
-          const settlement = settleWorkflowResult(exit.value);
-          if (settlement.kind === "retry") {
-            throw new Error(
-              `retryable workflow failure: ${settlement.reason}`,
-            );
-          }
-        } else {
-          // E=never on handleEvent, so this can only be defects. Log + rethrow
-          // so pg-boss applies its retry policy.
-          console.error(
-            `[worker] ${event.type} crashed:\n${Cause.pretty(exit.cause)}`,
-          );
-          throw new Error(`AgentRuntime crashed: ${Cause.pretty(exit.cause)}`);
-        }
+        return;
       }
+      // Retryable failures (incl. a tick that blew its wall-clock budget) must
+      // throw so pg-boss applies its retry policy; acking here would drop the
+      // event forever (audit C1). Exhausted retries land on the dead-letter
+      // queue, whose consumer parks the case for a human.
+      if (settlement.kind === "retry") {
+        throw new Error(`retryable workflow failure: ${settlement.reason}`);
+      }
+      // Defect — log + rethrow so pg-boss retries.
+      console.error(`[worker] ${event.type} crashed:\n${settlement.detail}`);
+      throw new Error(`AgentRuntime crashed: ${settlement.detail}`);
     },
-  );
+  });
 
   console.log(
-    `[worker] running. workerId=${workerId} queue=${DEFAULT_WORKFLOW_QUEUE_NAME}`,
+    `[worker] running. workerId=${workerId} queue=${DEFAULT_WORKFLOW_QUEUE_NAME} ` +
+      `concurrency=${consumerConfig.concurrency} tickTimeoutMs=${consumerConfig.tickTimeoutMs}`,
   );
 
   // Dead-letter consumer: parks the case behind any workflow event that
