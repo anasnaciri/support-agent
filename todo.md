@@ -14,7 +14,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-### 2026-07-01 — Dashboard tracking checkpoint rail (apps/dashboard + apps/dashboard-spa, commit 3dd4682 + DEPLOYED Cloudflare)
+### 2026-07-01 — Dashboard tracking checkpoint rail (apps/dashboard + apps/dashboard-spa, commits 3dd4682 + ea53348, DEPLOYED Cloudflare)
 
 - [x] Tracking card checkpoints in both the Next dashboard and SPA now render
       on a single continuous parent rail instead of each checkpoint owning a
@@ -28,11 +28,11 @@ The single source of truth for **what's done**, **what's next**, and **what inva
       are green. Attempted in-app browser verification after starting Vite,
       but browser control failed before opening a tab due to a local
       `node_repl` sandbox metadata error; the temporary dev server was stopped.
-- [x] Deployed the Next dashboard to Cloudflare with
+- [x] Deployed the centered-rail Next dashboard to Cloudflare with
       `pnpm --filter @support-agent/dashboard cf:deploy`.
       Worker: `support-agent-dashboard`; URL:
       `https://support-agent-dashboard.12anas2000.workers.dev`; version ID:
-      `fad1caa2-d3ec-49e5-a951-a6405e8dc293`. Post-deploy check:
+      `6162c743-fc52-4525-94d5-d8a0695b4388`. Post-deploy check:
       `curl -I https://support-agent-dashboard.12anas2000.workers.dev`
       returned `HTTP/2 307` redirecting to `/sign-up` as expected for the
       unauthenticated root.
