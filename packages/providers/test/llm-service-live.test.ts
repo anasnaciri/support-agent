@@ -73,7 +73,8 @@ vi.mock("@ai-sdk/openai", () => ({
 }));
 
 // Defer importing the live layer until after the mocks are registered.
-const { LLMServiceLive } = await import("../src/llm-service-live.js");
+const { LLMServiceLive, llmCallTimeoutMs, DEFAULT_LLM_CALL_TIMEOUT_MS } =
+  await import("../src/llm-service-live.js");
 
 // ---------- Helpers ----------------------------------------------------------
 
@@ -558,6 +559,53 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
     // undefined because we call `provider.chat(model)` with no second
     // argument for non-Anthropic models.
     expect(arg.model.__chatSettings).toBeUndefined();
+  });
+});
+
+// A hung provider request had NO client-side timeout, so a single stalled
+// LLM call could hold a worker's tick for minutes (the prod incident: one
+// message.received ran `active` 5+ min). The call now carries an
+// `AbortSignal.timeout(...)` so a stalled request is cancelled and surfaces as
+// a retryable provider error.
+describe("LLMServiceLive — per-call timeout / abort", () => {
+  it("llmCallTimeoutMs: default, env override, clamp, and garbage handling", () => {
+    expect(llmCallTimeoutMs({})).toBe(DEFAULT_LLM_CALL_TIMEOUT_MS);
+    expect(DEFAULT_LLM_CALL_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(llmCallTimeoutMs({ LLM_CALL_TIMEOUT_MS: "45000" })).toBe(45000);
+    // clamped low/high
+    expect(llmCallTimeoutMs({ LLM_CALL_TIMEOUT_MS: "1" })).toBe(5000);
+    expect(llmCallTimeoutMs({ LLM_CALL_TIMEOUT_MS: "99999999" })).toBe(600000);
+    // garbage → default
+    expect(llmCallTimeoutMs({ LLM_CALL_TIMEOUT_MS: "soon" })).toBe(
+      DEFAULT_LLM_CALL_TIMEOUT_MS,
+    );
+  });
+
+  it("passes an AbortSignal to generateText so a hung request is cancellable", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "ok" });
+    await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    const arg = generateText.mock.calls[0]![0] as { abortSignal?: unknown };
+    expect(arg.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("maps an abort/timeout rejection to a retryable ProviderUnavailable", async () => {
+    const timedOut = Object.assign(new Error("The operation timed out"), {
+      name: "TimeoutError",
+    });
+    generateText.mockReset();
+    generateText.mockRejectedValueOnce(timedOut);
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) =>
+        s
+          .runToolCalling(baseRequest)
+          .pipe(Effect.catchAll((err) => Effect.succeed(err))),
+      ),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value).toBeInstanceOf(ProviderUnavailable);
   });
 });
 

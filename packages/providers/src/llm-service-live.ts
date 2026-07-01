@@ -202,6 +202,32 @@ const toToolSet = (
 // Internal: errors → LLMError
 // ============================================================
 
+// ============================================================
+// Per-call timeout
+// ============================================================
+
+/**
+ * Wall-clock budget for a single provider call. The AI SDK request carries no
+ * client-side timeout by default, so a hung request would stall the worker's
+ * tick with nothing to cancel it (the prod incident: one `message.received`
+ * ran `active` 5+ min). We pass `AbortSignal.timeout(this)` to `generateText`
+ * so a stalled call is cancelled and surfaces as a retryable provider error.
+ * Env override: `LLM_CALL_TIMEOUT_MS`.
+ */
+export const DEFAULT_LLM_CALL_TIMEOUT_MS = 90_000;
+const MIN_LLM_CALL_TIMEOUT_MS = 5_000;
+const MAX_LLM_CALL_TIMEOUT_MS = 600_000;
+
+export const llmCallTimeoutMs = (
+  env: Record<string, string | undefined>,
+): number => {
+  const raw = env["LLM_CALL_TIMEOUT_MS"];
+  if (raw === undefined) return DEFAULT_LLM_CALL_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return DEFAULT_LLM_CALL_TIMEOUT_MS;
+  return Math.max(MIN_LLM_CALL_TIMEOUT_MS, Math.min(MAX_LLM_CALL_TIMEOUT_MS, n));
+};
+
 const mapError = (cause: unknown, providerName: LLMProvider): LLMError => {
   // Diagnostic: emit the raw error so the underlying message isn't lost
   // when we wrap it in a tagged error whose toString is generic. Cheap +
@@ -220,6 +246,16 @@ const mapError = (cause: unknown, providerName: LLMProvider): LLMError => {
   if (cause instanceof Error) {
     const msg = cause.message.toLowerCase();
     const status = (cause as { statusCode?: number }).statusCode;
+    // Our own `AbortSignal.timeout` fired (or the request was otherwise
+    // aborted): the provider stalled. Transient — retry, don't dead-letter.
+    if (
+      cause.name === "TimeoutError" ||
+      cause.name === "AbortError" ||
+      msg.includes("aborted") ||
+      msg.includes("timed out")
+    ) {
+      return new ProviderUnavailable({ provider: providerName });
+    }
     if (
       msg.includes("context length") ||
       msg.includes("context_length") ||
@@ -347,6 +383,8 @@ export const LLMServiceLive = Layer.effect(
     const resolver = yield* LLMCredentialResolver;
     const blob = yield* BlobStorage;
     const cache = new Map<string, ChatFactory>();
+    // Resolved once for the worker's lifetime; bounds every provider call.
+    const callTimeoutMs = llmCallTimeoutMs(process.env);
 
     const factoryFor = (cred: LLMCredential): ChatFactory => {
       const key = cacheKey(cred);
@@ -386,6 +424,8 @@ export const LLMServiceLive = Layer.effect(
                 system: req.system,
                 messages: modelMessages,
                 tools: toToolSet(req.tools, sanitize),
+                // Cancel a stalled provider request so it can't hold the tick.
+                abortSignal: AbortSignal.timeout(callTimeoutMs),
                 ...(req.temperature !== undefined
                   ? { temperature: req.temperature }
                   : {}),

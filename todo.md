@@ -29,7 +29,9 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - [x] **Deployed Fly v41** (2026-07-01): merged to main (`01994f9`) + `fly deploy`; verified worker on new concurrent code — two case-keys (`9b02ba90`+`c7d7815c`) processed in the SAME second, sweep `republished` dropped 12→2, no crashes. Local `main` is ahead of `origin/main` by 6 (deploy builds locally; not pushed to GitHub).
 - [x] **Incident self-drained ~00:45** (2026-07-01): once the 5-min hung `message.received` job finished, the serial consumer caught up and processed the whole backlog before we intervened. Queue is now empty (0 created/active). Outcomes: `17826b3b` + `3de407bb` → resolved (their approved reply finally sent, ~40 min stale — correct, just late); `ae0cdb01` + `3428f154` → human_takeover (mixed approve/reject escalated); `9b02ba90` + `c7d7815c` → still waiting_for_approval with a genuine PENDING draft for the merchant to decide (their old approved reply re-executes as `tool.execution_deduped` every 2 min — no re-send, benign; loop stops when the merchant decides the pending draft). No stale duplicate sends confirmed (runtime + connector idempotency deduped the old approved replies).
 - [ ] **No DB writes taken** — nothing to reset (drafts already sent or legitimately pending). Do NOT reset the resolved cases (would risk a re-send).
-- [ ] **Investigate the trigger:** why `message.received` autonomous runs for tenant `477168f6` are so slow/hung (many `shopify.get_order OrderNotFound` retries per tick; the tick timeout only contains it — root cause of the slow runs is separate).
+- [x] **Investigated the trigger** (2026-07-01): the 5+-min hang was an LLM provider call with **no client-side timeout** — `generateText` in `llm-service-live.ts` carried no `abortSignal`, and NO tool declares a `timeout` either, so a stalled call/tool ran unbounded. `scenario-resolution-agent` also has the highest `maxTurnsPerTick` (20) and loops on `shopify.get_order → OrderNotFound`, so healthy runs are long too.
+- [x] **Fix: per-call LLM timeout** — `generateText` now gets `abortSignal: AbortSignal.timeout(llmCallTimeoutMs(env))` (default 90s, `LLM_CALL_TIMEOUT_MS`, clamped 5s–600s); a stalled request is cancelled and `mapError` maps abort/timeout → retryable `ProviderUnavailable`. TDD (3 new tests in `llm-service-live.test.ts`), `pnpm build` green. NOT yet committed/deployed.
+- [ ] **Remaining trigger follow-ups:** (a) default wall-clock timeout for TOOL calls (17track/Shopify/knowledge HTTP can still hang — no tool declares `tool.timeout`); (b) stop the `scenario-resolution-agent` `get_order → OrderNotFound` retry loop and/or lower `maxTurnsPerTick` from 20; (c) sweep-dedup (still deferred — low value post-concurrency-fix; duplicate deliveries are idempotently skipped).
 - [ ] Consider prioritizing approval events over `message.received` (merchant is actively waiting) and sizing the worker Postgres pool if concurrency is raised much above 4.
 
 ### 2026-07-01 — Timeline "Proposed message" card: long URL overflow fix (apps/dashboard, committed)
@@ -270,7 +272,11 @@ Resolution-agent-direct + tool-config-once (decided 2026-06-28):
   - [x] Slice 4: stripped the temporary `routedbg.bound` / `routedbg.decision` audit diagnostics
         from agent-runtime.ts.
   - [x] Deploy: Fly backend (api+worker) for slices 1+2+4.
-  - [ ] Deploy: Cloudflare dashboard for slice 3.
+  - [x] Deploy: Cloudflare dashboard for slice 3.
+  - SHIPPED + verified live 2026-06-28: a fresh inbound case routes straight to
+    scenario-resolution-agent (audit `agent.routed via resolution-agent-direct`), the agent picks
+    the scenario itself (`scenarioKey`), queues a remedy, and parks waiting_for_approval — no
+    support-triage hop, no silent resolve. Isolated test cases cleaned up afterward.
 - WHEN `resolutionAgentEnabled`, route inbound cases DIRECTLY to the
   scenario-resolution-agent (no support-triage hop). The resolution agent picks the matching
   scenario itself (sets `scenarioKey`) and resolves end-to-end. Motivation: the support-triage →
