@@ -2479,6 +2479,15 @@ const AgentRuntimeLayer = Layer.effect(
         // order/customer-mismatch guard both key on. Idempotent (skips once
         // stamped) + best-effort (each leg fails to null; a write failure just
         // leaves it unstamped and the tick proceeds).
+        //
+        // The Shopify lookups are uncached network calls, so a case with
+        // identifiers but NO Shopify match (e.g. a pre-sales emailer with no
+        // account) would otherwise repeat them on every tick. A negative-attempt
+        // marker (`customerResolutionTriedFor`, keyed on the exact identifier
+        // set) records a miss so later ticks skip the lookup, while a change to
+        // the identifiers produces a new key and re-triggers. Trade-off: if the
+        // same customer becomes resolvable under UNCHANGED identifiers mid-case,
+        // we won't retry — an acceptable miss vs. hammering the API each tick.
         const ensureCustomerResolved = Effect.gen(function* () {
           const ctx = working.context as Record<string, unknown>;
           const existing = ctx["shopifyCustomerId"];
@@ -2493,6 +2502,8 @@ const AgentRuntimeLayer = Layer.effect(
           const cPhone = ctxStr("customerPhone");
           const cName = ctxStr("customerName");
           if (!cEmail && !cPhone && !cName) return;
+          const attemptKey = JSON.stringify([cEmail, cPhone, cName]);
+          if (ctx["customerResolutionTriedFor"] === attemptKey) return;
           const orNull = (
             eff: Effect.Effect<
               { readonly id: string } | null,
@@ -2513,7 +2524,19 @@ const AgentRuntimeLayer = Layer.effect(
               shopify.searchByName(working.tenantId, cName),
             );
           }
-          if (!customer) return;
+          // Missed: record the attempt so the next tick skips the lookup unless
+          // the identifiers change. Best-effort — a write failure just retries.
+          if (!customer) {
+            working = yield* cases
+              .update(working.id, {
+                context: {
+                  ...ctx,
+                  customerResolutionTriedFor: attemptKey,
+                } as never,
+              })
+              .pipe(Effect.catchAll(() => Effect.succeed(working)));
+            return;
+          }
           working = yield* cases
             .update(working.id, {
               context: { ...ctx, shopifyCustomerId: customer.id } as never,

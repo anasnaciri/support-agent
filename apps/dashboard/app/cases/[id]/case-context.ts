@@ -103,6 +103,12 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "riskFlags",
   "liveTrackingStatus",
   "notes",
+  // Runtime-only customer-resolution bookkeeping — a raw Shopify customer gid
+  // and the negative-attempt marker. Meaningless to an operator (the friendly
+  // "Customer ID" row comes from `identifiedCustomerId`), so keep them out of
+  // the fallback dump rather than surface them as rows.
+  "shopifyCustomerId",
+  "customerResolutionTriedFor",
 ]);
 
 export const buildContextRows = (

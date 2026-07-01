@@ -131,6 +131,17 @@ describe("buildContextRows", () => {
     expect(byKey(rows, "emptyObj")).toBeUndefined();
   });
 
+  it("suppresses internal customer-resolution bookkeeping keys", () => {
+    // Runtime-only ids/markers the guards + resolve loop key on — meaningless
+    // to an operator, so they must NOT surface as fallback rows.
+    const rows = buildContextRows({
+      shopifyCustomerId: "gid://shopify/Customer/123",
+      customerResolutionTriedFor: '["jane@example.com",null,null]',
+    });
+    expect(byKey(rows, "shopifyCustomerId")).toBeUndefined();
+    expect(byKey(rows, "customerResolutionTriedFor")).toBeUndefined();
+  });
+
   it("orders known rows ahead of unknown ones", () => {
     const rows = buildContextRows({
       zzz_custom: "x",

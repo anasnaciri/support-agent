@@ -3061,6 +3061,142 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found.context["shopifyCustomerId"]).toBe(customerId);
   });
 
+  // ── shopifyCustomerId negative-attempt marker ──────────────────────────────
+  // ensureCustomerResolved skips the (uncached) Shopify email→phone→name
+  // lookups once they've missed for a given identifier set, keyed on the
+  // identifiers so it still retries when they change. Exercised via a resume
+  // tick (enrichCase's creation lookup doesn't run on resume, so
+  // ensureCustomerResolved owns the resolution).
+  const resolutionSpecialist: AgentConfig = {
+    id: AgentId("order-status-agent"),
+    name: "Order status",
+    description: "Looks up orders.",
+    mode: "primary",
+    provider: "openrouter",
+    model: "google/gemini-3.5-flash",
+    promptTemplate: "Answer.",
+    tools: [],
+    permissionOverrides: {},
+    handoffs: [],
+    maxTurnsPerTick: 2,
+    temperature: 0,
+  };
+
+  const seededCustomer = (id: CustomerId, email: string) => ({
+    id,
+    email,
+    firstName: "Seed",
+    lastName: "Customer",
+    phone: null,
+    ordersCount: 1,
+    totalSpent: { amount: "10.00", currencyCode: "USD" },
+    defaultAddress: null,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  });
+
+  const runResolutionTick = (
+    initialContext: Record<string, unknown>,
+    fixtures: Parameters<typeof ShopifyServiceTest>[0],
+  ) => {
+    const env = Layer.mergeAll(
+      CaseRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([resolutionSpecialist]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted([{ type: "final_message", text: "Looking into it." }]),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest(fixtures),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-acme"),
+            channel: "email",
+            currentAgentId: resolutionSpecialist.id,
+            context: initialContext,
+          });
+          yield* repo.transitionStatus(created.id, "in_progress", {
+            reason: "test setup",
+          });
+          yield* runtime.handleEvent({
+            type: "case.resumed",
+            caseId: created.id,
+            trigger: "dashboard_full_retry",
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+  };
+
+  it("stamps the negative marker (no shopifyCustomerId) when no Shopify customer matches", async () => {
+    const found = await runResolutionTick(
+      { customerEmail: "nomatch@example.com" },
+      {}, // empty store → every search misses
+    );
+    expect(found.context["shopifyCustomerId"]).toBeUndefined();
+    expect(found.context["customerResolutionTriedFor"]).toBe(
+      JSON.stringify(["nomatch@example.com", null, null]),
+    );
+  });
+
+  it("skips the Shopify lookup when the marker already covers the current identifiers", async () => {
+    // A customer now EXISTS under this email, but a prior tick recorded a miss
+    // for these exact identifiers — the tick must NOT re-run the lookup (the
+    // whole point of the marker), so shopifyCustomerId stays unset.
+    const customerId = CustomerId("gid://shopify/Customer/9001");
+    const found = await runResolutionTick(
+      {
+        customerEmail: "late@example.com",
+        customerResolutionTriedFor: JSON.stringify([
+          "late@example.com",
+          null,
+          null,
+        ]),
+      },
+      {
+        customersByEmail: new Map([
+          ["late@example.com", seededCustomer(customerId, "late@example.com")],
+        ]),
+      },
+    );
+    expect(found.context["shopifyCustomerId"]).toBeUndefined();
+  });
+
+  it("re-attempts and resolves when the identifiers changed since the last failed attempt", async () => {
+    // The marker was recorded for a DIFFERENT (old) identifier set; the current
+    // email differs and now matches — so it must re-run and stamp the id.
+    const customerId = CustomerId("gid://shopify/Customer/9002");
+    const found = await runResolutionTick(
+      {
+        customerEmail: "fresh@example.com",
+        customerResolutionTriedFor: JSON.stringify([
+          "stale@example.com",
+          null,
+          null,
+        ]),
+      },
+      {
+        customersByEmail: new Map([
+          ["fresh@example.com", seededCustomer(customerId, "fresh@example.com")],
+        ]),
+      },
+    );
+    expect(found.context["shopifyCustomerId"]).toBe(customerId);
+  });
+
   it("projects inbound image attachments into the turn-0 user message as multimodal parts", async () => {
     // When a customer emails with photos (damaged-product flow), the
     // runtime must hand them to the LLM as image content parts so the
