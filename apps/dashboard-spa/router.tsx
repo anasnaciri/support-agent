@@ -9,6 +9,8 @@ import { AuthedLayout } from "@/components/shell/DashboardShell";
 import { HomePage } from "@/features/home/HomePage";
 import { CasesPage } from "@/features/cases/CasesPage";
 import { CaseDetailPage } from "@/features/cases/CaseDetailPage";
+import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
+import { ApprovalDetailPage } from "@/features/approvals/ApprovalDetailPage";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
 import { Placeholder } from "@/features/placeholder";
@@ -38,9 +40,8 @@ const authedChild = (
 const homeRoute = authedChild("/", HomePage);
 const casesRoute = authedChild("/cases", CasesPage);
 const caseDetailRoute = authedChild("/cases/$caseId", CaseDetailPage);
-const approvalsRoute = authedChild("/approvals", () => (
-  <Placeholder title="Approvals" />
-));
+const approvalsRoute = authedChild("/approvals", ApprovalsPage);
+const approvalDetailRoute = authedChild("/approvals/$approvalId", ApprovalDetailPage);
 const auditRoute = authedChild("/audit", AuditPage);
 const settingsRoute = authedChild("/settings", () => (
   <Placeholder title="Settings" />
@@ -65,6 +66,7 @@ const routeTree = rootRoute.addChildren([
     casesRoute,
     caseDetailRoute,
     approvalsRoute,
+    approvalDetailRoute,
     auditRoute,
     settingsRoute,
     settingsUsageRoute,
