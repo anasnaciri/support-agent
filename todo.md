@@ -14,7 +14,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-### 2026-07-01 — Approvals stuck in `waiting_for_approval`: workflow.events serial-consumer starvation (apps/worker, fix branch `fix/workflow-consumer-concurrency`, NOT merged/deployed)
+### 2026-07-01 — Approvals stuck in `waiting_for_approval`: workflow.events serial-consumer starvation (apps/worker, merged to main `01994f9` + DEPLOYED Fly v41)
 
 **Symptom (prod):** a case stayed `waiting_for_approval` after its draft was approved, and the approved reply was never sent. Found **6** such cases (tenant `477168f6`; `scenario-resolution-agent` ×5 + `order-status-agent`), one stuck since 2026-06-29.
 
@@ -26,7 +26,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 - [x] TDD: `apps/worker/test/workflow-consumer.test.ts` (9 tests) — config defaults/override/clamp, complete/retry/**timeout→retry**/defect settlement, `localConcurrency` is set. `pnpm build` + workflow test files green.
 - [ ] **INVARIANT (do not regress):** the `workflow.events` consumer must stay concurrent (`localConcurrency > 1`) — a serial consumer re-introduces this outage. Per-case ordering is guaranteed by `key_strict_fifo`, NOT by serial processing.
 - [ ] **Deferred follow-up (top priority):** approval-maintenance sweep dedup — don't re-publish a `case:*` event when one is already `created`/`active` for that key (needs a per-key existence seam; low-risk now because duplicate deliveries are idempotently skipped by `resumeApprovedTool`).
-- [ ] **Deploy:** `fly deploy` the worker (v40+). PREVENTION — the fix stops recurrence; it does not need to run to recover this incident (see next).
+- [x] **Deployed Fly v41** (2026-07-01): merged to main (`01994f9`) + `fly deploy`; verified worker on new concurrent code — two case-keys (`9b02ba90`+`c7d7815c`) processed in the SAME second, sweep `republished` dropped 12→2, no crashes. Local `main` is ahead of `origin/main` by 6 (deploy builds locally; not pushed to GitHub).
 - [x] **Incident self-drained ~00:45** (2026-07-01): once the 5-min hung `message.received` job finished, the serial consumer caught up and processed the whole backlog before we intervened. Queue is now empty (0 created/active). Outcomes: `17826b3b` + `3de407bb` → resolved (their approved reply finally sent, ~40 min stale — correct, just late); `ae0cdb01` + `3428f154` → human_takeover (mixed approve/reject escalated); `9b02ba90` + `c7d7815c` → still waiting_for_approval with a genuine PENDING draft for the merchant to decide (their old approved reply re-executes as `tool.execution_deduped` every 2 min — no re-send, benign; loop stops when the merchant decides the pending draft). No stale duplicate sends confirmed (runtime + connector idempotency deduped the old approved replies).
 - [ ] **No DB writes taken** — nothing to reset (drafts already sent or legitimately pending). Do NOT reset the resolved cases (would risk a re-send).
 - [ ] **Investigate the trigger:** why `message.received` autonomous runs for tenant `477168f6` are so slow/hung (many `shopify.get_order OrderNotFound` retries per tick; the tick timeout only contains it — root cause of the slow runs is separate).
