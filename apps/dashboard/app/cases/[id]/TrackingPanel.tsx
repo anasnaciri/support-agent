@@ -135,15 +135,22 @@ export const TrackingPanel = ({
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
               {checkpoints.length > 1 ? "Checkpoints" : "Latest update"}
             </div>
-            <ol className="relative space-y-2.5">
+            <ol
+              aria-label="Shipment checkpoint timeline"
+              className={cn(
+                "relative space-y-2.5",
+                shownCheckpoints.length > 1 &&
+                  "before:absolute before:bottom-1 before:left-1 before:top-1 before:w-0.5 before:bg-border",
+              )}
+            >
               {shownCheckpoints.map((scan, i) => (
                 <li
                   key={`${scan.occurredAt}-${i}`}
-                  className="relative border-l-2 border-border pb-0.5 pl-3.5 last:border-transparent"
+                  className="relative pb-0.5 pl-4"
                 >
                   <span
                     className={cn(
-                      "absolute -left-[5px] top-1 size-2 rounded-full",
+                      "absolute left-1 top-1 z-10 size-2 -translate-x-1/2 rounded-full",
                       i === 0 ? "bg-primary" : "bg-muted-foreground/40",
                     )}
                     aria-hidden
@@ -159,7 +166,7 @@ export const TrackingPanel = ({
               ))}
             </ol>
             {hiddenCount > 0 ? (
-              <p className="pl-3.5 text-xs text-muted-foreground">
+              <p className="pl-4 text-xs text-muted-foreground">
                 +{hiddenCount} earlier{" "}
                 {hiddenCount === 1 ? "update" : "updates"}
                 {url ? (

@@ -14,6 +14,21 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Dashboard tracking checkpoint rail (apps/dashboard + apps/dashboard-spa, committed in this session)
+
+- [x] Tracking card checkpoints in both the Next dashboard and SPA now render
+      on a single continuous parent rail instead of each checkpoint owning a
+      left border segment that could visually disconnect the timeline.
+- [x] Verification: `pnpm exec vitest run apps/dashboard-spa/test/tracking-panel-data.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`,
+      `pnpm --filter @support-agent/dashboard typecheck`,
+      `pnpm --filter @support-agent/dashboard build`, and root `pnpm build`
+      are green. Attempted in-app browser verification after starting Vite,
+      but browser control failed before opening a tab due to a local
+      `node_repl` sandbox metadata error; the temporary dev server was stopped.
+
+---
+
 ### 2026-07-01 — Order lookup + mismatch by CUSTOMER, not just thread email (commit ecbd3de, on main, DEPLOYED Fly v48; backend-only)
 
 Order lookup + the order/customer-mismatch warning now key on the case's RESOLVED
