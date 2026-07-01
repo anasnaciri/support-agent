@@ -20,7 +20,8 @@ import {
 /**
  * What the composer is for, decided by the case's state on the server:
  *  - `approval`: a drafted agent reply is awaiting the manager's call. The draft
- *    fills the input; the send control becomes Approve (✓) / Reject (✗).
+ *    fills the input; the controls become a subtle gray Reject (✗) circle and
+ *    the regular blue Send button, which approves and sends the draft.
  *  - `reply`: the manager has taken the case over and writes the reply by hand.
  *  - `locked`: the agent owns the conversation — the input is read-only with a
  *    hint to take over.
@@ -224,12 +225,14 @@ export function ChatComposer({
           </div>
 
           {mode.kind === "approval" ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               <form action={rejectAction}>
                 <input type="hidden" name="approvalId" value={mode.approvalId} />
                 <input type="hidden" name="returnTo" value={mode.returnTo} />
                 <ConfirmSubmitButton
                   size="icon"
+                  variant="secondary"
+                  className="rounded-full"
                   aria-label="Reject this draft and take over"
                   title="Reject this approval?"
                   confirmLabel="Reject & take over"
@@ -244,11 +247,10 @@ export function ChatComposer({
                 <input type="hidden" name="bodyText" value={text} />
                 <SubmitButton
                   size="icon"
-                  variant="success"
                   aria-label="Approve and send"
                   title="Approve and send this reply to the customer"
                 >
-                  <Check aria-hidden />
+                  <SendHorizontal aria-hidden />
                 </SubmitButton>
               </form>
             </div>
