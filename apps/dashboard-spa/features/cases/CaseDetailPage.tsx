@@ -49,6 +49,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { ApprovalSignalsStrip } from "./ApprovalSignalsStrip";
 import { BundleApprovalBar } from "./BundleApprovalBar";
 import { IssueRefundCard } from "./IssueRefundCard";
+import { RefundDialog } from "./RefundDialog";
 import { RetrySendButton } from "./RetrySendButton";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
@@ -400,6 +401,8 @@ export function CaseDetailPage() {
   const refundRecommendation = extractRefundRecommendation(entries);
   // The agent's issuable refund recommendation (PATH B), if any.
   const refundToIssue = issuableRefund(entries);
+  const refundableOrder =
+    order && order.financialStatus !== "refunded" ? order : null;
   const composerMode =
     singleApproval && singleApprovalDraft !== null
       ? {
@@ -489,6 +492,16 @@ export function CaseDetailPage() {
             canResume={canResume}
             showRetrySend={showRetrySend}
             statusTargets={caseRow.manualStatusTargets ?? []}
+            refundSlot={
+              refundableOrder ? (
+                <RefundDialog
+                  compact
+                  workspaceId={ctx.workspaceId}
+                  caseId={id}
+                  orderName={refundableOrder.name}
+                />
+              ) : null
+            }
           />
         </header>
 

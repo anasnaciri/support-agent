@@ -41,6 +41,8 @@ interface Props {
   readonly showRetrySend: boolean;
   /** Hand-settable status targets (matrix-validated by the api). */
   readonly statusTargets: ReadonlyArray<string>;
+  /** The RefundDialog trigger, when the order is refundable; sits before the ⋮ menu. */
+  readonly refundSlot?: ReactNode;
 }
 
 const IconActionButton = ({
@@ -76,6 +78,7 @@ export function CaseHeaderActions({
   canResume,
   showRetrySend,
   statusTargets,
+  refundSlot,
 }: Props) {
   const ctx = { workspaceId };
   const [menuOpen, setMenuOpen] = useState(false);
@@ -203,6 +206,8 @@ export function CaseHeaderActions({
           </IconActionButton>
         </>
       ) : null}
+
+      {refundSlot}
 
       {menuItems.length > 0 ? (
         <div ref={containerRef} className="relative">
