@@ -226,12 +226,20 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     const res = await get(`/dashboard/cases/${caseB}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      case: { id: string; status: string };
+      case: {
+        id: string;
+        status: string;
+        manualStatusTargets: ReadonlyArray<string>;
+      };
       auditEntries: ReadonlyArray<unknown>;
       approvals: ReadonlyArray<{ tool: string }>;
     };
     expect(body.case.id).toBe(caseB);
     expect(body.case.status).toBe("waiting_for_approval");
+    // The hand-settable status targets are matrix-derived server-side and never
+    // include the case's own current status (the SPA renders these directly).
+    expect(Array.isArray(body.case.manualStatusTargets)).toBe(true);
+    expect(body.case.manualStatusTargets).not.toContain("waiting_for_approval");
     expect(body.auditEntries).toHaveLength(1);
     expect(body.approvals).toHaveLength(1);
     expect(body.approvals[0]?.tool).toBe("refund.create");

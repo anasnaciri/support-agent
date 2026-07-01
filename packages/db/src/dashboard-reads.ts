@@ -35,6 +35,10 @@ import {
   type TodaySummary,
   type UsageDecisionRow,
 } from "@support-agent/dashboard-contracts";
+import {
+  allowedManualStatusTargets,
+  type CaseStatus,
+} from "@support-agent/agent-core";
 import type { DrizzleDb } from "./client.js";
 import {
   approvals,
@@ -509,6 +513,7 @@ export const caseDetail = async (
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+      manualStatusTargets: allowedManualStatusTargets(row.status as CaseStatus),
     },
     auditEntries: entries.map(toAuditEntry),
     approvals: caseApprovals.map(toApprovalDetail),

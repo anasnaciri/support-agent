@@ -29,6 +29,7 @@ import {
 } from "@/lib/refund-recommendation";
 import { buildContextRows } from "@/lib/case-context";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
+import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { Link } from "@/components/ui/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ChatThread } from "./ChatThread";
 import { ChatScrollArea } from "./ChatScrollArea";
 import { CaseDetailsPanel } from "./CaseDetailsPanel";
+import { CaseHeaderActions } from "./CaseHeaderActions";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { TrackingPanel } from "./TrackingPanel";
@@ -47,6 +49,17 @@ import { CaseDetailLoading } from "./CaseDetailLoading";
 // composer, approve/reject, take-over/resume/resolve, refund dialog, the ⋮
 // actions menu, and the live-refresh boundary — lands in Phase 4/5. The read-
 // only derivations + timeline assembly mirror the Next page 1:1.
+
+// UI-visibility gates for the header actions (NOT the §10 transition matrix —
+// the api enforces the real rules; these just decide which buttons to show).
+const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
+const RESOLVE_HIDDEN = new Set([
+  "resolved",
+  "failed",
+  "waiting_for_approval",
+  "waiting_for_supplier",
+  "approved_action_running",
+]);
 
 const formatDateTime = (date: string): string =>
   date.slice(0, 19).replace("T", " ");
@@ -289,6 +302,14 @@ export function CaseDetailPage() {
     customerFullName ?? threadInboundName ?? customerEmail ?? "Customer";
 
   const pendingApprovals = allApprovals.filter((a) => a.status === "pending");
+  const canTakeOver = !TERMINAL.has(caseRow.status);
+  const canResume = caseRow.status === "human_takeover";
+  const canResolve = !RESOLVE_HIDDEN.has(caseRow.status);
+  const showRetrySend = shouldShowRetrySendAction({
+    caseStatus: caseRow.status,
+    activeReplyDelivery: detail.activeReplyDelivery,
+    riskFlags,
+  });
   const summaryText =
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
@@ -371,6 +392,16 @@ export function CaseDetailPage() {
               ) : null}
             </div>
           </div>
+
+          <CaseHeaderActions
+            workspaceId={ctx.workspaceId}
+            caseId={id}
+            canResolve={canResolve}
+            canTakeOver={canTakeOver}
+            canResume={canResume}
+            showRetrySend={showRetrySend}
+            statusTargets={caseRow.manualStatusTargets ?? []}
+          />
         </header>
 
         <ChatScrollArea

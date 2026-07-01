@@ -142,6 +142,14 @@ export interface CaseDetailCase {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly resolvedAt: string | null;
+  /**
+   * The statuses a human may set BY HAND from here, matrix-validated server-side
+   * (agent-core `allowedManualStatusTargets`). The case page renders exactly
+   * these as the ⋮ "change status" options so the SPA never has to re-derive the
+   * §10 transition matrix. Empty when nothing is hand-settable from the current
+   * status.
+   */
+  readonly manualStatusTargets: ReadonlyArray<string>;
 }
 
 export interface AuditEntry {
