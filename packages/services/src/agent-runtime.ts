@@ -39,7 +39,7 @@ import {
 } from "./merchant-notification.js";
 import { ImageHashStore, type SimilarImageHit } from "./image-hash-store.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
-import { signApprovalToken } from "./approval-tokens.js";
+import { buildApprovalNotification } from "./approval-notification.js";
 import {
   TenantAgentOverridesService,
   type AgentOverride,
@@ -80,8 +80,6 @@ import {
   buildSystemPrompt,
   buildInitialMessages,
   inboundCustomerEmail,
-  derivePreview,
-  deriveSubject,
   renderThreadTranscript,
   executionKeyFor,
   toolCallTimeoutMs,
@@ -1432,54 +1430,27 @@ const AgentRuntimeLayer = Layer.effect(
               const approval = parked.approval;
               current = parked.case_;
 
-              // Fire the approval-link email. Best-effort: a Resend outage,
-              // a tenant without `notificationEmail` configured, or any other
-              // mail failure must NOT block the case. The approval row is
-              // the source of truth and the dashboard (when it lands) will
-              // pick it up regardless. Each URL carries its OWN signed token
-              // with the action bound into the HMAC (audit S3) — holding a
-              // reject link must not allow approving by editing the path.
-              const approveToken = signApprovalToken({
+              // Fire the approval-link email + merchant ping. Best-effort: a
+              // Resend outage, a tenant without `notificationEmail` configured,
+              // or any other mail failure must NOT block the case. The approval
+              // row is the source of truth and the dashboard picks it up
+              // regardless; the maintenance cron re-sends this same
+              // notification if the first send was dropped. `buildApprovalNotification`
+              // is shared with that reminder path so the signed links + preview
+              // can't drift. Each URL carries its OWN token with the action
+              // bound into the HMAC (audit S3) — a reject link must not approve.
+              const notification = buildApprovalNotification({
                 approvalId: approval.id,
-                action: "approve",
-                secret: linkConfig.signingKey,
-                ttlMs: linkConfig.ttlMs,
+                tenantId: current.tenantId,
+                caseId: current.id,
+                tool: tool.name,
+                proposedInput: callInput,
+                linkConfig,
               });
-              const rejectToken = signApprovalToken({
-                approvalId: approval.id,
-                action: "reject",
-                secret: linkConfig.signingKey,
-                ttlMs: linkConfig.ttlMs,
-              });
-              const approveUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/approve?token=${encodeURIComponent(approveToken)}`;
-              const rejectUrl = `${linkConfig.baseUrl}/approvals/${approval.id}/reject?token=${encodeURIComponent(rejectToken)}`;
-              const draftPreview = derivePreview(callInput);
-              const draftSubject = deriveSubject(callInput);
               yield* mail
-                .sendApprovalLink({
-                  tenantId: current.tenantId,
-                  approvalId: approval.id,
-                  draftSubject,
-                  draftPreview,
-                  toolName: tool.name,
-                  approveUrl,
-                  rejectUrl,
-                })
+                .sendApprovalLink(notification.mail)
                 .pipe(Effect.either);
-              // Same best-effort fan-out on the merchant's push channel
-              // (master-plan §9): the chat ping carries the same signed
-              // decision links as the email.
-              yield* notifyMerchant(
-                current.tenantId,
-                approvalRequestedNotification({
-                  caseId: current.id,
-                  toolName: tool.name,
-                  draftSubject,
-                  draftPreview,
-                  approveUrl,
-                  rejectUrl,
-                }),
-              );
+              yield* notifyMerchant(current.tenantId, notification.merchant);
 
               return {
                 type: "PausedWaitingForApproval",

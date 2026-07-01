@@ -38,6 +38,7 @@ export * from "./platform-mail.js";
 export * from "./merchant-notification.js";
 export * from "./org-directory.js";
 export * from "./approval-link-config.js";
+export * from "./approval-notification.js";
 export * from "./timer-service.js";
 export * from "./idempotency-store.js";
 export * from "./image-hash-store.js";

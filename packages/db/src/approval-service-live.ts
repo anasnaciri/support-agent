@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalNotFound,
@@ -356,6 +356,56 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map((r) => rowToApproval(r.approval));
       });
 
+    // Pending approvals due for a reminder re-notification (see the Tag doc).
+    // All comparisons are operator-based (`lt`/`gte`/`isNull`) so the Date
+    // binds through the column's timestamp encoder — a raw `sql` fragment with
+    // a JS Date throws in the pg driver (the bug that silently killed the old
+    // expiry sweep). Keep it operator-based.
+    const listPendingNeedingReminder = (opts: {
+      readonly createdBefore: Date;
+      readonly createdAfter: Date;
+      readonly remindedBefore: Date;
+      readonly limit?: number;
+    }): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "listPendingNeedingReminder",
+          db
+            .select()
+            .from(approvals)
+            .where(
+              and(
+                eq(approvals.status, "pending"),
+                lt(approvals.createdAt, opts.createdBefore),
+                gte(approvals.createdAt, opts.createdAfter),
+                or(
+                  isNull(approvals.lastRemindedAt),
+                  lt(approvals.lastRemindedAt, opts.remindedBefore),
+                ),
+              ),
+            )
+            .orderBy(sql`${approvals.createdAt} ASC`)
+            .limit(opts.limit ?? 100),
+        );
+        return rows.map(rowToApproval);
+      });
+
+    const recordReminderSent = (
+      id: ReturnType<typeof ApprovalId>,
+      at: Date,
+    ): Effect.Effect<void, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "recordReminderSent",
+          db
+            .update(approvals)
+            .set({ lastRemindedAt: at })
+            .where(eq(approvals.id, id)),
+        );
+      });
+
     return ApprovalService.of({
       create,
       getById,
@@ -366,6 +416,8 @@ export const ApprovalServiceLive = Layer.effect(
       cancelPendingForCase,
       supersedePendingForCase,
       listDecidedUnresumed,
+      listPendingNeedingReminder,
+      recordReminderSent,
     });
   }),
 );

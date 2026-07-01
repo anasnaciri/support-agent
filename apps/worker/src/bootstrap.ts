@@ -117,6 +117,7 @@ export interface WorkerBootstrap {
     | BlobStorage
     | OrgDirectoryService
     | PlatformMailService
+    | ApprovalLinkConfig
     | ConnectorCredentialStore
     | DbClient,
     never,

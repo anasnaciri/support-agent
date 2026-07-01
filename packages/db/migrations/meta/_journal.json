@@ -218,6 +218,13 @@
       "when": 1782336344928,
       "tag": "0030_giant_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782910914408,
+      "tag": "0031_thin_wong",
+      "breakpoints": true
     }
   ]
 }

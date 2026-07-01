@@ -174,4 +174,62 @@ describeIfDb("ApprovalService (Live, integration)", () => {
       expect(["approved", "rejected"]).toContain(a.status);
     }
   });
+
+  // The reminder sweep's due-query is operator-based (lt/gte/isNull) for the
+  // same Date-encoding safety as listDecidedUnresumed. Exercise it against real
+  // PG so the grace/window bounds, the isNull-vs-interval branch, and the
+  // recordReminderSent stamp are validated end-to-end (the in-memory Test layer
+  // re-implements this logic and can't catch a SQL/encoder drift).
+  it("listPendingNeedingReminder honors grace/window/interval + recordReminderSent (real PG)", async () => {
+    const now = new Date();
+    const withinWindow = {
+      createdBefore: new Date(now.getTime() + 60 * 60_000), // row is "old enough"
+      createdAfter: new Date(now.getTime() - 7 * 24 * 60 * 60_000), // inside 7d
+    };
+    const result = await runLive(
+      Effect.gen(function* () {
+        const svc = yield* ApprovalService;
+        const created = yield* svc.create(sample());
+        const id = created.id;
+
+        // Never reminded → due.
+        const due1 = yield* svc.listPendingNeedingReminder({
+          ...withinWindow,
+          remindedBefore: new Date(now.getTime() - 24 * 60 * 60_000),
+        });
+
+        // Older than the window (createdAfter in the future) → not due.
+        const outOfWindow = yield* svc.listPendingNeedingReminder({
+          createdBefore: new Date(now.getTime() + 60 * 60_000),
+          createdAfter: new Date(now.getTime() + 60 * 60_000),
+          remindedBefore: new Date(now.getTime() - 24 * 60 * 60_000),
+        });
+
+        // Stamp a reminder; the interval gate then excludes it...
+        yield* svc.recordReminderSent(id, now);
+        const dueInsideInterval = yield* svc.listPendingNeedingReminder({
+          ...withinWindow,
+          remindedBefore: new Date(now.getTime() - 24 * 60 * 60_000),
+        });
+
+        // ...until the interval elapses (remindedBefore in the future).
+        const dueAfterInterval = yield* svc.listPendingNeedingReminder({
+          ...withinWindow,
+          remindedBefore: new Date(now.getTime() + 25 * 60 * 60_000),
+        });
+
+        return {
+          id,
+          due1: due1.map((a) => a.id),
+          outOfWindow: outOfWindow.map((a) => a.id),
+          dueInsideInterval: dueInsideInterval.map((a) => a.id),
+          dueAfterInterval: dueAfterInterval.map((a) => a.id),
+        };
+      }),
+    );
+    expect(result.due1).toContain(result.id);
+    expect(result.outOfWindow).not.toContain(result.id);
+    expect(result.dueInsideInterval).not.toContain(result.id);
+    expect(result.dueAfterInterval).toContain(result.id);
+  });
 });
