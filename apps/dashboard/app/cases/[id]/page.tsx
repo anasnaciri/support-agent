@@ -886,24 +886,29 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
 
         {banner ? (
           <div className="shrink-0 px-4 pt-3">
-            <Alert variant={toneToVariant(banner.tone)}>
-              <AlertDescription>{banner.text}</AlertDescription>
-            </Alert>
+            <div className="mx-auto w-full max-w-3xl">
+              <Alert variant={toneToVariant(banner.tone)}>
+                <AlertDescription>{banner.text}</AlertDescription>
+              </Alert>
+            </div>
           </div>
         ) : null}
 
         <ChatScrollArea
           bottomKey={threadKey}
-          className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4"
+          className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6"
         >
-          <ChatThread
-            result={
-              conversationThread ?? { status: "unavailable", reason: "no_thread" }
-            }
-          />
+          <div className="mx-auto w-full max-w-3xl">
+            <ChatThread
+              result={
+                conversationThread ?? { status: "unavailable", reason: "no_thread" }
+              }
+            />
+          </div>
         </ChatScrollArea>
 
         <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
+          <div className="mx-auto w-full max-w-3xl">
           {composerMode ? (
             <>
               {composerMode.kind === "approval" ? (
@@ -937,6 +942,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               requestedResolution={requestedResolution}
             />
           ) : null}
+          </div>
         </div>
       </section>
 
