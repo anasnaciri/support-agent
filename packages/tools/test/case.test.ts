@@ -161,6 +161,31 @@ describe("case.update_context tool", () => {
     expect(result.context["notes"]).toBe("asked twice");
   });
 
+  it("lets the agent record a customer phone the ingest parser missed", async () => {
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* RepoTag;
+          const created = yield* repo.create({
+            tenantId: TenantId("t1"),
+            channel: "email",
+            currentAgentId: AgentId("support-triage"),
+            context: {},
+          });
+          // The deterministic ingest parser handles the structured contact
+          // form; this is the LLM backstop for an unusual format it missed.
+          yield* caseUpdateContext.execute(
+            { customerPhone: "(215) 801-9255" },
+            baseCtx(created.id),
+          );
+          return yield* repo.getById(created.id);
+        }),
+        toolEnv,
+      ),
+    );
+    expect(result.context["customerPhone"]).toBe("(215) 801-9255");
+  });
+
   it("persists the scenarioKey hint (triage's chosen scenario)", async () => {
     const result = await Effect.runPromise(
       Effect.provide(

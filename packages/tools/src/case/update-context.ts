@@ -25,6 +25,16 @@ const Input = Schema.Struct({
   quotedOrderRef: Schema.optional(Schema.String),
   identifiedCustomerId: Schema.optional(Schema.String),
   /**
+   * The customer's phone number, when the message states one that the
+   * deterministic ingest parser (`inboundCustomerPhone`) didn't capture — an
+   * unusual format or label the regex missed. A benign contact detail (used
+   * only as a fallback identifier for the customer lookup, email → phone →
+   * name — never an identity/permission gate), so unlike `customerEmail` it's
+   * safe for the agent to write; `ShopifyService.searchByPhone` normalizes it
+   * before querying.
+   */
+  customerPhone: Schema.optional(Schema.String),
+  /**
    * The resolution scenario triage matched this case to (a `ScenarioPolicy.key`
    * — built-in like `delivery_issue` or a merchant-defined custom key). The
    * scenario-resolution agent reads it to load the scenario's tool/permission
@@ -128,7 +138,7 @@ const Output = Schema.Struct({
 export const caseUpdateContext = defineTool({
   name: "case.update_context",
   description:
-    "Shallow-merge fields into the case's `context` JSON. Use this to record classification, identified IDs, customer-facing notes, and any other derived facts.",
+    "Shallow-merge fields into the case's `context` JSON. Use this to record classification, identified IDs, customer-facing notes, a customer phone number the message states (if not already captured), and any other derived facts.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "write",
@@ -155,6 +165,8 @@ export const caseUpdateContext = defineTool({
         patch["quotedOrderRef"] = input.quotedOrderRef;
       if (input.identifiedCustomerId !== undefined)
         patch["identifiedCustomerId"] = input.identifiedCustomerId;
+      if (input.customerPhone !== undefined)
+        patch["customerPhone"] = input.customerPhone;
       if (input.scenarioKey !== undefined)
         patch["scenarioKey"] = input.scenarioKey;
       if (input.notes !== undefined) patch["notes"] = input.notes;
