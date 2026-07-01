@@ -38,6 +38,7 @@ import { ChatThread } from "./ChatThread";
 import { ChatScrollArea } from "./ChatScrollArea";
 import { CaseDetailsPanel } from "./CaseDetailsPanel";
 import { CaseHeaderActions } from "./CaseHeaderActions";
+import { ChatComposer } from "./ChatComposer";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { TrackingPanel } from "./TrackingPanel";
@@ -217,6 +218,13 @@ export function CaseDetailPage() {
     queryFn: () => api.caseTracking(ctx, id),
     enabled: id.length > 0,
   });
+  // The rephrase model picker's catalog — tolerant (null when the member can't
+  // read it), so a reply-only member still gets the composer minus the picker.
+  const replyModelsQuery = useQuery({
+    queryKey: qk.models(ctx.workspaceId),
+    queryFn: () => api.replyModels(ctx),
+    enabled: id.length > 0,
+  });
 
   if (detailQuery.isLoading) return <CaseDetailLoading />;
 
@@ -314,17 +322,15 @@ export function CaseDetailPage() {
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
 
-  // Read-only note where the composer/approval controls will land (Phase 4).
-  const composerNote =
-    pendingApprovals.length > 0
-      ? "A reply is drafted and awaiting your approval — review it in the timeline below."
-      : caseRow.status === "human_takeover"
-        ? "You've taken over this case."
-        : caseRow.status === "resolved"
-          ? "This case is resolved."
-          : caseRow.status === "failed"
-            ? "This case is closed."
-            : "The agent is handling this conversation.";
+  // Why the composer is read-only when the agent owns the conversation.
+  const lockedMessage =
+    caseRow.status === "resolved"
+      ? "This case is resolved. Reopen it from the status menu to reply."
+      : caseRow.status === "failed"
+        ? "This case is closed. Reopen it from the status menu to reply."
+        : caseRow.status === "waiting_for_supplier"
+          ? "Waiting on the supplier. Take over to reply to the customer."
+          : "The agent is handling this conversation. Take over to reply yourself.";
 
   const recommendationTimelineItems: SimplifiedTimelineItem[] = entries.flatMap(
     (entry) => {
@@ -422,9 +428,27 @@ export function CaseDetailPage() {
 
         <div className="shrink-0 border-t border-border/60 bg-card px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
-            <p className="text-center text-sm text-muted-foreground">
-              {composerNote}
-            </p>
+            {pendingApprovals.length > 0 ? (
+              // Approval decisions (approve/reject the drafted reply) land in
+              // Phase 4c; until then the drafted reply is visible in the timeline.
+              <p className="text-center text-sm text-muted-foreground">
+                A reply is drafted and awaiting your approval — review it in the
+                timeline.
+              </p>
+            ) : (
+              <ChatComposer
+                key={id}
+                workspaceId={ctx.workspaceId}
+                caseId={id}
+                customerEmail={customerEmail}
+                models={replyModelsQuery.data ?? null}
+                mode={
+                  canResume
+                    ? { kind: "reply" }
+                    : { kind: "locked", message: lockedMessage }
+                }
+              />
+            )}
           </div>
         </div>
       </section>
