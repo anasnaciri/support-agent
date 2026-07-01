@@ -13,6 +13,11 @@ import {
   type WorkosOrganizationDirectory,
   type WorkosUserDirectory,
 } from "./auth/workos-directory.js";
+import {
+  makeSessionCodec,
+  type SessionCodec,
+} from "./auth/dashboard-session.js";
+import { registerDashboardAuthRoutes } from "./auth/dashboard-auth-routes.js";
 import { buildApp } from "./platform/app.js";
 import type { RouteContext } from "./platform/context.js";
 import { stopApprovalBoss } from "./platform/pgboss.js";
@@ -64,6 +69,17 @@ export interface StartServerOptions {
    * org's display name beside its id. Tests inject a static map.
    */
   readonly workosOrganizationDirectory?: WorkosOrganizationDirectory;
+  /**
+   * Override the SPA BFF session codec. Production builds it from
+   * `cfg.dashboardBff.sessionPassword`; tests inject one so they can seal a
+   * cookie and exercise the cookie-credential path.
+   */
+  readonly dashboardSessionCodec?: SessionCodec;
+  /**
+   * Override the WorkOS OAuth HTTP calls used by `/dashboard/auth/*` (code
+   * exchange + refresh). Production uses global fetch; tests inject a fake.
+   */
+  readonly workosOAuthFetch?: typeof fetch;
 }
 
 export const startServer = async (
@@ -100,13 +116,29 @@ export const startServer = async (
       ? makeWorkosOrganizationDirectory(cfg.workos.apiKey)
       : null);
 
+  // SPA BFF session codec — seals/unseals the httpOnly cookie. `null` unless the
+  // BFF is configured (API_SESSION_PASSWORD). The credential seam + auth routes
+  // read it off `req.server`.
+  const dashboardSessionCodec: SessionCodec | null =
+    opts.dashboardSessionCodec ??
+    (cfg.dashboardBff
+      ? makeSessionCodec(cfg.dashboardBff.sessionPassword)
+      : null);
+
   const app = await buildApp({
     dashboardTokenVerifier,
     workosUserDirectory,
     workosOrganizationDirectory,
+    dashboardSessionCodec,
+    dashboardBffOrigins: cfg.dashboardBff?.spaOrigins ?? [],
   });
 
   const ctx: RouteContext = { cfg, layer };
+  registerDashboardAuthRoutes(
+    app,
+    ctx,
+    opts.workosOAuthFetch ? { workosFetch: opts.workosOAuthFetch } : {},
+  );
   registerShopifyRoutes(app, ctx);
   registerMailboxRoutes(app, ctx);
   registerTelegramRoutes(app, ctx);

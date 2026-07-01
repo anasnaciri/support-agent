@@ -14,6 +14,54 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Dashboard SPA port to Vite (branch `feat/dashboard-spa`, NOT merged)
+
+Porting `apps/dashboard` (Next 16 App Router) → a NEW `apps/dashboard-spa` (Vite +
+React 19 + TanStack Query + TanStack Router). The Next app stays untouched and keeps
+deploying; the SPA is additive. Approved plan: `~/.claude/plans/steady-inventing-fairy.md`.
+Auth decision = **Option B (BFF httpOnly cookie owned by apps/api)**, with apps/api
+accepting BOTH the existing Bearer-JWT (Next path, S14) AND a new session cookie (SPA
+path) — additive only. Deploy target = Cloudflare Workers static assets (new hostname).
+
+- [x] **Phase 0 — scaffold + build green** (committed `880a565`). New `apps/dashboard-spa`:
+      Vite 6 + `@vitejs/plugin-react` + `@tailwindcss/vite` (Tailwind v4 CSS-first);
+      standalone bundler tsconfig with `@/* -> ./*`. Copied verbatim from `apps/dashboard`:
+      28 pure `lib/*` modules, 21 `components/ui/*`, `globals.css`→`app.css` (+ plain
+      `@font-face` replacing `next/font/local`), 24 pure-logic unit tests (185 tests pass).
+      De-Next-ified `feedback-toaster` (dropped `next/navigation`). Re-included the package
+      in root `vitest.config.ts`. **Layout deviation:** kept the Next app's FLAT layout
+      (`lib/`+`components/`+`test/` at package root, alias `@/*`→`./*`) instead of the plan's
+      `src/` nesting, so pure modules + tests copy verbatim. Skipped (rewrite in later phases):
+      `api-client.ts`, `session.ts`, `require-permission.ts`, `require-supplier-permission.ts`,
+      `user-id.ts` (uses `node:crypto` — SPA will source `userDecisionUuid` from the api).
+- [x] **Phase 1 — apps/api dual-credential auth** (cookie BFF) — auth mechanism DONE (TDD,
+      92 auth tests + 611 full-api-suite green). New `src/auth/dashboard-session.ts` (JWE
+      cookie codec via `jose` — no iron-session dep; raw-fetch WorkOS authorize/exchange/
+      refresh; cookie + signed-`state`/nonce + CSRF helpers). New `authenticateDashboardCredential`
+      in `dashboard-auth.ts`: **Bearer present → delegates to the unchanged `authenticateDashboardToken`
+      (regression-guarded); else the `sa-dash-session` cookie → unseal → verify with the SAME
+      JWKS verifier → sealed (verified) email, not `x-user-email`.** `resolveDashboardAuth` +
+      `authenticateDashboardOrg` switched to it. New `dashboard-auth-routes.ts`:
+      `GET /dashboard/auth/login` (signed state + nonce cookie → WorkOS authorize),
+      `GET …/callback` (nonce-bound → exchange → seal → 302 to SPA), `GET …/session` (whoami +
+      in-place refresh), `POST …/refresh`, `POST …/logout`. `platform/app.ts`: `@fastify/cors`
+      scoped to `/dashboard/*` (exact SPA-origin allowlist + credentials) + an `onRequest` CSRF
+      guard (cookie-authed mutation ⇒ allowed Origin). Config: `cfg.dashboardBff` from
+      `API_SESSION_PASSWORD`/`DASHBOARD_SPA_ORIGIN`/`DASHBOARD_BFF_REDIRECT_URI` (fail-fast on
+      half-config); `startServer` builds+decorates the codec + accepts `dashboardSessionCodec`/
+      `workosOAuthFetch` test overrides. Cookie posture: `SameSite=None;Secure` (https) vs `Lax`
+      (http dev) auto-derived. **DEFERRED to the flows that need them:** the admin-SDK server-side
+      moves (onboarding `createOrganization`/`switchToOrganization`; member/supplier `sendInvitation`)
+      land in Phase 2 (onboarding) / Phase 4 (invites), since only new-user + invite flows need them.
+- [ ] **Phase 2 — SPA auth + shell + workspace context** (SessionProvider, WorkspaceProvider,
+      AppShell, TanStack Router tree + `beforeLoad` guards from `resolveDashboardRedirect`).
+- [ ] **Phase 3 — read pages via `useQuery`** (Cases, Approvals, Audit, Usage, all Settings, supplier).
+- [ ] **Phase 4 — mutations** (63 server actions → `useMutation`).
+- [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
+- [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
+
+---
+
 ### 2026-07-01 — Case detail page polish pass (apps/dashboard, committed `dd452fd` + DEPLOYED to CF Workers)
 
 Adopted the palette-independent polish techniques from a reference "Support Inbox"

@@ -5,6 +5,11 @@ import type {
   DashboardTokenVerifier,
   DashboardTokenVerifyFailure,
 } from "./dashboard-jwt.js";
+import {
+  SESSION_COOKIE_NAME,
+  parseCookieHeader,
+  type SessionCodec,
+} from "./dashboard-session.js";
 
 // Auth for the dashboard's HTTP API (Path B). The dashboard (a Cloudflare
 // Worker) authenticates the merchant via WorkOS and forwards that merchant's
@@ -113,6 +118,56 @@ export const authenticateDashboardToken = async (
     userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
     workosUserId: verified.claims.workosUserId,
     userEmail: nonEmpty(headers["x-user-email"]),
+    workspaceId: nonEmpty(headers["x-workspace-id"]),
+  };
+};
+
+/**
+ * Dual-credential dashboard auth. The Next dashboard forwards a WorkOS bearer
+ * (S14); the Vite SPA (apps/dashboard-spa) presents the httpOnly `sa-dash-session`
+ * cookie apps/api minted at OAuth callback. BOTH resolve to the same verified
+ * org + user:
+ *   - Bearer present → delegate to `authenticateDashboardToken` UNCHANGED, so
+ *     the Next path is byte-for-byte identical (regression-guarded in tests).
+ *   - Else the session cookie → unseal → verify the SEALED access token with the
+ *     SAME JWKS verifier. On this path `userEmail` comes from the sealed session
+ *     (verified server-side at callback), never the spoofable `x-user-email`
+ *     header the SPA can't be trusted to set.
+ *
+ * `codec` is null when the BFF isn't configured (no `API_SESSION_PASSWORD`) — the
+ * cookie path is then unavailable and only the bearer path works.
+ */
+export const authenticateDashboardCredential = async (
+  headers: Record<string, string | undefined>,
+  verifier: DashboardTokenVerifier,
+  codec: SessionCodec | null,
+): Promise<DashboardAuthParse> => {
+  const auth = headers["authorization"];
+  if (auth && auth.startsWith(BEARER)) {
+    return authenticateDashboardToken(headers, verifier);
+  }
+  if (!codec) {
+    return { ok: false, status: 401, message: "missing bearer token" };
+  }
+  const cookieValue = parseCookieHeader(headers["cookie"])[SESSION_COOKIE_NAME];
+  if (!cookieValue) {
+    return { ok: false, status: 401, message: "missing session" };
+  }
+  const sealed = await codec.unseal(cookieValue);
+  if (!sealed) {
+    return { ok: false, status: 401, message: "invalid session" };
+  }
+  const verified = await verifier.verify(sealed.accessToken);
+  if (!verified.ok) {
+    return { ok: false, status: 401, message: failureMessage(verified.reason) };
+  }
+  return {
+    ok: true,
+    organizationId: verified.claims.organizationId,
+    userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+    workosUserId: verified.claims.workosUserId,
+    // Verified email from the sealed session — NOT the x-user-email header.
+    userEmail: nonEmpty(sealed.user.email ?? undefined),
     workspaceId: nonEmpty(headers["x-workspace-id"]),
   };
 };

@@ -1,15 +1,20 @@
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
+  type FastifyRequest,
 } from "fastify";
 import fastifyHelmet from "@fastify/helmet";
 import fastifyRateLimit from "@fastify/rate-limit";
+import fastifyCors, {
+  type FastifyCorsOptions,
+} from "@fastify/cors";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import { loggerConfig } from "./logger.js";
 import { sendJson } from "./http.js";
 import { TAGS } from "./schemas.js";
 import type { DashboardTokenVerifier } from "../auth/dashboard-jwt.js";
+import { csrfRejected, type SessionCodec } from "../auth/dashboard-session.js";
 import type {
   WorkosOrganizationDirectory,
   WorkosUserDirectory,
@@ -19,6 +24,17 @@ export interface AppDecorations {
   readonly dashboardTokenVerifier: DashboardTokenVerifier | null;
   readonly workosUserDirectory: WorkosUserDirectory | null;
   readonly workosOrganizationDirectory: WorkosOrganizationDirectory | null;
+  /**
+   * SPA BFF session codec (seal/unseal the httpOnly cookie). `null` when the
+   * BFF isn't configured — the cookie credential is then unavailable and only
+   * the Bearer path works. Read off `req.server` by the auth seam.
+   */
+  readonly dashboardSessionCodec: SessionCodec | null;
+  /**
+   * Allowed SPA origins for the `/dashboard/*` CORS allowlist + the cookie-path
+   * CSRF origin check. Empty when the BFF isn't configured (CORS stays closed).
+   */
+  readonly dashboardBffOrigins: ReadonlyArray<string>;
 }
 
 /**
@@ -44,6 +60,7 @@ export const buildApp = async (
     "workosOrganizationDirectory",
     decorations.workosOrganizationDirectory,
   );
+  app.decorate("dashboardSessionCodec", decorations.dashboardSessionCodec);
 
   // Webhook HMAC is computed over the exact bytes the provider sent, so we
   // keep the raw body as a Buffer instead of letting Fastify JSON-parse it
@@ -61,9 +78,7 @@ export const buildApp = async (
 
   // Security headers (audit S11). The CSP is strict because the only HTML
   // this server emits is self-contained receipt/landing pages with inline
-  // styles — no scripts, no external assets. CORS stays closed on purpose:
-  // the dashboard talks to this api server-to-server with a bearer token,
-  // never from the browser with cookies.
+  // styles — no scripts, no external assets.
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
       directives: {
@@ -75,6 +90,55 @@ export const buildApp = async (
       },
     },
   });
+
+  // CORS is closed everywhere EXCEPT `/dashboard/*` from the allow-listed SPA
+  // origin(s) (dashboard-spa BFF). Webhooks/OAuth/admin stay browser-closed —
+  // the Next dashboard talks server-to-server with a bearer and needs no CORS.
+  // The delegator returns `{ origin: false }` for anything off the allowlist.
+  const allowedOrigins = new Set(decorations.dashboardBffOrigins);
+  const hstr = (v: string | string[] | undefined): string | undefined =>
+    Array.isArray(v) ? v[0] : v;
+  if (allowedOrigins.size > 0) {
+    await app.register(fastifyCors, () => (
+      req: FastifyRequest,
+      cb: (err: Error | null, options: FastifyCorsOptions) => void,
+    ) => {
+      const origin = hstr(req.headers.origin);
+      if (
+        (req.url ?? "").startsWith("/dashboard/") &&
+        origin &&
+        allowedOrigins.has(origin)
+      ) {
+        cb(null, {
+          origin,
+          credentials: true,
+          methods: ["GET", "POST", "OPTIONS"],
+          allowedHeaders: ["content-type", "x-workspace-id"],
+          maxAge: 600,
+        });
+      } else {
+        cb(null, { origin: false });
+      }
+    });
+
+    // CSRF: a cookie-authed `/dashboard/*` mutation must carry an allowed Origin
+    // (the SPA cookie is SameSite=None cross-site, so ambient-cookie CSRF is
+    // otherwise possible). Bearer + safe-method + non-dashboard requests skip it.
+    app.addHook("onRequest", async (req, res) => {
+      if (
+        csrfRejected({
+          url: req.url ?? "",
+          method: req.method,
+          cookieHeader: hstr(req.headers.cookie),
+          authorizationHeader: hstr(req.headers.authorization),
+          origin: hstr(req.headers.origin),
+          allowedOrigins,
+        })
+      ) {
+        return sendJson(res, 403, { error: "csrf_origin_rejected" });
+      }
+    });
+  }
 
   // Rate limiting (audit S11). One generous global bucket — the goal is
   // blunting token brute-force and webhook floods, not traffic shaping.

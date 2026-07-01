@@ -18,10 +18,11 @@ import {
 import { type RbacPermissionId } from "@support-agent/dashboard-contracts";
 import { decideAuthz } from "./dashboard-authz.js";
 import {
-  authenticateDashboardToken,
+  authenticateDashboardCredential,
   isWorkspaceIdShape,
 } from "./dashboard-auth.js";
 import { type DashboardTokenVerifier } from "./dashboard-jwt.js";
+import { type SessionCodec } from "./dashboard-session.js";
 import {
   type WorkosOrganizationDirectory,
   type WorkosUserDirectory,
@@ -78,6 +79,18 @@ export const getDashboardVerifier = (
   }).dashboardTokenVerifier;
 
 /**
+ * The SPA BFF session codec (seal/unseal the httpOnly cookie), decorated at
+ * boot alongside the verifier. `null` → the BFF isn't configured, so the cookie
+ * credential is unavailable and only the forwarded-bearer path works.
+ */
+export const getDashboardSessionCodec = (
+  req: FastifyRequest,
+): SessionCodec | null =>
+  (req.server as unknown as {
+    dashboardSessionCodec: SessionCodec | null;
+  }).dashboardSessionCodec;
+
+/**
  * The WorkOS user directory (verified-email lookup), decorated alongside the
  * verifier. `null` → no `WORKOS_API_KEY`, so invite reconcile degrades to a
  * no-op rather than ever trusting the `x-user-email` header.
@@ -109,9 +122,10 @@ export const resolveDashboardAuth = async (
   if (!verifier) {
     return { ok: false, status: 503, error: "dashboard_api_not_configured" };
   }
-  const parsed = await authenticateDashboardToken(
+  const parsed = await authenticateDashboardCredential(
     req.headers as Record<string, string | undefined>,
     verifier,
+    getDashboardSessionCodec(req),
   );
   if (!parsed.ok) {
     return { ok: false, status: parsed.status, error: parsed.message };
@@ -216,9 +230,10 @@ export const authenticateDashboardOrg = async (
   if (!verifier) {
     return { ok: false, status: 503, error: "dashboard_api_not_configured" };
   }
-  const parsed = await authenticateDashboardToken(
+  const parsed = await authenticateDashboardCredential(
     req.headers as Record<string, string | undefined>,
     verifier,
+    getDashboardSessionCodec(req),
   );
   if (!parsed.ok) {
     return { ok: false, status: parsed.status, error: parsed.message };

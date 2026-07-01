@@ -210,6 +210,23 @@ export interface WorkosAuthConfig {
   readonly apiKey: string | null;
 }
 
+/**
+ * BFF cookie-session config for the Vite SPA (apps/dashboard-spa). The SPA has
+ * no server, so apps/api owns the WorkOS OAuth handshake and mints an httpOnly
+ * session cookie the SPA sends with `credentials:"include"`. This is ADDITIVE
+ * to the Bearer path (the Next dashboard is unaffected). `null` unless WorkOS is
+ * configured AND `API_SESSION_PASSWORD` is set — then `/dashboard/auth/*` and
+ * the cookie credential are simply unavailable (bearer still works).
+ */
+export interface DashboardBffConfig {
+  /** Seals the session cookie (JWE). `API_SESSION_PASSWORD`, ≥32 chars. */
+  readonly sessionPassword: string;
+  /** This api's own OAuth callback URL, registered in WorkOS. */
+  readonly redirectUri: string;
+  /** Allowed SPA origins — CORS allowlist + CSRF origin check + post-login target. */
+  readonly spaOrigins: ReadonlyArray<string>;
+}
+
 export interface ApiConfig {
   readonly port: number;
   readonly databaseUrl: string;
@@ -277,6 +294,11 @@ export interface ApiConfig {
    * trusted `x-org-id`). `null` → those routes respond 503 (not configured).
    */
   readonly workos: WorkosAuthConfig | null;
+  /**
+   * Cookie-session BFF for the Vite SPA (additive to `workos` bearer auth).
+   * `null` unless WorkOS is configured AND `API_SESSION_PASSWORD` is set.
+   */
+  readonly dashboardBff: DashboardBffConfig | null;
   /**
    * Bearer token guarding the platform-operator admin endpoints
    * (`POST /admin/tenants/:id/delete` — delete *any* tenant's account).
@@ -403,6 +425,42 @@ export const loadApiConfig = (): ApiConfig => {
     requireEnv("CREDENTIAL_ENCRYPTION_KEY"),
     process.env["CREDENTIAL_ENCRYPTION_KEY_PREVIOUS"],
   );
+  // Dashboard BFF (SPA cookie session). Opt-in via API_SESSION_PASSWORD; when
+  // set it must be ≥32 chars and the SPA origin(s) + api callback must be
+  // configured (fail fast on a half-config). Requires WorkOS too — the BFF
+  // drives the same WorkOS OAuth the bearer path verifies.
+  const sessionPassword = process.env["API_SESSION_PASSWORD"]?.trim() || null;
+  let dashboardBff: DashboardBffConfig | null = null;
+  if (sessionPassword) {
+    if (sessionPassword.length < 32) {
+      throw new Error("API_SESSION_PASSWORD must be at least 32 characters");
+    }
+    if (!workosClientId) {
+      throw new Error(
+        "API_SESSION_PASSWORD is set but WORKOS_CLIENT_ID is not — the SPA BFF needs WorkOS configured",
+      );
+    }
+    if (!process.env["WORKOS_API_KEY"]?.trim()) {
+      throw new Error(
+        "API_SESSION_PASSWORD is set but WORKOS_API_KEY is not — the SPA BFF needs it as the OAuth client_secret",
+      );
+    }
+    const spaOrigins = (process.env["DASHBOARD_SPA_ORIGIN"] ?? "")
+      .split(",")
+      .map((s) => s.trim().replace(/\/+$/u, ""))
+      .filter((s) => s.length > 0);
+    if (spaOrigins.length === 0) {
+      throw new Error(
+        "API_SESSION_PASSWORD is set but DASHBOARD_SPA_ORIGIN is empty (CORS/CSRF allowlist)",
+      );
+    }
+    dashboardBff = {
+      sessionPassword,
+      redirectUri: requireEnv("DASHBOARD_BFF_REDIRECT_URI"),
+      spaOrigins,
+    };
+  }
+
   return {
     port: Number(process.env["API_PORT"] ?? 4000),
     databaseUrl: requireEnv("DATABASE_URL"),
@@ -427,6 +485,7 @@ export const loadApiConfig = (): ApiConfig => {
           apiKey: process.env["WORKOS_API_KEY"]?.trim() || null,
         }
       : null,
+    dashboardBff,
     adminApiToken: process.env["ADMIN_API_TOKEN"]?.trim() || null,
     shopifyConnectRequiresProvisioning: requiresProvisioning,
     google: googleConfigured
