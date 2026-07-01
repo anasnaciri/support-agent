@@ -38,6 +38,7 @@ import { CaseActionsMenu, type CaseMenuAction } from "./CaseActionsMenu";
 import { RefundDialog } from "./RefundDialog";
 import { caseActionMenuItems, type CaseActionKey } from "./case-actions-menu";
 import {
+  editCaseDetailsAction,
   issueRefundAction,
   loadRefundContextAction,
   resolveAction,
@@ -48,6 +49,7 @@ import {
   setStatusAction,
   takeOverAction,
 } from "./actions";
+import { CardEditPopover } from "./CardEditPopover";
 import {
   buildCaseTimelineHref,
   curatedTimelineEvent,
@@ -89,6 +91,8 @@ interface Params {
     readonly statusChanged?: string;
     readonly caseResolved?: string;
     readonly refundIssued?: string;
+    readonly detailsEdited?: string;
+    readonly orderResolved?: string;
     readonly decided?: string;
     readonly action?: string;
     readonly kind?: string;
@@ -272,6 +276,35 @@ const refundIssuedBanner = (kind: string | undefined): Banner | null => {
   }
   if (kind === "invalid_amount") {
     return { tone: "warn", text: "That refund amount isn't valid." };
+  }
+  return null;
+};
+
+const detailsEditedBanner = (
+  kind: string | undefined,
+  orderResolved: string | undefined,
+): Banner | null => {
+  if (!kind) return null;
+  if (kind === "saved") {
+    if (orderResolved === "true") {
+      return { tone: "success", text: "Order linked and case details updated." };
+    }
+    if (orderResolved === "false") {
+      return {
+        tone: "warn",
+        text: "Saved — but we couldn't find that order in your store. It's recorded on the case as a reference.",
+      };
+    }
+    return { tone: "success", text: "Case details updated." };
+  }
+  if (kind === "invalid_email") {
+    return { tone: "warn", text: "That doesn't look like a valid email address." };
+  }
+  if (kind === "nothing_to_update") {
+    return { tone: "info", text: "Nothing to update." };
+  }
+  if (kind === "case_not_found") {
+    return { tone: "warn", text: "Couldn't find that case." };
   }
   return null;
 };
@@ -589,6 +622,7 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     statusChangedBanner(sp.statusChanged) ??
     caseResolvedBanner(sp.caseResolved) ??
     refundIssuedBanner(sp.refundIssued) ??
+    detailsEditedBanner(sp.detailsEdited, sp.orderResolved) ??
     approvalBanner(sp);
   const ctx = await getDashboardContext();
   const [detail, shopify, conversationThread, trackingResult] =
@@ -665,6 +699,22 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
     threadInboundName ??
     customerEmail ??
     "Customer";
+
+  // Prefilled values for the "edit details" pencils — the merchant edits from
+  // what's already known (empty when the agent found nothing). The order field
+  // shows the human-friendly name/ref, never a raw GID.
+  const contextCustomerName =
+    typeof context["customerName"] === "string"
+      ? (context["customerName"] as string)
+      : null;
+  const editCustomerNameDefault =
+    contextCustomerName ?? customerFullName(customer) ?? threadInboundName ?? "";
+  const editCustomerEmailDefault = customerEmail ?? customer?.email ?? "";
+  const editOrderRefDefault =
+    order?.name ??
+    (typeof context["quotedOrderRef"] === "string"
+      ? (context["quotedOrderRef"] as string)
+      : "");
 
   const canTakeOver = !TERMINAL.has(caseRow.status);
   const canResume = caseRow.status === "human_takeover";
@@ -954,8 +1004,53 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
             customer={customer}
             customerEmail={customerEmail}
             verifiedOrderEmail={verifiedOrderEmail}
+            headerAction={
+              <CardEditPopover
+                caseId={caseRow.id}
+                action={editCaseDetailsAction}
+                label="Edit customer"
+                title="Edit customer"
+                description="Set the customer the agent couldn't identify. Replies and lookups will use this address."
+                fields={[
+                  {
+                    name: "customerName",
+                    label: "Name",
+                    placeholder: "Jane Shopper",
+                    defaultValue: editCustomerNameDefault,
+                  },
+                  {
+                    name: "customerEmail",
+                    label: "Email",
+                    type: "email",
+                    placeholder: "jane@example.com",
+                    defaultValue: editCustomerEmailDefault,
+                  },
+                ]}
+              />
+            }
           />
-          <OrderPanel order={order} orderHint={orderHint} shopDomain={shopDomain} />
+          <OrderPanel
+            order={order}
+            orderHint={orderHint}
+            shopDomain={shopDomain}
+            headerAction={
+              <CardEditPopover
+                caseId={caseRow.id}
+                action={editCaseDetailsAction}
+                label="Assign order"
+                title="Assign order"
+                description="Enter the order number or confirmation code to link it to this case."
+                fields={[
+                  {
+                    name: "orderRef",
+                    label: "Order number",
+                    placeholder: "#1001",
+                    defaultValue: editOrderRefDefault,
+                  },
+                ]}
+              />
+            }
+          />
 
           {tracking ? (
             <TrackingPanel

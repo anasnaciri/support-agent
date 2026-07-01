@@ -14,6 +14,8 @@ interface Props {
    * which is the corresponding address and may be a typo or a different sender.
    */
   readonly verifiedOrderEmail?: string | null;
+  /** The pencil "edit customer" control, rendered in the card header. */
+  readonly headerAction?: React.ReactNode;
 }
 
 const fullName = (c: ShopifyCustomer): string | null => {
@@ -33,15 +35,20 @@ const initialsOf = (name: string | null, email: string | null): string => {
 
 const PanelShell = ({
   children,
+  headerAction,
 }: {
   readonly children: React.ReactNode;
+  readonly headerAction?: React.ReactNode;
 }) => (
   <Card>
     <CardHeader className="pb-3">
-      <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-        <User className="size-3.5" aria-hidden />
-        Customer
-      </CardTitle>
+      <div className="flex items-center justify-between gap-2">
+        <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+          <User className="size-3.5" aria-hidden />
+          Customer
+        </CardTitle>
+        {headerAction}
+      </div>
     </CardHeader>
     <CardContent className="pt-0">{children}</CardContent>
   </Card>
@@ -112,6 +119,7 @@ export const CustomerPanel = ({
   customer,
   customerEmail,
   verifiedOrderEmail,
+  headerAction,
 }: Props) => {
   const verified =
     typeof verifiedOrderEmail === "string" && verifiedOrderEmail.length > 0
@@ -120,7 +128,7 @@ export const CustomerPanel = ({
 
   if (!customer && !customerEmail && !verified) {
     return (
-      <PanelShell>
+      <PanelShell headerAction={headerAction}>
         <p className="text-sm italic text-muted-foreground">
           No customer linked to this case yet.
         </p>
@@ -130,7 +138,7 @@ export const CustomerPanel = ({
 
   if (!customer) {
     return (
-      <PanelShell>
+      <PanelShell headerAction={headerAction}>
         <Identity name={null} email={customerEmail} />
         {verified ? (
           <dl className="mt-4">
@@ -150,7 +158,7 @@ export const CustomerPanel = ({
   const stats = customerStats(customer);
 
   return (
-    <PanelShell>
+    <PanelShell headerAction={headerAction}>
       <Identity name={name} email={email} />
 
       <div className="mt-4 grid grid-cols-3 gap-2">

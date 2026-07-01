@@ -117,6 +117,41 @@ export const setStatusAction = async (formData: FormData): Promise<void> => {
   redirect(`/cases/${caseId}?statusChanged=${result.kind}`);
 };
 
+// Hand-correct the customer and/or order the agent couldn't extract, from the
+// pencil edit on the Customer / Order cards. Sends only the fields the card
+// submitted (empty inputs are treated as "no change"). The api validates the
+// email, resolves the order ref to a real Shopify order, and stamps the case.
+export const editCaseDetailsAction = async (
+  formData: FormData,
+): Promise<void> => {
+  const caseId = caseIdOf(formData);
+  const ctx = await getDashboardContext();
+
+  const field = (name: string): string | undefined => {
+    const raw = formData.get(name);
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+  const customerEmail = field("customerEmail");
+  const customerName = field("customerName");
+  const orderRef = field("orderRef");
+
+  const result = await api.editCaseDetails(ctx, caseId, {
+    ...(customerEmail !== undefined ? { customerEmail } : {}),
+    ...(customerName !== undefined ? { customerName } : {}),
+    ...(orderRef !== undefined ? { orderRef } : {}),
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  const params = new URLSearchParams({ detailsEdited: result.kind });
+  if (result.orderResolved !== undefined) {
+    params.set("orderResolved", String(result.orderResolved));
+  }
+  redirect(`/cases/${caseId}?${params.toString()}`);
+};
+
 // Resolve a case by hand from the case page — works even while the manager has
 // taken it over ("a case that's with me"). The api bridges the close legally
 // (human_takeover → in_progress → resolved) for this human action; the runtime's

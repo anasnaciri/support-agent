@@ -390,6 +390,14 @@ export interface SetCaseStatusOutcomeView {
 export interface ResolveCaseOutcomeView {
   readonly kind: string;
 }
+export interface EditCaseDetailsOutcomeView {
+  // saved | invalid_email | nothing_to_update | case_not_found | error
+  readonly kind: string;
+  /** When an order ref was submitted: whether it resolved to a real order. */
+  readonly orderResolved?: boolean;
+  /** The resolved order's display name (e.g. "#1001"), when it resolved. */
+  readonly orderName?: string;
+}
 export interface IssueRefundOutcomeView {
   readonly kind: string;
   readonly refundId?: string;
@@ -1129,6 +1137,27 @@ export const api = {
       ctx,
     });
     return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Hand-correct the customer and/or order the agent couldn't extract (the
+  // pencil edit on the case's Customer / Order cards). Only the provided fields
+  // change. The api resolves an order ref to its canonical Shopify order and
+  // stamps it. Returns the discriminated outcome (saved | invalid_email |
+  // nothing_to_update | case_not_found).
+  editCaseDetails: async (
+    ctx: CallCtx,
+    caseId: string,
+    fields: {
+      readonly customerEmail?: string;
+      readonly customerName?: string;
+      readonly orderRef?: string;
+    },
+  ): Promise<EditCaseDetailsOutcomeView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/details`,
+      { method: "POST", body: fields, ctx },
+    );
+    return (body as EditCaseDetailsOutcomeView | null) ?? { kind: "error" };
   },
 
   // Resolve a case by hand — including one the manager has TAKEN OVER. Distinct

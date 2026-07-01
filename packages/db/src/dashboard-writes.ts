@@ -226,6 +226,70 @@ export const resolveCaseManually = async (
   );
 };
 
+export type EditCaseDetailsOutcome =
+  | { readonly kind: "saved" }
+  | { readonly kind: "case_not_found" };
+
+export interface EditCaseDetailsInput {
+  readonly caseId: string;
+  readonly tenantId: string;
+  readonly managerId: string;
+  /** Corrected customer address (already validated + normalized). */
+  readonly customerEmail?: string | undefined;
+  /** Corrected customer display name. */
+  readonly customerName?: string | null | undefined;
+  /** Resolved order GID — set only when the merchant's ref resolved in Shopify. */
+  readonly identifiedOrderId?: string | undefined;
+  /** The raw order ref the merchant typed (untrusted hint). */
+  readonly quotedOrderRef?: string | undefined;
+}
+
+/**
+ * Hand-correct a case's customer/order binding from the case page (the pencil
+ * edit on the Customer / Order cards). Merges ONLY the provided fields into
+ * `case.context` + writes one `case.details_edited` audit row, in one tx, via
+ * `CaseLifecycleWriter.setCaseDetails`. No status change — editing details is
+ * metadata, so it works in any status (that's the point: the manager isn't
+ * blocked). The order ref is resolved to its canonical GID by the caller (the
+ * api handler, which holds ShopifyService) before it reaches here, so this
+ * stays inside the canonical-order-binding invariant. Cross-tenant ids surface
+ * as `case_not_found` (never disclose existence).
+ */
+export const editCaseDetails = async (
+  db: DrizzleDb,
+  input: EditCaseDetailsInput,
+): Promise<EditCaseDetailsOutcome> =>
+  runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle
+        .setCaseDetails({
+          caseId: CaseId(input.caseId),
+          tenantId: TenantId(input.tenantId),
+          actor: { type: "user", id: input.managerId },
+          ...(input.customerEmail !== undefined
+            ? { customerEmail: input.customerEmail }
+            : {}),
+          ...(input.customerName !== undefined && input.customerName !== null
+            ? { customerName: input.customerName }
+            : {}),
+          ...(input.identifiedOrderId !== undefined
+            ? { identifiedOrderId: input.identifiedOrderId }
+            : {}),
+          ...(input.quotedOrderRef !== undefined
+            ? { quotedOrderRef: input.quotedOrderRef }
+            : {}),
+        })
+        .pipe(
+          Effect.map(() => ({ kind: "saved" as const })),
+          Effect.catchTag("CaseNotFound", () =>
+            Effect.succeed({ kind: "case_not_found" as const }),
+          ),
+        );
+    }),
+  );
+
 /**
  * Self-service FIRST-workspace creation for a signed-in WorkOS org (the
  * onboarding flow). Idempotent by org via the pre-SELECT only — since

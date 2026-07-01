@@ -43,6 +43,7 @@ import {
   casesList,
   connectionsList,
   DbClient,
+  editCaseDetails,
   getActiveReplyDeliveryForCase,
   getMemberAccess,
   parsePageNumber,
@@ -79,6 +80,11 @@ import {
   resolveCustomerForContext,
   resolveOrderForContext,
 } from "./shopify-panels.js";
+import {
+  classifyOrderRef,
+  normalizeCustomerEmail,
+  normalizeCustomerName,
+} from "./case-details-input.js";
 import { makePgBossApprovalPublisher } from "../approvals/endpoints.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
@@ -873,6 +879,117 @@ export const handleDashboardResolveCase = async (
     }),
   );
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/details — a manager hand-corrects the customer
+// and/or order the agent couldn't extract (the pencil edit on the Customer /
+// Order cards). Rarely needed, but it must never leave the manager blocked on a
+// case: e.g. a legacy relay case created before Reply-To parsing landed, stamped
+// with `mailer@shopify.com` as the customer. The order ref is resolved to its
+// canonical Shopify order HERE (this handler holds ShopifyService) so we stamp
+// the same `identifiedOrderId` GID the runtime would — an unresolvable ref is
+// still recorded as `quotedOrderRef` so the panel shows the hint. Only the
+// provided fields change; no status transition (details are metadata). Gated on
+// `cases.set_status` (the "correct case state by hand" permission).
+export const handleDashboardEditCaseDetails = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+
+  // Customer email: validate only when the field is present + non-blank; a
+  // malformed address is refused rather than stamped as the reply target.
+  const rawEmail = body["customerEmail"];
+  const hasEmailField =
+    typeof rawEmail === "string" && rawEmail.trim() !== "";
+  const customerEmail = hasEmailField
+    ? normalizeCustomerEmail(rawEmail)
+    : undefined;
+  if (hasEmailField && customerEmail === null) {
+    return sendJson(res, 400, { kind: "invalid_email" });
+  }
+  const customerName =
+    typeof body["customerName"] === "string"
+      ? (normalizeCustomerName(body["customerName"]) ?? undefined)
+      : undefined;
+  const rawOrderRef =
+    typeof body["orderRef"] === "string" ? body["orderRef"].trim() : "";
+  const orderRef = rawOrderRef.length > 0 ? rawOrderRef : undefined;
+
+  if (
+    customerEmail === undefined &&
+    customerName === undefined &&
+    orderRef === undefined
+  ) {
+    return sendJson(res, 400, { kind: "nothing_to_update" });
+  }
+
+  const result = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        // Best-effort resolve the typed order ref to its canonical Shopify
+        // order (mirrors resolveOrderForContext). A miss (no creds, 404) leaves
+        // identifiedOrderId unset; the raw ref is still saved as quotedOrderRef.
+        let identifiedOrderId: string | undefined;
+        let orderName: string | null = null;
+        if (orderRef) {
+          const shopify = yield* ShopifyService;
+          const tenant = TenantId(auth.tenantId);
+          const kind = classifyOrderRef(orderRef);
+          const lookup =
+            kind === "gid"
+              ? shopify.getOrder(tenant, OrderId(orderRef))
+              : kind === "name"
+                ? shopify.findOrderByName(tenant, orderRef)
+                : shopify.findOrderByConfirmationNumber(tenant, orderRef);
+          const order = yield* lookup.pipe(
+            Effect.catchAll(() => Effect.succeed(null)),
+          );
+          if (order) {
+            identifiedOrderId = order.id;
+            orderName = order.name;
+          }
+        }
+        const outcome = yield* Effect.promise(() =>
+          editCaseDetails(db, {
+            caseId: id,
+            tenantId: auth.tenantId,
+            managerId: auth.userId!,
+            ...(customerEmail ? { customerEmail } : {}),
+            ...(customerName !== undefined ? { customerName } : {}),
+            ...(identifiedOrderId !== undefined ? { identifiedOrderId } : {}),
+            ...(orderRef !== undefined ? { quotedOrderRef: orderRef } : {}),
+          }),
+        );
+        return {
+          outcome,
+          // Only meaningful when an order ref was submitted.
+          orderResolved:
+            orderRef !== undefined ? identifiedOrderId !== undefined : undefined,
+          orderName,
+        };
+      }),
+      layer,
+    ),
+  );
+
+  if (result.outcome.kind === "case_not_found") {
+    return sendJson(res, 404, { kind: "case_not_found" });
+  }
+  return sendJson(res, 200, {
+    kind: "saved",
+    ...(result.orderResolved !== undefined
+      ? { orderResolved: result.orderResolved }
+      : {}),
+    ...(result.orderName ? { orderName: result.orderName } : {}),
+  });
 };
 
 // POST /dashboard/cases/:id/retry — manager hands a taken-over case back

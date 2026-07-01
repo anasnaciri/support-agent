@@ -32,6 +32,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const caseRetry = randomUUID();
   const caseSetStatus = randomUUID();
   const caseHt = randomUUID();
+  const caseDetails = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
@@ -108,6 +109,13 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       .where(eq(cases.id, id))
       .limit(1)
       .then((r) => r[0]?.status);
+  const caseContext = (id: string) =>
+    raw!.db
+      .select({ context: cases.context })
+      .from(cases)
+      .where(eq(cases.id, id))
+      .limit(1)
+      .then((r) => r[0]?.context as Record<string, unknown> | undefined);
 
   beforeAll(async () => {
     if (!raw) return;
@@ -123,6 +131,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseRetry, tenantId, "human_takeover"),
       mkCase(caseSetStatus, tenantId, "waiting_for_approval"),
       mkCase(caseHt, tenantId, "human_takeover"),
+      mkCase(caseDetails, tenantId, "human_takeover"),
     ]);
     await raw.db.insert(approvals).values([
       mkApproval(pApprove, caseApprove, tenantId),
@@ -292,6 +301,72 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("unchanged");
     expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+  });
+
+  it("edit-details stamps a hand-corrected customer email + name into context", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+      customerEmail: "Jane@Shopper.com",
+      customerName: "Jane Shopper",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("saved");
+    const ctx = await caseContext(caseDetails);
+    expect(ctx?.["customerEmail"]).toBe("jane@shopper.com");
+    expect(ctx?.["customerName"]).toBe("Jane Shopper");
+    // A details edit never changes the case status.
+    expect(await caseStatus(caseDetails)).toBe("human_takeover");
+  });
+
+  it("edit-details records an unresolvable order ref as a hint (no Shopify creds)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+      orderRef: "#1001",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { kind: string; orderResolved?: boolean };
+    expect(body.kind).toBe("saved");
+    expect(body.orderResolved).toBe(false);
+    const ctx = await caseContext(caseDetails);
+    expect(ctx?.["quotedOrderRef"]).toBe("#1001");
+    // Unresolved → no canonical GID stamped.
+    expect(ctx?.["identifiedOrderId"]).toBeUndefined();
+  });
+
+  it("edit-details rejects a malformed email (invalid_email, 400)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+      customerEmail: "not-an-email",
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { kind: string }).kind).toBe("invalid_email");
+  });
+
+  it("edit-details with no fields is a no-op (nothing_to_update, 400)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseDetails}/details`, {});
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "nothing_to_update",
+    );
+  });
+
+  it("edit-details 404s for a case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseDetails}/details`,
+      { customerEmail: "leak@x.com" },
+      dashboardAuthHeaders(
+        otherOrgId,
+        { "content-type": "application/json" },
+        `user_${randomUUID()}`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    // The real tenant's case is untouched.
+    expect((await caseContext(caseDetails))?.["customerEmail"]).toBe(
+      "jane@shopper.com",
+    );
   });
 
   it("rejects a status the merchant may not set (invalid_status, 400)", async () => {

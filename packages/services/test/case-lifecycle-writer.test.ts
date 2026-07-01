@@ -823,4 +823,101 @@ describe("CaseLifecycleWriter", () => {
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.entries).toEqual([]);
   });
+
+  it("merges manually-assigned customer + order details into context and audits the edit", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        // A legacy relay case: the connector stamped the Shopify mailer as the
+        // customer and never found the order. The status is irrelevant — the
+        // manager can correct details at any point.
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "human_takeover",
+          context: {
+            customerEmail: "mailer@shopify.com",
+            classification: "where_is_order",
+            riskFlags: ["existing"],
+          },
+        });
+
+        const updated = yield* lifecycle.setCaseDetails({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: UserId("mgr-1") },
+          customerEmail: "jane@shopper.com",
+          customerName: "Jane Shopper",
+          identifiedOrderId: "gid://shopify/Order/12345",
+          quotedOrderRef: "#1001",
+        });
+
+        const fetched = yield* cases.getById(created.id, TenantId("tenant-a"));
+        const entries = yield* audit.forCase(created.id, {
+          tenantId: TenantId("tenant-a"),
+        });
+        return { updated, fetched, entries };
+      }),
+    );
+
+    // The corrected values overwrite the relay email; untouched keys survive.
+    expect(out.fetched.context["customerEmail"]).toBe("jane@shopper.com");
+    expect(out.fetched.context["customerName"]).toBe("Jane Shopper");
+    expect(out.fetched.context["identifiedOrderId"]).toBe(
+      "gid://shopify/Order/12345",
+    );
+    expect(out.fetched.context["quotedOrderRef"]).toBe("#1001");
+    expect(out.fetched.context["classification"]).toBe("where_is_order");
+    expect(out.fetched.context["riskFlags"]).toEqual(["existing"]);
+    // Status is untouched by a details edit.
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.entries).toHaveLength(1);
+    expect(out.entries[0]).toMatchObject({
+      actor: { type: "user", id: "mgr-1" },
+      action: "case.details_edited",
+      details: {
+        changed: ["customerEmail", "customerName", "identifiedOrderId", "quotedOrderRef"],
+      },
+    });
+  });
+
+  it("patches only the provided fields, leaving other context untouched", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("order-status-agent"),
+          status: "in_progress",
+          context: {
+            customerEmail: "mailer@shopify.com",
+            identifiedOrderId: "gid://shopify/Order/999",
+          },
+        });
+
+        // Only the customer is corrected here — the existing order binding
+        // must not be disturbed.
+        yield* lifecycle.setCaseDetails({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: UserId("mgr-1") },
+          customerEmail: "jane@shopper.com",
+        });
+
+        return {
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+        };
+      }),
+    );
+
+    expect(out.fetched.context["customerEmail"]).toBe("jane@shopper.com");
+    expect(out.fetched.context["identifiedOrderId"]).toBe(
+      "gid://shopify/Order/999",
+    );
+  });
 });

@@ -206,6 +206,32 @@ export interface SetMerchantStatusInput {
   readonly reason: string;
 }
 
+/**
+ * A manager hand-correcting the case's customer/order binding from the case
+ * page (the "pencil" edit on the Customer / Order cards). Rarely needed — only
+ * when the agent couldn't extract them (e.g. a legacy relay case created before
+ * Reply-To parsing, stamped with `mailer@shopify.com`). Only the provided
+ * fields are merged into `context`; the rest is untouched. `identifiedOrderId`
+ * is the CANONICAL resolved Shopify GID (the caller resolves the merchant's
+ * typed ref through `ShopifyService` first, exactly like the runtime does), so
+ * this stays inside the canonical-order-binding invariant; `quotedOrderRef`
+ * holds the raw string the merchant typed. No status transition — editing
+ * details is metadata, not a lifecycle move, so it works in any status.
+ */
+export interface SetCaseDetailsInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly actor: AuditActor;
+  /** Corrected customer address; merged into `context.customerEmail`. */
+  readonly customerEmail?: string;
+  /** Corrected customer display name; merged into `context.customerName`. */
+  readonly customerName?: string | null;
+  /** Resolved order GID (present only when the ref resolved in Shopify). */
+  readonly identifiedOrderId?: string;
+  /** The raw order ref the merchant typed (untrusted hint). */
+  readonly quotedOrderRef?: string;
+}
+
 export type CaseLifecycleWriterError =
   | ApprovalServiceError
   | CaseRepositoryError
@@ -267,6 +293,10 @@ export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
     readonly setMerchantStatus: (
       input: SetMerchantStatusInput,
     ) => Effect.Effect<SetMerchantStatusOutcome, CaseLifecycleWriterError>;
+
+    readonly setCaseDetails: (
+      input: SetCaseDetailsInput,
+    ) => Effect.Effect<Case, CaseLifecycleWriterError>;
   }
 >() {}
 
@@ -953,6 +983,50 @@ export const CaseLifecycleWriterLive = Layer.effect(
               toStatus,
               canceledApprovals,
             };
+          }),
+        ),
+
+      setCaseDetails: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            const current = yield* cases.getById(input.caseId, input.tenantId);
+            const changed: Array<string> = [];
+            const nextContext: Record<string, unknown> = { ...current.context };
+            if (input.customerEmail !== undefined) {
+              nextContext["customerEmail"] = input.customerEmail;
+              changed.push("customerEmail");
+            }
+            if (
+              input.customerName !== undefined &&
+              input.customerName !== null
+            ) {
+              nextContext["customerName"] = input.customerName;
+              changed.push("customerName");
+            }
+            if (input.identifiedOrderId !== undefined) {
+              nextContext["identifiedOrderId"] = input.identifiedOrderId;
+              changed.push("identifiedOrderId");
+            }
+            if (input.quotedOrderRef !== undefined) {
+              nextContext["quotedOrderRef"] = input.quotedOrderRef;
+              changed.push("quotedOrderRef");
+            }
+            // Nothing to change — don't write an empty edit or a noise audit row.
+            if (changed.length === 0) return current;
+
+            const updated = yield* cases.update(
+              current.id,
+              { context: nextContext as CaseContext },
+              current.tenantId,
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: input.actor,
+              action: "case.details_edited",
+              details: { changed },
+            });
+            return updated;
           }),
         ),
     });

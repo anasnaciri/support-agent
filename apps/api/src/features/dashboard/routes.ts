@@ -13,6 +13,7 @@ import {
   handleDashboardCaseDetail,
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
+  handleDashboardEditCaseDetails,
   handleDashboardIssueRefund,
   handleDashboardRefundContext,
   handleDashboardRephrase,
@@ -274,6 +275,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/resolve",
     "Resolve a case by hand, including one under takeover (manager)",
     handleDashboardResolveCase,
+    "cases.set_status",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/details",
+    "Hand-correct a case's customer / order the agent couldn't extract (manager)",
+    handleDashboardEditCaseDetails,
     "cases.set_status",
   );
   dashboardPost(

@@ -390,7 +390,19 @@ export const casesList = async (
       category: cases.category,
       currentAgentId: cases.currentAgentId,
       priority: cases.priority,
-      orderRef: cases.shopifyOrderId,
+      // The order the case is about, from the SAME single source of truth the
+      // case page + refund use — `context` — not the legacy `shopify_order_id`
+      // column (which the runtime stopped maintaining once `identifiedOrderId`
+      // became canonical, and which a manual "assign order" edit doesn't touch).
+      // Prefer the human-friendly ref the customer/merchant wrote
+      // (`quotedOrderRef`, e.g. "#1001") over the canonical GID, and keep the
+      // legacy column as a last-resort fallback for old rows. `formatOrderRef`
+      // normalizes whichever wins.
+      orderRef: sql<string | null>`coalesce(
+        ${cases.context}->>'quotedOrderRef',
+        ${cases.context}->>'identifiedOrderId',
+        ${cases.shopifyOrderId}
+      )`,
       preview: cases.summary,
       // Requester email lives in the agent-stamped context JSONB (same row —
       // no join). NULL when the case has no customer email yet.
