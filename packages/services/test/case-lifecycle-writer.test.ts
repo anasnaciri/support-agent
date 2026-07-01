@@ -603,6 +603,7 @@ describe("CaseLifecycleWriter", () => {
   it("resumes only human takeover cases", async () => {
     const out = await run(
       Effect.gen(function* () {
+        const approvals = yield* ApprovalService;
         const cases = yield* CaseRepository;
         const audit = yield* AuditLogService;
         const lifecycle = yield* CaseLifecycleWriter;
@@ -611,6 +612,19 @@ describe("CaseLifecycleWriter", () => {
           channel: "email",
           currentAgentId: AgentId("support-triage"),
           status: "human_takeover",
+        });
+        // A plain hand-back re-runs the SAME bound specialist, so a pending
+        // approval it queued is still valid and must survive (only a
+        // restart-from-triage re-routes and drops it).
+        const approval = yield* approvals.create({
+          tenantId: TenantId("tenant-a"),
+          caseId: takeover.id,
+          agentId: AgentId("support-triage"),
+          tool: "conversation.reply",
+          proposedInput: { bodyText: "draft" },
+          reasoning: "needs review",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 86_400_000),
         });
         const active = yield* cases.create({
           tenantId: TenantId("tenant-a"),
@@ -623,12 +637,14 @@ describe("CaseLifecycleWriter", () => {
           caseId: takeover.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
           reason: "handing back",
         });
         const noOp = yield* lifecycle.resume({
           caseId: active.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
           reason: "handing back",
         });
 
@@ -636,6 +652,10 @@ describe("CaseLifecycleWriter", () => {
           resumed,
           noOp,
           takeover: yield* cases.getById(takeover.id, TenantId("tenant-a")),
+          stillPending: yield* approvals.getById(
+            approval.id,
+            TenantId("tenant-a"),
+          ),
           entries: yield* audit.forCase(takeover.id, {
             tenantId: TenantId("tenant-a"),
           }),
@@ -643,8 +663,14 @@ describe("CaseLifecycleWriter", () => {
       }),
     );
 
-    expect(out.resumed).toEqual({ kind: "resumed", toStatus: "in_progress" });
+    expect(out.resumed).toEqual({
+      kind: "resumed",
+      toStatus: "in_progress",
+      canceledApprovals: 0,
+    });
     expect(out.takeover.status).toBe("in_progress");
+    // Plain hand-back leaves the specialist's pending approval untouched.
+    expect(out.stillPending.status).toBe("pending");
     expect(out.noOp).toEqual({ kind: "not_in_takeover", status: "in_progress" });
     expect(out.entries[0]).toMatchObject({
       action: "case.resumed",
@@ -677,6 +703,7 @@ describe("CaseLifecycleWriter", () => {
           caseId: takeover.id,
           tenantId: TenantId("tenant-a"),
           actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
           reason: "full retry from triage",
           restartFromTriage: true,
         });
@@ -691,7 +718,11 @@ describe("CaseLifecycleWriter", () => {
       }),
     );
 
-    expect(out.resumed).toEqual({ kind: "resumed", toStatus: "in_progress" });
+    expect(out.resumed).toEqual({
+      kind: "resumed",
+      toStatus: "in_progress",
+      canceledApprovals: 0,
+    });
     expect(out.after.status).toBe("in_progress");
     // Rebound to triage so the next tick re-classifies + re-routes.
     expect(out.after.currentAgentId).toBe("support-triage");
@@ -707,6 +738,60 @@ describe("CaseLifecycleWriter", () => {
       action: "case.resumed",
       details: { restartFromTriage: true },
     });
+  });
+
+  it("restartFromTriage resume drops every pending approval", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const approvals = yield* ApprovalService;
+        const cases = yield* CaseRepository;
+        const lifecycle = yield* CaseLifecycleWriter;
+        // A human_takeover case still carrying a stale draft the specialist
+        // queued before the manager stepped in. Re-triaging re-classifies and
+        // re-routes from scratch, so that draft is stale and must be dropped —
+        // else a stale approval-link click could act on the old proposal after
+        // the case has been sent back through triage.
+        const takeover = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("refund-review-agent"),
+          status: "human_takeover",
+          context: { classification: "refund_request" } as never,
+        });
+        const approval = yield* approvals.create({
+          tenantId: TenantId("tenant-a"),
+          caseId: takeover.id,
+          agentId: AgentId("refund-review-agent"),
+          tool: "conversation.reply",
+          proposedInput: { bodyText: "stale draft" },
+          reasoning: "needs review",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        });
+
+        const resumed = yield* lifecycle.resume({
+          caseId: takeover.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
+          reason: "full retry from triage",
+          restartFromTriage: true,
+        });
+
+        return {
+          resumed,
+          decided: yield* approvals.getById(approval.id, TenantId("tenant-a")),
+        };
+      }),
+    );
+
+    expect(out.resumed).toEqual({
+      kind: "resumed",
+      toStatus: "in_progress",
+      canceledApprovals: 1,
+    });
+    expect(out.decided.status).toBe("rejected");
+    expect(out.decided.decisionReason).toBe("case restarted from triage");
   });
 
   it("sets a merchant status through the state machine and cancels approvals", async () => {

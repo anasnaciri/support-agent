@@ -160,7 +160,16 @@ export interface TakeOverCaseInput {
 }
 
 export type ResumeCaseOutcome =
-  | { readonly kind: "resumed"; readonly toStatus: CaseStatus }
+  | {
+      readonly kind: "resumed";
+      readonly toStatus: CaseStatus;
+      /**
+       * Pending approvals dropped by this resume. Always 0 for a plain
+       * hand-back (the bound specialist re-runs, so its proposals stay valid);
+       * only a `restartFromTriage` resume cancels them (see below).
+       */
+      readonly canceledApprovals: number;
+    }
   | { readonly kind: "case_not_found" }
   | { readonly kind: "not_in_takeover"; readonly status: CaseStatus };
 
@@ -168,6 +177,8 @@ export interface ResumeCaseInput {
   readonly caseId: CaseId;
   readonly tenantId: TenantId;
   readonly actor: AuditActor;
+  /** The manager rejecting any pending approvals a `restartFromTriage` drops. */
+  readonly decidedBy: UserId;
   readonly reason: string;
   /**
    * Full retry from triage. The runtime always re-runs `current_agent_id`, so a
@@ -177,6 +188,11 @@ export interface ResumeCaseInput {
    * re-routes — the only way a deployed routing change reaches an in-flight,
    * already-routed case. Enrichment + the customer's reason (`notes`) are kept,
    * since triage has no message-replay and re-classifies from context.
+   *
+   * Because triage re-classifies and re-routes from scratch, every pending
+   * approval from the old run is stale and is CANCELED in the same tx — a
+   * stale approval-link click must not execute the previous route's proposal
+   * after the case has been sent back through triage.
    */
   readonly restartFromTriage?: boolean;
 }
@@ -898,15 +914,24 @@ export const CaseLifecycleWriterLive = Layer.effect(
                 reason: input.reason,
               },
             );
-            // Full retry from triage: rebind to the primary agent and drop the
-            // stale routing key so the tick re-classifies + re-routes. Same tx
-            // as the status flip — the rebind must be atomic with the resume.
+            // Full retry from triage: rebind to the primary agent, drop the
+            // stale routing key, and cancel every pending approval so the tick
+            // re-classifies + re-routes from scratch and no stale approval-link
+            // click acts on the old route's proposal. Same tx as the status
+            // flip — the rebind + cancel must be atomic with the resume.
+            let canceledApprovals = 0;
             if (input.restartFromTriage) {
               const { classification: _drop, ...keptContext } =
                 case_.context as Record<string, unknown>;
               yield* cases.update(case_.id, {
                 currentAgentId: PRIMARY_AGENT_ID,
                 context: keptContext as never,
+              });
+              canceledApprovals = yield* approvals.cancelPendingForCase({
+                tenantId: updated.tenantId,
+                caseId: updated.id,
+                decidedBy: input.decidedBy,
+                decisionReason: "case restarted from triage",
               });
             }
             yield* audit.record({
@@ -920,7 +945,11 @@ export const CaseLifecycleWriterLive = Layer.effect(
                 restartFromTriage: input.restartFromTriage === true,
               },
             });
-            return { kind: "resumed", toStatus: RESUME_TO_STATUS };
+            return {
+              kind: "resumed",
+              toStatus: RESUME_TO_STATUS,
+              canceledApprovals,
+            };
           }),
         ),
 

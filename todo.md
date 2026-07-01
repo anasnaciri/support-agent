@@ -14,6 +14,37 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — "Restart from triage" now drops every pending approval (packages/services + packages/db, NOT committed)
+
+**Why:** a `restartFromTriage` resume rebinds the case to triage and clears the
+stale classification so the next tick re-classifies + re-routes *from scratch*.
+Any approval the old route queued (e.g. a refund-review draft reply) is now
+stale, but it stayed `pending` — a stale approval-link click could execute the
+previous route's proposal after the case had been sent back through triage.
+
+**Done (TDD red→green; `pnpm build` green; 448 services+db unit tests pass, integration DB-gated):**
+
+- [x] `CaseLifecycleWriter.resume` (packages/services `case-lifecycle-writer.ts`)
+      now calls `approvals.cancelPendingForCase` in the SAME tx as the
+      status-flip + rebind when `restartFromTriage` is set (reason `"case
+      restarted from triage"`). Mirrors `takeOver` / `setMerchantStatus`. A
+      plain hand-back still leaves the bound specialist's approvals intact.
+- [x] `ResumeCaseInput` gains a required `decidedBy: UserId` (the manager who
+      rejects the dropped approvals); `ResumeCaseOutcome.resumed` gains
+      `canceledApprovals: number` (0 for a plain hand-back).
+- [x] `dashboard-writes.resumeCase` passes `decidedBy: UserId(managerId)`; doc
+      comment updated. Retry path (`retryCaseNow` → `resume()` closure) inherits
+      the drop for free; `RetryOutcome` unchanged (count not surfaced to UI —
+      possible follow-up).
+- [x] Tests: new "restartFromTriage resume drops every pending approval"; the
+      "resumes only human takeover cases" test now asserts a pending approval
+      SURVIVES a plain hand-back (locks the negative).
+
+**Follow-up (noted, not done):** surface `canceledApprovals` in the retry
+outcome + a dashboard toast ("N pending approvals dropped"). Not committed yet.
+
+---
+
 ### 2026-07-01 — Manual "edit customer / assign order" pencil on the case cards (apps/dashboard + backend, committed `d226ee9` on `feat/dashboard-spa` + DEPLOYED: Fly v45 + CF Workers `05ff05bd`)
 
 **Why:** a customer reported the agent no longer resolves the customer on case

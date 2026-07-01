@@ -106,8 +106,12 @@ export const takeOverCase = async (
  * guard only holds events while the status is `human_takeover`, so flipping
  * the status is all that's needed (the runtime has no message-history replay,
  * so we deliberately don't re-trigger the agent on the already-seen reply).
- * Only acts from `human_takeover`; any other status is a no-op
- * (`not_in_takeover`). Cross-tenant ids surface as `case_not_found`.
+ * With `restartFromTriage`, it ALSO rebinds the case to triage and cancels
+ * every pending approval (the old route's proposals are stale once the case
+ * re-classifies from scratch — mirrors `takeOverCase`); a plain hand-back
+ * leaves the bound specialist's pending approvals intact. Only acts from
+ * `human_takeover`; any other status is a no-op (`not_in_takeover`).
+ * Cross-tenant ids surface as `case_not_found`.
  */
 export const resumeCase = async (
   db: DrizzleDb,
@@ -122,6 +126,7 @@ export const resumeCase = async (
         caseId: CaseId(input.caseId),
         tenantId: TenantId(input.tenantId),
         actor: { type: "user", id: input.managerId },
+        decidedBy: UserId(input.managerId),
         reason,
         restartFromTriage: input.restartFromTriage === true,
       });
