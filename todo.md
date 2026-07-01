@@ -6,6 +6,67 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — Case recovery hardening: round (epoch) + consumed marker on approvals (packages + worker, NOT committed)
+
+**Why:** two prod incidents on case `2f636312-…`. (1) A double-send — an
+approved-but-skipped reply (round A) was swept into round B's approval bundle and
+sent alongside the new reply. (2) A non-send — replayed/re-published rejections of
+OLD approvals forced the case into `human_takeover`, which then blocked its
+already-approved reply from ever sending. Root cause: approval handlers acted on
+event *intent*, not current state; no per-approval "handled" marker; the L3b
+maintenance sweep re-fired stale (and rejected) decisions.
+
+**Done (TDD red→green; `pnpm build` green; 56 targeted unit tests pass):**
+
+- [x] Schema `0031_case_recovery_hardening.sql`: `cases.epoch`, `approvals.epoch`,
+      `approvals.resumed_at`. `Case.epoch` / `Approval.epoch` / `Approval.resumedAt`
+      (optional) + repo/rowToApproval mapping + `UpdatableCaseFields += epoch`.
+- [x] **H6/epoch**: `resume` (both modes) + `takeOver` bump `cases.epoch`;
+      `parkForApproval`/`queueApproval` stamp the approval with the case's epoch.
+- [x] **H1**: `stale_delivery_skipped` now `markResumed`s the skipped approval so it
+      can't be re-bundled or re-published.
+- [x] **H2**: `resumeApprovedTool` bundle runs only current-round, unresumed,
+      `approved` rows; a stale trigger is ignored (no spurious escalate); each run
+      row is `markResumed`. Fixes the double-send.
+- [x] **H3**: `listDecidedUnresumed` → APPROVED + unresumed + `epoch = cases.epoch`
+      only (drops rejected); cron re-checks the same. Fixes the reject-storm source.
+- [x] **H4**: `handleApprovalRejected` re-loads the approval and ignores a
+      stale/already-resumed/prior-epoch rejection (audit `approval.ignored_stale`)
+      instead of escalating. Fixes the non-send.
+- [x] `ApprovalService.markResumed` (Tag + Live + Test). New audit action
+      `approval.ignored_stale`.
+- [x] Also fixed 2 pre-existing build-red errors in the entangled tree
+      (`members/rbac-handlers.ts`, `suppliers/handlers.ts` — `inviterUserId` under
+      `exactOptionalPropertyTypes`).
+
+- [x] **H7**: event-level redelivery dedup. New `processed_events` table
+      (`0032_processed_events.sql`) + `ProcessedEventStore` (Tag+Live+Test);
+      the workflow consumer (`apps/worker/src/index.ts` onJob) skips a job whose
+      `eventId` was already claimed, and claims only after a non-retryable
+      settlement (mirrors C3). The L3b sweep mints a FRESH eventId so its
+      recovery republishes are intentionally NOT deduped here. `runtimeLayer`
+      now exposes `ProcessedEventStore`. Test: `processed-event-store.test.ts`.
+
+**Remaining (adopted, not yet done):**
+
+- [ ] **H8** retry-safe send: the external send runs OUTSIDE the marker-commit
+      tx (`agent-runtime.ts:587`, audit D6), so a crash between send and marker
+      commit re-sends on retry; and the Gmail connector does NOT actually dedupe
+      on `(caseId, draftId)` despite its `ConversationService` contract. Fix =
+      connector-level `(caseId, draftId)` send idempotency (claim-before-send).
+      Deferred deliberately — it's a careful change to the customer/money send
+      path (a wrong claim could suppress a legit retry), wants its own TDD cycle.
+- [ ] **H9** dashboard "approved but not sent" surfacing + one-click resend
+      (API detection off `approval.stale_delivery_skipped` + apps/dashboard-spa).
+- [ ] **H6 extension**: timer/supplier events don't yet carry/consume the epoch
+      (only approvals do). The `cases.epoch` primitive is in place to build on.
+
+Status: **6 of 8 adopted hardenings landed** (all the fixes for the two real
+prod incidents + event dedup), `pnpm build` green, 673 services+worker unit
+tests pass. NOT committed (entangled tree — needs a dedicated branch).
+
+---
+
 ## Current status
 
 - **Phase 0 — Foundations:** ✅ done (2 items explicitly deferred to Phase 1 with reasoning recorded below)
@@ -364,10 +425,12 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         `refreshAccessToken(organizationId)` + `createTenantForOrg` (idempotent). SPA: `needsOnboarding`
         whoami union + SessionProvider short-circuit + real OnboardingPage form. Trust model: the JWE
         cookie is the auth proof (only api can mint it). 25 unit + 6 onboarding-integration tests;
-        115 auth/member/supplier green. **Adversarial review found + fixed** the inviter-id bug
-        (`8b875e0`: must pass `auth.workosUserId`, not the decision UUID, or WorkOS rejects the send).
-        **NOT verified live.** Review note: 2 facets (auth-trust/CSRF, spa-flow) didn't finish (subagent
-        session-limit) — re-run when convenient.
+        128 auth/member/supplier green. **Two adversarial-review passes, 3 findings fixed**: the
+        inviter-id bug (`8b875e0`: pass `auth.workosUserId`, not the decision UUID, or WorkOS rejects
+        the send); and two MEDIUM auth-boundary defects (`4c77fc0`): `/session` returned needsOnboarding
+        for an invalid (rotated-kid) token, and `/onboard` could fork a duplicate org on a transient
+        WorkOS lookup failure — now gated strictly on `missing_claims` with refresh + null-on-lookup-
+        failure. Full facet coverage completed on the 2nd pass. **NOT verified live.**
   - [ ] **Not ported (optional parity):** the Next "edit customer / assign order" pencil
         (`CardEditPopover`, `d226ee9`) — needs `editCaseDetails` added to the SPA `api-client` +
         a `headerAction` slot on the Customer/Order panels. `editCaseDetails` already exists in
