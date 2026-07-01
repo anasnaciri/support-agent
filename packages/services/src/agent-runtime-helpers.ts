@@ -367,6 +367,53 @@ export const inboundCustomerName = (
   return name ? name : null;
 };
 
+// Phone-field labels a structured form (Shopify's storefront contact form, and
+// most form apps) prints before the number. Anchored to the start of a line and
+// requires the trailing colon, so it never matches a phone-shaped substring
+// inside prose (e.g. an order number or a date in the customer's comment).
+const PHONE_LABEL_LINE =
+  /^\s*(?:phone(?:\s*number)?|telephone|tel|mobile|cell|contact\s*(?:number|phone))\s*:\s*(.*)$/i;
+
+/**
+ * The customer's phone from a structured inbound email — deliberately a
+ * DETERMINISTIC label parser, not an LLM: the format is machine-generated and
+ * rigid (`Phone Number:` then the value on the same or next line), so a regex
+ * extracts it exactly, for free, in the ingest path — no per-email model call,
+ * no hallucinated digits. The example that motivated this is a Shopify contact
+ * form (`From: mailer@shopify.com`), which carries the shopper's phone as a
+ * labelled field. Returns null when there's no phone field or the value can't
+ * be a phone (7–15 digits), so an unstructured email never mis-captures an
+ * order number / date as a phone. Stored in `context.customerPhone` and used as
+ * a fallback identifier for the customer lookup (email → phone → name).
+ */
+export const inboundCustomerPhone = (
+  payload: Pick<InboundMessage, "bodyText">,
+): string | null => {
+  const body = payload.bodyText;
+  if (!body) return null;
+  const lines = body.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const match = PHONE_LABEL_LINE.exec(lines[i]!);
+    if (!match) continue;
+    // Value after the colon on the same line, else the next non-empty line.
+    let value = match[1]!.trim();
+    if (!value) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j]!.trim();
+        if (next) {
+          value = next;
+          break;
+        }
+      }
+    }
+    // Must look like a phone: 7–15 digits (E.164 caps at 15). Keep the raw
+    // formatting — `ShopifyService.searchByPhone` normalizes before querying.
+    const digits = value.replace(/\D/g, "");
+    if (digits.length >= 7 && digits.length <= 15) return value;
+  }
+  return null;
+};
+
 export const buildInitialMessages = (
   event: DomainEvent,
   caseRow: {

@@ -81,6 +81,7 @@ import {
   buildInitialMessages,
   inboundCustomerEmail,
   inboundCustomerName,
+  inboundCustomerPhone,
   derivePreview,
   deriveSubject,
   renderThreadTranscript,
@@ -868,6 +869,12 @@ const AgentRuntimeLayer = Layer.effect(
               // carry no name.
               const name = inboundCustomerName(event.payload);
               if (name) contextPatch["customerName"] = name;
+              // A structured inbound email (Shopify contact form) carries the
+              // shopper's phone as a labelled field — capture it so the customer
+              // panel can fall back email → phone → name. Deterministic parse,
+              // no LLM (see inboundCustomerPhone).
+              const phone = inboundCustomerPhone(event.payload);
+              if (phone) contextPatch["customerPhone"] = phone;
               if (resolved._tag === "Right" && resolved.right) {
                 contextPatch["shopifyCustomerId"] = resolved.right.id;
               }
