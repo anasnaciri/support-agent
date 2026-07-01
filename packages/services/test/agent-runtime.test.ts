@@ -24,6 +24,8 @@ import {
   specialistsCallableFrom,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
+  DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  toolCallTimeoutMs,
   toolFailureAuditDetail,
   type AgentOverride,
   type ResolutionPolicy,
@@ -451,6 +453,21 @@ describe("applyOverride — tool permissions", () => {
     );
     expect(next.model).toBe("google/gemini-3.5-flash");
     expect(next.permissionOverrides).toEqual({ "conversation.reply": "allow" });
+  });
+});
+
+describe("toolCallTimeoutMs — default wall-clock bound for tool calls", () => {
+  it("defaults to a positive bound and reads/clamps the env override", () => {
+    expect(toolCallTimeoutMs({})).toBe(DEFAULT_TOOL_CALL_TIMEOUT_MS);
+    expect(DEFAULT_TOOL_CALL_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(toolCallTimeoutMs({ TOOL_CALL_TIMEOUT_MS: "30000" })).toBe(30000);
+    // clamped: below floor, above ceiling
+    expect(toolCallTimeoutMs({ TOOL_CALL_TIMEOUT_MS: "10" })).toBe(1000);
+    expect(toolCallTimeoutMs({ TOOL_CALL_TIMEOUT_MS: "99999999" })).toBe(300000);
+    // garbage → default
+    expect(toolCallTimeoutMs({ TOOL_CALL_TIMEOUT_MS: "nope" })).toBe(
+      DEFAULT_TOOL_CALL_TIMEOUT_MS,
+    );
   });
 });
 

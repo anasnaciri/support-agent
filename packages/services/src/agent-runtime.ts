@@ -84,6 +84,7 @@ import {
   deriveSubject,
   renderThreadTranscript,
   executionKeyFor,
+  toolCallTimeoutMs,
   deliveryScopeFor,
   inboundReplyCandidateIds,
   refundAuditDetails,
@@ -143,6 +144,10 @@ const AgentRuntimeLayer = Layer.effect(
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
     const tenantRepo = yield* TenantRepository;
+    // Default wall-clock bound for a tool call that declares no `timeout`;
+    // resolved once so both the in-loop and approval-resume tool paths close
+    // over it. Stops a hung connector call from pinning the tick.
+    const defaultToolTimeoutMs = toolCallTimeoutMs(process.env);
     // Optional — like ImageHashStore below. Present in the worker (which wires
     // KnowledgeBaseServiceLive); absent in the many runtime test layers that
     // don't, in which case the knowledge-base title header is simply omitted.
@@ -548,15 +553,16 @@ const AgentRuntimeLayer = Layer.effect(
               attemptNumber: 1,
             };
             // The external side effect runs OUTSIDE the SQL tx (audit D6);
-            // the audit row + execution marker then commit together. A
-            // declared tool timeout is honored here too (audit L15).
+            // the audit row + execution marker then commit together. The
+            // tool's declared timeout — or the default bound — is honored here
+            // too (audit L15).
             const rawResumeEffect = toolToRun.execute(
               toolInput,
               ctx,
             ) as unknown as Effect.Effect<unknown, unknown, never>;
-            const resumeEffect = toolToRun.timeout
-              ? rawResumeEffect.pipe(Effect.timeout(toolToRun.timeout))
-              : rawResumeEffect;
+            const resumeEffect = rawResumeEffect.pipe(
+              Effect.timeout(toolToRun.timeout ?? defaultToolTimeoutMs),
+            );
             let exec: { readonly _tag: "Right" | "Left"; readonly right?: unknown; readonly left?: unknown };
             if (priorMarker) {
               // Already executed successfully in a prior delivery — skip
@@ -1853,13 +1859,13 @@ const AgentRuntimeLayer = Layer.effect(
                 callInput,
                 ctx,
               ) as unknown as Effect.Effect<unknown, unknown, never>;
-              // Honor the tool's declared timeout (audit L15) — a hung connector
-              // call must not pin the tick (and previously its DB tx) until the
-              // HTTP client's own timeout while the job clock runs toward
-              // redelivery.
-              const toolEffect = tool.timeout
-                ? rawToolEffect.pipe(Effect.timeout(tool.timeout))
-                : rawToolEffect;
+              // Honor the tool's declared timeout, or a default wall-clock
+              // bound when it declares none (audit L15) — a hung connector call
+              // must not pin the tick (and previously its DB tx) until the HTTP
+              // client's own timeout while the job clock runs toward redelivery.
+              const toolEffect = rawToolEffect.pipe(
+                Effect.timeout(tool.timeout ?? defaultToolTimeoutMs),
+              );
               const result = yield* toolEffect.pipe(Effect.either);
               const exec = yield* tx.run(
                 Effect.gen(function* () {

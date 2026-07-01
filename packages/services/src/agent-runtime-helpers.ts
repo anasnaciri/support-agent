@@ -1334,3 +1334,32 @@ export const applyResolutionAgentEntry = (
     promptTemplate: `${agent.promptTemplate}\n\n${header}`,
   };
 };
+
+// ============================================================
+// Tool-call timeout
+// ============================================================
+
+/**
+ * Default wall-clock bound applied to a tool call when the tool doesn't
+ * declare its own `timeout`. No first-party tool declares one, so without this
+ * a hung connector call (Shopify / 17track / knowledge HTTP) would run
+ * unbounded and pin the worker's tick. Kept below the LLM-call (90s) and
+ * per-tick (180s) budgets so one hung tool fails first. Env override:
+ * `TOOL_CALL_TIMEOUT_MS` (clamped 1s–300s).
+ */
+export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 60_000;
+const MIN_TOOL_CALL_TIMEOUT_MS = 1_000;
+const MAX_TOOL_CALL_TIMEOUT_MS = 300_000;
+
+export const toolCallTimeoutMs = (
+  env: Record<string, string | undefined>,
+): number => {
+  const raw = env["TOOL_CALL_TIMEOUT_MS"];
+  if (raw === undefined) return DEFAULT_TOOL_CALL_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return DEFAULT_TOOL_CALL_TIMEOUT_MS;
+  return Math.max(
+    MIN_TOOL_CALL_TIMEOUT_MS,
+    Math.min(MAX_TOOL_CALL_TIMEOUT_MS, n),
+  );
+};
