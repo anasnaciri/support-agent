@@ -7,6 +7,7 @@ import {
 
 import { AuthedLayout } from "@/components/shell/DashboardShell";
 import { HomePage } from "@/features/home/HomePage";
+import { CasesPage } from "@/features/cases/CasesPage";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
 import { Placeholder } from "@/features/placeholder";
@@ -34,7 +35,7 @@ const authedChild = (
 ) => createRoute({ getParentRoute: () => authedRoute, path, component });
 
 const homeRoute = authedChild("/", HomePage);
-const casesRoute = authedChild("/cases", () => <Placeholder title="Cases" />);
+const casesRoute = authedChild("/cases", CasesPage);
 const approvalsRoute = authedChild("/approvals", () => (
   <Placeholder title="Approvals" />
 ));

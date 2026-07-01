@@ -27,6 +27,10 @@ export interface MultiSelectProps {
   readonly allLabel?: string;
   readonly id?: string;
   readonly disabled?: boolean;
+  /** SPA addition: notified with the new selection on every change, so a
+   *  state-driven page can react without a `<form method="get">` submit. The
+   *  hidden inputs still render, so form usage is unaffected. */
+  readonly onChange?: (values: ReadonlyArray<string>) => void;
 }
 
 export const MultiSelect = ({
@@ -37,6 +41,7 @@ export const MultiSelect = ({
   allLabel,
   id,
   disabled,
+  onChange,
 }: MultiSelectProps) => {
   const [open, setOpen] = React.useState(false);
   const [selected, setSelected] = React.useState<ReadonlyArray<string>>(values);
@@ -101,18 +106,23 @@ export const MultiSelect = ({
     }
   };
 
+  const emit = (next: ReadonlyArray<string>) => {
+    setSelected(next);
+    onChange?.(next);
+  };
+
   const toggle = (value: string) => {
-    setSelected((prev) =>
-      prev.includes(value)
-        ? prev.filter((v) => v !== value)
-        : [...prev, value],
+    emit(
+      selected.includes(value)
+        ? selected.filter((v) => v !== value)
+        : [...selected, value],
     );
   };
 
   const allValues = options.map((o) => o.value);
   const allSelected =
     allValues.length > 0 && allValues.every((v) => selected.includes(v));
-  const toggleAll = () => setSelected(allSelected ? [] : allValues);
+  const toggleAll = () => emit(allSelected ? [] : allValues);
 
   const selectedLabels = options
     .filter((o) => selected.includes(o.value))
