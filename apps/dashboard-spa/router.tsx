@@ -15,6 +15,7 @@ import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
 import { SupplierCasesPage } from "@/features/supplier/SupplierCasesPage";
 import { SupplierCaseDetailPage } from "@/features/supplier/SupplierCaseDetailPage";
+import { SettingsPage } from "@/features/settings/SettingsPage";
 import { Placeholder } from "@/features/placeholder";
 import {
   GoodbyePage,
@@ -45,9 +46,7 @@ const caseDetailRoute = authedChild("/cases/$caseId", CaseDetailPage);
 const approvalsRoute = authedChild("/approvals", ApprovalsPage);
 const approvalDetailRoute = authedChild("/approvals/$approvalId", ApprovalDetailPage);
 const auditRoute = authedChild("/audit", AuditPage);
-const settingsRoute = authedChild("/settings", () => (
-  <Placeholder title="Settings" />
-));
+const settingsRoute = authedChild("/settings", SettingsPage);
 const settingsUsageRoute = authedChild("/settings/usage", UsagePage);
 const supplierCasesRoute = authedChild("/supplier/cases", SupplierCasesPage);
 const supplierCaseDetailRoute = authedChild(

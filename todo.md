@@ -142,10 +142,14 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
   - [x] **3f** — Supplier portal reads (`/supplier/cases` + `/supplier/cases/:id`); the
         "post an update" form is deferred to Phase 4. AppShell already walls `/supplier*` to
         the bare shell; gated on `supplier.cases.view`.
-  - [ ] **3e** — Settings read pages (hub + account/integrations/knowledge/llm/refund-policy/
-        discount-policy/resolution-policy/notifications/permissions/members/agents/suppliers/
-        supplier-escalation/legal). Most are forms whose write path is Phase 4; port the read
-        display + routes. (Usage already done in 3a.)
+  - [~] **3e** — Settings read pages. **Settings hub** (`/settings`) landed (catalog-count
+        tiles). Usage already done in 3a. **DECISION:** the remaining settings pages
+        (account, integrations, knowledge list/detail, llm, refund-policy, discount-policy,
+        resolution-policy, notifications, permissions, members, agents list/detail/new,
+        suppliers, supplier-escalation, legal) are **forms dominated by write UI** — a
+        read-only pass now would be ~90% rewritten in Phase 4, so they are folded into
+        **Phase 4** (read + `useMutation` together, per page). Until then the
+        `/settings/$` splat route renders a Placeholder for them.
 - [ ] **Phase 4 — mutations** (63 server actions → `useMutation`).
 - [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
 - [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
