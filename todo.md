@@ -313,12 +313,38 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
   - [x] **Approval-detail approve/reject** (`bd96d5d`) — `/approvals/:id` decision surface
         (ApprovalDecisionCard: edit-and-approve / reject → api.approveApproval/rejectApproval,
         returns to the list on decision).
-  - [ ] **Remaining Phase 4** (NOT done): the supplier update form (`/supplier/cases/:id`)
-        and the form-heavy **settings** pages (read+mutation together per page — see 3e).
-        Also NOT ported: the Next "edit customer / assign order" pencil (CardEditPopover,
-        committed `d226ee9` on `apps/dashboard`) — a SPA `headerAction` slot on Customer/Order
-        panels + `api.editCaseDetails` would mirror it. **NOT live-verified** (needs api+WorkOS).
-- [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
+  - [x] **Settings pages + supplier form** (`0f06288` settings, `bbe8a17` supplier form) —
+        ported the 14 form-heavy settings areas (account, integrations + `/integrations/:provider`,
+        knowledge + `/knowledge/:id`, llm, refund-policy, discount-policy, resolution-policy,
+        notifications, permissions, members, agents list/detail/new, suppliers, supplier-escalation,
+        legal) + the supplier `/supplier/cases/:id` update form. `useQuery` reads + `useMutation`
+        writes; the PRG `?flag=` + `FeedbackToaster` indirection is dropped for direct `toast.*` in
+        `onSuccess`/`onError` + `invalidateQueries` on each `revalidatePath` target; client
+        pre-validation mirrors each server action. Pure modules copied verbatim WITH their tests
+        (`parse-thresholds`, `parse-discount`, `parse-resolution`, `resolution-action-labels`,
+        `sheet-url`, `connect-error`, `connect-plan`, `integration-providers`, `knowledge-messages`,
+        `agent-switcher-data`). All 18 routes wired in `router.tsx` (static before `$param`). Built
+        by a 15-agent workflow fan-out (one page-group each, no shared-file edits), then a 10-agent
+        adversarial review — only 2 low findings (atomic-render gaps on supplier-escalation +
+        permissions), both fixed. **Build + 356 SPA tests green. NOT live-verified** (needs api+WorkOS).
+  - [ ] **DEFERRED — WorkOS admin-SDK server-side moves** (blocks a few flows from being fully live):
+        `apps/api` has **no WorkOS admin org client** (its `WORKOS_API_KEY` is verified-email lookup
+        only; member/supplier invites are stored locally with a **client-minted** `workosInvitationId`).
+        So under Option B the SPA can't: (a) **send** member/supplier invitations — the ported
+        Members/Suppliers pages record the pending binding but no WorkOS invite email goes out yet;
+        (b) **onboard a brand-new org** (needs `createOrganization` + membership + `switchToOrganization`
+        cookie re-mint — `refreshAccessToken` already accepts `organizationId`, so the re-mint
+        primitive exists). Both need a net-new additive `apps/api` WorkOS-admin surface (TDD). The
+        SPA `OnboardingPage` (`features/auth/pages.tsx`) stays a placeholder until (b) lands.
+  - [ ] **Not ported (optional parity):** the Next "edit customer / assign order" pencil
+        (`CardEditPopover`, `d226ee9`) — needs `editCaseDetails` added to the SPA `api-client` +
+        a `headerAction` slot on the Customer/Order panels. `editCaseDetails` already exists in
+        `apps/api` (`case-handlers.ts`).
+- [x] **Phase 5 — live updates** (`48232c5`) — `CaseLiveBoundary` ported to a TanStack Query
+      `refetchInterval` (2.5s) over `/cases/:id/events?since=`; first poll primes the cursor, then a
+      new event id advances it + invalidates the `["case",w,id]` prefix (detail/thread/shopify/tracking)
+      so idle polling never storms; reuses the tested `lib/live-status.ts`; 401 → existing global
+      sign-in nav; LIVE badge wired into the case header. **NOT live-verified.**
 - [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
 
 ---
