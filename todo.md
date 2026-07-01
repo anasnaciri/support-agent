@@ -14,6 +14,29 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-01 — Order lookup + mismatch by CUSTOMER, not just thread email (commit ecbd3de, on main, DEPLOYED Fly v48; backend-only)
+
+Order lookup + the order/customer-mismatch warning now key on the case's RESOLVED
+customer, not strictly the thread email:
+
+- [x] `enrichCase` resolves the Shopify customer by **email → phone → name**, stamps
+      `shopifyCustomerId` from the first hit (was email-only).
+- [x] `ShopifyService.findOrdersByCustomerId` (Tag+Live+Test); `shopify.find_customer_order`
+      reads the case's resolved customer and lists THAT account's orders (finds orders
+      placed under a different email), falling back to by-email. Quoted order number
+      still takes the direct `get_order` path.
+- [x] `get_order` output exposes `customerId`; `orderCustomerMismatchFlag(orderEmail,
+      orderCustomerId, ctx)` clears on a customer OR email match, flags only when
+      neither holds → no false mismatch when a customer ordered under a second email.
+
+**USER DECISION — "trust any match":** a phone/name-resolved customer ALSO lifts the
+disclosure gate (not just a verified email). Guardrails kept: a strong email match
+overrides a fuzzy name match, and the **refund** scope guard (`refundCustomerMismatchFlag`)
+stays **email-strict** (money). Follow-up if wanted: relax the refund guard to match, or
+add a "verified vs resolved" split so name/phone resolve-for-display but keep the challenge.
+
+---
+
 ### 2026-07-01 — Phone capture + email→phone→name customer resolution (committed + DEPLOYED Fly v47 + CF dcef78d4, on main)
 
 Follow-on to the manual case-details edit. When a case's email matches no Shopify
