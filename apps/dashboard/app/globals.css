@@ -269,6 +269,22 @@
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;
 }
+/* Keep email content inside its chat bubble: break long unbreakable tokens
+   (URLs, IDs), cap any images/media to the bubble width, and wrap <pre> rather
+   than let it force horizontal overflow. Too-wide tables scroll via the
+   bubble's own overflow-x-auto wrapper. */
+.email-html {
+  overflow-wrap: anywhere;
+}
+.email-html img,
+.email-html video {
+  max-width: 100%;
+  height: auto;
+}
+.email-html pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* Thin, tone-matched scrollbars for the case view's scroll panes — the chat
    transcript, the composer overflow, and the details column. Scoped to an
