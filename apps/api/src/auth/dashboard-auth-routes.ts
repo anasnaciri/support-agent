@@ -1,12 +1,17 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { createTenantForOrg } from "@support-agent/db";
+
 import type { RouteContext } from "../platform/context.js";
-import { sendJson } from "../platform/http.js";
+import { parseJsonBody, sendJson } from "../platform/http.js";
 import { dashboardUserDecisionUuid } from "./dashboard-user-id.js";
 import {
   getDashboardSessionCodec,
   getDashboardVerifier,
+  getWorkosOrgAdminDirectory,
+  makeLegalAcceptance,
+  runWithDb,
 } from "./dashboard-context.js";
 import {
   OAUTH_STATE_COOKIE,
@@ -158,26 +163,43 @@ export const registerDashboardAuthRoutes = (
     if (!sealed) return sendJson(res, 401, { error: "unauthenticated" });
 
     let verified = await verifier.verify(sealed.accessToken);
-    if (!verified.ok && verified.reason === "expired" && sealed.refreshToken) {
+    if (!verified.ok && verified.reason === "expired") {
+      // Expired token: try to refresh in place. A dead refresh token (revoked /
+      // expired) means the session is genuinely over → 401 (re-login), NOT
+      // onboarding.
+      if (!sealed.refreshToken) {
+        return sendJson(res, 401, { error: "unauthenticated" });
+      }
       const refreshed = await refreshAccessToken({
         clientId: ready.clientId,
         apiKey: ready.apiKey,
         refreshToken: sealed.refreshToken,
         ...fetchOpt,
       });
-      if (refreshed.ok) {
-        sealed = refreshed.session;
-        res.header(
-          "set-cookie",
-          serializeSessionCookie(await ready.codec.seal(sealed), { secure }),
-        );
-        verified = await verifier.verify(sealed.accessToken);
+      if (!refreshed.ok) {
+        return sendJson(res, 401, { error: "unauthenticated" });
       }
+      sealed = refreshed.session;
+      res.header(
+        "set-cookie",
+        serializeSessionCookie(await ready.codec.seal(sealed), { secure }),
+      );
+      verified = await verifier.verify(sealed.accessToken);
     }
-    if (!verified.ok) return sendJson(res, 401, { error: "unauthenticated" });
+    if (verified.ok) {
+      return sendJson(res, 200, {
+        organizationId: verified.claims.organizationId,
+        userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+        user: sealed.user,
+      });
+    }
+    // The cookie is ours (it unsealed) and its token is fresh (not expired) but
+    // carries no organization — a brand-new self-service user who signed in
+    // before creating/joining an org. Report `needsOnboarding` (authenticated,
+    // no org) so the SPA routes to /onboarding instead of bouncing to sign-in.
     return sendJson(res, 200, {
-      organizationId: verified.claims.organizationId,
-      userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+      needsOnboarding: true,
+      userId: dashboardUserDecisionUuid(sealed.user.id),
       user: sealed.user,
     });
   });
@@ -208,6 +230,102 @@ export const registerDashboardAuthRoutes = (
       }),
     );
     return sendJson(res, 200, { ok: true });
+  });
+
+  // ---- Onboard: provision the org (if new), re-mint the cookie, create the
+  // first tenant. SPA-only (cookie) counterpart of the Next server action.
+  //
+  // A brand-new self-service user has NO WorkOS org, so their token doesn't
+  // verify to one and `/session` reports needsOnboarding. This creates the org
+  // server-side (the browser has no WORKOS_API_KEY), adds the user, re-mints the
+  // cookie so it now carries the org, then creates the tenant. Idempotent: a
+  // user who already has an org (a prior attempt, or an invite) reuses it via
+  // listOrganizationMemberships, and createTenantForOrg returns the existing
+  // tenant on retry. The Next dashboard keeps using POST /dashboard/onboarding
+  // (bearer, org already provisioned in its own server action).
+  app.post("/dashboard/auth/onboard", schema, async (req, res) => {
+    const ready = bffReady(req);
+    if (!ready) return unavailable(res);
+    const verifier = getDashboardVerifier(req);
+    if (!verifier) return unavailable(res);
+
+    const raw = cookie(req, SESSION_COOKIE_NAME);
+    const sealed = raw ? await ready.codec.unseal(raw) : null;
+    // A sealed cookie is the auth proof here: it's a JWE only we can mint (from a
+    // real WorkOS exchange), so `sealed.user.id` is a trusted WorkOS user id.
+    if (!sealed?.user.id) {
+      return sendJson(res, 401, { error: "unauthenticated" });
+    }
+    const workosUserId = sealed.user.id;
+
+    // Validate the onboarding form (mirrors POST /dashboard/onboarding).
+    const body = parseJsonBody(req);
+    const name = typeof body["name"] === "string" ? body["name"].trim() : "";
+    const email =
+      typeof body["notificationEmail"] === "string"
+        ? body["notificationEmail"].trim()
+        : "";
+    const legalAccepted = body["legalAccepted"] === true;
+    if (name.length < 2) return sendJson(res, 400, { error: "bad_name" });
+    if (!email.includes("@")) return sendJson(res, 400, { error: "bad_email" });
+    if (!legalAccepted) {
+      return sendJson(res, 400, { error: "legal_acceptance_required" });
+    }
+
+    // If the token already verifies to an org (a retry after tenant-create
+    // failed, or an org-scoped session), reuse it and skip the re-mint.
+    // Otherwise provision: reuse an existing membership or create a fresh org,
+    // then re-mint the cookie so it carries the resolved org.
+    const verified = await verifier.verify(sealed.accessToken);
+    let organizationId: string;
+    if (verified.ok) {
+      organizationId = verified.claims.organizationId;
+    } else {
+      const admin = getWorkosOrgAdminDirectory(req);
+      if (!admin) {
+        return sendJson(res, 503, { error: "workos_admin_not_configured" });
+      }
+      const existing = (
+        await admin.listOrganizationMemberships(workosUserId)
+      )[0];
+      if (existing) {
+        organizationId = existing;
+      } else {
+        const created = await admin.createOrganization(name);
+        if (!created) return sendJson(res, 502, { error: "org_create_failed" });
+        organizationId = created.id;
+        await admin.addOrganizationMembership(organizationId, workosUserId);
+      }
+      const refreshed = await refreshAccessToken({
+        clientId: ready.clientId,
+        apiKey: ready.apiKey,
+        refreshToken: sealed.refreshToken,
+        organizationId,
+        ...fetchOpt,
+      });
+      // The re-mint MUST land — the SPA's next request has to carry the org. The
+      // org + membership are already created, so a client retry is idempotent.
+      if (!refreshed.ok) {
+        return sendJson(res, 500, { error: "session_remint_failed" });
+      }
+      res.header(
+        "set-cookie",
+        serializeSessionCookie(await ready.codec.seal(refreshed.session), {
+          secure,
+        }),
+      );
+    }
+
+    const userId = dashboardUserDecisionUuid(workosUserId);
+    const result = await runWithDb(ctx.layer, (db) =>
+      createTenantForOrg(db, {
+        organizationId,
+        name: name.slice(0, 120),
+        notificationEmail: email.slice(0, 254),
+        legalAcceptance: makeLegalAcceptance(userId),
+      }),
+    );
+    return sendJson(res, 200, { ...result, organizationId });
   });
 
   // ---- Logout: clear the session cookie (POST-only, mirrors S13) ----
