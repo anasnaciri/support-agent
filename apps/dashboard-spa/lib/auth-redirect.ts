@@ -1,0 +1,65 @@
+// Pure routing decisions for the dashboard auth gate. No server-only imports
+// (no `withAuth`/`redirect`), so this is unit-testable; lib/api-client.ts
+// consumes the constants + resolver. Keeping the policy here means the
+// "logged-out users go to the legal-gated /sign-up, not WorkOS-hosted
+// /sign-in" rule (audit B2 / re-audit #4) has a regression test.
+
+import { sanitizeReturnTo } from "./return-to";
+
+/** The self-hosted, legal-gated sign-up page (the logged-out front door). */
+export const SIGN_UP_PATH = "/sign-up";
+/** The WorkOS-hosted sign-in bounce (returning users — re-auth, not sign-up). */
+export const SIGN_IN_PATH = "/sign-in";
+/** Onboarding provisions the org + tenant for a signed-in user without one. */
+export const ONBOARDING_PATH = "/onboarding";
+
+export interface DashboardAuthState {
+  /** A WorkOS session exists. */
+  readonly hasUser: boolean;
+  /** The session is bound to an organization. */
+  readonly hasOrganization: boolean;
+  /** The organization maps to a provisioned tenant. */
+  readonly hasTenant: boolean;
+}
+
+/**
+ * Where a request to a tenant-scoped page should be redirected, or `null` to
+ * proceed. A logged-out request goes to {@link SIGN_UP_PATH} — never to the
+ * WorkOS-hosted sign-in — so the data-processing checkbox can't be skipped.
+ * A signed-in user without an org/tenant goes to onboarding.
+ */
+export const resolveDashboardRedirect = (
+  state: DashboardAuthState,
+): string | null => {
+  if (!state.hasUser) return SIGN_UP_PATH;
+  if (!state.hasOrganization) return ONBOARDING_PATH;
+  if (!state.hasTenant) return ONBOARDING_PATH;
+  return null;
+};
+
+/**
+ * The logged-out redirect target, carrying the page the user was on as a
+ * sanitised `returnTo` query param so re-auth lands them back there. The
+ * destination is always {@link SIGN_UP_PATH}; the home page and any unsafe
+ * value yield the bare path (nothing worth preserving / open-redirect guard).
+ */
+export const buildSignUpRedirect = (
+  returnTo: string | null | undefined,
+): string => {
+  const safe = sanitizeReturnTo(returnTo, "/");
+  if (safe === "/") return SIGN_UP_PATH;
+  return `${SIGN_UP_PATH}?returnTo=${encodeURIComponent(safe)}`;
+};
+
+/**
+ * Same shape as {@link buildSignUpRedirect} but targeting the hosted sign-in
+ * bounce — used by client pollers whose fetch came back 401 (U1): the user
+ * already has an account, they just need to re-authenticate.
+ */
+export const buildSignInRedirect = (
+  returnTo: string | null | undefined,
+): string => {
+  const safe = sanitizeReturnTo(returnTo, "/");
+  if (safe === "/") return SIGN_IN_PATH;
+  return `${SIGN_IN_PATH}?returnTo=${encodeURIComponent(safe)}`;
+};
