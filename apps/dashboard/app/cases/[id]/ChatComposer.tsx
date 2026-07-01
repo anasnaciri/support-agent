@@ -16,25 +16,13 @@ import {
   sendReplyAction,
   setRephraseModelAction,
 } from "./actions";
+import {
+  activeApprovalId,
+  resyncDraft,
+  type ComposerMode,
+} from "./composer-draft-sync";
 
-/**
- * What the composer is for, decided by the case's state on the server:
- *  - `approval`: a drafted agent reply is awaiting the manager's call. The draft
- *    fills the input; the controls become a subtle gray Reject (✗) circle and
- *    the regular blue Send button, which approves and sends the draft.
- *  - `reply`: the manager has taken the case over and writes the reply by hand.
- *  - `locked`: the agent owns the conversation — the input is read-only with a
- *    hint to take over.
- */
-export type ComposerMode =
-  | {
-      readonly kind: "approval";
-      readonly approvalId: string;
-      readonly draftBody: string;
-      readonly returnTo: string;
-    }
-  | { readonly kind: "reply" }
-  | { readonly kind: "locked"; readonly message: string };
+export type { ComposerMode };
 
 interface ChatComposerProps {
   readonly caseId: string;
@@ -132,6 +120,20 @@ export function ChatComposer({
   const [text, setText] = useState(
     mode.kind === "approval" ? mode.draftBody : "",
   );
+  // Which approval draft the editor currently holds. The composer stays mounted
+  // across live refreshes (CaseLiveBoundary's router.refresh), so `useState`
+  // won't re-init when a draft arrives — we reload it here instead, keyed on
+  // the approval id so a NEW draft repopulates the box but edits to the one
+  // under review are never clobbered. Adjusting state during render (rather than
+  // in an effect) avoids a flash of the empty/stale text.
+  const [loadedApprovalId, setLoadedApprovalId] = useState<string | null>(
+    activeApprovalId(mode),
+  );
+  const resync = resyncDraft(mode, loadedApprovalId);
+  if (resync) {
+    setText(resync.text);
+    setLoadedApprovalId(resync.loadedApprovalId);
+  }
   const [error, setError] = useState<string | null>(null);
   const [rephrasing, startRephrase] = useTransition();
   const [, startSaveModel] = useTransition();
