@@ -13,6 +13,8 @@ import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
 import { ApprovalDetailPage } from "@/features/approvals/ApprovalDetailPage";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
+import { SupplierCasesPage } from "@/features/supplier/SupplierCasesPage";
+import { SupplierCaseDetailPage } from "@/features/supplier/SupplierCaseDetailPage";
 import { Placeholder } from "@/features/placeholder";
 import {
   GoodbyePage,
@@ -47,6 +49,11 @@ const settingsRoute = authedChild("/settings", () => (
   <Placeholder title="Settings" />
 ));
 const settingsUsageRoute = authedChild("/settings/usage", UsagePage);
+const supplierCasesRoute = authedChild("/supplier/cases", SupplierCasesPage);
+const supplierCaseDetailRoute = authedChild(
+  "/supplier/cases/$escalationId",
+  SupplierCaseDetailPage,
+);
 // Catch every settings subpage (agents, refund-policy, …) until they're ported.
 const settingsSplatRoute = authedChild("/settings/$", () => (
   <Placeholder title="Settings" />
@@ -70,6 +77,8 @@ const routeTree = rootRoute.addChildren([
     auditRoute,
     settingsRoute,
     settingsUsageRoute,
+    supplierCasesRoute,
+    supplierCaseDetailRoute,
     settingsSplatRoute,
   ]),
   signInRoute,

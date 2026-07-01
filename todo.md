@@ -120,7 +120,32 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
       = RouterProvider + QueryClientProvider + Toaster. **REMAINING in Phase 2/3:** full `CasesSidebar`
       (stubbed) + real onboarding form + `beforeLoad` route guards (currently gated inside SessionProvider,
       not per-route) — fold into Phase 3. NOT live-verified (needs a running api with WorkOS).
-- [ ] **Phase 3 — read pages via `useQuery`** (Cases, Approvals, Audit, Usage, all Settings, supplier).
+- [~] **Phase 3 — read pages via `useQuery`** — IN PROGRESS. Shared read-page infra +
+      6 of 7 read areas landed; only Settings read pages (3e) remain. Commits:
+  - [x] **3a** (`5b07332`) — Audit + Usage pages + shared infra: SPA callback-driven
+        `TablePagination` + `useTableState` (page/pageSize in state; rows pref in localStorage,
+        NOT the URL — a parity gap vs the Next shareable filter URLs, revisit if needed);
+        client `RequirePermission` gate; `page-breadcrumb`/`settings-breadcrumb`; tested
+        `pageOptionsFor`; `qk` gained `limit` on the paginated keys + `openRouterPricing`.
+  - [x] **3b** (`57c92c9`) — Cases list + the full virtualized `CasesSidebar` (the `/api/cases`
+        proxy → direct `api.cases` cookie call; 401 → `login()`; workspace-switch resets page 1);
+        `MultiSelect` gained an additive `onChange` for state-driven filtering.
+  - [x] **3c** (`167aae3` data modules + tests; `cbbd553` page) — read-only `/cases/:id`: copied
+        the 12 pure case-detail view-builders into the SPA lib, ported the 6 read-only panels
+        (ChatThread/ChatScrollArea/CaseDetailsPanel/Customer/Order/TrackingPanel), and assembled
+        `CaseDetailPage` (4 useQueries; timeline assembly mirrors the Next page; Activity/Audit
+        toggle is local state). **DEFERRED to Phase 4/5:** composer, approve/reject, take-over/
+        resume/resolve, refund dialog, ⋮ actions menu, live-refresh boundary — the composer band
+        shows a read-only status line for now.
+  - [x] **3d** (`0b3fbf2`) — Approvals list (4 facet filters, count chips) + read-only
+        `/approvals/:id` detail (approve/reject deferred to Phase 4).
+  - [x] **3f** — Supplier portal reads (`/supplier/cases` + `/supplier/cases/:id`); the
+        "post an update" form is deferred to Phase 4. AppShell already walls `/supplier*` to
+        the bare shell; gated on `supplier.cases.view`.
+  - [ ] **3e** — Settings read pages (hub + account/integrations/knowledge/llm/refund-policy/
+        discount-policy/resolution-policy/notifications/permissions/members/agents/suppliers/
+        supplier-escalation/legal). Most are forms whose write path is Phase 4; port the read
+        display + routes. (Usage already done in 3a.)
 - [ ] **Phase 4 — mutations** (63 server actions → `useMutation`).
 - [ ] **Phase 5 — live updates** (`CaseLiveBoundary` → `refetchInterval` events query).
 - [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
