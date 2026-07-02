@@ -6,6 +6,18 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — Dashboard refund always failed with 502 `refund_failed`/`NetworkError` — root cause: invalid `code` field on `refundCreate.userErrors` (packages/providers, NOT committed → commit next)
+
+**Symptom:** clicking "Issue refund" (agent-recommended or line-item modal) on any case in prod returned HTTP 502 with body `{ kind: "refund_failed", error: "NetworkError" }`. Modal opened fine; scopes (`write_orders`) present; order refundable.
+
+**Root cause:** `REFUND_CREATE_MUTATION` selected `userErrors { field message code }`, but Shopify's `refundCreate.userErrors` is the **base `UserError` type — no `code` field** (unlike `discountCodeBasicCreate`/`orderCancel`, whose richer error types DO carry `code`). Shopify rejects the whole mutation with a **top-level GraphQL error** (`Cannot query field "code" on type "UserError"`); `runQuery` maps any GraphQL `errors[]` (`ShopifyResponseInvalid`) → generic `NetworkError`; the dashboard handler throws only `result.left._tag` (discarding the real message) and maps `refund_failed` → 502. So it was 100% deterministic and undiagnosable from logs. Verified against the live 2026-04 schema with the Shopify MCP `validate_graphql_codeblocks`. (The `@idempotent` theory was **refuted** — validation flagged only the `code` field.)
+
+- [x] Fix: `userErrors { field message }` + drop `code` from `RefundCreatePayload` type + map `code: null`. TDD regression test asserts the mutation never selects `code` on userErrors. Provider suite (58) + dashboard refund tests green; `pnpm build` green; `dist` verified.
+- [ ] **Deploy** the backend to Fly (fix lives in `packages/providers`; prod runs `dist`) then retry #1002 to confirm.
+- [ ] **Follow-up (diagnosability, separate commit):** stop collapsing Shopify errors to `_tag` at `case-handlers.ts:1546` — log/propagate the real `NetworkError.cause`; and split `ShopifyResponseInvalid` out of the `NetworkError` bucket in `runQuery` so GraphQL-level errors aren't mislabeled.
+- [ ] **Follow-up:** `ShopifyHttpLive` is the only outbound client with **no timeout** — add `AbortSignal.timeout(...)` so a hung Shopify call can't pin a request into a gateway 502.
+- [ ] **Follow-up:** `orderCancel`'s `refund` argument is deprecated in 2026-04 (`Use refundMethod instead`) — still valid, but schedule a migration.
+
 ### 2026-07-02 — Suppliers bound to MANY merchants + unified workspace switcher (committed `ce75c9e` on main; DEPLOYED)
 
 Supersedes the "one supplier ↔ one workspace" decision. A supplier is now an

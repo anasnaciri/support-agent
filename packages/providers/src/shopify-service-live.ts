@@ -803,6 +803,12 @@ const GET_ORDER_TRANSACTIONS_QUERY = `
   }
 `;
 
+// NOTE: `refundCreate.userErrors` is Shopify's base `UserError` type, which
+// exposes only `field` and `message` — it has NO `code` field (unlike
+// `discountCodeBasicCreate` / `orderCancel`, whose richer error types do).
+// Selecting `code` here makes Shopify reject the whole mutation with a
+// top-level GraphQL error, which `runQuery` surfaces as a generic
+// `NetworkError` → the dashboard's "refund_failed" / HTTP 502.
 const REFUND_CREATE_MUTATION = `
   mutation RefundCreate($input: RefundInput!) {
     refundCreate(input: $input) {
@@ -812,7 +818,7 @@ const REFUND_CREATE_MUTATION = `
         note
         totalRefundedSet { shopMoney { amount currencyCode } }
       }
-      userErrors { field message code }
+      userErrors { field message }
     }
   }
 `;
@@ -874,10 +880,11 @@ type RefundCreatePayload = {
       readonly note: string | null;
       readonly totalRefundedSet: { readonly shopMoney: GqlMoney };
     } | null;
+    // Base `UserError` — `field` + `message` only (no `code`); see the note
+    // on REFUND_CREATE_MUTATION.
     readonly userErrors: ReadonlyArray<{
       readonly field: ReadonlyArray<string> | null;
       readonly message: string;
-      readonly code: string | null;
     }>;
   };
 };
@@ -1649,7 +1656,9 @@ export const ShopifyServiceLive = Layer.effect(
               return yield* Effect.fail(
                 new RefundFailed({
                   orderId: input.orderId,
-                  code: firstError.code ?? null,
+                  // `refundCreate.userErrors` (base UserError) carries no
+                  // machine-readable code — only field + message.
+                  code: null,
                   message: firstError.message,
                 }),
               );

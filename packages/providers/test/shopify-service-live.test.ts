@@ -1533,6 +1533,26 @@ describe("ShopifyServiceLive — refundOrder", () => {
     }
   });
 
+  it("refundCreate mutation must not select `code` on userErrors (base UserError has none)", async () => {
+    reset();
+    const layer = buildLayer(
+      httpFromSequence([
+        () => respond(200, txPayload()),
+        () => respond(200, refundOkPayload),
+      ]),
+    );
+    await callRefund(layer);
+    // Shopify's `refundCreate.userErrors` is the base `UserError` type,
+    // which exposes only `field` and `message`. Selecting `code` makes
+    // Shopify reject the WHOLE mutation with a top-level GraphQL error,
+    // which `runQuery` surfaces as a generic NetworkError → HTTP 502.
+    // (Unlike discountCodeBasicCreate / orderCancel, whose richer error
+    // types DO carry `code`.)
+    const mutation = (JSON.parse(captures[1]!.body) as { query: string }).query;
+    expect(mutation).toContain("userErrors");
+    expect(mutation).not.toMatch(/userErrors\s*{[^}]*\bcode\b/);
+  });
+
   it("currency mismatch → RefundFailed (no mutation called)", async () => {
     reset();
     const layer = buildLayer(
@@ -1588,7 +1608,7 @@ describe("ShopifyServiceLive — refundOrder", () => {
     }
   });
 
-  it("userErrors in refundCreate → RefundFailed with code + message", async () => {
+  it("userErrors in refundCreate → RefundFailed with message (base UserError has no code)", async () => {
     reset();
     const layer = buildLayer(
       httpFromSequence([
@@ -1598,11 +1618,11 @@ describe("ShopifyServiceLive — refundOrder", () => {
             data: {
               refundCreate: {
                 refund: null,
+                // Base `UserError`: field + message only, no `code`.
                 userErrors: [
                   {
                     field: ["transactions"],
                     message: "Refund amount exceeds remaining refundable amount",
-                    code: "TRANSACTION_AMOUNT_EXCEEDED",
                   },
                 ],
               },
@@ -1616,7 +1636,7 @@ describe("ShopifyServiceLive — refundOrder", () => {
       const err = (exit.cause as { error: unknown }).error;
       expect(err).toBeInstanceOf(RefundFailed);
       if (err instanceof RefundFailed) {
-        expect(err.code).toBe("TRANSACTION_AMOUNT_EXCEEDED");
+        expect(err.code).toBeNull();
         expect(err.message).toContain("exceeds");
       }
     }
