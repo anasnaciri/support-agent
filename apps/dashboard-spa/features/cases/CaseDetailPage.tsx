@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 
@@ -54,6 +59,7 @@ import { RefundDialog } from "./RefundDialog";
 import { RetrySendButton } from "./RetrySendButton";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
+import { CardEditPopover } from "./CardEditPopover";
 import { TrackingPanel } from "./TrackingPanel";
 import { CaseDetailLoading } from "./CaseDetailLoading";
 
@@ -266,6 +272,45 @@ export function CaseDetailPage() {
     enabled: id.length > 0,
   });
 
+  // Hand-correct the customer / order the agent couldn't identify (the pencils on
+  // the Customer / Order panels). Toasts the outcome + invalidates the case so
+  // the panels + timeline refresh. Mirrors the Next `editCaseDetailsAction`.
+  const qc = useQueryClient();
+  const editDetails = useMutation({
+    mutationFn: (fields: {
+      readonly customerEmail?: string;
+      readonly customerName?: string;
+      readonly customerPhone?: string;
+      readonly orderRef?: string;
+    }) => api.editCaseDetails(ctx, id, fields),
+    onSuccess: (result) => {
+      if (result.kind === "saved") {
+        if (result.orderResolved === true) {
+          toast.success("Order linked and case details updated.");
+        } else if (result.orderResolved === false) {
+          toast.warning(
+            "Saved — but we couldn't find that order in your store. It's recorded on the case as a reference.",
+          );
+        } else {
+          toast.success("Case details updated.");
+        }
+      } else if (result.kind === "invalid_email") {
+        toast.warning("That doesn't look like a valid email address.");
+      } else if (result.kind === "nothing_to_update") {
+        toast.info("Nothing to update.");
+      } else if (result.kind === "case_not_found") {
+        toast.warning("Couldn't find that case.");
+      } else {
+        toast.warning("Something went wrong. Please try again.");
+      }
+      void qc.invalidateQueries({ queryKey: qk.case(ctx.workspaceId, id) });
+      void qc.invalidateQueries({ queryKey: ["cases", ctx.workspaceId] });
+    },
+    onError: () => toast.warning("Something went wrong. Please try again."),
+  });
+  const submitCaseEdit = (values: Record<string, string>): Promise<void> =>
+    editDetails.mutateAsync(values).then(() => undefined);
+
   if (detailQuery.isLoading) return <CaseDetailLoading />;
 
   const detail = detailQuery.data;
@@ -360,6 +405,26 @@ export function CaseDetailPage() {
   })();
   const customerName =
     customerFullName ?? threadInboundName ?? customerEmail ?? "Customer";
+
+  // Defaults for the edit-customer / assign-order pencils (context override →
+  // Shopify record → thread), mirroring the Next page.
+  const contextCustomerName =
+    typeof context["customerName"] === "string"
+      ? (context["customerName"] as string)
+      : null;
+  const contextCustomerPhone =
+    typeof context["customerPhone"] === "string"
+      ? (context["customerPhone"] as string)
+      : null;
+  const contextQuotedOrderRef =
+    typeof context["quotedOrderRef"] === "string"
+      ? (context["quotedOrderRef"] as string)
+      : "";
+  const editCustomerNameDefault =
+    contextCustomerName ?? customerFullName ?? threadInboundName ?? "";
+  const editCustomerEmailDefault = customerEmail ?? customer?.email ?? "";
+  const editCustomerPhoneDefault = contextCustomerPhone ?? customer?.phone ?? "";
+  const editOrderRefDefault = order?.name ?? contextQuotedOrderRef;
 
   const pendingApprovals = allApprovals
     .filter((a) => a.status === "pending")
@@ -577,8 +642,60 @@ export function CaseDetailPage() {
             customer={customer}
             customerEmail={customerEmail}
             verifiedOrderEmail={verifiedOrderEmail}
+            headerAction={
+              <CardEditPopover
+                caseId={id}
+                onSubmit={submitCaseEdit}
+                label="Edit customer"
+                title="Edit customer"
+                description="Set the customer the agent couldn't identify. We look them up by email, then phone, then name."
+                fields={[
+                  {
+                    name: "customerName",
+                    label: "Name",
+                    placeholder: "Jane Shopper",
+                    defaultValue: editCustomerNameDefault,
+                  },
+                  {
+                    name: "customerEmail",
+                    label: "Email",
+                    type: "email",
+                    placeholder: "jane@example.com",
+                    defaultValue: editCustomerEmailDefault,
+                  },
+                  {
+                    name: "customerPhone",
+                    label: "Phone",
+                    type: "tel",
+                    placeholder: "+1 555 123 4567",
+                    defaultValue: editCustomerPhoneDefault,
+                  },
+                ]}
+              />
+            }
           />
-          <OrderPanel order={order} orderHint={orderHint} shopDomain={shopDomain} />
+          <OrderPanel
+            order={order}
+            orderHint={orderHint}
+            shopDomain={shopDomain}
+            headerAction={
+              <CardEditPopover
+                caseId={id}
+                onSubmit={submitCaseEdit}
+                label="Assign order"
+                title="Assign order"
+                description="Enter the order number or confirmation code to link it to this case."
+                fields={[
+                  {
+                    name: "orderRef",
+                    label: "Order number",
+                    placeholder: "#1001",
+                    defaultValue: editOrderRefDefault,
+                  },
+                ]}
+              />
+            }
+          />
           {tracking ? (
             <TrackingPanel
               tracking={tracking}

@@ -245,6 +245,14 @@ export interface IssueRefundOutcomeView {
   readonly requestedCurrency?: string;
   readonly error?: string;
 }
+export interface EditCaseDetailsOutcomeView {
+  // saved | invalid_email | nothing_to_update | case_not_found | error
+  readonly kind: string;
+  /** When an order ref was submitted: whether it resolved to a real order. */
+  readonly orderResolved?: boolean;
+  /** The resolved order's display name (e.g. "#1001"), when it resolved. */
+  readonly orderName?: string;
+}
 
 // One restock/refund line the dashboard refund modal sends to the issue-refund
 // endpoint. Mirrors the api's `RefundLineItemInput` (resolved client-side:
@@ -1026,6 +1034,27 @@ export const api = {
       ctx,
     });
     return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Hand-correct the customer / order the agent couldn't identify (the pencil on
+  // the Customer / Order panels). Only non-empty fields are sent; an order ref is
+  // resolved server-side to a real Shopify order when possible.
+  editCaseDetails: async (
+    ctx: CallCtx,
+    caseId: string,
+    fields: {
+      readonly customerEmail?: string;
+      readonly customerName?: string;
+      readonly customerPhone?: string;
+      readonly orderRef?: string;
+    },
+  ): Promise<EditCaseDetailsOutcomeView> => {
+    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/details`, {
+      method: "POST",
+      body: fields,
+      ctx,
+    });
+    return (body as EditCaseDetailsOutcomeView | null) ?? { kind: "error" };
   },
 
   // Refundable line items + pricing for the case's order, powering the

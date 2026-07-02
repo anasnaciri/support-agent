@@ -17,6 +17,8 @@ interface Props {
    * connection — the panel still renders, just without the deep link.
    */
   readonly shopDomain: string | null;
+  /** Rendered in the panel header (the assign-order pencil). */
+  readonly headerAction?: React.ReactNode;
 }
 
 /**
@@ -90,15 +92,21 @@ const financialBadgeVariant = (
   }
 };
 
-export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
+export const OrderPanel = ({
+  order,
+  orderHint,
+  shopDomain,
+  headerAction,
+}: Props) => {
   if (!order && !orderHint) {
     return (
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
             Order
           </CardTitle>
+          {headerAction}
         </CardHeader>
         <CardContent className="pt-0">
           <p className="text-sm italic text-muted-foreground">
@@ -112,11 +120,12 @@ export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
   if (!order) {
     return (
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
             Order
           </CardTitle>
+          {headerAction}
         </CardHeader>
         <CardContent className="pt-0">
           <p className="text-sm italic text-muted-foreground">
@@ -138,7 +147,7 @@ export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
@@ -169,6 +178,7 @@ export const OrderPanel = ({ order, orderHint, shopDomain }: Props) => {
             </Badge>
           ) : null}
         </div>
+        {headerAction}
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
