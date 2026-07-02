@@ -514,6 +514,14 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         supplier branch now gives the detail route a full-height `overflow-hidden` main + `h-screen`
         outer (list keeps the centered document layout); predicate + bubble derivation are pure in
         `lib/supplier-case-chat.ts` (TDD, 7 tests). **NOT live-verified** (needs a supplier login).
+  - [x] **Case-detail context → floating card** (`4a3ddaa`, 2026-07-02) — the intended target of the
+        supplier redesign above (user meant `/cases/:id`; the supplier version stays, revert `18cb2bd`
+        if unwanted): the Context section moved out of the right `CaseDetailsPanel` into a card pinned
+        top-right of the chat that slides right-to-left from behind the details column (chat stage
+        `overflow-hidden` clips the parked card) while an invisible `md:w-80` spacer column pushes
+        the bubbles left; PanelRight toggle at the header's right end (default open, local state,
+        not persisted). `CaseContext` slimmed to a bare divided row list (the card owns the
+        border/bg chrome). UI-only — no new pure logic. **NOT live-verified.**
 - [x] **Phase 5 — live updates** (`48232c5`) — `CaseLiveBoundary` ported to a TanStack Query
       `refetchInterval` (2.5s) over `/cases/:id/events?since=`; first poll primes the cursor, then a
       new event id advances it + invalidates the `["case",w,id]` prefix (detail/thread/shopify/tracking)
