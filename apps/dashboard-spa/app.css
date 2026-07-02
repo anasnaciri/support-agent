@@ -127,55 +127,70 @@
   --ring: rgb(0 87 255 / 0.45);
 }
 
+/* Dark = "graphite": the neutral twin of the light theme, same 60/30/10
+   logic inverted. The rail stays the darkest zone (#0a0a0a) so the
+   three-zone hierarchy survives — deep rail / dark field / lifted cards.
+   Every value below was contrast-checked (WCAG AA, 4.5:1) in the exact
+   pairings the components use: token as text on card, badge text on its
+   own /20–/25 tint over card, and *-foreground on its solid fill.
+   Two consequences worth knowing before "fixing" anything here:
+   - No blue passes BOTH as link text on #1e1e1e AND under white button
+     text (the constraints exclude each other), so --primary is a bright
+     blue with near-black ink for --primary-foreground.
+   - Badge text sits on a tint of itself, which forces the status colors
+     lighter than their light-mode cousins. Darkening them re-fails the
+     badge pairings. */
 .dark {
-  --background: #191919;
-  --foreground: #f2f2f2;
+  --background: #141414;
+  --foreground: #ededed;
 
-  --sidebar: #0f0f0f;
+  --sidebar: #0a0a0a;
   --sidebar-foreground: #ededed;
-  --sidebar-primary: #5b8cff;
+  --sidebar-primary: #6d9aff;
   --sidebar-accent: #ffffff14;
   --sidebar-border: #ffffff1f;
 
-  --card: #1f1f1f;
-  --card-foreground: #f2f2f2;
+  --card: #1e1e1e;
+  --card-foreground: #ededed;
 
-  --popover: #1f1f1f;
-  --popover-foreground: #f2f2f2;
+  /* Popovers float above cards, so they take one more tonal step */
+  --popover: #232323;
+  --popover-foreground: #ededed;
 
-  /* Brand blue brightened so it carries the same weight on near-black */
-  --primary: #3d7bff;
-  --primary-foreground: #ffffff;
+  /* Bright brand blue; ink text (white tops out at 2.7:1 on this blue) */
+  --primary: #6d9aff;
+  --primary-foreground: #10131a;
 
   --secondary: #2a2a2a;
-  --secondary-foreground: #f2f2f2;
+  --secondary-foreground: #ededed;
 
-  --muted: #242424;
-  --muted-foreground: #a1a1a1;
+  --muted: #232323;
+  --muted-foreground: #a6a6a6;
 
-  --accent: #2a2a2a;
-  --accent-foreground: #f2f2f2;
+  --accent: #2b2b2b;
+  --accent-foreground: #ededed;
 
-  --destructive: #e5484d;
-  --destructive-foreground: #ffffff;
+  --destructive: #ff8a8d;
+  --destructive-foreground: #200a0a;
 
-  --success: #30a46c;
-  --success-foreground: #ffffff;
+  --success: #3ecf8e;
+  --success-foreground: #06251a;
 
-  --warning: #e0991a;
-  --warning-foreground: #191919;
+  --warning: #f0a422;
+  --warning-foreground: #241503;
+  --warning-surface: #3a2c12;
 
-  --info: #3d7bff;
-  --info-foreground: #ffffff;
+  --info: #85adff;
+  --info-foreground: #0a1226;
 
-  /* Vivid ramp brightened for near-black surfaces */
-  --success-vivid: #43c47e;
-  --warning-vivid: #facc15;
-  --destructive-vivid: #ff5b5f;
+  /* Vivid ramp: still the brighter cousins, re-tuned for dark tints */
+  --success-vivid: #4ade80;
+  --warning-vivid: #fbbf24;
+  --destructive-vivid: #ff9592;
 
-  --border: #2c2c2c;
-  --input: #2c2c2c;
-  --ring: rgb(61 123 255 / 0.5);
+  --border: #303030;
+  --input: #3a3a3a;
+  --ring: rgb(109 154 255 / 0.5);
 }
 
 @layer base {

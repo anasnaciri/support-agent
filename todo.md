@@ -107,6 +107,28 @@ staged on the same branch. Remaining: H8 for other connectors, H6 extension.
 
 ---
 
+### 2026-07-02 — Dark-mode palette designed for the SPA (apps/dashboard-spa, `app.css` only)
+
+- [x] Replaced the placeholder `.dark` block with a designed "graphite" palette —
+      the neutral twin of the light theme with the 60/30/10 hierarchy inverted
+      (rail `#0a0a0a` stays the darkest zone / field `#141414` / cards `#1e1e1e`).
+      Every pairing the components actually render was WCAG-AA (4.5:1) verified
+      with a contrast script: token-as-text on card, badge text on its own
+      /20–/25 tint over card (badge.tsx dark: variants), `*-foreground` on its
+      solid fill. Two deliberate consequences documented in the CSS comment:
+      `--primary` is bright `#6d9aff` with near-black ink `--primary-foreground`
+      (no blue passes both as link text on dark cards and under white button
+      text), and status colors are lighter than their light-mode cousins
+      (badge-on-self-tint forces it). Added the previously missing
+      `--warning-surface` dark override.
+- [x] Verification: contrast script (all pairings PASS) + `pnpm --filter dashboard-spa build` green.
+- [ ] Nothing toggles `.dark` yet — needs a theme switch (persisted preference +
+      `document.documentElement.classList`), and the always-dark rail's scoped
+      tokens should be re-checked visually once a toggle exists.
+- [ ] The old placeholder values in the Next `apps/dashboard` globals (if any)
+      were NOT touched — mirror the graphite palette there only if dark mode
+      ships before the SPA replaces it.
+
 ### 2026-07-01 — Dashboard tracking checkpoint rail (apps/dashboard + apps/dashboard-spa, commits 3dd4682 + ea53348, DEPLOYED Cloudflare)
 
 - [x] Tracking card checkpoints in both the Next dashboard and SPA now render
