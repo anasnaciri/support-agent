@@ -497,6 +497,17 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         redirect, workspace-lifecycle FeedbackToaster (onboarded now lands `/?onboarded=1`). Shell
         polish: FeedbackToaster action → SPA nav (not full reload); account-deletion → `/goodbye?deleted=1`
         with deletion-specific copy. Audit/usage "Apply button" gaps left as-is (deliberate live-filter choice).
+  - [x] **Supplier case detail → chat layout** (2026-07-02) — `/supplier/cases/:id` redesigned as a
+        chat mirroring the merchant case view: the escalation problem is an inbound "Support team"
+        bubble, the posted update the outbound reply (with a "Suggested resolution" footer inside the
+        bubble), and the update form the pinned bottom composer. The Order/Tracking/Ship-to context
+        moved to a card pinned top-right of the chat that slides in right-to-left from behind the
+        stage's clipped right edge; an invisible spacer column (`md:w-80`, width-animated like the
+        AppShell secondary sidebar) pushes the bubbles left instead of letting the card cover them
+        (below `md` the card floats over the chat). Header gains a PanelRight toggle. AppShell's
+        supplier branch now gives the detail route a full-height `overflow-hidden` main + `h-screen`
+        outer (list keeps the centered document layout); predicate + bubble derivation are pure in
+        `lib/supplier-case-chat.ts` (TDD, 7 tests). **NOT live-verified** (needs a supplier login).
 - [x] **Phase 5 — live updates** (`48232c5`) — `CaseLiveBoundary` ported to a TanStack Query
       `refetchInterval` (2.5s) over `/cases/:id/events?since=`; first poll primes the cursor, then a
       new event id advances it + invalidates the `["case",w,id]` prefix (detail/thread/shopify/tracking)

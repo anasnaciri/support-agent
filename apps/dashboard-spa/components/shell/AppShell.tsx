@@ -25,6 +25,7 @@ import { IconRail } from "./IconRail";
 import { SettingsNav } from "./settings-nav";
 import { CasesSidebar } from "./CasesSidebar";
 import { caseIdFromPathname } from "@/lib/cases-sidebar-data";
+import { supplierEscalationIdFromPathname } from "@/lib/supplier-case-chat";
 import { logout } from "@/lib/auth/session-api";
 
 const SIDEBAR_KEY = "sidebar:state";
@@ -157,7 +158,16 @@ export function AppShell({
   // Placed after all hooks above so the rules-of-hooks order is unconditional.
   if (pathname.startsWith("/supplier")) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
+      <div
+        className={cn(
+          "flex flex-col bg-background",
+          // The escalation-detail chat needs a definite height to fill (its
+          // bubbles scroll, its composer pins); document routes keep growing.
+          supplierEscalationIdFromPathname(pathname)
+            ? "h-screen"
+            : "min-h-screen",
+        )}
+      >
         <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
           <span className="text-sm font-semibold tracking-tight">
             Supplier portal
@@ -175,9 +185,17 @@ export function AppShell({
             </button>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-          <div className="mx-auto w-full max-w-3xl">{children}</div>
-        </main>
+        {supplierEscalationIdFromPathname(pathname) ? (
+          // The escalation detail is a full-height chat (its own scroll +
+          // pinned composer), so it runs edge-to-edge like the merchant
+          // case view; every other supplier route keeps the centered,
+          // scrollable document layout.
+          <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+        ) : (
+          <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+            <div className="mx-auto w-full max-w-3xl">{children}</div>
+          </main>
+        )}
       </div>
     );
   }
