@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
@@ -179,6 +180,8 @@ const RefundRecommendationBlock = ({
   </div>
 );
 
+// Rendered inside the floating context card, which owns the border/background
+// chrome — this is just the divided row list (or its empty state).
 function CaseContext({
   context,
 }: {
@@ -187,15 +190,13 @@ function CaseContext({
   const rows = buildContextRows(context);
   if (rows.length === 0) {
     return (
-      <p className="rounded-md border bg-card p-4 text-sm text-muted-foreground">
-        Nothing recorded yet.
-      </p>
+      <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
     );
   }
   return (
-    <dl className="divide-y divide-border overflow-hidden rounded-md border bg-card">
+    <dl className="divide-y divide-border">
       {rows.map((row) => (
-        <div key={row.key} className="px-3 py-2.5">
+        <div key={row.key} className="py-2.5 first:pt-0 last:pb-0">
           <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {row.label}
           </dt>
@@ -245,6 +246,7 @@ export function CaseDetailPage() {
   const pathname = usePathname() ?? "";
   const id = caseIdFromPathname(pathname) ?? "";
   const [showFullAudit, setShowFullAudit] = useState(false);
+  const [contextOpen, setContextOpen] = useState(true);
 
   const detailQuery = useQuery({
     queryKey: qk.case(ctx.workspaceId, id),
@@ -578,23 +580,70 @@ export function CaseDetailPage() {
               ) : null
             }
           />
+
+          <button
+            type="button"
+            onClick={() => setContextOpen((v) => !v)}
+            aria-expanded={contextOpen}
+            aria-label={contextOpen ? "Hide context" : "Show context"}
+            title={contextOpen ? "Hide context" : "Show context"}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {contextOpen ? (
+              <PanelRightClose className="size-4" aria-hidden />
+            ) : (
+              <PanelRightOpen className="size-4" aria-hidden />
+            )}
+          </button>
         </header>
 
-        <ChatScrollArea
-          bottomKey={threadKey}
-          className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6"
-        >
-          <div className="mx-auto w-full max-w-3xl">
-            <ChatThread
-              result={
-                conversationThread ?? {
-                  status: "unavailable",
-                  reason: "no_thread",
+        {/* The chat stage — overflow-hidden parks the context card just past
+            the right edge, so opening it reads as sliding out from behind the
+            details column. */}
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          <ChatScrollArea
+            bottomKey={threadKey}
+            className="thin-scrollbar min-w-0 flex-1 overflow-y-auto px-4 py-6"
+          >
+            <div className="mx-auto w-full max-w-3xl">
+              <ChatThread
+                result={
+                  conversationThread ?? {
+                    status: "unavailable",
+                    reason: "no_thread",
+                  }
                 }
-              }
-            />
-          </div>
-        </ChatScrollArea>
+              />
+            </div>
+          </ChatScrollArea>
+
+          {/* The card's invisible column: an empty spacer that widens with the
+              card (md+ only — on phones the card floats over the chat), pushing
+              the centered bubble column left. */}
+          <div
+            aria-hidden
+            className={cn(
+              "w-0 shrink-0 transition-[width] duration-300 ease-in-out",
+              contextOpen && "md:w-80",
+            )}
+          />
+
+          <aside
+            aria-hidden={!contextOpen}
+            aria-label="Case context"
+            className={cn(
+              "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
+              contextOpen
+                ? "translate-x-0"
+                : "pointer-events-none translate-x-[calc(100%+1rem)]",
+            )}
+          >
+            <h2 className="pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Context
+            </h2>
+            <CaseContext context={context} />
+          </aside>
+        </div>
 
         <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
           <div className="mx-auto w-full max-w-3xl">
@@ -718,13 +767,6 @@ export function CaseDetailPage() {
               refund={{ ...refundToIssue, amount: refundToIssue.amount }}
             />
           ) : null}
-
-          <div>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Context
-            </h2>
-            <CaseContext context={context} />
-          </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
