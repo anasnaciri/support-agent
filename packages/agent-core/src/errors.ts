@@ -73,6 +73,21 @@ export class NetworkError extends Data.TaggedError("NetworkError")<{
   readonly cause: unknown;
 }> {}
 
+/**
+ * Shopify accepted the request at the transport layer (HTTP 2xx) but the
+ * GraphQL response carried a top-level `errors[]` array or no `data` — i.e.
+ * the operation itself was invalid (a hallucinated/removed field, a bad
+ * argument, a query-cost throttle, an internal Shopify error). Distinct from
+ * `NetworkError` (a genuine transport failure) so these are not mislabeled and
+ * the Shopify message survives for diagnosis. `message` joins the returned
+ * error messages.
+ */
+export class ShopifyResponseInvalid extends Data.TaggedError(
+  "ShopifyResponseInvalid",
+)<{
+  readonly message: string;
+}> {}
+
 export class ProviderUnavailable extends Data.TaggedError("ProviderUnavailable")<{
   readonly provider: ProviderName;
 }> {}
@@ -147,6 +162,7 @@ export type ShopifyError =
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing
+  | ShopifyResponseInvalid
   | NetworkError;
 
 export class LLMCredentialMissing extends Data.TaggedError(

@@ -12,6 +12,7 @@ import {
   RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
+  ShopifyResponseInvalid,
   TenantId,
 } from "@support-agent/agent-core";
 import {
@@ -19,6 +20,8 @@ import {
   ShopifyService,
 } from "@support-agent/services";
 import {
+  DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS,
+  shopifyHttpTimeoutMs,
   ShopifyHttpFromFn,
   ShopifyServiceLive,
   type ShopifyHttpClient,
@@ -1404,7 +1407,7 @@ describe("ShopifyServiceLive — error mapping", () => {
     }
   });
 
-  it("GraphQL errors array → NetworkError (response-invalid)", async () => {
+  it("GraphQL errors array → ShopifyResponseInvalid carrying the message (NOT a generic NetworkError)", async () => {
     reset();
     const layer = buildLayer(
       httpFromSequence([
@@ -1415,7 +1418,14 @@ describe("ShopifyServiceLive — error mapping", () => {
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
       const err = (exit.cause as { error: unknown }).error;
-      expect(err).toBeInstanceOf(NetworkError);
+      // A top-level GraphQL error is a schema/response problem, not a
+      // transport failure — it must not be mislabeled as NetworkError, and
+      // the Shopify message must survive so failures are diagnosable.
+      expect(err).toBeInstanceOf(ShopifyResponseInvalid);
+      expect(err).not.toBeInstanceOf(NetworkError);
+      if (err instanceof ShopifyResponseInvalid) {
+        expect(err.message).toContain("Field 'foo' missing");
+      }
     }
   });
 });
@@ -1423,6 +1433,22 @@ describe("ShopifyServiceLive — error mapping", () => {
 // ============================================================
 // refundOrder
 // ============================================================
+
+describe("shopifyHttpTimeoutMs", () => {
+  it("defaults when unset or unparseable", () => {
+    expect(shopifyHttpTimeoutMs({})).toBe(DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS);
+    expect(shopifyHttpTimeoutMs({ SHOPIFY_HTTP_TIMEOUT_MS: "nope" })).toBe(
+      DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS,
+    );
+  });
+  it("reads an override and clamps to sane bounds", () => {
+    expect(shopifyHttpTimeoutMs({ SHOPIFY_HTTP_TIMEOUT_MS: "5000" })).toBe(5000);
+    expect(shopifyHttpTimeoutMs({ SHOPIFY_HTTP_TIMEOUT_MS: "1" })).toBeGreaterThanOrEqual(1000);
+    expect(shopifyHttpTimeoutMs({ SHOPIFY_HTTP_TIMEOUT_MS: "99999999" })).toBeLessThanOrEqual(
+      120_000,
+    );
+  });
+});
 
 describe("ShopifyServiceLive — refundOrder", () => {
   const orderGid = "gid://shopify/Order/77777";

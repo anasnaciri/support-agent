@@ -32,6 +32,7 @@ import {
   RefundFailed,
   ShopifyAuthFailed,
   ShopifyRateLimited,
+  ShopifyResponseInvalid,
 } from "@support-agent/agent-core";
 import {
   ShopifyCredentialStore,
@@ -69,9 +70,38 @@ export class ShopifyHttp extends Context.Tag("ShopifyHttp")<
   ShopifyHttpClient
 >() {}
 
+/**
+ * Wall-clock budget for a single Shopify Admin API call. `fetch` carries no
+ * client-side timeout by default, so a hung request (slow `refundCreate`, a
+ * stalled socket) would block the API/worker with nothing to cancel it and
+ * eventually surface as an opaque gateway 502. `AbortSignal.timeout` cancels
+ * it; the rejection is caught by `runQuery` and surfaces as a NetworkError.
+ * Env override: `SHOPIFY_HTTP_TIMEOUT_MS`.
+ */
+export const DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS = 20_000;
+const MIN_SHOPIFY_HTTP_TIMEOUT_MS = 1_000;
+const MAX_SHOPIFY_HTTP_TIMEOUT_MS = 120_000;
+
+export const shopifyHttpTimeoutMs = (
+  env: Record<string, string | undefined>,
+): number => {
+  const raw = env["SHOPIFY_HTTP_TIMEOUT_MS"];
+  if (raw === undefined) return DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS;
+  return Math.max(
+    MIN_SHOPIFY_HTTP_TIMEOUT_MS,
+    Math.min(MAX_SHOPIFY_HTTP_TIMEOUT_MS, n),
+  );
+};
+
 export const ShopifyHttpLive = Layer.succeed(
   ShopifyHttp,
-  (url, init) => fetch(url, init) as unknown as ReturnType<ShopifyHttpClient>,
+  (url, init) =>
+    fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(shopifyHttpTimeoutMs(process.env)),
+    }) as unknown as ReturnType<ShopifyHttpClient>,
 );
 
 export const ShopifyHttpFromFn = (fn: ShopifyHttpClient) =>
@@ -119,11 +149,6 @@ type GraphQLResponse<T> = {
   }>;
 };
 
-class ShopifyResponseInvalid {
-  readonly _tag = "ShopifyResponseInvalid";
-  constructor(readonly message: string) {}
-}
-
 const runQuery = <T>(
   http: ShopifyHttpClient,
   creds: ShopifyCredentials,
@@ -156,17 +181,24 @@ const runQuery = <T>(
       const payload = (await res.json()) as GraphQLResponse<T>;
       if (payload.errors && payload.errors.length > 0) {
         const msg = payload.errors.map((e) => e.message).join("; ");
-        throw new ShopifyResponseInvalid(msg);
+        throw new ShopifyResponseInvalid({ message: msg });
       }
       if (!payload.data) {
-        throw new ShopifyResponseInvalid("Shopify response missing data");
+        throw new ShopifyResponseInvalid({
+          message: "Shopify response missing data",
+        });
       }
       return payload.data;
     },
     catch: (cause): ShopifyError => {
+      // Preserve our already-typed errors verbatim — only a GENUINE transport
+      // failure (fetch rejection, timeout, socket reset, JSON parse) falls
+      // through to NetworkError. A top-level GraphQL error stays a
+      // ShopifyResponseInvalid so it isn't mislabeled as "network".
       if (
         cause instanceof ShopifyAuthFailed ||
         cause instanceof ShopifyRateLimited ||
+        cause instanceof ShopifyResponseInvalid ||
         cause instanceof NetworkError
       ) {
         return cause;
