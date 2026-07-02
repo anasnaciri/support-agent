@@ -61,6 +61,27 @@ maintenance sweep re-fired stale (and rejected) decisions.
       helper) + `providers/test/gmail-conversation-live.test.ts` (+2: dedup +
       stamp). `send` now always does a thread read (cheap for Gmail/HTTP).
 
+- [x] **H9** dashboard "approved but not sent" surfacing + one-click resend.
+      When a manager approves a `conversation.reply` after the case is taken
+      over, the runtime skips it (`approval.stale_delivery_skipped`) and the
+      draft never sends. Now surfaced + resendable:
+      - Pure detection `resurfaceableApprovedReply(audit, approvals)`
+        (`packages/db/src/approved-not-sent.ts`) → the approved reply that was
+        skipped and not yet resent; `caseDetail` exposes it as
+        `CaseDetail.approvedNotSent` (contract).
+      - `POST /dashboard/cases/:id/resend-approval` (scope `cases.retry`); core
+        `resendApprovedReply` (DI, unit-tested) resends the EXACT approved draft
+        via `ConversationService.reply` (idempotent on (mailbox,draftId) via H8),
+        records `case.approved_reply_resent` + `case.replied` + message-id, and
+        leaves the case in `human_takeover` (mirrors the manual-reply flow — a
+        person is driving). The resent marker retires the card.
+      - SPA: `approvedNotSentTimelineItem` + card in `CaseDetailPage` +
+        `ResendApprovalButton` + `api.resendApproval` + `resendApproval`
+        feedback/CaseAction.
+      - Tests: `approved-not-sent.test.ts` (6) + `.integration.test.ts` (2,
+        read seam) + `case-resend.test.ts` (6) + `approved-not-sent-timeline`
+        (3) + feedback assertions.
+
 **Remaining (adopted, not yet done):**
 
 - [ ] **H8 for other connectors**: IMAP/SMTP already STAMPS a deterministic
@@ -68,15 +89,13 @@ maintenance sweep re-fired stale (and rejected) decisions.
       pre-send dedup scan — adding one costs an extra IMAP connect, which the
       send-reliability work deliberately minimized (weigh before adding). Graph
       (Outlook) can't easily set a custom Message-ID.
-- [ ] **H9** dashboard "approved but not sent" surfacing + one-click resend
-      (API detection off `approval.stale_delivery_skipped` + apps/dashboard-spa).
 - [ ] **H6 extension**: timer/supplier events don't yet carry/consume the epoch
       (only approvals do). The `cases.epoch` primitive is in place to build on.
 
-Status: **7 of 8 adopted hardenings landed** (all fixes for the two real prod
-incidents + event dedup + Gmail retry-safe send), `pnpm build` green. H8 is
-complete for Gmail; other connectors + H9 remain. NOT committed (entangled tree
-— needs a dedicated branch).
+Status: **all 8 adopted hardenings landed** (two prod-incident fixes + event
+dedup + Gmail retry-safe send + approved-but-not-sent resend), `pnpm build`
+green. H1–H8 committed on `fix/case-recovery-hardening` (e9a5542 + 478429b); H9
+staged on the same branch. Remaining: H8 for other connectors, H6 extension.
 
 ---
 

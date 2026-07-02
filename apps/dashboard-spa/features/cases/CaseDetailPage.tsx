@@ -22,6 +22,7 @@ import {
 } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
 import {
+  approvedNotSentTimelineItem,
   curatedTimelineEvent,
   replyDeliveryFailedTimelineItem,
   type CuratedTimelineItem,
@@ -57,6 +58,7 @@ import { BundleApprovalBar } from "./BundleApprovalBar";
 import { IssueRefundCard } from "./IssueRefundCard";
 import { RefundDialog } from "./RefundDialog";
 import { RetrySendButton } from "./RetrySendButton";
+import { ResendApprovalButton } from "./ResendApprovalButton";
 import { CustomerPanel } from "./CustomerPanel";
 import { OrderPanel } from "./OrderPanel";
 import { CardEditPopover } from "./CardEditPopover";
@@ -503,12 +505,17 @@ export function CaseDetailPage() {
     activeReplyDelivery: detail.activeReplyDelivery,
     riskFlags,
   });
+  const approvedNotSentItem = approvedNotSentTimelineItem({
+    caseStatus: caseRow.status,
+    approvedNotSent: detail.approvedNotSent,
+  });
   const simplifiedTimelineItems: SimplifiedTimelineItem[] = [
     ...entries
       .map((entry) => curatedTimelineEvent(entry, customerEmail))
       .filter((item): item is CuratedTimelineItem => item !== null),
     ...recommendationTimelineItems,
     ...(failedDeliveryItem ? [failedDeliveryItem] : []),
+    ...(approvedNotSentItem ? [approvedNotSentItem] : []),
     ...allApprovals.map((approval) => ({
       kind: "approval" as const,
       id: `approval-${approval.id}`,
@@ -898,6 +905,32 @@ export function CaseDetailPage() {
                                 : ""}
                             </p>
                             <RetrySendButton
+                              workspaceId={ctx.workspaceId}
+                              caseId={id}
+                            />
+                          </CardContent>
+                        ) : item.kind === "approvedNotSent" ? (
+                          <CardContent className="space-y-2 p-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-medium">
+                                Approved reply not sent
+                              </div>
+                              <Badge variant="outline">Needs resend</Badge>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDateTime(item.occurredAt)}
+                            </div>
+                            <p className="break-words text-sm text-muted-foreground">
+                              A manager approved this reply, but it was never
+                              sent because the case was taken over. Send it now
+                              if it&apos;s still the right response.
+                            </p>
+                            {item.bodyPreview ? (
+                              <p className="break-words rounded-md bg-muted p-2 text-sm">
+                                {item.bodyPreview}
+                              </p>
+                            ) : null}
+                            <ResendApprovalButton
                               workspaceId={ctx.workspaceId}
                               caseId={id}
                             />

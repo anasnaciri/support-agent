@@ -18,6 +18,7 @@ import {
   ShopifyAppProvisioningStore,
 } from "@support-agent/services";
 import {
+  ApprovalId,
   CaseId,
   OrderId,
   TenantId,
@@ -62,6 +63,7 @@ import {
   sendManualReply,
   type ManualReplyCaseView,
 } from "./case-reply.js";
+import { resendApprovedReply } from "./case-resend.js";
 import { issueCaseRefund } from "./case-refund.js";
 import { dashboardRefundNote } from "./refund-note.js";
 import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
@@ -1255,6 +1257,192 @@ export const handleDashboardCaseReply = async (
           : outcome.kind === "send_failed"
             ? 502
             : 409; // not_in_takeover | no_thread
+  return sendJson(res, status, outcome);
+};
+
+// A conversation.reply approval's stored input (the manager-approved draft).
+// proposedInput is `unknown` at the type level — decode it defensively before
+// re-sending. Returns null when the shape isn't a usable reply.
+interface DecodedApprovedReply {
+  readonly threadId: string;
+  readonly to: ReadonlyArray<{ readonly name: string | null; readonly email: string }>;
+  readonly subject: string | null;
+  readonly bodyText: string;
+  readonly bodyHtml: string | null;
+  readonly inReplyToMessageId: string | null;
+  readonly draftId: string;
+}
+
+const decodeApprovedReply = (input: unknown): DecodedApprovedReply | null => {
+  if (!input || typeof input !== "object") return null;
+  const o = input as Record<string, unknown>;
+  const threadId = typeof o["threadId"] === "string" ? o["threadId"] : null;
+  const bodyText = typeof o["bodyText"] === "string" ? o["bodyText"] : null;
+  const draftId = typeof o["draftId"] === "string" ? o["draftId"] : null;
+  if (!threadId || bodyText === null || !draftId) return null;
+  const to = Array.isArray(o["to"])
+    ? o["to"]
+        .filter(
+          (p): p is { name?: unknown; email: string } =>
+            !!p && typeof p === "object" && typeof (p as { email?: unknown }).email === "string",
+        )
+        .map((p) => ({
+          name: typeof p.name === "string" ? p.name : null,
+          email: p.email,
+        }))
+    : [];
+  if (to.length === 0) return null;
+  return {
+    threadId,
+    to,
+    subject: typeof o["subject"] === "string" ? o["subject"] : null,
+    bodyText,
+    bodyHtml: typeof o["bodyHtml"] === "string" ? o["bodyHtml"] : null,
+    inReplyToMessageId:
+      typeof o["inReplyToMessageId"] === "string" ? o["inReplyToMessageId"] : null,
+    draftId,
+  };
+};
+
+// POST /dashboard/cases/:id/resend-approval — resend an approved customer reply
+// that was never sent (skipped when the case was taken over — audit
+// `approval.stale_delivery_skipped`). Re-sends the EXACT approved draft on the
+// same thread (idempotent on (mailbox, draftId), so a retry can't double-send);
+// the case stays in `human_takeover` for the operator. Orchestration + guards
+// live in the unit-tested `resendApprovedReply` core.
+export const handleDashboardResendApproval = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const tenantId = TenantId(auth.tenantId);
+  const caseId = CaseId(id);
+  const userId = auth.userId;
+
+  // One tenant-scoped read serves both the status guard and the resurfaceable
+  // approval lookup (memoised so the core's two calls don't double-query).
+  let detailP: Promise<Awaited<ReturnType<typeof caseDetail>>> | null = null;
+  const loadDetail = () =>
+    (detailP ??= runWithDb(layer, (db) => caseDetail(db, auth.tenantId, id)));
+
+  const deliverEffect = (approvalId: string) =>
+    Effect.gen(function* () {
+      const approvalsSvc = yield* ApprovalService;
+      const cases = yield* CaseRepository;
+      const conversation = yield* ConversationService;
+      const approval = yield* approvalsSvc
+        .getById(ApprovalId(approvalId), tenantId)
+        .pipe(Effect.either);
+      if (approval._tag === "Left") {
+        return { kind: "error" as const, error: "approval_not_found" };
+      }
+      const reply = decodeApprovedReply(approval.right.proposedInput);
+      if (!reply) return { kind: "error" as const, error: "bad_draft" };
+      const caseRow = yield* cases.getById(caseId, tenantId).pipe(Effect.either);
+      if (caseRow._tag === "Left") {
+        return { kind: "error" as const, error: "case_not_found" };
+      }
+      const mailbox = caseRow.right.mailbox;
+      if (!mailbox) return { kind: "error" as const, error: "no_mailbox" };
+      const sent = yield* conversation
+        .reply(tenantId, {
+          threadId: ThreadId(reply.threadId),
+          mailbox,
+          to: reply.to.map((p) => ({ name: p.name, email: p.email })),
+          subject: reply.subject,
+          bodyText: reply.bodyText,
+          bodyHtml: reply.bodyHtml,
+          attachments: [],
+          inReplyToMessageId: reply.inReplyToMessageId,
+          draftId: reply.draftId,
+        })
+        .pipe(Effect.either);
+      return sent._tag === "Left"
+        ? { kind: "error" as const, error: sent.left._tag }
+        : {
+            kind: "ok" as const,
+            sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
+          };
+    }).pipe(
+      Effect.catchAll((e) =>
+        Effect.succeed({
+          kind: "error" as const,
+          error:
+            typeof (e as { _tag?: unknown })._tag === "string"
+              ? String((e as { _tag: string })._tag)
+              : String(e),
+        }),
+      ),
+    );
+
+  const outcome = await resendApprovedReply({
+    loadCaseStatus: async () => {
+      const detail = await loadDetail();
+      return detail ? detail.case.status : null;
+    },
+    findResurfaceableApprovalId: async () => {
+      const detail = await loadDetail();
+      return detail?.approvedNotSent?.approvalId ?? null;
+    },
+    deliver: async (approvalId) => {
+      const result = await Effect.runPromise(
+        Effect.provide(deliverEffect(approvalId), layer),
+      );
+      if (result.kind === "error") throw new Error(result.error);
+      return result.sent;
+    },
+    recordResent: (approvalId, sent) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const cases = yield* CaseRepository;
+            const audit = yield* AuditLogService;
+            yield* cases
+              .recordMessageId({
+                tenantId,
+                caseId,
+                messageId: sent.id,
+                direction: "outbound",
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+            // Retires the "approved but not sent" card (detection keys on this).
+            yield* audit
+              .record({
+                tenantId,
+                caseId,
+                actor: { type: "user", id: userId },
+                action: "case.approved_reply_resent",
+                details: { approvalId, messageId: sent.id },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+            yield* audit
+              .record({
+                tenantId,
+                caseId,
+                actor: { type: "user", id: userId },
+                action: "case.replied",
+                details: { messageId: sent.id, via: "resend_approved" },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+          }),
+          layer,
+        ),
+      ),
+  });
+
+  const status =
+    outcome.kind === "resent"
+      ? 200
+      : outcome.kind === "case_not_found" || outcome.kind === "nothing_to_resend"
+        ? 404
+        : outcome.kind === "send_failed"
+          ? 502
+          : 409; // not_in_takeover
   return sendJson(res, status, outcome);
 };
 

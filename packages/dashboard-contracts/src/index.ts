@@ -194,11 +194,23 @@ export interface CaseDetailReplyDelivery {
   readonly updatedAt: string;
 }
 
+/**
+ * An approved customer reply that was never sent (the case was taken over
+ * before the approval's delivery ran, so the runtime skipped it). Surfaced so
+ * an operator can one-click resend it. `null` when there is nothing to resend.
+ */
+export interface CaseDetailApprovedNotSent {
+  readonly approvalId: string;
+  readonly bodyPreview: string;
+  readonly occurredAt: string;
+}
+
 export interface CaseDetail {
   readonly case: CaseDetailCase;
   readonly auditEntries: ReadonlyArray<AuditEntry>;
   readonly approvals: ReadonlyArray<ApprovalDetail>;
   readonly activeReplyDelivery: CaseDetailReplyDelivery | null;
+  readonly approvedNotSent: CaseDetailApprovedNotSent | null;
 }
 
 export interface DashboardConversationParticipant {

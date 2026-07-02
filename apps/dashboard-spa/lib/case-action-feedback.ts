@@ -15,6 +15,7 @@ export type CaseAction =
   | "resume"
   | "retry"
   | "retrySend"
+  | "resendApproval"
   | "setStatus"
   | "resolve"
   | "issueRefund"
@@ -112,6 +113,28 @@ const FEEDBACK: Record<CaseAction, Record<string, ActionFeedback>> = {
       text: "Shopify rejected the refund. No money moved — try again or issue it in Shopify.",
     },
     invalid_amount: { tone: "warning", text: "That refund amount isn't valid." },
+  },
+  resendApproval: {
+    resent: {
+      tone: "success",
+      text: "The approved reply was sent to the customer. The case stays with you — resolve it when you're done.",
+    },
+    nothing_to_resend: {
+      tone: "info",
+      text: "There's no approved reply waiting to be sent on this case — no change.",
+    },
+    not_in_takeover: {
+      tone: "info",
+      text: "You can only resend an approved reply while you've taken over the case.",
+    },
+    send_failed: {
+      tone: "warning",
+      text: "The reply couldn't be sent. Check the connected mailbox and try again.",
+    },
+    case_not_found: {
+      tone: "warning",
+      text: "Couldn't find that case to resend on.",
+    },
   },
   reply: {
     sent: { tone: "success", text: "Your reply was sent to the customer." },

@@ -21,6 +21,7 @@ import {
   handleDashboardCases,
   handleDashboardCaseTracking,
   handleDashboardConnections,
+  handleDashboardResendApproval,
   handleDashboardResolveCase,
   handleDashboardResume,
   handleDashboardRetry,
@@ -293,6 +294,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/retry-send",
     "Re-send the drafted customer reply whose delivery failed (manager)",
     handleDashboardRetrySend,
+    "cases.retry",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/resend-approval",
+    "Resend an approved reply that was never sent (skipped on takeover)",
+    handleDashboardResendApproval,
     "cases.retry",
   );
   dashboardPost(

@@ -90,6 +90,15 @@ export type CuratedTimelineItem =
       /** Last transport error, surfaced so the merchant knows why. */
       readonly lastError: string | null;
       readonly occurredAt: string;
+    }
+  | {
+      readonly kind: "approvedNotSent";
+      readonly id: string;
+      /** The approval whose drafted reply was approved but never sent. */
+      readonly approvalId: string;
+      /** One-line preview of the drafted reply. */
+      readonly bodyPreview: string;
+      readonly occurredAt: string;
     };
 
 const INBOUND_EMAIL_EVENTS = new Set(["message.received", "customer.replied"]);
@@ -270,6 +279,35 @@ export const replyDeliveryFailedTimelineItem = (
     title: "Email failed to send",
     lastError: delivery.lastError,
     occurredAt: delivery.updatedAt,
+  };
+};
+
+// The "approved but not sent" card (H9): a manager-approved reply that the
+// runtime skipped when the case was taken over. Like the failed-send card it's
+// derived from live CaseDetail (`approvedNotSent`), not an audit row, and only
+// shows while a human is driving (human_takeover) — the one condition its
+// inline resend button also needs.
+export interface ApprovedNotSentInput {
+  readonly caseStatus: string;
+  readonly approvedNotSent: null | {
+    readonly approvalId: string;
+    readonly bodyPreview: string;
+    readonly occurredAt: string;
+  };
+}
+
+export const approvedNotSentTimelineItem = (
+  input: ApprovedNotSentInput,
+): CuratedTimelineItem | null => {
+  if (input.caseStatus !== "human_takeover") return null;
+  const a = input.approvedNotSent;
+  if (!a) return null;
+  return {
+    kind: "approvedNotSent",
+    id: `approved-not-sent-${a.approvalId}`,
+    approvalId: a.approvalId,
+    bodyPreview: a.bodyPreview,
+    occurredAt: a.occurredAt,
   };
 };
 

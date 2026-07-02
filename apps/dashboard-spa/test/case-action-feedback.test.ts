@@ -17,6 +17,10 @@ describe("caseActionFeedback", () => {
       "warning",
     );
     expect(caseActionFeedback("resume", "not_in_takeover").tone).toBe("info");
+    expect(caseActionFeedback("resendApproval", "resent").tone).toBe("success");
+    expect(caseActionFeedback("resendApproval", "nothing_to_resend").tone).toBe(
+      "info",
+    );
   });
 
   it("falls back to a generic warning for an unknown/error kind", () => {

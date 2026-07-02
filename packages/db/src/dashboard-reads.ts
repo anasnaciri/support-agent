@@ -50,6 +50,7 @@ import {
   tenants,
 } from "./schema.js";
 import { getActiveReplyDeliveryForCase } from "./reply-delivery-store.js";
+import { resurfaceableApprovedReply } from "./approved-not-sent.js";
 
 // Read queries backing the dashboard's HTTP API (Path B). The dashboard
 // hosts on Cloudflare Workers and can't open a Postgres TCP pool, so these
@@ -458,6 +459,20 @@ const toApprovalDetail = (a: typeof approvals.$inferSelect): ApprovalDetail => (
   createdAt: a.createdAt.toISOString(),
 });
 
+// A short one-line preview of a conversation.reply approval's drafted body,
+// for the "approved but not sent" card. proposedInput is unknown at the type
+// level (it's the tool's stored input) — pull bodyText defensively.
+const replyBodyPreview = (proposedInput: unknown): string => {
+  const body =
+    proposedInput &&
+    typeof proposedInput === "object" &&
+    "bodyText" in proposedInput
+      ? (proposedInput as { readonly bodyText?: unknown }).bodyText
+      : null;
+  const text = typeof body === "string" ? body.replace(/\s+/g, " ").trim() : "";
+  return text.length > 140 ? `${text.slice(0, 139)}…` : text;
+};
+
 const toAuditEntry = (e: typeof auditLog.$inferSelect): AuditEntry => ({
   id: e.id.toString(),
   caseId: e.caseId,
@@ -500,6 +515,10 @@ export const caseDetail = async (
     getActiveReplyDeliveryForCase(db, caseId),
   ]);
 
+  const auditEntries = entries.map(toAuditEntry);
+  const approvalDetails = caseApprovals.map(toApprovalDetail);
+  const resurfaceable = resurfaceableApprovedReply(auditEntries, approvalDetails);
+
   return {
     case: {
       id: row.id,
@@ -515,9 +534,16 @@ export const caseDetail = async (
       resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
       manualStatusTargets: allowedManualStatusTargets(row.status as CaseStatus),
     },
-    auditEntries: entries.map(toAuditEntry),
-    approvals: caseApprovals.map(toApprovalDetail),
+    auditEntries,
+    approvals: approvalDetails,
     activeReplyDelivery: toCaseDetailReplyDelivery(activeReplyDelivery),
+    approvedNotSent: resurfaceable
+      ? {
+          approvalId: resurfaceable.id,
+          bodyPreview: replyBodyPreview(resurfaceable.proposedInput),
+          occurredAt: resurfaceable.decidedAt ?? resurfaceable.createdAt,
+        }
+      : null,
   };
 };
 

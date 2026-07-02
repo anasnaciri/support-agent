@@ -1102,6 +1102,21 @@ export const api = {
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
 
+  // Resend an approved reply that was never sent (skipped when the case was
+  // taken over). Re-sends the EXACT approved draft; the case stays in
+  // human_takeover. Returns the discriminated outcome (resent | nothing_to_resend
+  // | not_in_takeover | send_failed | …).
+  resendApproval: async (
+    ctx: CallCtx,
+    caseId: string,
+  ): Promise<{ readonly kind: string }> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/resend-approval`,
+      { method: "POST", ctx },
+    );
+    return (body as { kind: string } | null) ?? { kind: "error" };
+  },
+
   // Send a human-drafted customer reply while driving a taken-over case. Goes
   // out on the same connector/thread the agent uses; the case stays in
   // human_takeover. Returns the discriminated outcome (sent | not_in_takeover |
