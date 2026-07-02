@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import type { ResolvedToast } from "@/lib/toast-feedback";
+import { useAppNavigate } from "@/lib/navigation";
 
 /**
  * Fires the post-action toasts a server page resolved from its URL search
@@ -23,6 +24,7 @@ export function FeedbackToaster({
   readonly consume?: readonly string[];
 }) {
   const fired = useRef(false);
+  const nav = useAppNavigate();
 
   useEffect(() => {
     if (fired.current) return;
@@ -36,7 +38,7 @@ export function FeedbackToaster({
           ? {
               action: {
                 label: t.action.label,
-                onClick: () => window.location.assign(t.action!.href),
+                onClick: () => nav.push(t.action!.href),
               },
             }
           : {}),

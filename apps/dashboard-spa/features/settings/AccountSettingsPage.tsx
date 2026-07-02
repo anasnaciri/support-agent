@@ -143,8 +143,9 @@ function DeleteAccountForm({ tenantName }: { readonly tenantName: string }) {
         toast.error(ERROR_COPY.delete_failed);
         return;
       }
-      // Session is now orphaned — sign out and land on the public goodbye page.
-      void logout();
+      // Session is now orphaned — sign out and land on the deletion-specific
+      // goodbye page.
+      void logout("/goodbye?deleted=1");
     },
     onError: () => toast.error(ERROR_COPY.delete_failed),
   });

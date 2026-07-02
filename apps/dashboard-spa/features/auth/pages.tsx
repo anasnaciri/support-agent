@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2 } from "lucide-react";
 
 import {
   getAuthSession,
@@ -46,6 +47,33 @@ export function SignInPage() {
 }
 
 export function GoodbyePage() {
+  // Shared by regular sign-out AND account deletion; `?deleted=1` (set by the
+  // delete-account flow) shows the deletion-specific confirmation.
+  const deleted =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("deleted") === "1";
+
+  if (deleted) {
+    return (
+      <Centered>
+        <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-success/15 text-success">
+          <CheckCircle2 className="size-6" aria-hidden />
+        </span>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Your account has been deleted
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Your account and all associated data have been permanently removed. A
+          confirmation has been emailed to the address on file. Thanks for
+          trying the platform.
+        </p>
+        <Button className="w-full" onClick={() => login("/", "sign-up")}>
+          Create a new account
+        </Button>
+      </Centered>
+    );
+  }
+
   return (
     <Centered>
       <h1 className="text-xl font-semibold tracking-tight">Signed out</h1>
@@ -117,7 +145,8 @@ export function OnboardingPage() {
       // The cookie now carries the org — refetch the gate and enter.
       await qc.invalidateQueries({ queryKey: qk.authSession });
       await qc.invalidateQueries({ queryKey: qk.workspaces });
-      nav.replace("/");
+      // Land on Today with the "workspace is ready" toast (mirrors the Next flow).
+      nav.replace("/?onboarded=1");
     },
   });
 

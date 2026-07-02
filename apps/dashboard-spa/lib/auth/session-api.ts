@@ -94,8 +94,11 @@ export const login = (
   window.location.assign(url.toString());
 };
 
-/** POST-only sign-out (S13), then land on the goodbye page. */
-export const logout = async (): Promise<void> => {
+/**
+ * POST-only sign-out (S13), then land on the goodbye page. `returnTo` lets the
+ * account-deletion flow show a deletion-specific message (`/goodbye?deleted=1`).
+ */
+export const logout = async (returnTo = "/goodbye"): Promise<void> => {
   try {
     await fetch(`${apiOrigin()}/dashboard/auth/logout`, {
       method: "POST",
@@ -103,6 +106,6 @@ export const logout = async (): Promise<void> => {
       headers: { origin: window.location.origin },
     });
   } finally {
-    window.location.assign("/goodbye");
+    window.location.assign(returnTo);
   }
 };
