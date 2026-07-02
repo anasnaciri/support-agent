@@ -17,7 +17,7 @@ import guidezillaLogo from "./guidezilla-logo-dark.svg";
 
 import type {
   RbacPermissionId,
-  WorkspaceSummary,
+  UnifiedWorkspace,
 } from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
@@ -102,7 +102,7 @@ const RailLink = ({
 interface Props {
   readonly email: string | null;
   /** Workspaces for the switcher; null → signed out / pre-onboarding. */
-  readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
+  readonly workspaces: ReadonlyArray<UnifiedWorkspace> | null;
   readonly activeWorkspaceId: string | null;
   /** Member's effective permissions for nav gating; null → fail-open. */
   readonly permissions: ReadonlyArray<RbacPermissionId> | null;

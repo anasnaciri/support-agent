@@ -8,12 +8,19 @@ import {
   type ReactNode,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  RbacPermissionId,
-  WorkspaceSummary,
+import {
+  mergeWorkspaces,
+  surfaceHomeForKind,
+  type RbacPermissionId,
+  type UnifiedWorkspace,
 } from "@support-agent/dashboard-contracts";
 
-import { getMeSession, getWorkspaces } from "./api-client";
+import {
+  getMeSession,
+  getSupplierSession,
+  getSupplierWorkspaces,
+  getWorkspaces,
+} from "./api-client";
 import {
   getAuthSession,
   isOnboardingRequired,
@@ -23,15 +30,35 @@ import {
 import type { SessionUser } from "./auth/types";
 import { qk, workspaceScopedKeyPrefixes } from "./query-keys";
 import { WORKSPACE_COOKIE, pickActiveWorkspace } from "./workspace";
-import { useAppNavigate } from "./navigation";
+import { useAppNavigate, usePathname } from "./navigation";
 
 // The client-side replacement for the RSC `getDashboardContext` gate: bootstrap
-// the WorkOS session (BFF whoami), the org's workspaces, the active workspace
+// the WorkOS session (BFF whoami), the workspaces, the active workspace
 // (localStorage, default-tolerant), and the member's effective permissions for
 // nav gating. Gates the whole authed area — children only render once resolved.
+//
+// UNIFIED switcher: a person can be a MERCHANT in one workspace and a SUPPLIER in
+// another (org-independent binding). We source two lists — the org-scoped
+// merchant workspaces and the binding-anchored supplier workspaces — and merge
+// them, each entry tagged by kind. The surface/mode is a property of the ACTIVE
+// workspace, so permissions load from POST /me/session (merchant) or GET
+// /supplier/session (supplier) depending on which kind is active.
 
 const readStoredWorkspace = (): string | undefined => {
   try {
+    // A supplier notification deep-link (?w=<tenantId>) pins the workspace so a
+    // multi-merchant supplier lands on the right one; it wins over the stored
+    // pick and is persisted so it sticks after the param is gone. A ?w the user
+    // isn't bound to is harmless — pickActiveWorkspace falls back to default.
+    const fromUrl = new URLSearchParams(window.location.search).get("w");
+    if (fromUrl) {
+      try {
+        localStorage.setItem(WORKSPACE_COOKIE, fromUrl);
+      } catch {
+        /* private mode */
+      }
+      return fromUrl;
+    }
     return localStorage.getItem(WORKSPACE_COOKIE) ?? undefined;
   } catch {
     return undefined;
@@ -42,8 +69,8 @@ export interface SessionValue {
   readonly organizationId: string;
   readonly userId: string;
   readonly user: SessionUser;
-  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
-  readonly activeWorkspace: WorkspaceSummary;
+  readonly workspaces: ReadonlyArray<UnifiedWorkspace>;
+  readonly activeWorkspace: UnifiedWorkspace;
   readonly activeWorkspaceId: string;
   readonly permissions: ReadonlySet<RbacPermissionId>;
   readonly isOwner: boolean;
@@ -72,6 +99,7 @@ const Splash = ({ label }: { label: string }) => (
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const nav = useAppNavigate();
+  const pathname = usePathname() ?? "/";
   const [storedId, setStoredId] = useState<string | undefined>(
     readStoredWorkspace,
   );
@@ -88,23 +116,71 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const needsOnboarding =
     authQuery.isSuccess && isOnboardingRequired(authQuery.data);
 
+  const bootstrapReady = authQuery.isSuccess && !needsOnboarding;
+
+  // Org-scoped merchant workspaces (the current WorkOS org).
   const workspacesQuery = useQuery({
     queryKey: qk.workspaces,
     queryFn: () => getWorkspaces(),
-    enabled: authQuery.isSuccess && !needsOnboarding,
+    enabled: bootstrapReady,
+  });
+  // Binding-anchored supplier workspaces (cross-org). This call also completes
+  // the cross-tenant bootstrap server-side; staleTime keeps it from re-running
+  // (and re-hitting WorkOS) on every render.
+  const supplierWorkspacesQuery = useQuery({
+    queryKey: qk.supplierWorkspaces,
+    queryFn: () => getSupplierWorkspaces(),
+    enabled: bootstrapReady,
+    staleTime: 300_000,
   });
 
-  const workspaces = workspacesQuery.data?.workspaces ?? [];
-  const active = useMemo(
-    () => pickActiveWorkspace(workspaces, storedId),
-    [workspaces, storedId],
+  const merchantWorkspaces = workspacesQuery.data?.workspaces ?? [];
+  const supplierWorkspaces = supplierWorkspacesQuery.data?.workspaces ?? [];
+
+  // Probe merchant access on the org's default workspace: only if the user is a
+  // real merchant there do we surface the org's merchant workspaces (else the
+  // org-scoped list would over-list to a pure supplier who merely belongs to the
+  // merchant's WorkOS org). When the active workspace IS this default, the query
+  // below dedupes with it (same key).
+  const merchantDefaultId = merchantWorkspaces[0]?.id;
+  const merchantMeQuery = useQuery({
+    queryKey: merchantDefaultId ? qk.me(merchantDefaultId) : ["me", "no-merchant"],
+    queryFn: () => getMeSession({ workspaceId: merchantDefaultId! }),
+    enabled: Boolean(merchantDefaultId),
+  });
+  const isMerchant = (merchantMeQuery.data?.permissions ?? []).includes(
+    "cases.view",
   );
 
-  const meQuery = useQuery({
-    queryKey: active ? qk.me(active.id) : ["me", "none"],
+  const workspaces = useMemo(
+    () => mergeWorkspaces(merchantWorkspaces, supplierWorkspaces, isMerchant),
+    [merchantWorkspaces, supplierWorkspaces, isMerchant],
+  );
+  const active = useMemo(
+    () => pickActiveWorkspace(workspaces, storedId) as UnifiedWorkspace | null,
+    [workspaces, storedId],
+  );
+  const activeIsSupplier = active?.kind === "supplier";
+
+  // Permissions follow the active workspace's kind. Merchant → POST /me/session
+  // (org-resolved). Supplier → GET /supplier/session (binding-anchored; the
+  // merchant endpoint would 404 for a different org's tenant).
+  const activeMeQuery = useQuery({
+    queryKey: active && !activeIsSupplier ? qk.me(active.id) : ["me", "none"],
     queryFn: () => getMeSession({ workspaceId: active!.id }),
-    enabled: Boolean(active),
+    enabled: Boolean(active) && !activeIsSupplier,
   });
+  const activeSupplierSessionQuery = useQuery({
+    queryKey:
+      active && activeIsSupplier
+        ? qk.supplierSession(active.id)
+        : ["supplier-session", "none"],
+    queryFn: () => getSupplierSession({ workspaceId: active!.id }),
+    enabled: Boolean(active) && activeIsSupplier,
+  });
+  const activePerms = activeIsSupplier
+    ? activeSupplierSessionQuery.data
+    : activeMeQuery.data;
 
   const setActiveWorkspace = useCallback(
     (id: string) => {
@@ -119,8 +195,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       for (const prefix of workspaceScopedKeyPrefixes) {
         void queryClient.invalidateQueries({ queryKey: [prefix] });
       }
+      // Route to the target's surface. Switching INTO a supplier workspace →
+      // the portal; switching a merchant workspace while on the supplier portal
+      // → back to the merchant home. Merchant→merchant stays on the current
+      // route (its data just refetches under the new workspace).
+      const target = workspaces.find((w) => w.id === id);
+      if (target?.kind === "supplier") {
+        nav.replace(surfaceHomeForKind("supplier"));
+      } else if (pathname.startsWith("/supplier")) {
+        nav.replace(surfaceHomeForKind("merchant"));
+      }
     },
-    [queryClient],
+    [queryClient, workspaces, nav, pathname],
   );
 
   // No session → into the WorkOS handshake (full-page). The global query
@@ -135,25 +221,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (needsOnboarding) nav.replace("/onboarding");
   }, [needsOnboarding, nav]);
 
-  // Signed in WITH an org but no workspace yet → onboarding.
+  // Both workspace lists resolved but the user has NO workspace of either kind
+  // → onboarding. Gated on both queries settling so a supplier-only user isn't
+  // bounced while their binding list is still loading.
+  const listsSettled =
+    workspacesQuery.isSuccess &&
+    (supplierWorkspacesQuery.isSuccess || supplierWorkspacesQuery.isError);
   useEffect(() => {
-    if (
-      authQuery.isSuccess &&
-      !needsOnboarding &&
-      workspacesQuery.isSuccess &&
-      !active
-    ) {
+    if (bootstrapReady && listsSettled && !active) {
       nav.replace("/onboarding");
     }
-  }, [authQuery.isSuccess, needsOnboarding, workspacesQuery.isSuccess, active, nav]);
+  }, [bootstrapReady, listsSettled, active, nav]);
 
   if (authQuery.isLoading) return <Splash label="Signing in…" />;
   if (authQuery.isError) return <Splash label="Redirecting to sign-in…" />;
   if (needsOnboarding) return <Splash label="Setting up your workspace…" />;
-  if (workspacesQuery.isLoading || meQuery.isLoading) {
+  // Wait for both lists + the merchant probe (so the merged list + active are
+  // final before we resolve permissions) and the active-workspace permissions.
+  if (
+    workspacesQuery.isLoading ||
+    supplierWorkspacesQuery.isLoading ||
+    (Boolean(merchantDefaultId) && merchantMeQuery.isLoading)
+  ) {
     return <Splash label="Loading your workspace…" />;
   }
   if (!active) return <Splash label="Setting up your workspace…" />;
+  if (activeIsSupplier ? activeSupplierSessionQuery.isLoading : activeMeQuery.isLoading) {
+    return <Splash label="Loading your workspace…" />;
+  }
 
   const auth = authQuery.data!;
   // Narrowed: the needsOnboarding branches returned above.
@@ -169,8 +264,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     activeWorkspaceId: active.id,
     // Fail-open on a permissions blip (null-ish): the api + page guards remain
     // the real boundary, so the nav never strands a member with an empty rail.
-    permissions: new Set(meQuery.data?.permissions ?? []),
-    isOwner: meQuery.data?.isOwner ?? false,
+    permissions: new Set(activePerms?.permissions ?? []),
+    isOwner: activePerms?.isOwner ?? false,
     setActiveWorkspace,
   };
 

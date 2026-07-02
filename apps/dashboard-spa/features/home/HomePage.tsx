@@ -33,19 +33,21 @@ export function HomePage() {
   const ctx = useWorkspaceCtx();
   const nav = useAppNavigate();
 
-  // A supplier (constrained external role) has no merchant surface — send them
-  // to their portal instead of a "Today" page whose data they can't read.
-  const isSupplierOnly =
+  // When the ACTIVE workspace is a supplier one, the member has no merchant
+  // surface for it — send them to the portal instead of a "Today" page whose
+  // data they can't read. Permissions follow the active workspace's kind, so a
+  // dual-role user only lands here while a merchant workspace is active.
+  const activeIsSupplier =
     session.permissions.has("supplier.cases.view") &&
     !session.permissions.has("cases.view");
   useEffect(() => {
-    if (isSupplierOnly) nav.replace("/supplier/cases");
-  }, [isSupplierOnly, nav]);
+    if (activeIsSupplier) nav.replace("/supplier/cases");
+  }, [activeIsSupplier, nav]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: qk.today(ctx.workspaceId),
     queryFn: () => api.today(ctx),
-    enabled: !isSupplierOnly,
+    enabled: !activeIsSupplier,
   });
 
   // Post-onboarding / workspace lifecycle toasts, read once from the URL.
@@ -79,7 +81,7 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (isSupplierOnly) return null; // redirecting to the supplier portal
+  if (activeIsSupplier) return null; // redirecting to the supplier portal
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }

@@ -62,8 +62,10 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
     expect(marked).toEqual(["e1"]); // only the success is stamped notified
     expect(failures).toEqual([["e2", "smtp down"]]); // the failure is retried later
     // Portal deep link is built per-escalation; the PII-free projection forwarded.
+    // ?w pins the workspace so a supplier serving several merchants lands on the
+    // right one (their active workspace may be a different merchant).
     expect(sentInputs[0]!.portalUrl).toBe(
-      "https://app.example.com/supplier/cases/e1",
+      "https://app.example.com/supplier/cases/e1?w=t1",
     );
     expect(sentInputs[0]).toMatchObject({
       tenantId: "t1",

@@ -11,8 +11,10 @@ import type {
 export const qk = {
   authSession: ["auth-session"] as const,
   workspaces: ["workspaces"] as const, // NOT workspace-scoped
+  supplierWorkspaces: ["supplier-workspaces"] as const, // identity-scoped, cross-org
   openRouterPricing: ["openrouter-pricing"] as const, // NOT workspace-scoped
   me: (w: string) => ["me", w] as const,
+  supplierSession: (w: string) => ["supplier-session", w] as const,
 
   today: (w: string) => ["today", w] as const,
   cases: (w: string, f: CasesFilter, page: number, limit: number) =>
@@ -54,6 +56,7 @@ export const qk = {
 /** Everything scoped to a workspace shares this prefix — invalidate on switch. */
 export const workspaceScopedKeyPrefixes = [
   "me",
+  "supplier-session",
   "today",
   "cases",
   "case",

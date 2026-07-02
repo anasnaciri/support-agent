@@ -4,8 +4,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import {
   auditLog,
   bindSupplierUser,
+  bindSupplierUserAllTenants,
   caseStateTransitions,
   cases,
+  createInvitation,
   createSupplier,
   ensureSupplierRole,
   getDefaultSupplier,
@@ -15,8 +17,11 @@ import {
   getSupplierForUser,
   insertEscalation,
   listOpenEscalationsForSupplier,
+  listSupplierWorkspacesForUser,
+  listTenantsWithPendingSupplierInvitationForEmail,
   makeDbClient,
   recordSupplierUpdate,
+  suppliers,
   tenants,
 } from "../src/index.js";
 
@@ -96,6 +101,82 @@ describeIfDb("supplier-store", () => {
     expect((await getSupplierForUser(db, tenantId, user))?.id).toBe(id);
     await bindSupplierUser(db, tenantId, "wh@x.com", user); // idempotent
     expect((await getSupplierForUser(db, tenantId, user))?.id).toBe(id);
+  });
+
+  it("binds the SAME user across MULTIPLE tenants (one supplier ↔ many merchants)", async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const email = "multi@wh.com";
+    const a = (await createSupplier(db, tenantA, { name: "A", email })).id;
+    const b = (await createSupplier(db, tenantB, { name: "B", email })).id;
+    const user = randomUUID();
+
+    await bindSupplierUserAllTenants(db, email, user);
+
+    // Bound in BOTH tenants — the old global unique would have blocked the 2nd.
+    expect((await getSupplierForUser(db, tenantA, user))?.id).toBe(a);
+    expect((await getSupplierForUser(db, tenantB, user))?.id).toBe(b);
+
+    // Idempotent — a second bootstrap is a no-op, not a unique violation.
+    await bindSupplierUserAllTenants(db, email, user);
+    expect((await getSupplierForUser(db, tenantB, user))?.id).toBe(b);
+  });
+
+  it("still rejects binding the same user to two supplier rows WITHIN one tenant", async () => {
+    const tenantId = await seedTenant();
+    const a = (await createSupplier(db, tenantId, { name: "A", email: "one@wh.com" }))
+      .id;
+    const b = (await createSupplier(db, tenantId, { name: "B", email: "two@wh.com" }))
+      .id;
+    const user = randomUUID();
+    await bindSupplierUser(db, tenantId, "one@wh.com", user);
+    expect((await getSupplierForUser(db, tenantId, user))?.id).toBe(a);
+
+    // Forcing the same uuid onto a 2nd row in the same tenant must violate
+    // suppliers_tenant_user_unique.
+    await expect(
+      db.update(suppliers).set({ userDecisionUuid: user }).where(eq(suppliers.id, b)),
+    ).rejects.toThrow();
+  });
+
+  it("listSupplierWorkspacesForUser returns every bound tenant, oldest-first", async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const email = "list@wh.com";
+    await createSupplier(db, tenantA, { name: "Store A", email });
+    await createSupplier(db, tenantB, { name: "Store B", email });
+    const user = randomUUID();
+    await bindSupplierUserAllTenants(db, email, user);
+
+    const ws = await listSupplierWorkspacesForUser(db, user);
+    const ids = ws.map((w) => w.id);
+    expect(ids).toContain(tenantA);
+    expect(ids).toContain(tenantB);
+    // oldest-first: tenantA (seeded first) precedes tenantB.
+    expect(ids.indexOf(tenantA)).toBeLessThan(ids.indexOf(tenantB));
+    // Rows carry the WORKSPACE (tenant) projection — name + shopifyDomain.
+    const rowA = ws.find((w) => w.id === tenantA)!;
+    expect(rowA.name).toBe("Supplier Test");
+    expect(rowA.shopifyDomain).toBeNull();
+    // An unbound user sees nothing.
+    expect(await listSupplierWorkspacesForUser(db, randomUUID())).toHaveLength(0);
+  });
+
+  it("listTenantsWithPendingSupplierInvitationForEmail returns tenants with a pending invite", async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const email = "pending@wh.com";
+    const roleA = await ensureSupplierRole(db, tenantA);
+    await createInvitation(db, tenantA, { email, roleId: roleA });
+    // tenantB has a supplier row but NO pending invite.
+    await createSupplier(db, tenantB, { name: "B", email });
+
+    const tenantIds = await listTenantsWithPendingSupplierInvitationForEmail(
+      db,
+      "PENDING@wh.com",
+    );
+    expect(tenantIds).toContain(tenantA);
+    expect(tenantIds).not.toContain(tenantB);
   });
 
   it("lists ONLY a supplier's own open escalations with the minimal privacy projection", async () => {

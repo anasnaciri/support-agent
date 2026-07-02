@@ -22,6 +22,7 @@ import {
   parseSidebarWidth,
 } from "@/lib/sidebar-width";
 import { IconRail } from "./IconRail";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { SettingsNav } from "./settings-nav";
 import { CasesSidebar } from "./CasesSidebar";
 import { caseIdFromPathname } from "@/lib/cases-sidebar-data";
@@ -169,9 +170,14 @@ export function AppShell({
         )}
       >
         <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
-          <span className="text-sm font-semibold tracking-tight">
-            Supplier portal
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold tracking-tight">
+              Supplier portal
+            </span>
+            {/* Cross-org switcher: a supplier serving several merchants (and a
+                dual-role user with their own store) switches workspaces here. */}
+            <WorkspaceSwitcher variant="header" />
+          </div>
           <div className="flex items-center gap-3">
             {email ? (
               <span className="text-xs text-muted-foreground">{email}</span>

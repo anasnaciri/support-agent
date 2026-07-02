@@ -194,6 +194,26 @@ export const getWorkspaces = async (
   okBody("/workspaces", ctx) as Promise<WorkspacesResponse>;
 
 /**
+ * Every merchant workspace the signed-in SUPPLIER is bound to, across all orgs
+ * (identity-only; sends no x-workspace-id). Also completes the cross-tenant
+ * bootstrap server-side. Feeds the unified switcher's supplier entries.
+ */
+export const getSupplierWorkspaces = async (
+  ctx: CallCtx = {},
+): Promise<WorkspacesResponse> =>
+  okBody("/supplier/workspaces", ctx) as Promise<WorkspacesResponse>;
+
+/**
+ * Binding-anchored supplier permissions for the ACTIVE workspace (needs
+ * x-workspace-id). Used instead of POST /me/session when the active workspace is
+ * a supplier one — that endpoint resolves via org and would 404 across orgs.
+ */
+export const getSupplierSession = async (
+  ctx: CallCtx,
+): Promise<MePermissionsResponse> =>
+  okBody("/supplier/session", ctx) as Promise<MePermissionsResponse>;
+
+/**
  * Reconcile any pending invite + load the member's effective permissions for
  * the active workspace (POST because it may write the reconcile). Seeds the
  * permission set the nav gates on.

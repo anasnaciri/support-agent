@@ -167,10 +167,7 @@ export function IconRail({
 
         {workspaces && workspaces.length > 0 && activeWorkspace ? (
           <div className="mt-3 flex w-full items-center gap-3">
-            <WorkspaceSwitcher
-              workspaces={workspaces}
-              activeWorkspaceId={activeWorkspace.id}
-            />
+            <WorkspaceSwitcher />
             <span className={RAIL_LABEL}>{activeWorkspace.name}</span>
           </div>
         ) : null}

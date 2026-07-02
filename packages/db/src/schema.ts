@@ -987,12 +987,14 @@ export type MemberInvitationInsert = typeof memberInvitations.$inferInsert;
 // Supplier portal (master-plan §19 / supplier-escalation loop)
 // ---------------------------------------------------------------------------
 
-// A supplier/warehouse entity scoped to one workspace (decision: one supplier ↔
-// one workspace). Created at invite time so an escalation can target it before
-// the supplier ever signs in; `user_decision_uuid` is bound on their first
-// authenticated load (mirrors member_role_assignments). A supplier is a heavily
-// constrained WorkOS member with the "Supplier" RBAC role — these rows just hold
-// the named identity + the case-visibility binding.
+// A supplier/warehouse entity scoped to one workspace. Created at invite time so
+// an escalation can target it before the supplier ever signs in;
+// `user_decision_uuid` is bound on their first authenticated load (mirrors
+// member_role_assignments). A supplier is a heavily constrained WorkOS member
+// with the "Supplier" RBAC role — these rows just hold the named identity + the
+// case-visibility binding. One WorkOS user (userDecisionUuid) may be bound to
+// MANY workspaces (one supplier ↔ many merchants); supplier-portal access is
+// anchored by this binding, org-independent (see resolveSupplierAuth).
 export const suppliers = pgTable(
   "suppliers",
   {
@@ -1012,10 +1014,13 @@ export const suppliers = pgTable(
       t.tenantId,
       sql`lower(${t.email})`,
     ),
-    // A WorkOS user maps to at most one supplier (one supplier ↔ one workspace).
-    uniqueIndex("suppliers_user_unique")
-      .on(t.userDecisionUuid)
+    // A WorkOS user binds to at most one supplier row PER tenant, but may be
+    // bound across many tenants (one supplier ↔ many merchants).
+    uniqueIndex("suppliers_tenant_user_unique")
+      .on(t.tenantId, t.userDecisionUuid)
       .where(sql`${t.userDecisionUuid} IS NOT NULL`),
+    // Cross-tenant lookup: every workspace a signed-in supplier can switch to.
+    index("suppliers_user_idx").on(t.userDecisionUuid),
     index("suppliers_tenant_idx").on(t.tenantId),
   ],
 );

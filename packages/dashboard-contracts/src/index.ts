@@ -718,6 +718,50 @@ export interface WorkspacesResponse {
   readonly defaultWorkspaceId: string | null;
 }
 
+// The workspace switcher spans BOTH roles: one person can be a MERCHANT in one
+// workspace and a SUPPLIER in another (org-independent binding). Each entry is
+// tagged so the switcher routes to the right surface and the session loads the
+// right permissions. Merchant entries come from the org-scoped list; supplier
+// entries from the binding-anchored list (cross-org). Shared by both dashboards.
+
+export type WorkspaceKind = "merchant" | "supplier";
+
+export interface UnifiedWorkspace extends WorkspaceSummary {
+  readonly kind: WorkspaceKind;
+}
+
+/**
+ * Merge the merchant + supplier workspace lists into one switcher list. Merchant
+ * entries are included only when the user actually has merchant access
+ * (`includeMerchant` — else the org-scoped list would over-list workspaces to a
+ * pure supplier who merely belongs to the merchant's WorkOS org). A workspace in
+ * both lists is a merchant entry (merchant wins). Order: merchant first (already
+ * default-ordered), then supplier-only workspaces.
+ */
+export const mergeWorkspaces = (
+  merchant: ReadonlyArray<WorkspaceSummary>,
+  supplier: ReadonlyArray<WorkspaceSummary>,
+  includeMerchant: boolean,
+): ReadonlyArray<UnifiedWorkspace> => {
+  const out: UnifiedWorkspace[] = [];
+  const seen = new Set<string>();
+  if (includeMerchant) {
+    for (const w of merchant) {
+      out.push({ ...w, kind: "merchant" });
+      seen.add(w.id);
+    }
+  }
+  for (const w of supplier) {
+    if (seen.has(w.id)) continue;
+    out.push({ ...w, kind: "supplier" });
+  }
+  return out;
+};
+
+/** Where selecting a workspace of this kind lands the user. */
+export const surfaceHomeForKind = (kind: WorkspaceKind): string =>
+  kind === "supplier" ? "/supplier/cases" : "/";
+
 export interface CreateWorkspaceResult {
   readonly workspaceId: string;
 }

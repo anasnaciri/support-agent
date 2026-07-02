@@ -239,6 +239,13 @@
       "when": 1782911200000,
       "tag": "0033_approval_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782911300000,
+      "tag": "0034_supplier_multi_tenant",
+      "breakpoints": true
     }
   ]
 }

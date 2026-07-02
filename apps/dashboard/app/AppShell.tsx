@@ -12,7 +12,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import type {
   RbacPermissionId,
-  WorkspaceSummary,
+  UnifiedWorkspace,
 } from "@support-agent/dashboard-contracts";
 
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ import {
   clampSidebarWidth,
 } from "@/lib/sidebar-width";
 import { IconRail } from "./IconRail";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { SettingsNav } from "./settings/_components/settings-nav";
 import { CasesSidebar } from "./cases/_components/CasesSidebar";
 import { caseIdFromPathname } from "./cases/_components/cases-sidebar-data";
@@ -40,7 +41,7 @@ interface SecondarySection {
 interface Props {
   readonly email: string | null;
   /** Workspaces for the rail's switcher; null → signed out / pre-onboarding. */
-  readonly workspaces: ReadonlyArray<WorkspaceSummary> | null;
+  readonly workspaces: ReadonlyArray<UnifiedWorkspace> | null;
   readonly activeWorkspaceId: string | null;
   /** Member's effective permissions for nav gating; null → fail-open (show all). */
   readonly permissions: ReadonlyArray<RbacPermissionId> | null;
@@ -140,9 +141,20 @@ export function AppShell({
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
-          <span className="text-sm font-semibold tracking-tight">
-            Supplier portal
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold tracking-tight">
+              Supplier portal
+            </span>
+            {/* Cross-org switcher: a supplier serving several merchants (and a
+                dual-role user with their own store) switches workspaces here. */}
+            {workspaces && activeWorkspaceId ? (
+              <WorkspaceSwitcher
+                variant="header"
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspaceId}
+              />
+            ) : null}
+          </div>
           <div className="flex items-center gap-3">
             {email ? (
               <span className="text-xs text-muted-foreground">{email}</span>

@@ -5,7 +5,7 @@ import { errorResponseSchema } from "../platform/schemas.js";
 import type { ApiHandler, RouteContext } from "../platform/context.js";
 import type { ApiConfig, ApiLayer } from "../bootstrap.js";
 import { sendJson } from "../platform/http.js";
-import { authenticateDashboard, runWithDb } from "./dashboard-context.js";
+import { authenticateSupplier, runWithDb } from "./dashboard-context.js";
 import { decideSupplierAuthz } from "./dashboard-authz.js";
 
 /**
@@ -21,7 +21,7 @@ export const enforceSupplierPermission = async (
   res: FastifyReply,
   permission: RbacPermissionId,
 ): Promise<boolean> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
+  const auth = await authenticateSupplier(cfg, layer, req);
   if (!auth.ok) {
     sendJson(res, auth.status, { error: auth.error });
     return false;

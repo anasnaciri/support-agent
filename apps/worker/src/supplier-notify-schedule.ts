@@ -93,8 +93,10 @@ export const fireSupplierNotificationsOnce = async (
       tenantId: TenantId(esc.tenantId),
       escalationId: esc.id,
       supplierEmail: esc.supplierEmail,
+      // ?w pins the workspace so a supplier serving several merchants lands on
+      // the right one (their active workspace may be a different merchant).
       portalUrl: deps.portalBaseUrl
-        ? `${deps.portalBaseUrl}/supplier/cases/${esc.id}`
+        ? `${deps.portalBaseUrl}/supplier/cases/${esc.id}?w=${esc.tenantId}`
         : null,
       problem: esc.problem,
       orderRef: esc.orderRef,

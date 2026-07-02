@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
+import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
   auditLog,
   caseStateTransitions,
   caseSupplierEscalations,
   cases,
+  memberInvitations,
   rolePermissions,
   roles,
   suppliers,
+  tenants,
 } from "./schema.js";
 
 // Plain DrizzleDb access for the supplier portal — mirrors member-rbac-store.ts
@@ -127,9 +130,10 @@ export const getSupplierByEmail = async (
 };
 
 /**
- * The workspace's default supplier (one supplier ↔ one workspace). When a
- * workspace has more than one supplier row, escalation routing v1 targets the
- * oldest; per-vendor routing is a later follow-up.
+ * The workspace's default supplier. When a workspace has more than one supplier
+ * row, escalation routing v1 targets the oldest; per-vendor routing is a later
+ * follow-up. (A supplier may serve many workspaces, but each workspace still
+ * routes escalations to a single supplier here.)
  */
 export const getDefaultSupplier = async (
   db: DrizzleDb,
@@ -188,6 +192,73 @@ export const getSupplierForUser = async (
     )
     .limit(1);
   return rows[0] ?? null;
+};
+
+/**
+ * Bind a signed-in WorkOS user to EVERY supplier row matching their email,
+ * across all tenants (one supplier ↔ many merchants). Runs on the supplier
+ * portal's identity-only bootstrap (`GET /dashboard/supplier/workspaces`).
+ * Idempotent — only fills currently-unbound rows, so an already-bound tenant is
+ * skipped and the per-tenant unique (tenant_id, user_decision_uuid) can't trip.
+ */
+export const bindSupplierUserAllTenants = async (
+  db: DrizzleDb,
+  email: string,
+  userDecisionUuid: string,
+): Promise<void> => {
+  await db
+    .update(suppliers)
+    .set({ userDecisionUuid })
+    .where(
+      and(
+        sql`lower(${suppliers.email}) = lower(${email})`,
+        sql`${suppliers.userDecisionUuid} IS NULL`,
+      ),
+    );
+};
+
+/**
+ * Every workspace (tenant) a signed-in supplier is bound to — the cross-org
+ * source for the supplier portal's workspace switcher. Ordered oldest-first
+ * (id ASC tiebreak) to match `defaultWorkspaceOrder`. Org is NOT consulted;
+ * membership here is purely the `suppliers` binding.
+ */
+export const listSupplierWorkspacesForUser = async (
+  db: DrizzleDb,
+  userDecisionUuid: string,
+): Promise<ReadonlyArray<WorkspaceRow>> =>
+  db
+    .select({
+      id: tenants.id,
+      name: tenants.name,
+      createdAt: tenants.createdAt,
+      shopifyDomain: tenants.shopifyDomain,
+    })
+    .from(suppliers)
+    .innerJoin(tenants, eq(tenants.id, suppliers.tenantId))
+    .where(eq(suppliers.userDecisionUuid, userDecisionUuid))
+    .orderBy(asc(tenants.createdAt), asc(tenants.id));
+
+/**
+ * Tenant ids with a still-pending invitation for this email — scopes the
+ * cross-tenant reconcile loop on supplier bootstrap (a supplier invited by a
+ * new merchant gets their per-tenant Supplier role assignment on next load,
+ * regardless of which org's session they signed into).
+ */
+export const listTenantsWithPendingSupplierInvitationForEmail = async (
+  db: DrizzleDb,
+  email: string,
+): Promise<ReadonlyArray<string>> => {
+  const rows = await db
+    .select({ tenantId: memberInvitations.tenantId })
+    .from(memberInvitations)
+    .where(
+      and(
+        sql`lower(${memberInvitations.email}) = lower(${email})`,
+        eq(memberInvitations.status, "pending"),
+      ),
+    );
+  return [...new Set(rows.map((r) => r.tenantId))];
 };
 
 // ---------------------------------------------------------------------------

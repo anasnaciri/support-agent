@@ -13,6 +13,7 @@ import {
   findTenantIdByWorkosOrg,
   findWorkspaceForOrg,
   getMemberAccess,
+  getSupplierForUser,
   type DrizzleDb,
 } from "@support-agent/db";
 import { type RbacPermissionId } from "@support-agent/dashboard-contracts";
@@ -193,6 +194,116 @@ export const authenticateDashboard = async (
   const result = await resolveDashboardAuth(layer, req);
   store[kDashAuth] = result;
   return result;
+};
+
+// Per-request memo for the supplier auth path (parallels kDashAuth) so the RBAC
+// guard in supplierGet/supplierPost and the handler share ONE resolution.
+const kSupplierAuth = Symbol("supplierAuth");
+
+/**
+ * Org-INDEPENDENT supplier auth. Verify the credential for IDENTITY ONLY, then
+ * resolve the tenant purely from the `x-workspace-id` header VALIDATED BY THE
+ * SUPPLIER BINDING (a `suppliers` row for this user in that workspace). The
+ * JWT's `org_id` is deliberately NOT consulted — a supplier reaches a merchant's
+ * tenant because they're bound to it, not because they belong to that WorkOS org
+ * (a supplier serves merchants across many orgs). A workspace the supplier isn't
+ * bound to → 404 (disclosure-safe, mirrors `findWorkspaceForOrg`).
+ */
+export const resolveSupplierAuth = async (
+  layer: ApiLayer,
+  req: FastifyRequest,
+): Promise<DashboardAuthResult> => {
+  const verifier = getDashboardVerifier(req);
+  if (!verifier) {
+    return { ok: false, status: 503, error: "dashboard_api_not_configured" };
+  }
+  const parsed = await authenticateDashboardCredential(
+    req.headers as Record<string, string | undefined>,
+    verifier,
+    getDashboardSessionCodec(req),
+  );
+  if (!parsed.ok) {
+    return { ok: false, status: parsed.status, error: parsed.message };
+  }
+  if (!parsed.userId) {
+    return { ok: false, status: 401, error: "missing_user" };
+  }
+  if (parsed.workspaceId === undefined) {
+    return { ok: false, status: 400, error: "missing_workspace" };
+  }
+  if (!isWorkspaceIdShape(parsed.workspaceId)) {
+    return { ok: false, status: 400, error: "invalid_workspace_id" };
+  }
+  const workspaceId = parsed.workspaceId;
+  const userId = parsed.userId;
+  const supplier = await runWithDb(layer, (db) =>
+    getSupplierForUser(db, workspaceId, userId),
+  );
+  if (!supplier) {
+    return { ok: false, status: 404, error: "workspace_not_found" };
+  }
+  return {
+    ok: true,
+    tenantId: workspaceId,
+    organizationId: parsed.organizationId,
+    userId,
+    workosUserId: parsed.workosUserId,
+    userEmail: parsed.userEmail,
+  };
+};
+
+export const authenticateSupplier = async (
+  _cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+): Promise<DashboardAuthResult> => {
+  const store = req as unknown as Record<symbol, DashboardAuthResult | undefined>;
+  const cached = store[kSupplierAuth];
+  if (cached) return cached;
+  const result = await resolveSupplierAuth(layer, req);
+  store[kSupplierAuth] = result;
+  return result;
+};
+
+export type SupplierIdentityResult =
+  | {
+      readonly ok: true;
+      readonly userId: string;
+      readonly workosUserId: string | undefined;
+      readonly userEmail: string | undefined;
+    }
+  | { readonly ok: false; readonly status: number; readonly error: string };
+
+/**
+ * Identity-only auth for the supplier bootstrap endpoint
+ * (`GET /dashboard/supplier/workspaces`): verify the credential and require a
+ * user, but require NO `x-workspace-id` and consult NO org — the caller lists
+ * the workspaces the user is bound to across all orgs.
+ */
+export const authenticateSupplierIdentity = async (
+  req: FastifyRequest,
+): Promise<SupplierIdentityResult> => {
+  const verifier = getDashboardVerifier(req);
+  if (!verifier) {
+    return { ok: false, status: 503, error: "dashboard_api_not_configured" };
+  }
+  const parsed = await authenticateDashboardCredential(
+    req.headers as Record<string, string | undefined>,
+    verifier,
+    getDashboardSessionCodec(req),
+  );
+  if (!parsed.ok) {
+    return { ok: false, status: parsed.status, error: parsed.message };
+  }
+  if (!parsed.userId) {
+    return { ok: false, status: 401, error: "missing_user" };
+  }
+  return {
+    ok: true,
+    userId: parsed.userId,
+    workosUserId: parsed.workosUserId,
+    userEmail: parsed.userEmail,
+  };
 };
 
 /**

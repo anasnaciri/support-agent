@@ -6,7 +6,9 @@ import {
   handleSupplierCase,
   handleSupplierCases,
   handleSupplierInvite,
+  handleSupplierSession,
   handleSupplierUpdate,
+  handleSupplierWorkspaces,
 } from "./handlers.js";
 
 export const registerSupplierRoutes = (
@@ -14,7 +16,21 @@ export const registerSupplierRoutes = (
   ctx: RouteContext,
 ): void => {
   const { supplierGet, supplierPost } = makeSupplierRoutes(app, ctx);
-  const { dashboardPost } = makeDashboardRoutes(app, ctx);
+  const { dashboardGet, dashboardPost } = makeDashboardRoutes(app, ctx);
+
+  // Supplier bootstrap + switcher — identity-only / binding-anchored, so NOT
+  // gated by supplierGet (which needs an x-workspace-id + supplier.cases.* the
+  // caller doesn't have yet at bootstrap). Each handler self-authenticates.
+  dashboardGet(
+    "/dashboard/supplier/workspaces",
+    "Every workspace the signed-in supplier is bound to (across orgs)",
+    handleSupplierWorkspaces,
+  );
+  dashboardGet(
+    "/dashboard/supplier/session",
+    "Binding-anchored supplier permissions for the active workspace",
+    handleSupplierSession,
+  );
 
   // Supplier-facing surface — gated on the constrained supplier.cases.* and
   // walled off from merchant endpoints by decideSupplierAuthz.

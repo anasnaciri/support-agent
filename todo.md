@@ -6,6 +6,61 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — Suppliers bound to MANY merchants + unified workspace switcher (NOT committed / NOT deployed)
+
+Supersedes the "one supplier ↔ one workspace" decision. A supplier is now an
+**org-independent, binding-anchored** identity that can be bound to many merchant
+workspaces and switch between them in the frontend; the switcher is **unified**
+(one list across a person's merchant AND supplier workspaces).
+
+- [x] **DB** (`packages/db/src/schema.ts`, migration `0034_supplier_multi_tenant.sql` + journal):
+      dropped the global `suppliers_user_unique`; added per-tenant
+      `suppliers_tenant_user_unique` + a `suppliers_user_idx` lookup. Hand-authored
+      SQL + journal-only (snapshot chain already broken past 0030 — do **not**
+      `db:generate`). Applied to the dev DB.
+- [x] **Store** (`supplier-store.ts`): `bindSupplierUserAllTenants`,
+      `listSupplierWorkspacesForUser`, `listTenantsWithPendingSupplierInvitationForEmail`.
+      TDD: 4 new integration tests (multi-tenant bind allowed; per-tenant unique still
+      enforced; cross-org list; pending-invite list).
+- [x] **Org-independent auth** (`apps/api/src/auth/dashboard-context.ts`):
+      `resolveSupplierAuth`/`authenticateSupplier` resolve the tenant from
+      `x-workspace-id` **validated by the `suppliers` binding** — the JWT's org is
+      NOT consulted (no `findWorkspaceForOrg`). No-binding → 404 (disclosure-safe).
+      `authenticateSupplierIdentity` for the bootstrap. The 3 supplier handlers +
+      `enforceSupplierPermission` swapped to it; `decideSupplierAuthz` unchanged.
+      **INVARIANT**: supplier portal access is by binding, never by org membership.
+- [x] **Endpoints** (`suppliers/handlers.ts` + `routes.ts`):
+      `GET /dashboard/supplier/workspaces` (identity-only; also does the cross-tenant
+      bind + reconcile bootstrap — email resolved from WorkOS by verified `sub`, NEVER
+      the `x-user-email` header) and `GET /dashboard/supplier/session` (binding-anchored
+      per-workspace permissions). Registered via `dashboardGet` (no permission arg).
+- [x] **Shared helper** (`packages/dashboard-contracts`): `mergeWorkspaces` +
+      `UnifiedWorkspace`/`WorkspaceKind` + `surfaceHomeForKind`, imported by both apps.
+- [x] **SPA** (`apps/dashboard-spa`): `session-context` sources merchant (org) +
+      supplier (binding) workspaces, merges them (merchant included only when the
+      probe grants `cases.view`), and loads permissions per ACTIVE workspace kind
+      (`/me/session` vs `/supplier/session`). `setActiveWorkspace` routes by kind;
+      `WorkspaceSwitcher` is kind-aware (rail + new `header` variant, shown in the
+      supplier bare shell); `?w=<tenantId>` deep-link pins the workspace. 4 pure tests.
+- [x] **Next parity** (`apps/dashboard`): `getDashboardContext`/`getShellWorkspaces`
+      merge + per-kind permissions; `switchWorkspaceAction` routes by kind;
+      `WorkspaceSwitcher`/`AppShell`/`IconRail` on `UnifiedWorkspace`.
+- [x] **Worker**: supplier notification deep-link now carries `?w=<tenantId>`.
+- [x] Verified: root `pnpm build` green; dev `db:migrate` applied 0034;
+      27 targeted tests green (11 db store, 2 api cross-org e2e incl.
+      x-workspace-id=tenantB under JWT orgA → returns B, no-binding → 404, 6 authz
+      unit, 8 SPA logic); full SPA suite 385 green; both dashboards typecheck.
+- [ ] **Follow-ups**: (1) `?w` deep-link pin is SPA-only — the Next RSC path still
+      lands on the cookie default; (2) `/dashboard/supplier/workspaces` runs a WorkOS
+      `getEmail` + no-op bind on every bootstrap (react-query `staleTime` bounds the
+      SPA; the Next RSC path pays it per page — optimize by short-circuiting when a
+      binding already exists); (3) merchant portion of the switcher is all-or-nothing
+      per org (pre-existing over-listing); per-tenant merchant filtering is deferred;
+      (4) NOT committed, NOT deployed — needs api+worker redeploy (Fly) + both
+      dashboards redeploy (CF), and prod `db:migrate` for 0034.
+
+---
+
 ### 2026-07-02 — Dashboard SPA deployed to Cloudflare Workers
 
 - [x] Deployed `apps/dashboard-spa` to Cloudflare with

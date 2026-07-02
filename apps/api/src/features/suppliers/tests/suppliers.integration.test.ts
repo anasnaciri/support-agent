@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   caseSupplierEscalations,
   cases,
+  createInvitation,
+  createSupplier,
+  ensureSupplierRole,
   getSupplierByEmail,
+  getSupplierForUser,
   insertEscalation,
   makeDbClient,
   memberInvitations,
@@ -31,6 +35,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
   const org = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
+  // A SECOND merchant under a DIFFERENT WorkOS org — the cross-org supplier case.
+  const orgB = `org_${randomUUID().slice(0, 8)}`;
+  const tenantB = randomUUID();
 
   const adminWorkos = "user_sup_admin";
   const supplierWorkos = "user_sup_wh";
@@ -81,26 +88,36 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
   const headers = (
     userId?: string,
     email?: string,
+    workspaceId?: string,
   ): Record<string, string> =>
     dashboardAuthHeaders(
       org,
       {
         "content-type": "application/json",
         ...(email ? { "x-user-email": email } : {}),
+        // The supplier portal pins the active workspace by header; the JWT org
+        // stays `org` (orgA) so the cross-org calls prove org is not consulted.
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       },
       userId ? (workosByUuid[userId] ?? userId) : "user_unassigned",
     );
-  const get = (path: string, userId?: string, email?: string): Promise<Response> =>
-    fetch(`${baseUrl}${path}`, { headers: headers(userId, email) });
+  const get = (
+    path: string,
+    userId?: string,
+    email?: string,
+    workspaceId?: string,
+  ): Promise<Response> =>
+    fetch(`${baseUrl}${path}`, { headers: headers(userId, email, workspaceId) });
   const post = (
     path: string,
     body: unknown,
     userId?: string,
     email?: string,
+    workspaceId?: string,
   ): Promise<Response> =>
     fetch(`${baseUrl}${path}`, {
       method: "POST",
-      headers: headers(userId, email),
+      headers: headers(userId, email, workspaceId),
       body: JSON.stringify(body),
     });
 
@@ -109,6 +126,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     await raw.db
       .insert(tenants)
       .values({ id: tenantId, name: "Supplier-int", workosOrganizationId: org });
+    await raw.db
+      .insert(tenants)
+      .values({ id: tenantB, name: "Supplier-int-B", workosOrganizationId: orgB });
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
       workosUserDirectory: directory,
@@ -116,28 +136,34 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     baseUrl = `http://localhost:${handle.port}`;
   });
 
-  afterAll(async () => {
+  const cleanupTenant = async (id: string): Promise<void> => {
     if (!raw) return;
-    if (handle) await handle.close();
     // children first (cases cascade escalations; tenant cascade does the rest).
-    await raw.db.delete(cases).where(eq(cases.tenantId, tenantId));
+    await raw.db.delete(cases).where(eq(cases.tenantId, id));
     await raw.db
       .delete(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.tenantId, tenantId));
-    await raw.db.delete(suppliers).where(eq(suppliers.tenantId, tenantId));
+      .where(eq(caseSupplierEscalations.tenantId, id));
+    await raw.db.delete(suppliers).where(eq(suppliers.tenantId, id));
     await raw.db
       .delete(memberInvitations)
-      .where(eq(memberInvitations.tenantId, tenantId));
+      .where(eq(memberInvitations.tenantId, id));
     await raw.db
       .delete(memberRoleAssignments)
-      .where(eq(memberRoleAssignments.tenantId, tenantId));
+      .where(eq(memberRoleAssignments.tenantId, id));
     await raw.db
       .delete(rolePermissions)
       .where(
-        sql`${rolePermissions.roleId} IN (SELECT id FROM roles WHERE tenant_id = ${tenantId})`,
+        sql`${rolePermissions.roleId} IN (SELECT id FROM roles WHERE tenant_id = ${id})`,
       );
-    await raw.db.delete(roles).where(eq(roles.tenantId, tenantId));
-    await raw.db.delete(tenants).where(eq(tenants.id, tenantId));
+    await raw.db.delete(roles).where(eq(roles.tenantId, id));
+    await raw.db.delete(tenants).where(eq(tenants.id, id));
+  };
+
+  afterAll(async () => {
+    if (!raw) return;
+    if (handle) await handle.close();
+    await cleanupTenant(tenantId);
+    await cleanupTenant(tenantB);
     await raw.close();
   });
 
@@ -197,8 +223,14 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       trackingNumber: "TRK-1",
     });
 
-    // 4) Supplier sees ONLY the minimal projection — no customer PII.
-    const list = await get("/dashboard/supplier/cases", supplierUuid, "wh@acme.com");
+    // 4) Supplier sees ONLY the minimal projection — no customer PII. Pins the
+    // active workspace by header (binding-anchored auth requires x-workspace-id).
+    const list = await get(
+      "/dashboard/supplier/cases",
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
     expect(list.status).toBe(200);
     const listed = ((await list.json()) as { cases: Array<Record<string, unknown>> })
       .cases;
@@ -218,24 +250,26 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     );
     expect(JSON.stringify(listed[0])).not.toContain("cust@example.com");
 
-    // 5) Owner previewing the supplier surface isn't a supplier → empty.
+    // 5) Owner previewing the supplier surface has no supplier binding for this
+    // workspace → 404 (binding-anchored auth; disclosure-safe, not an empty 200).
     const ownerList = await get(
       "/dashboard/supplier/cases",
       adminUuid,
       "admin@acme.com",
+      tenantId,
     );
-    expect(ownerList.status).toBe(200);
-    expect(
-      ((await ownerList.json()) as { cases: unknown[] }).cases,
-    ).toHaveLength(0);
+    expect(ownerList.status).toBe(404);
 
-    // 6) A signed-in stranger with no assignment is denied (no open-mode bypass).
+    // 6) A signed-in stranger with no supplier binding → 404 (no disclosure) —
+    // the binding check precedes decideSupplierAuthz (whose 403 path is unit-
+    // tested in auth/tests/supplier-authz.test.ts).
     const stranger = await get(
       "/dashboard/supplier/cases",
       strangerUuid,
       "stranger@acme.com",
+      tenantId,
     );
-    expect(stranger.status).toBe(403);
+    expect(stranger.status).toBe(404);
 
     // 7) Supplier posts an update → escalation resolved + case flipped, in ONE tx.
     const update = await post(
@@ -243,6 +277,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       { note: "Reshipped via DHL; new ETA Friday.", proposedResolution: "reship" },
       supplierUuid,
       "wh@acme.com",
+      tenantId,
     );
     expect(update.status).toBe(200);
     expect(((await update.json()) as { resumed: boolean }).resumed).toBe(true);
@@ -268,6 +303,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       { note: "again" },
       supplierUuid,
       "wh@acme.com",
+      tenantId,
     );
     expect(again.status).toBe(409);
 
@@ -277,7 +313,114 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       { note: "x" },
       supplierUuid,
       "wh@acme.com",
+      tenantId,
     );
     expect(missing.status).toBe(404);
+  });
+
+  it("binds a supplier across ORGS + switches by x-workspace-id (org not consulted)", async () => {
+    if (!raw) return;
+
+    // tenantB is a DIFFERENT merchant under a DIFFERENT WorkOS org (orgB). Seed
+    // the Supplier role + supplier row + a PENDING invite for the same person.
+    const roleB = await ensureSupplierRole(raw.db, tenantB);
+    await createSupplier(raw.db, tenantB, {
+      name: "Acme Warehouse",
+      email: "wh@acme.com",
+    });
+    const inv = await createInvitation(raw.db, tenantB, {
+      email: "wh@acme.com",
+      roleId: roleB,
+    });
+    expect(inv.ok).toBe(true);
+
+    // The supplier's JWT org is `org` (orgA). Hitting the identity-only bootstrap
+    // binds them to tenantB's row AND reconciles the pending invite (creating the
+    // per-tenant Supplier assignment) — WITHOUT ever switching WorkOS orgs.
+    const wsRes = await get(
+      "/dashboard/supplier/workspaces",
+      supplierUuid,
+      "wh@acme.com",
+    );
+    expect(wsRes.status).toBe(200);
+    const { workspaces } = (await wsRes.json()) as {
+      workspaces: Array<{ id: string; name: string }>;
+    };
+    const wsIds = workspaces.map((w) => w.id);
+    // Both merchants show up — tenantA (bound in the first test) + cross-org tenantB.
+    expect(wsIds).toContain(tenantId);
+    expect(wsIds).toContain(tenantB);
+
+    // The cross-tenant reconcile created the Supplier role assignment in tenantB.
+    const assignB = await raw.db
+      .select({ uuid: memberRoleAssignments.userDecisionUuid })
+      .from(memberRoleAssignments)
+      .where(
+        and(
+          eq(memberRoleAssignments.tenantId, tenantB),
+          eq(memberRoleAssignments.userDecisionUuid, supplierUuid),
+        ),
+      );
+    expect(assignB).toHaveLength(1);
+    // And the binding is now resolvable in tenantB.
+    expect(await getSupplierForUser(raw.db, tenantB, supplierUuid)).not.toBeNull();
+
+    // Seed a parked case + escalation in tenantB.
+    const supplierB = await getSupplierForUser(raw.db, tenantB, supplierUuid);
+    const caseB = randomUUID();
+    await raw.db.insert(cases).values({
+      id: caseB,
+      tenantId: tenantB,
+      channel: "email",
+      status: "waiting_for_supplier",
+      currentAgentId: "missing-package-agent",
+      context: { customerEmail: "custB@example.com" },
+    });
+    const { id: escB } = await insertEscalation(raw.db, {
+      tenantId: tenantB,
+      caseId: caseB,
+      supplierId: supplierB!.id,
+      problem: "Order #B22 stuck",
+      orderRef: "#B22",
+      shipCity: "Paris",
+      shipCountry: "FR",
+      trackingNumber: "TRK-B",
+    });
+
+    // Switching to tenantB is a pure x-workspace-id swap — the JWT is still orgA,
+    // proving the supplier path never consults the org.
+    const casesB = await get(
+      "/dashboard/supplier/cases",
+      supplierUuid,
+      "wh@acme.com",
+      tenantB,
+    );
+    expect(casesB.status).toBe(200);
+    const listedB = ((await casesB.json()) as {
+      cases: Array<Record<string, unknown>>;
+    }).cases;
+    expect(listedB).toHaveLength(1);
+    expect(listedB[0]!["id"]).toBe(escB);
+
+    // Binding-anchored per-workspace permissions for the switcher.
+    const sessB = await get(
+      "/dashboard/supplier/session",
+      supplierUuid,
+      "wh@acme.com",
+      tenantB,
+    );
+    expect(sessB.status).toBe(200);
+    const permsB = (await sessB.json()) as { permissions: string[] };
+    expect(permsB.permissions).toContain("supplier.cases.view");
+
+    // A workspace the supplier has NO binding for → 404 (disclosure-safe),
+    // regardless of the JWT org.
+    const unbound = await get(
+      "/dashboard/supplier/cases",
+      supplierUuid,
+      "wh@acme.com",
+      randomUUID(),
+    );
+    expect(unbound.status).toBe(404);
   });
 });

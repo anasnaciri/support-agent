@@ -3,23 +3,32 @@ import { randomUUID } from "node:crypto";
 import { CaseId, type DomainEvent } from "@support-agent/agent-core";
 import { makeEnqueuedWorkflowEvent } from "@support-agent/services";
 import {
+  bindSupplierUserAllTenants,
   createInvitation,
   createSupplier,
   ensureActingOwnerInOpenMode,
   ensureSupplierRole,
   getEscalationForSupplier,
+  getMemberAccess,
   getSupplierByEmail,
   getSupplierForUser,
   listOpenEscalationsForSupplier,
+  listSupplierWorkspacesForUser,
+  listTenantsWithPendingSupplierInvitationForEmail,
+  reconcileInvitation,
   recordSupplierUpdate,
 } from "@support-agent/db";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { bodyStr, sendJson } from "../../platform/http.js";
 import {
   authenticateDashboard,
+  authenticateSupplier,
+  authenticateSupplierIdentity,
+  getWorkosDirectory,
   getWorkosOrgAdminDirectory,
   runWithDb,
 } from "../../auth/dashboard-context.js";
+import { sessionPermissions } from "../../auth/dashboard-authz.js";
 import { resolveInvitationId } from "../../auth/invite-send.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 
@@ -51,15 +60,16 @@ const publishSupplierUpdate = async (
 };
 
 // GET /dashboard/supplier/cases — open escalations for the logged-in supplier
-// (minimal privacy projection). An owner previewing this who isn't a supplier
-// resolves to no supplier row → empty list.
+// (minimal privacy projection). Auth is binding-anchored (authenticateSupplier):
+// a user with no supplier binding for x-workspace-id is already 404'd, so the
+// empty-list branch below only guards a redundant re-lookup.
 export const handleSupplierCases = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
+  const auth = await authenticateSupplier(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
   const userId = auth.userId;
@@ -79,7 +89,7 @@ export const handleSupplierCase = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
+  const auth = await authenticateSupplier(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
   const userId = auth.userId;
@@ -102,7 +112,7 @@ export const handleSupplierUpdate = async (
   req: FastifyRequest,
   res: FastifyReply,
 ): Promise<FastifyReply> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
+  const auth = await authenticateSupplier(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
   const userId = auth.userId;
@@ -162,6 +172,76 @@ export const handleSupplierUpdate = async (
     resumed: result.resumed,
     ticked: result.resumed,
   });
+};
+
+// GET /dashboard/supplier/workspaces — every merchant workspace the signed-in
+// supplier is bound to, ACROSS ALL ORGS, for the portal's workspace switcher.
+// Identity-only (no x-workspace-id; the JWT's org is NOT consulted). It also
+// idempotently completes the cross-tenant BOOTSTRAP: bind the user to any
+// supplier rows matching their VERIFIED email and reconcile pending supplier
+// invitations, so a supplier invited by a new merchant appears here on their
+// next load regardless of which org's session they signed into. GET-that-writes,
+// mirroring the /dashboard/me/session reconcile precedent; the write is
+// idempotent. The email is resolved from WorkOS by the verified `sub` (never the
+// spoofable x-user-email header) — a bind grants case visibility.
+export const handleSupplierWorkspaces = async (
+  _cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateSupplierIdentity(req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const userId = auth.userId;
+  const directory = getWorkosDirectory(req);
+  const email =
+    auth.workosUserId && directory
+      ? await directory.getEmail(auth.workosUserId)
+      : null;
+  const workspaces = await runWithDb(layer, async (db) => {
+    if (email) {
+      await bindSupplierUserAllTenants(db, email, userId);
+      const pendingTenants =
+        await listTenantsWithPendingSupplierInvitationForEmail(db, email);
+      for (const tenantId of pendingTenants) {
+        await reconcileInvitation(db, tenantId, {
+          email,
+          userDecisionUuid: userId,
+          ...(auth.workosUserId ? { workosUserId: auth.workosUserId } : {}),
+        });
+      }
+    }
+    return listSupplierWorkspacesForUser(db, userId);
+  });
+  return sendJson(res, 200, {
+    workspaces: workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      createdAt: w.createdAt.toISOString(),
+      shopifyDomain: w.shopifyDomain,
+    })),
+    defaultWorkspaceId: workspaces[0]?.id ?? null,
+  });
+};
+
+// GET /dashboard/supplier/session — binding-anchored per-workspace permissions
+// for the unified switcher. authenticateSupplier already validated the binding
+// for x-workspace-id (org NOT consulted), so this simply returns the effective
+// supplier permissions for that workspace. This is how the SPA loads permissions
+// when the ACTIVE workspace is a supplier one — the merchant POST
+// /dashboard/me/session would 404 for a different org's tenant.
+export const handleSupplierSession = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateSupplier(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const access = await runWithDb(layer, (db) =>
+    getMemberAccess(db, auth.tenantId, auth.userId),
+  );
+  return sendJson(res, 200, sessionPermissions(access));
 };
 
 // POST /dashboard/supplier/invite — a merchant (members.manage) invites a

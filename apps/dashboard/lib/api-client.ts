@@ -43,12 +43,14 @@ import type {
   UsageDecisionRow,
   WorkspaceSummary,
   WorkspacesResponse,
+  UnifiedWorkspace,
   MePermissionsResponse,
   MembersResponse,
   RolesResponse,
   RbacPermissionDef,
   RbacPermissionId,
 } from "@support-agent/dashboard-contracts";
+import { mergeWorkspaces } from "@support-agent/dashboard-contracts";
 import { dashboardUserDecisionUuid } from "./user-id";
 import { parseMintDenial } from "./connect-denial";
 import { WORKSPACE_COOKIE, pickActiveWorkspace } from "./workspace";
@@ -107,8 +109,12 @@ export interface DashboardContext {
   readonly tenantId: string;
   readonly tenantName: string;
   readonly workspaceId: string;
-  /** Every workspace the org owns, default first (for the switcher). */
-  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
+  /**
+   * Every workspace the user can reach — merchant (their stores) AND supplier
+   * (merchants that escalate to them), each tagged by kind, for the unified
+   * switcher.
+   */
+  readonly workspaces: ReadonlyArray<UnifiedWorkspace>;
   /** The member's effective permissions for the ACTIVE workspace (nav gating). */
   readonly permissions: ReadonlySet<RbacPermissionId>;
   /** True when the member is an owner (all-access) of the active workspace. */
@@ -212,6 +218,37 @@ const fetchMeSession = async (ctx: CallCtx): Promise<MePermissionsResponse> => {
   return body as MePermissionsResponse;
 };
 
+// Binding-anchored supplier workspaces (cross-org) for the unified switcher.
+// Identity-only; also completes the cross-tenant bootstrap server-side.
+const fetchSupplierWorkspaces = async (
+  accessToken: string,
+): Promise<WorkspacesResponse> => {
+  const { status, body } = await call("/supplier/workspaces", {
+    ctx: { accessToken },
+  });
+  if (status !== 200) {
+    throw new Error(`dashboard api ${status} on /supplier/workspaces`);
+  }
+  return body as WorkspacesResponse;
+};
+
+// Supplier permissions for the ACTIVE workspace when it's a supplier one (the
+// merchant /me/session resolves via org and would 404 across orgs).
+const fetchSupplierSession = async (
+  ctx: CallCtx,
+): Promise<MePermissionsResponse> => {
+  const { status, body } = await call("/supplier/session", { ctx });
+  if (status !== 200) {
+    throw new Error(`dashboard api ${status} on /supplier/session`);
+  }
+  return body as MePermissionsResponse;
+};
+
+// Both dashboards decide "is this user a merchant here?" the same way: do they
+// hold the merchant case-view permission for the probed workspace.
+const hasMerchantAccess = (me: MePermissionsResponse): boolean =>
+  me.permissions.includes("cases.view");
+
 /** The workspace:id cookie, or undefined. */
 const workspaceCookie = async (): Promise<string | undefined> => {
   const store = await cookies();
@@ -241,22 +278,44 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
   const { user, organizationId, accessToken } = session;
   if (!user || !accessToken) redirect(buildSignUpRedirect(await currentPathname()));
   if (!organizationId) redirect(ONBOARDING_PATH);
-  const { workspaces } = await fetchWorkspaces(accessToken);
+  const userDecisionUuid = dashboardUserDecisionUuid(user.id);
+  const userEmail = user.email ?? null;
+  // Two lists (in parallel): the org-scoped merchant workspaces and the
+  // binding-anchored supplier workspaces (cross-org). The supplier fetch also
+  // completes the cross-tenant bootstrap server-side.
+  const [{ workspaces: merchantWorkspaces }, { workspaces: supplierWorkspaces }] =
+    await Promise.all([
+      fetchWorkspaces(accessToken),
+      fetchSupplierWorkspaces(accessToken),
+    ]);
+  // Probe merchant access on the org's default workspace: only a real merchant
+  // there surfaces the org's merchant workspaces (a pure supplier merely belongs
+  // to the merchant's WorkOS org). Reused for permissions when it's the active.
+  const merchantDefault = merchantWorkspaces[0];
+  const merchantMe = merchantDefault
+    ? await fetchMeSession({ accessToken, userEmail, workspaceId: merchantDefault.id })
+    : null;
+  const workspaces = mergeWorkspaces(
+    merchantWorkspaces,
+    supplierWorkspaces,
+    merchantMe ? hasMerchantAccess(merchantMe) : false,
+  );
   // The cookie is advisory — a stale value (deleted workspace) resolves to
   // the default instead of erroring, so a delete/switch race can't strand
   // the user. The cookie itself is rewritten on the next explicit switch.
-  const active = pickActiveWorkspace(workspaces, await workspaceCookie());
+  const active = pickActiveWorkspace(workspaces, await workspaceCookie()) as
+    | UnifiedWorkspace
+    | null;
   if (!active) redirect(ONBOARDING_PATH);
-  const userDecisionUuid = dashboardUserDecisionUuid(user.id);
-  const userEmail = user.email ?? null;
-  // Reconcile any pending invite + load the member's effective access for the
-  // active workspace, so pages/nav gate on real permissions (the api still
-  // enforces independently — this only drives what the UI shows).
-  const me = await fetchMeSession({
-    accessToken,
-    userEmail,
-    workspaceId: active.id,
-  });
+  // Permissions follow the active workspace's kind. Supplier → /supplier/session
+  // (binding-anchored). Merchant → the probe if it's the default, else a fresh
+  // /me/session for the active workspace.
+  const me =
+    active.kind === "supplier"
+      ? await fetchSupplierSession({ accessToken, userEmail, workspaceId: active.id })
+      : active.id === merchantDefault?.id && merchantMe
+        ? merchantMe
+        : await fetchMeSession({ accessToken, userEmail, workspaceId: active.id });
   return {
     organizationId,
     userId: user.id,
@@ -279,7 +338,7 @@ export const getDashboardContext = async (): Promise<DashboardContext> => {
  * redirect or a crash.
  */
 export interface ShellWorkspaces {
-  readonly workspaces: ReadonlyArray<WorkspaceSummary>;
+  readonly workspaces: ReadonlyArray<UnifiedWorkspace>;
   readonly activeWorkspaceId: string;
   /**
    * The member's effective permissions for the active workspace, for nav
@@ -294,16 +353,38 @@ export const getShellWorkspaces = async (): Promise<ShellWorkspaces | null> => {
     const { session } = await getSessionState();
     const { user, organizationId, accessToken } = session;
     if (!user || !organizationId || !accessToken) return null;
-    const { workspaces } = await fetchWorkspaces(accessToken);
-    const active = pickActiveWorkspace(workspaces, await workspaceCookie());
+    const userEmail = user.email ?? null;
+    const [{ workspaces: merchantWorkspaces }, { workspaces: supplierWorkspaces }] =
+      await Promise.all([
+        fetchWorkspaces(accessToken),
+        fetchSupplierWorkspaces(accessToken),
+      ]);
+    const merchantDefault = merchantWorkspaces[0];
+    let merchantMe: MePermissionsResponse | null = null;
+    try {
+      merchantMe = merchantDefault
+        ? await fetchMeSession({ accessToken, userEmail, workspaceId: merchantDefault.id })
+        : null;
+    } catch {
+      // Fail-open: nav shows everything; the api + page guards still enforce.
+    }
+    const workspaces = mergeWorkspaces(
+      merchantWorkspaces,
+      supplierWorkspaces,
+      merchantMe ? hasMerchantAccess(merchantMe) : false,
+    );
+    const active = pickActiveWorkspace(workspaces, await workspaceCookie()) as
+      | UnifiedWorkspace
+      | null;
     if (!active) return null;
     let permissions: ReadonlyArray<RbacPermissionId> | null = null;
     try {
-      const me = await fetchMeSession({
-        accessToken,
-        userEmail: user.email ?? null,
-        workspaceId: active.id,
-      });
+      const me =
+        active.kind === "supplier"
+          ? await fetchSupplierSession({ accessToken, userEmail, workspaceId: active.id })
+          : active.id === merchantDefault?.id && merchantMe
+            ? merchantMe
+            : await fetchMeSession({ accessToken, userEmail, workspaceId: active.id });
       permissions = me.permissions;
     } catch {
       // Fail-open: nav shows everything; the api + page guards still enforce.
