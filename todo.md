@@ -6,6 +6,26 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — Dashboard SPA deployed to Cloudflare Workers
+
+- [x] Deployed `apps/dashboard-spa` to Cloudflare with
+      `pnpm --filter @support-agent/dashboard-spa cf:deploy`.
+      Worker: `support-agent-dashboard-v2`; URL:
+      `https://support-agent-dashboard-v2.12anas2000.workers.dev`; version ID:
+      `49a7c795-0f1b-4677-975c-b03989dd31e2`.
+- [x] Verification: `pnpm --filter @support-agent/dashboard-spa build` green;
+      deploy script build green; `curl -I` on `/` returned `HTTP/2 200`;
+      `curl -I` on `/cases/example` returned `HTTP/2 200` confirming the SPA
+      deep-link fallback; root `pnpm build` green. The full commit hook CI also
+      ran green after this deploy: build, migrations, and 2870 tests passing
+      / 5 skipped.
+- [ ] Ops follow-up: confirm `apps/api` production env has
+      `DASHBOARD_SPA_ORIGIN=https://support-agent-dashboard-v2.12anas2000.workers.dev`
+      and WorkOS has the matching dashboard BFF callback registered before using
+      the SPA for authenticated production traffic.
+
+---
+
 ### 2026-07-02 — Dark-mode email body paper treatment (dashboard case thread)
 
 - [x] Inbound sanitized HTML emails in the case thread now get an
