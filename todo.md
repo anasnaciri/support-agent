@@ -6,7 +6,7 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
-### 2026-07-02 — Suppliers bound to MANY merchants + unified workspace switcher (NOT committed / NOT deployed)
+### 2026-07-02 — Suppliers bound to MANY merchants + unified workspace switcher (committed `ce75c9e` on main; DEPLOYED)
 
 Supersedes the "one supplier ↔ one workspace" decision. A supplier is now an
 **org-independent, binding-anchored** identity that can be bound to many merchant
@@ -55,9 +55,14 @@ workspaces and switch between them in the frontend; the switcher is **unified**
       `getEmail` + no-op bind on every bootstrap (react-query `staleTime` bounds the
       SPA; the Next RSC path pays it per page — optimize by short-circuiting when a
       binding already exists); (3) merchant portion of the switcher is all-or-nothing
-      per org (pre-existing over-listing); per-tenant merchant filtering is deferred;
-      (4) NOT committed, NOT deployed — needs api+worker redeploy (Fly) + both
-      dashboards redeploy (CF), and prod `db:migrate` for 0034.
+      per org (pre-existing over-listing); per-tenant merchant filtering is deferred.
+- [x] **DEPLOYED** 2026-07-02: prod `0034` migrated via Fly `release_command`;
+      backend rolled to Fly (api+worker, `support-agent-backend`, image
+      `deployment-01KWHK9WVK…`, `/healthz` 200); SPA → CF
+      `support-agent-dashboard-v2` (ver `3155b6de`); Next → CF
+      `support-agent-dashboard` (ver `ce2283a5`). Smoke: api
+      `/dashboard/supplier/{workspaces,session}` → 401 (registered), SPA `/` 200,
+      Next `/` 307. NOT live-verified with a real multi-workspace supplier login.
 
 ---
 
