@@ -15,6 +15,26 @@ export interface ChatBubbleChromeInput {
   readonly sanitizedBodyHtml: string | null;
 }
 
+/**
+ * Does this sanitized email HTML style its own colors? Connectors wrap even
+ * plain-text replies in HTML, so "has HTML" says nothing — the signal for the
+ * dark-mode paper treatment is an email that hardcodes a palette (inline
+ * `color:`/`background`, legacy `bgcolor`/`<font color>`), i.e. one authored
+ * against white. Colorless HTML inherits the theme and renders fine on a dark
+ * bubble. `border-color` (quoted-reply chrome) is layout, not a palette — the
+ * lookbehind keeps `color:` from matching inside it.
+ * (Mirror of apps/dashboard-spa/lib/case-timeline.ts.)
+ */
+const OWN_COLOR_SIGNALS: ReadonlyArray<RegExp> = [
+  /(?<![-\w])color\s*:/i,
+  /background(?:-color)?\s*:/i,
+  /\bbgcolor\s*=/i,
+  /<font[^>]*\scolor\s*=/i,
+];
+
+export const emailHtmlHasOwnColors = (html: string): boolean =>
+  OWN_COLOR_SIGNALS.some((signal) => signal.test(html));
+
 export const chatBubbleChromeClass = (
   message: ChatBubbleChromeInput,
 ): string => {
@@ -25,7 +45,10 @@ export const chatBubbleChromeClass = (
       ? "rounded-br-sm bg-primary text-primary-foreground"
       : [
           "rounded-bl-sm border border-border bg-card text-foreground",
-          message.sanitizedBodyHtml ? "email-paper" : null,
+          message.sanitizedBodyHtml &&
+          emailHtmlHasOwnColors(message.sanitizedBodyHtml)
+            ? "email-paper"
+            : null,
         ]
           .filter(Boolean)
           .join(" "),

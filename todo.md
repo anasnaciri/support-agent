@@ -23,6 +23,37 @@ The single source of truth for **what's done**, **what's next**, and **what inva
       in-app Browser plugin could not start due to a local `node_repl` sandbox
       metadata error (`sandboxCwd must be an absolute file URI`), so visual
       browser verification was not completed in this session.
+- [x] Follow-up (same day): paper is now ADAPTIVE, not blanket. Connectors wrap
+      even plain-text replies in HTML, so gating on `sanitizedBodyHtml` turned
+      every inbound bubble white in dark mode. New `emailHtmlHasOwnColors`
+      classifier (inline `color:`/`background`, legacy `bgcolor=`/`<font
+      color>`; `border-color` quoted-reply chrome deliberately excluded) gates
+      `email-paper` in BOTH `chatBubbleChromeClass` copies (dashboard-spa
+      lib/case-timeline.ts + dashboard app/cases/[id]/case-timeline.ts).
+      Colorless HTML inherits the dark theme and keeps the normal bubble; only
+      emails authored against white get the white canvas. TDD red/green in both
+      mirrored test files; both builds green.
+- [ ] Known limits of the classifier to revisit if a bad email shows up: a
+      `<style>` block that survives sanitization, and transparent dark-logo
+      images on colorless emails (invisible on dark; undetectable from markup).
+
+---
+
+### 2026-07-02 — Dashboard SPA deployed to Cloudflare Workers
+
+- [x] Deployed `apps/dashboard-spa` to Cloudflare with
+      `pnpm --filter @support-agent/dashboard-spa cf:deploy`.
+      Worker: `support-agent-dashboard-v2`; URL:
+      `https://support-agent-dashboard-v2.12anas2000.workers.dev`; version ID:
+      `49a7c795-0f1b-4677-975c-b03989dd31e2`.
+- [x] Verification: `pnpm --filter @support-agent/dashboard-spa build` green;
+      deploy script build green; `curl -I` on `/` returned `HTTP/2 200`;
+      `curl -I` on `/cases/example` returned `HTTP/2 200` confirming the SPA
+      deep-link fallback; root `pnpm build` green.
+- [ ] Ops follow-up: confirm `apps/api` production env has
+      `DASHBOARD_SPA_ORIGIN=https://support-agent-dashboard-v2.12anas2000.workers.dev`
+      and WorkOS has the matching dashboard BFF callback registered before using
+      the SPA for authenticated production traffic.
 
 ---
 

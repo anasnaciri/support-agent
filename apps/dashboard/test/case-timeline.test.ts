@@ -1,12 +1,73 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCaseTimelineHref,
+  chatBubbleChromeClass,
   conversationThreadUnavailableView,
   curatedTimelineEvent,
+  emailHtmlHasOwnColors,
   formatAttachmentSize,
   parseCaseTimelineMode,
   replyDeliveryFailedTimelineItem,
 } from "../app/cases/[id]/case-timeline.js";
+
+// Mirror of the dashboard-spa suite — the two thread renderers must agree on
+// when an email earns the dark-mode paper treatment.
+describe("emailHtmlHasOwnColors", () => {
+  it("plain connector-wrapped replies carry no colors", () => {
+    expect(
+      emailHtmlHasOwnColors('<div dir="ltr">Sounds good, thanks!<br></div>'),
+    ).toBe(false);
+    expect(emailHtmlHasOwnColors("<p>Hello</p>")).toBe(false);
+  });
+
+  it("quoted-reply chrome (borders, layout) is not a color", () => {
+    expect(
+      emailHtmlHasOwnColors(
+        '<blockquote style="border-left:1px solid #cccccc;padding-left:1ex">quoted</blockquote>',
+      ),
+    ).toBe(false);
+    expect(
+      emailHtmlHasOwnColors('<td style="border-color:#e0e0e0;padding:8px">cell</td>'),
+    ).toBe(false);
+  });
+
+  it("detects inline colors, css backgrounds, and legacy attributes", () => {
+    expect(
+      emailHtmlHasOwnColors('<p style="color:#333333">designed for white</p>'),
+    ).toBe(true);
+    expect(
+      emailHtmlHasOwnColors('<td style="background-color:#f6f6f6">x</td>'),
+    ).toBe(true);
+    expect(
+      emailHtmlHasOwnColors('<table BGCOLOR="#FFFFFF"><tr><td>x</td></tr></table>'),
+    ).toBe(true);
+    expect(emailHtmlHasOwnColors('<font color="red">deal!</font>')).toBe(true);
+  });
+});
+
+describe("chatBubbleChromeClass", () => {
+  it("papers only inbound emails whose html styles its own colors", () => {
+    expect(
+      chatBubbleChromeClass({
+        direction: "inbound",
+        sanitizedBodyHtml:
+          '<td style="background-color:#ffffff;color:#333">promo</td>',
+      }),
+    ).toContain("email-paper");
+    expect(
+      chatBubbleChromeClass({
+        direction: "inbound",
+        sanitizedBodyHtml: "<p>Hello</p>",
+      }),
+    ).not.toContain("email-paper");
+    expect(
+      chatBubbleChromeClass({
+        direction: "outbound",
+        sanitizedBodyHtml: '<p style="color:#333">Hello</p>',
+      }),
+    ).not.toContain("email-paper");
+  });
+});
 
 describe("case timeline navigation", () => {
   it("defaults to the curated (simplified) view; full is opt-in", () => {
