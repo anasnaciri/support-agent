@@ -107,11 +107,13 @@ staged on the same branch. Remaining: H8 for other connectors, H6 extension.
 
 ---
 
-### 2026-07-02 — Merge approval delivery reliability into main (local, not pushed/deployed yet)
+### 2026-07-02 — Merge approval delivery reliability into main (pushed; branches deleted; not deployed)
 
-Merged `fix/approval-link-ttl-and-reminder` into `main` as requested. The branch
-audited the drafted-action approval → delivery path for anything that slows down
-or fails getting an approved reply to the customer. Two real gaps, both fixed:
+Merged `fix/approval-link-ttl-and-reminder` into `main` as requested, pushed
+`main` to `origin`, and deleted the merged local + remote feature branches. The
+branch audited the drafted-action approval → delivery path for anything that
+slows down or fails getting an approved reply to the customer. Two real gaps,
+both fixed:
 
 - [x] **(a) Emailed approve/reject links expired after 24h** (`apps/worker/src/bootstrap.ts`
       `ttlMs`), while the api's link pages already said "expire after 30 days" — a draft
@@ -156,7 +158,11 @@ or fails getting an approved reply to the customer. Two real gaps, both fixed:
       than 7 days** (incl. the 2-week-old one) won't be re-nudged by the new cron — a
       pre-existing backlog to clear from the dashboard. Window/interval are tunable constants
       in `approval-maintenance-schedule.ts` if we want to widen coverage.
-- [ ] **Ops:** push/deploy after verification if desired. Worker deploy runs the new
+- [x] **Git cleanup:** pushed `main` to `origin` at `2634ac8` first, then recorded
+      this final todo correction. Deleted local `feat/dashboard-spa` and
+      `fix/approval-link-ttl-and-reminder`; deleted remote `origin/feat/dashboard-spa`
+      and `origin/feat/pilot-shopify-app-provisioning`. Only `main` remains.
+- [ ] **Ops:** deploy if desired. Worker deploy runs the new
       `0033_approval_reminders.sql` migration. Bundle reminders link per-row
       (`/approvals/:id`) not to the case page — acceptable (single-row decisions are
       supported) but a nicety to revisit.
