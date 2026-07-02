@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "support-agent-dashboard-spa",
+  "compatibility_date": "2025-03-01",
+  // Pure static SPA — no Worker script (no `main`). Cloudflare serves the Vite
+  // `dist/` output directly; `single-page-application` returns index.html (200)
+  // for any unmatched path so the client router (TanStack Router) can take over
+  // deep links like /cases/:id. Real assets (/assets/*.js) still match + serve.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+  // This app is 100% client-side: it holds NO secrets. Its config is the
+  // BUILD-TIME `VITE_*` env baked into the bundle by `vite build` (see
+  // .env.example + DEPLOY.md), NOT wrangler secrets. Deploy with:
+  //   VITE_API_BASE_URL=… VITE_WORKOS_CLIENT_ID=… … pnpm --filter \
+  //     @support-agent/dashboard-spa cf:deploy
+  // Kept on its OWN name (support-agent-dashboard-spa) so the Next
+  // apps/dashboard Worker stays live during the migration. Map a custom domain
+  // / route to this Worker after the first deploy.
+}
