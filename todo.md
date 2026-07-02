@@ -431,10 +431,18 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
         for an invalid (rotated-kid) token, and `/onboard` could fork a duplicate org on a transient
         WorkOS lookup failure — now gated strictly on `missing_claims` with refresh + null-on-lookup-
         failure. Full facet coverage completed on the 2nd pass. **NOT verified live.**
-  - [ ] **Not ported (optional parity):** the Next "edit customer / assign order" pencil
-        (`CardEditPopover`, `d226ee9`) — needs `editCaseDetails` added to the SPA `api-client` +
-        a `headerAction` slot on the Customer/Order panels. `editCaseDetails` already exists in
-        `apps/api` (`case-handlers.ts`).
+  - [x] **Edit-customer / assign-order pencil PORTED** (`99b97fa`) — `CardEditPopover` on the
+        Customer/Order panel headers; added `editCaseDetails` to the SPA `api-client` + a
+        `headerAction` slot on both panels; the popover fires a `useMutation` that toasts the
+        discriminated outcome + invalidates the case.
+  - [x] **Unported-gap sweep + fixes** (`2b1eb3e`) — a 6-area discovery workflow (Next vs SPA)
+        found the case page / cases list / approvals / settings / supplier portal FULLY ported; the
+        real gap was the **Today/home page** (materially under-ported). Rebuilt HomePage as a faithful
+        port: subtitle activity metrics, rich "Need your approval" card, missing "Need human takeover"
+        card, 4 status-broken-down stat tiles + In-progress InfoHint, supplier-only→/supplier/cases
+        redirect, workspace-lifecycle FeedbackToaster (onboarded now lands `/?onboarded=1`). Shell
+        polish: FeedbackToaster action → SPA nav (not full reload); account-deletion → `/goodbye?deleted=1`
+        with deletion-specific copy. Audit/usage "Apply button" gaps left as-is (deliberate live-filter choice).
 - [x] **Phase 5 — live updates** (`48232c5`) — `CaseLiveBoundary` ported to a TanStack Query
       `refetchInterval` (2.5s) over `/cases/:id/events?since=`; first poll primes the cursor, then a
       new event id advances it + invalidates the `["case",w,id]` prefix (detail/thread/shopify/tracking)
