@@ -10,6 +10,28 @@ import {
 
 export type CaseTimelineMode = "full" | "simplified" | "email";
 
+export interface ChatBubbleChromeInput {
+  readonly direction: "inbound" | "outbound";
+  readonly sanitizedBodyHtml: string | null;
+}
+
+export const chatBubbleChromeClass = (
+  message: ChatBubbleChromeInput,
+): string => {
+  const outbound = message.direction === "outbound";
+  return [
+    "max-w-[85%] min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm",
+    outbound
+      ? "rounded-br-sm bg-primary text-primary-foreground"
+      : [
+          "rounded-bl-sm border border-border bg-card text-foreground",
+          message.sanitizedBodyHtml ? "email-paper" : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+  ].join(" ");
+};
+
 /**
  * The curated ("simplified") view is the DEFAULT: merchants see customer
  * messages, the agent's outward findings/answers, and human touchpoints.

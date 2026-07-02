@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCaseTimelineHref,
+  chatBubbleChromeClass,
   conversationThreadUnavailableView,
   curatedTimelineEvent,
   formatAttachmentSize,
@@ -54,6 +55,31 @@ describe("case timeline navigation", () => {
       title: "Email provider temporarily unavailable",
       showIntegrationsLink: false,
     });
+  });
+});
+
+describe("chatBubbleChromeClass", () => {
+  it("marks only inbound HTML email bubbles for paper rendering", () => {
+    expect(
+      chatBubbleChromeClass({
+        direction: "inbound",
+        sanitizedBodyHtml: "<p>Hello</p>",
+      }),
+    ).toContain("email-paper");
+
+    expect(
+      chatBubbleChromeClass({
+        direction: "inbound",
+        sanitizedBodyHtml: null,
+      }),
+    ).not.toContain("email-paper");
+
+    expect(
+      chatBubbleChromeClass({
+        direction: "outbound",
+        sanitizedBodyHtml: "<p>Hello</p>",
+      }),
+    ).not.toContain("email-paper");
   });
 });
 

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import {
+  chatBubbleChromeClass,
   conversationThreadUnavailableView,
   formatAttachmentSize,
 } from "./case-timeline";
@@ -42,12 +43,7 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
         <span className="font-mono">{formatDateTime(message.sentAt)}</span>
       </div>
       <div
-        className={cn(
-          "max-w-[85%] min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm",
-          outbound
-            ? "rounded-br-sm bg-primary text-primary-foreground"
-            : "rounded-bl-sm border border-border bg-card text-foreground",
-        )}
+        className={chatBubbleChromeClass(message)}
       >
         {message.sanitizedBodyHtml ? (
           <div

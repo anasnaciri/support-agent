@@ -288,6 +288,23 @@
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;
 }
+.dark .email-paper {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #191919;
+  color-scheme: light;
+}
+.dark .email-paper .email-html {
+  background: #ffffff;
+  color: #191919;
+  color-scheme: light;
+}
+.dark .email-paper .email-html a {
+  color: #0057ff;
+}
+.dark .email-paper .email-html blockquote {
+  border-left-color: #e4e4e4;
+}
 
 /* Thin, tone-matched scrollbars for the case view's scroll panes — the chat
    transcript, the composer overflow, and the details column. Scoped to an

@@ -6,6 +6,26 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — Dark-mode email body paper treatment (dashboard case thread)
+
+- [x] Inbound sanitized HTML emails in the case thread now get an
+      `email-paper` bubble marker and render on a white paper surface in dark
+      mode, with dark inherited text, light color-scheme, light-mode link blue,
+      and a neutral blockquote border. Outbound agent replies keep their
+      existing primary bubble styling. Applied to both `apps/dashboard-spa` and
+      the legacy `apps/dashboard` thread renderer.
+- [x] Verification: red/green
+      `pnpm exec vitest run apps/dashboard-spa/test/case-timeline.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`,
+      `pnpm --filter @support-agent/dashboard typecheck`,
+      `pnpm --filter @support-agent/dashboard build`, root `pnpm build`, and
+      `rg` against the built SPA assets for `email-paper` / paper CSS. The
+      in-app Browser plugin could not start due to a local `node_repl` sandbox
+      metadata error (`sandboxCwd must be an absolute file URI`), so visual
+      browser verification was not completed in this session.
+
+---
+
 ### 2026-07-02 — Case recovery hardening: round (epoch) + consumed marker on approvals (packages + worker, NOT committed)
 
 **Why:** two prod incidents on case `2f636312-…`. (1) A double-send — an

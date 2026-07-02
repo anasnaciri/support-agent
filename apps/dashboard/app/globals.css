@@ -269,6 +269,23 @@
   border-left: 2px solid var(--border);
   padding-left: 0.75rem;
 }
+.dark .email-paper {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #191919;
+  color-scheme: light;
+}
+.dark .email-paper .email-html {
+  background: #ffffff;
+  color: #191919;
+  color-scheme: light;
+}
+.dark .email-paper .email-html a {
+  color: #0057ff;
+}
+.dark .email-paper .email-html blockquote {
+  border-left-color: #e4e4e4;
+}
 /* Keep email content inside its chat bubble: break long unbreakable tokens
    (URLs, IDs), cap any images/media to the bubble width, and wrap <pre> rather
    than let it force horizontal overflow. Too-wide tables scroll via the
