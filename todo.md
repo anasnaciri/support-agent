@@ -107,6 +107,62 @@ staged on the same branch. Remaining: H8 for other connectors, H6 extension.
 
 ---
 
+### 2026-07-02 — Merge approval delivery reliability into main (local, not pushed/deployed yet)
+
+Merged `fix/approval-link-ttl-and-reminder` into `main` as requested. The branch
+audited the drafted-action approval → delivery path for anything that slows down
+or fails getting an approved reply to the customer. Two real gaps, both fixed:
+
+- [x] **(a) Emailed approve/reject links expired after 24h** (`apps/worker/src/bootstrap.ts`
+      `ttlMs`), while the api's link pages already said "expire after 30 days" — a draft
+      proposed before a weekend couldn't be one-click approved by Monday (manager saw "this
+      link can't be used"), and the approval **row has no age-based expiry sweep**, so the
+      draft was only recoverable from the dashboard. Bumped to **30 days** to match the copy.
+      A long-lived token is safe: bearer credential bound to one approval id + action, and
+      `ApprovalService.approve` rejects already-decided rows. Also fixed the stale
+      `approval-link-config.ts` doc (claimed 7-day default + that approve rejects "expired"
+      rows — there's no expiry check). Commit `4ca2aad`.
+- [x] **(b) A pending approval's first notification is best-effort** (email + merchant ping
+      both `Effect.either`/ignored) — a Resend outage, a missing `notificationEmail`, or an
+      unlinked chat channel silently drops it, stranding the draft in `waiting_for_approval`
+      with **nothing nudging the manager** (the maintenance cron only re-published DECIDED-
+      but-unresumed rows, never still-pending ones). Added a **reminder pass** to the same
+      2-min `approval.maintenance` cron: re-sends the SAME notification on a spaced cadence —
+      30-min grace (never races the first send) → ≤1/24h → stop after a 7-day window (the
+      dashboard stays the durable surface). New nullable `approvals.last_reminded_at`
+      spaces reminders; due-query is operator-based (`lt`/`gte`/`isNull`) for the same
+      Date-encoding safety as `listDecidedUnresumed`. First-send + reminder now share
+      `buildApprovalNotification` (services) so signed links + preview can't drift.
+      Commit `0a12b23`.
+- [x] **Merge resolution:** the branch's original `0031_thin_wong.sql` collided with
+      `main`'s `0031_case_recovery_hardening.sql` and `0032_processed_events.sql`, so the
+      reminder migration was renumbered to `0033_approval_reminders.sql` and the stale
+      branch snapshot was dropped. The migration uses `ADD COLUMN IF NOT EXISTS` so local
+      DBs that already applied the old branch migration can still record the renumbered
+      migration without duplicate-column failure.
+- [x] **TDD before merge branch:** `packages/services/test/approval-notification.test.ts`
+      (3), 5 reminder-pass tests in `apps/worker/test/approval-maintenance.test.ts`,
+      1 real-PG test in `packages/db/test/approval-service-live.integration.test.ts`.
+      Branch full suite was green (2341).
+- [x] **Prod check (read-only, via `fly ssh` on `support-agent-backend`):** **49 pending**
+      approvals (48 >1h, **9 >24h, 3 >7d**, oldest 2026-06-17), **36 cases** parked in
+      `waiting_for_approval`. The republish safety net was healthy — `approval.maintenance`
+      cron running `*/2` (5630 completed jobs, latest current), and **ALL 36 parked cases
+      had ≥1 pending row** (zero orphaned approved-but-no-pending cases → no lost-publish
+      breakage). The 2 "decided-but-parked" rows (`9b02ba90`, `c7d7815c`) were benign
+      bundles from the line-56 serial-consumer incident: an approved row + a still-pending
+      sibling the merchant never decided. This is exactly what (b) fixes.
+- [ ] **Caveat / follow-up:** the reminder's **7-day window** means the **3 approvals older
+      than 7 days** (incl. the 2-week-old one) won't be re-nudged by the new cron — a
+      pre-existing backlog to clear from the dashboard. Window/interval are tunable constants
+      in `approval-maintenance-schedule.ts` if we want to widen coverage.
+- [ ] **Ops:** push/deploy after verification if desired. Worker deploy runs the new
+      `0033_approval_reminders.sql` migration. Bundle reminders link per-row
+      (`/approvals/:id`) not to the case page — acceptable (single-row decisions are
+      supported) but a nicety to revisit.
+
+---
+
 ### 2026-07-02 — Dark-mode palette designed for the SPA (apps/dashboard-spa, `app.css` only)
 
 - [x] Replaced the placeholder `.dark` block with a designed "graphite" palette —

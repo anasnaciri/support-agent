@@ -194,6 +194,34 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
       readonly decidedBefore: Date;
       readonly limit?: number;
     }) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /**
+     * Pending approvals due for a reminder (re-)notification. A pending
+     * approval's FIRST notification (approval email + merchant ping) is
+     * best-effort — a mail outage, a missing `notificationEmail`, or an
+     * unlinked chat channel can drop it, silently stranding the draft in
+     * `waiting_for_approval`. The maintenance cron re-sends the SAME
+     * notification on a spaced cadence, selected by three cutoffs:
+     *   - `createdBefore`: only rows older than a short grace, so a reminder
+     *     never races the initial notification;
+     *   - `createdAfter`: only rows younger than a window — stop nagging
+     *     after a few days (the dashboard stays the durable surface);
+     *   - `remindedBefore`: rows never reminded, or last reminded before this
+     *     cutoff (the reminder interval).
+     * Oldest-created first.
+     */
+    readonly listPendingNeedingReminder: (opts: {
+      readonly createdBefore: Date;
+      readonly createdAfter: Date;
+      readonly remindedBefore: Date;
+      readonly limit?: number;
+    }) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
+
+    /** Stamp `lastRemindedAt` after the reminder pass re-sent the notification. */
+    readonly recordReminderSent: (
+      id: ApprovalId,
+      at: Date,
+    ) => Effect.Effect<void, ApprovalServiceError>;
   }
 >() {}
 
@@ -205,6 +233,9 @@ export const ApprovalServiceTest = Layer.effect(
   ApprovalService,
   Effect.sync(() => {
     const store = new Map<string, Approval>();
+    // Reminder ledger kept beside the store — `lastRemindedAt` is a row-level
+    // column that the domain `Approval` type deliberately doesn't expose.
+    const reminderAt = new Map<string, Date>();
 
     // D9: a cross-tenant approval is indistinguishable from a missing one.
     const scoped = (id: ApprovalId, tenantId?: TenantId): Approval | null => {
@@ -334,6 +365,32 @@ export const ApprovalServiceTest = Layer.effect(
             }
           }
           return out;
+        }),
+
+      listPendingNeedingReminder: ({
+        createdBefore,
+        createdAfter,
+        remindedBefore,
+        limit = 100,
+      }) =>
+        Effect.sync(() => {
+          const due: Approval[] = [];
+          for (const a of store.values()) {
+            if (a.status !== "pending") continue;
+            const created = a.createdAt.getTime();
+            if (created >= createdBefore.getTime()) continue; // within grace
+            if (created < createdAfter.getTime()) continue; // past window
+            const last = reminderAt.get(a.id);
+            if (last && last.getTime() >= remindedBefore.getTime()) continue;
+            due.push(a);
+          }
+          due.sort((x, y) => x.createdAt.getTime() - y.createdAt.getTime());
+          return due.slice(0, limit);
+        }),
+
+      recordReminderSent: (id, at) =>
+        Effect.sync(() => {
+          reminderAt.set(id, at);
         }),
 
       // Map iteration is insertion order, which mirrors the Live impl's

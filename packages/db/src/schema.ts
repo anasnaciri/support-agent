@@ -299,6 +299,11 @@ export const approvals = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decisionReason: text("decision_reason"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // When the merchant was last (re-)notified that this approval is
+    // pending. Null until the maintenance cron's reminder pass first
+    // re-sends the approval notification; it uses this to space reminders
+    // out and to recover a draft whose original notification was dropped.
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
