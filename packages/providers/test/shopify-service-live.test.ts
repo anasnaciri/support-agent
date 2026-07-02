@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_SHOPIFY_HTTP_TIMEOUT_MS,
   shopifyHttpTimeoutMs,
+  toIdempotencyUuid,
   ShopifyHttpFromFn,
   ShopifyServiceLive,
   type ShopifyHttpClient,
@@ -1450,6 +1451,22 @@ describe("shopifyHttpTimeoutMs", () => {
   });
 });
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe("toIdempotencyUuid", () => {
+  it("is a valid v5-shaped UUID and deterministic for the same seed", () => {
+    const a = toIdempotencyUuid("dash-refund:case1:order1:20.00:USD");
+    expect(a).toMatch(UUID_RE);
+    expect(toIdempotencyUuid("dash-refund:case1:order1:20.00:USD")).toBe(a);
+  });
+  it("differs when the seed differs (amount change → new key)", () => {
+    expect(toIdempotencyUuid("x:20.00:USD")).not.toBe(
+      toIdempotencyUuid("x:21.00:USD"),
+    );
+  });
+});
+
 describe("ShopifyServiceLive — refundOrder", () => {
   const orderGid = "gid://shopify/Order/77777";
 
@@ -1537,10 +1554,15 @@ describe("ShopifyServiceLive — refundOrder", () => {
     // Second call is the refundCreate mutation. Inspect the body to
     // confirm the parent transaction id + gateway were threaded
     // through and `kind: "REFUND"` was set.
-    const body = JSON.parse(captures[1]!.body) as {
-      variables: { input: Record<string, unknown> };
+    const parsed = JSON.parse(captures[1]!.body) as {
+      query: string;
+      variables: { input: Record<string, unknown>; idempotencyKey?: unknown };
     };
-    const input = body.variables.input;
+    // refundCreate is mandatory-idempotent as of Shopify 2026-04: the mutation
+    // MUST carry the @idempotent directive with a key, or Shopify rejects it.
+    expect(parsed.query).toMatch(/@idempotent\(key:\s*\$idempotencyKey\)/);
+    expect(parsed.variables.idempotencyKey).toMatch(UUID_RE);
+    const input = parsed.variables.input;
     expect(input["orderId"]).toBe(orderGid);
     expect(input["note"]).toBe("Customer-requested refund");
     expect(input["notify"]).toBe(true);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Context, Effect, Layer } from "effect";
 import {
   type CustomerId,
@@ -841,9 +842,17 @@ const GET_ORDER_TRANSACTIONS_QUERY = `
 // Selecting `code` here makes Shopify reject the whole mutation with a
 // top-level GraphQL error, which `runQuery` surfaces as a generic
 // `NetworkError` → the dashboard's "refund_failed" / HTTP 502.
+//
+// The `@idempotent(key:)` directive is MANDATORY on refundCreate as of the
+// Shopify Admin API 2026-04 (optional since 2026-01). Omitting it fails at
+// runtime with "The @idempotent directive is required for this mutation but
+// was not provided." — note it is NOT enforced at the schema level, so a
+// codegen/schema validator won't catch its absence. We pass a deterministic
+// UUID derived from the caller's idempotency key so a retry of the SAME refund
+// reuses the SAME key and Shopify dedupes it (no double refund).
 const REFUND_CREATE_MUTATION = `
-  mutation RefundCreate($input: RefundInput!) {
-    refundCreate(input: $input) {
+  mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {
+    refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
       refund {
         id
         createdAt
@@ -1124,6 +1133,24 @@ type DiscountCreatePayload = {
 // to a parent SALE/CAPTURE that's in SUCCESS state. We pick the first
 // one and call it good — multi-transaction refund splits (e.g. gift
 // card + credit card on the same order) are a v2 concern.
+/**
+ * Derive a deterministic RFC-4122 v5-shaped UUID from an arbitrary seed
+ * string. Shopify's `@idempotent` directive wants a UUID; callers hand us
+ * varied keys (`dash-refund:<case>:<order>:<amount>:<currency>`, a tool
+ * `callId`), so we hash the seed into a stable UUID. Deterministic on purpose:
+ * retrying the exact same refund yields the same key, so Shopify returns the
+ * original result instead of issuing a second refund. Changing any parameter
+ * (e.g. the amount) changes the seed → a fresh key → a genuinely new refund.
+ */
+export const toIdempotencyUuid = (seed: string): string => {
+  const bytes = createHash("sha1").update(seed).digest().subarray(0, 16);
+  const b = Buffer.from(bytes);
+  b[6] = (b[6]! & 0x0f) | 0x50; // version 5
+  b[8] = (b[8]! & 0x3f) | 0x80; // RFC-4122 variant
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+};
+
 const pickParentTransaction = (
   txs: ReadonlyArray<GqlTransaction>,
 ): GqlTransaction | null => {
@@ -1668,12 +1695,19 @@ export const ShopifyServiceLive = Layer.effect(
               ],
             };
 
+            // Mandatory @idempotent key (2026-04). Seed from the caller's key
+            // when present; else a stable fingerprint of the refund so a naive
+            // retry still dedupes rather than double-refunding.
+            const idempotencyKey = toIdempotencyUuid(
+              input.idempotencyKey ??
+                `${orderGidStr}:${input.amount.amount}:${input.amount.currencyCode}`,
+            );
             const refundData = yield* runQuery<RefundCreatePayload>(
               http,
               creds,
               tenantId,
               REFUND_CREATE_MUTATION,
-              { input: refundInput },
+              { input: refundInput, idempotencyKey },
             );
 
             // Step 3: map the result. `userErrors` is Shopify's
