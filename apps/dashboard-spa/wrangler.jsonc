@@ -1,7 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "support-agent-dashboard-spa",
+  "name": "support-agent-dashboard-v2",
   "compatibility_date": "2025-03-01",
+  // Serve on the account's workers.dev subdomain: the deployed URL is
+  // <name>.<account-subdomain>.workers.dev — here
+  // support-agent-dashboard-v2.12anas2000.workers.dev.
+  "workers_dev": true,
   // Pure static SPA — no Worker script (no `main`). Cloudflare serves the Vite
   // `dist/` output directly; `single-page-application` returns index.html (200)
   // for any unmatched path so the client router (TanStack Router) can take over
@@ -15,7 +19,6 @@
   // .env.example + DEPLOY.md), NOT wrangler secrets. Deploy with:
   //   VITE_API_BASE_URL=… VITE_WORKOS_CLIENT_ID=… … pnpm --filter \
   //     @support-agent/dashboard-spa cf:deploy
-  // Kept on its OWN name (support-agent-dashboard-spa) so the Next
-  // apps/dashboard Worker stays live during the migration. Map a custom domain
-  // / route to this Worker after the first deploy.
+  // Its OWN name (distinct from the Next apps/dashboard Worker) so that stays
+  // live during the migration.
 }

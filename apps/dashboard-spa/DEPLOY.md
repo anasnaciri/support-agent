@@ -6,8 +6,10 @@ script): Cloudflare serves the Vite `dist/` output and, via
 `not_found_handling: "single-page-application"`, returns `index.html` for any
 unmatched path so the client router handles deep links.
 
-It deploys under its **own** Worker name (`support-agent-dashboard-spa`), so the
-existing Next `apps/dashboard` Worker stays live during the migration.
+It deploys under its **own** Worker name (`support-agent-dashboard-v2`), so the
+existing Next `apps/dashboard` Worker stays live during the migration. Its origin
+is either the account `workers.dev` URL (`<name>.<account>.workers.dev`) or a
+custom domain (§4).
 
 ## 1. Build-time env (baked into the bundle)
 
@@ -48,8 +50,16 @@ cookie the api mints — Option B / the BFF). So, on the API side:
   allowlist + CSRF origin check key off `DASHBOARD_SPA_ORIGIN`; without it the
   browser's credentialed requests are blocked.
 
-## 4. Custom domain
+## 4. Origin: workers.dev vs custom domain
 
-Map a hostname (e.g. `app-spa.example.com`) to the `support-agent-dashboard-spa`
-Worker (Cloudflare dashboard → Workers → Custom Domains / Routes), then set
+- **workers.dev (default):** with `workers_dev: true`, the Worker is served at
+  `https://<name>.<account-subdomain>.workers.dev` — the URL is known from the
+  Worker name + your account subdomain (no first-deploy discovery needed). NOTE:
+  this is a DIFFERENT site from the api (`*.fly.dev`), so the session cookie is
+  cross-site — it relies on `SameSite=None; Secure` (the api sets this on https)
+  and the browser not blocking third-party cookies. Fine for testing; for prod,
+  prefer a subdomain sharing the api's parent domain.
+- **Custom domain:** map a hostname (e.g. `app-spa.example.com`) to the
+  `support-agent-dashboard-v2`
+  Worker (Cloudflare dashboard → Workers → Custom Domains / Routes), then set
 `VITE_SPA_ORIGIN` to it and rebuild/redeploy.
