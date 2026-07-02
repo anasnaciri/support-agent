@@ -480,7 +480,16 @@ path) — additive only. Deploy target = Cloudflare Workers static assets (new h
       new event id advances it + invalidates the `["case",w,id]` prefix (detail/thread/shopify/tracking)
       so idle polling never storms; reuses the tested `lib/live-status.ts`; 401 → existing global
       sign-in nav; LIVE badge wired into the case header. **NOT live-verified.**
-- [ ] **Phase 6 — Cloudflare Workers static-assets deploy** (new hostname; Next app stays live).
+- [x] **Phase 6 — Cloudflare Workers static-assets deploy** (`a1e5d80`, config landed; on `main`).
+      `apps/dashboard-spa/wrangler.jsonc` = assets-only Worker (no `main` script) serving the Vite
+      `dist/` with `not_found_handling: single-page-application` (client-router deep-link fallback),
+      under its own name `support-agent-dashboard-spa` so the Next `apps/dashboard` Worker stays live.
+      `cf:preview`/`cf:deploy` scripts + the `wrangler` devDep; `DEPLOY.md` documents the build-time
+      `VITE_*` env (Vite bakes it in — no runtime secrets) + the one-time WorkOS redirect-URI and
+      `apps/api` `DASHBOARD_SPA_ORIGIN`/CORS wiring. Validated with `wrangler deploy --dry-run`.
+      **Remaining = OPS (user, needs the CF/WorkOS accounts):** run `cf:deploy` with prod `VITE_*`,
+      register the callback in WorkOS, set `apps/api` `DASHBOARD_SPA_ORIGIN`, map a custom domain.
+      **The whole SPA port (Phases 0–6) is now on `main`.** Still NOT live-verified end-to-end.
 
 ---
 
