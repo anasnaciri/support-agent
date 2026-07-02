@@ -165,7 +165,11 @@ const call = async (
   if (res.status === 403 && (opts.on403 ?? "throw") === "throw") {
     const err = (res.body as { error?: string } | null)?.error;
     if (err === "legal_acceptance_required") throw new LegalRequiredError();
-    throw new NoTenantError();
+    if (err === "no_tenant_for_organization") throw new NoTenantError();
+    throw new ApiError(
+      `dashboard api forbidden${err ? ` (${err})` : ""} on ${path}`,
+      403,
+    );
   }
   return res;
 };

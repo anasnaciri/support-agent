@@ -6,6 +6,41 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-02 — SPA intermittent false onboarding / apparent logout loop (apps/api + apps/dashboard-spa, committed locally; deploy next)
+
+**Symptom:** the SPA sometimes looked like it logged the user out, landed on
+`/onboarding`, asked for a workspace, then the submit did not create a new
+workspace and the user landed back in the normal dashboard.
+
+**Root causes fixed:**
+
+- [x] `/dashboard/auth/session` treated any validly signed org-less WorkOS token
+      (`missing_claims`) as first-run onboarding. It now checks existing WorkOS
+      memberships first and, when one exists, re-mints the BFF cookie for that
+      org before returning whoami. A transient membership lookup failure is no
+      longer reported as onboarding.
+- [x] The SPA api client mapped every `403` to `NoTenantError`, so a generic
+      `permission_denied`/forbidden response could route an already-onboarded
+      user to `/onboarding`. It now maps only
+      `no_tenant_for_organization` to onboarding and keeps other 403s as
+      ordinary `ApiError`s.
+- [x] `SessionProvider` started the WorkOS login flow on any auth-session query
+      error. It now does that only for `UnauthorizedError` (real 401), so
+      transient `/auth/session` failures no longer force a logout redirect.
+- [x] The public SPA onboarding page now self-heals: if a signed-in user already
+      has at least one workspace, it redirects home instead of making them submit
+      the first-workspace form.
+
+**Verification:** red→green
+`pnpm exec vitest run apps/dashboard-spa/test/session-context-auth-error.test.ts apps/dashboard-spa/test/api-client-auth-errors.test.ts apps/dashboard-spa/test/onboarding-gate.test.ts apps/api/src/auth/tests/orgless-session-recovery.test.ts`;
+SPA suite `pnpm exec vitest run apps/dashboard-spa/test` (393);
+API auth targeted suite `pnpm exec vitest run apps/api/src/auth/tests/dashboard-session.test.ts apps/api/src/auth/tests/orgless-session-recovery.test.ts apps/api/src/auth/tests/dashboard-onboard.integration.test.ts`
+(19 pass, DB-gated onboarding integration skipped because `DATABASE_URL` is unset);
+`pnpm --filter @support-agent/api build`; `pnpm --filter @support-agent/dashboard-spa build`;
+root `pnpm build`; commit hook CI also ran green once while the split commits were still combined (2899 pass / 5 skipped).
+
+---
+
 ### 2026-07-02 — Dashboard refund always failed with 502 `refund_failed`/`NetworkError` — root cause: invalid `code` field on `refundCreate.userErrors` (packages/providers, provider fix committed locally; deploy next)
 
 **Symptom:** clicking "Issue refund" (agent-recommended or line-item modal) on any case in prod returned HTTP 502 with body `{ kind: "refund_failed", error: "NetworkError" }`. Modal opened fine; scopes (`write_orders`) present; order refundable.

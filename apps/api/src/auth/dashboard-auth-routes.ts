@@ -28,7 +28,9 @@ import {
   signOAuthState,
   verifyOAuthState,
   type SessionCodec,
+  type SessionPayload,
 } from "./dashboard-session.js";
+import type { WorkosOrgAdminDirectory } from "./workos-directory.js";
 
 // ============================================================
 // Dashboard BFF auth routes (`/dashboard/auth/*`) — SPA cookie session
@@ -43,6 +45,42 @@ interface AuthRouteDeps {
   /** Override the WorkOS OAuth HTTP calls (tests). Prod uses global fetch. */
   readonly workosFetch?: typeof fetch;
 }
+
+export type OrglessSessionRecovery =
+  | {
+      readonly kind: "recovered";
+      readonly organizationId: string;
+      readonly session: SessionPayload;
+    }
+  | { readonly kind: "needs_onboarding" }
+  | { readonly kind: "lookup_failed" }
+  | { readonly kind: "remint_failed" };
+
+export const recoverOrglessSession = async (input: {
+  readonly admin: WorkosOrgAdminDirectory;
+  readonly clientId: string;
+  readonly apiKey: string;
+  readonly refreshToken: string;
+  readonly workosUserId: string;
+  readonly fetchImpl?: typeof fetch;
+}): Promise<OrglessSessionRecovery> => {
+  const memberships = await input.admin.listOrganizationMemberships(
+    input.workosUserId,
+  );
+  if (memberships === null) return { kind: "lookup_failed" };
+  const organizationId = memberships[0];
+  if (!organizationId) return { kind: "needs_onboarding" };
+
+  const refreshed = await refreshAccessToken({
+    clientId: input.clientId,
+    apiKey: input.apiKey,
+    refreshToken: input.refreshToken,
+    organizationId,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+  });
+  if (!refreshed.ok) return { kind: "remint_failed" };
+  return { kind: "recovered", organizationId, session: refreshed.session };
+};
 
 const qstr = (query: unknown, key: string): string | undefined => {
   const v = (query as Record<string, unknown> | undefined)?.[key];
@@ -166,8 +204,8 @@ export const registerDashboardAuthRoutes = (
     // A RECOVERABLE failure — expired, or a live token signed by a rotated-out
     // JWKS key (`invalid_token`) — is refreshed in place with the refresh token.
     // A dead refresh (revoked / expired) means the session is genuinely over →
-    // 401. `missing_claims` is NOT refreshed here: it's a validly-signed token
-    // that simply carries no org (the onboarding signal), handled below.
+    // 401. `missing_claims` is handled below: it can be true onboarding OR a
+    // WorkOS session that lost its active org but still has memberships.
     if (
       !verified.ok &&
       verified.reason !== "missing_claims" &&
@@ -196,12 +234,44 @@ export const registerDashboardAuthRoutes = (
         user: sealed.user,
       });
     }
-    // ONLY a validly-signed token that lacks an org claim (`missing_claims`) is a
-    // brand-new self-service user who signed in before creating/joining an org →
-    // report `needsOnboarding` so the SPA routes to /onboarding. Any OTHER
-    // failure (invalid signature, still-unverifiable after refresh, no refresh
-    // token) is a dead credential → 401 (re-login), never a 200.
+    // A validly-signed token that lacks an org claim (`missing_claims`) is often
+    // a brand-new self-service user, but WorkOS can also return an org-less
+    // token for a user who already has memberships. Re-mint into an existing
+    // membership first so an existing workspace never gets bounced to onboarding.
     if (!verified.ok && verified.reason === "missing_claims") {
+      const admin = getWorkosOrgAdminDirectory(req);
+      if (admin && sealed.refreshToken && sealed.user.id) {
+        const recovered = await recoverOrglessSession({
+          admin,
+          clientId: ready.clientId,
+          apiKey: ready.apiKey,
+          refreshToken: sealed.refreshToken,
+          workosUserId: sealed.user.id,
+          ...fetchOpt,
+        });
+        if (recovered.kind === "lookup_failed") {
+          return sendJson(res, 503, { error: "org_lookup_failed" });
+        }
+        if (recovered.kind === "remint_failed") {
+          return sendJson(res, 401, { error: "unauthenticated" });
+        }
+        if (recovered.kind === "recovered") {
+          sealed = recovered.session;
+          res.header(
+            "set-cookie",
+            serializeSessionCookie(await ready.codec.seal(sealed), { secure }),
+          );
+          verified = await verifier.verify(sealed.accessToken);
+          if (verified.ok) {
+            return sendJson(res, 200, {
+              organizationId: verified.claims.organizationId,
+              userId: dashboardUserDecisionUuid(verified.claims.workosUserId),
+              user: sealed.user,
+            });
+          }
+          return sendJson(res, 401, { error: "unauthenticated" });
+        }
+      }
       return sendJson(res, 200, {
         needsOnboarding: true,
         userId: dashboardUserDecisionUuid(sealed.user.id),

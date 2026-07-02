@@ -4,10 +4,13 @@ import { CheckCircle2 } from "lucide-react";
 
 import {
   getAuthSession,
+  isOnboardingRequired,
   login,
   onboard,
   OnboardError,
 } from "@/lib/auth/session-api";
+import { getWorkspaces } from "@/lib/api-client";
+import { onboardingDisposition } from "@/lib/onboarding-gate";
 import { qk } from "@/lib/query-keys";
 import { useAppNavigate } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
@@ -120,9 +123,19 @@ export function OnboardingPage() {
     queryFn: getAuthSession,
     retry: false,
   });
+  const workspacesQuery = useQuery({
+    queryKey: qk.workspaces,
+    queryFn: () => getWorkspaces(),
+    enabled:
+      sessionQuery.isSuccess && !isOnboardingRequired(sessionQuery.data),
+  });
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [legal, setLegal] = useState(false);
+  const disposition = onboardingDisposition(
+    sessionQuery.data ?? null,
+    workspacesQuery.data ?? null,
+  );
 
   // Seed the notification email from the signed-in user once (they can edit it).
   const seeded = useRef(false);
@@ -133,6 +146,10 @@ export function OnboardingPage() {
       seeded.current = true;
     }
   }, [sessionEmail]);
+
+  useEffect(() => {
+    if (disposition === "redirect_home") nav.replace("/");
+  }, [disposition, nav]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -156,6 +173,17 @@ export function OnboardingPage() {
       : mutation.isError
         ? "unknown"
         : null;
+
+  if (disposition === "loading" || disposition === "redirect_home") {
+    return (
+      <Centered>
+        <h1 className="text-xl font-semibold tracking-tight">
+          Opening your workspace
+        </h1>
+        <p className="text-sm text-muted-foreground">One moment…</p>
+      </Centered>
+    );
+  }
 
   return (
     <Centered>

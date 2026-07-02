@@ -21,6 +21,7 @@ import {
   getSupplierWorkspaces,
   getWorkspaces,
 } from "./api-client";
+import { UnauthorizedError } from "./errors";
 import {
   getAuthSession,
   isOnboardingRequired,
@@ -95,6 +96,9 @@ const Splash = ({ label }: { label: string }) => (
     <p className="text-sm text-muted-foreground">{label}</p>
   </div>
 );
+
+export const shouldStartLoginForAuthError = (error: unknown): boolean =>
+  error instanceof UnauthorizedError;
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -212,8 +216,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // No session → into the WorkOS handshake (full-page). The global query
   // error handler also does this; here we cover the initial-load 401.
   useEffect(() => {
-    if (authQuery.isError) login();
-  }, [authQuery.isError]);
+    if (authQuery.isError && shouldStartLoginForAuthError(authQuery.error)) {
+      login();
+    }
+  }, [authQuery.error, authQuery.isError]);
 
   // Authenticated but no org yet (brand-new self-service user) → onboarding,
   // before the workspace fetch that would 401 without an org.
@@ -234,7 +240,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [bootstrapReady, listsSettled, active, nav]);
 
   if (authQuery.isLoading) return <Splash label="Signing in…" />;
-  if (authQuery.isError) return <Splash label="Redirecting to sign-in…" />;
+  if (authQuery.isError) {
+    return (
+      <Splash
+        label={
+          shouldStartLoginForAuthError(authQuery.error)
+            ? "Redirecting to sign-in…"
+            : "Unable to load your session. Refresh to try again."
+        }
+      />
+    );
+  }
   if (needsOnboarding) return <Splash label="Setting up your workspace…" />;
   // Wait for both lists + the merchant probe (so the merged list + active are
   // final before we resolve permissions) and the active-workspace permissions.
