@@ -89,20 +89,20 @@ export const runApprovalMaintenanceOnce = (
         .getById(approval.caseId, approval.tenantId)
         .pipe(Effect.catchAll(() => Effect.succeed(null)));
       if (!row || row.status !== "waiting_for_approval") continue;
-      const event: DomainEvent =
-        approval.status === "approved"
-          ? {
-              type: "approval.approved",
-              approvalId: approval.id,
-              caseId: approval.caseId,
-              managerId: approval.decidedBy ?? SYSTEM_MANAGER_ID,
-            }
-          : {
-              type: "approval.rejected",
-              approvalId: approval.id,
-              caseId: approval.caseId,
-              managerId: approval.decidedBy ?? SYSTEM_MANAGER_ID,
-            };
+      // Recovery hardening: only ever republish an APPROVED, not-yet-resumed
+      // decision from the case's CURRENT round. A rejection has nothing to
+      // re-run (republishing one only re-forced human_takeover — the stale-
+      // reject storm), a resumed row was already acted on, and a decision from
+      // a prior attempt (lower epoch) must never drive the new one.
+      if (approval.status !== "approved") continue;
+      if (approval.resumedAt) continue;
+      if ((row.epoch ?? 0) !== (approval.epoch ?? 0)) continue;
+      const event: DomainEvent = {
+        type: "approval.approved",
+        approvalId: approval.id,
+        caseId: approval.caseId,
+        managerId: approval.decidedBy ?? SYSTEM_MANAGER_ID,
+      };
       const sent = yield* Effect.tryPromise({
         try: () => opts.publish(event),
         catch: (cause) => cause,

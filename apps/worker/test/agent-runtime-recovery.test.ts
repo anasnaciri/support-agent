@@ -943,6 +943,194 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
   });
 });
 
+describe("AgentRuntime — round fencing (recovery hardening)", () => {
+  it("does not execute a prior-round approved leftover when a new round's approval is approved (double-send guard)", async () => {
+    // The production double-send: round 0 approved a reply that was skipped
+    // (case taken over), leaving a zombie `approved` row; a later round drafted
+    // + approved a fresh reply; the bundle swept BOTH → the customer got two
+    // emails. Fencing by epoch makes only the current round's reply go out.
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([]) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const approvals = yield* ApprovalService;
+        // Round 0: an approved-but-never-delivered reply (distinct idempotency
+        // key so C2 can't be what saves us — only epoch fencing can).
+        const zombie = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 5 },
+          reasoning: "round 0",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+          epoch: 0,
+        });
+        yield* approvals.approve({ id: zombie.id, decidedBy: UserId("m") });
+        // The case advanced to round 1 (a resume bumped it).
+        yield* repo.update(caseId as never, { epoch: 1 }, TenantId("tenant-acme"));
+        // Round 1: fresh reply, approved.
+        const current = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 7 },
+          reasoning: "round 1",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+          epoch: 1,
+        });
+        yield* approvals.approve({ id: current.id, decidedBy: UserId("m") });
+        const result = yield* runtime.handleEvent({
+          type: "approval.approved",
+          approvalId: current.id,
+          caseId: caseId as never,
+          managerId: UserId("m"),
+        });
+        const fetched = yield* repo.getById(caseId as never);
+        return { result, fetched, count: counter.count };
+      }),
+    );
+
+    // Only the current round's reply went out — NOT the prior round's zombie.
+    expect(out.count).toBe(1);
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("resolved");
+  });
+
+  it("ignores a rejection for a prior-round approval instead of forcing human_takeover (stale-reject storm guard)", async () => {
+    // The production non-send: replayed rejections of OLD approvals slammed a
+    // case that had moved on into human_takeover, which then blocked its
+    // already-approved reply from ever sending.
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([]) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const approvals = yield* ApprovalService;
+        // Round 0: an approval that was rejected long ago.
+        const old = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 5 },
+          reasoning: "round 0",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+          epoch: 0,
+        });
+        yield* approvals.reject({ id: old.id, decidedBy: UserId("m") });
+        // The case advanced to round 1 and now waits on a fresh approval.
+        yield* repo.update(caseId as never, { epoch: 1 }, TenantId("tenant-acme"));
+        const current = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 7 },
+          reasoning: "round 1",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+          epoch: 1,
+        });
+        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+          reason: "round 1 pending",
+          tenantId: TenantId("tenant-acme"),
+        });
+        // A STALE rejected event for the round-0 approval is replayed.
+        const result = yield* runtime.handleEvent({
+          type: "approval.rejected",
+          approvalId: old.id,
+          caseId: caseId as never,
+          managerId: UserId("m"),
+        });
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        const currentAfter = yield* approvals.getById(
+          current.id,
+          TenantId("tenant-acme"),
+        );
+        return {
+          result,
+          fetched,
+          actions: entries.map((e) => e.action),
+          currentStatus: currentAfter.status,
+        };
+      }),
+    );
+
+    // The stale reject is a no-op: the case stays parked on its live approval.
+    expect(out.result.type).toBe("Completed");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.actions).toContain("approval.ignored_stale");
+    expect(out.actions).not.toContain("case.escalated_to_human");
+    expect(out.currentStatus).toBe("pending");
+  });
+
+  it("still escalates to human_takeover when the CURRENT round's approval is rejected", async () => {
+    // Positive control: the normal reject path is unchanged.
+    const counter = { count: 0 };
+    const layer = buildLayer(
+      LLMServiceScripted([]) as never,
+      [recoveryAgent()],
+      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+    );
+
+    const out = await runWithCase(layer as never, (caseId) =>
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const approvals = yield* ApprovalService;
+        const current = yield* approvals.create({
+          tenantId: TenantId("tenant-acme"),
+          caseId: caseId as never,
+          agentId: AgentId("recovery-test-agent"),
+          tool: "test.counted_action",
+          proposedInput: { amount: 5 },
+          reasoning: "current",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+          reason: "pending",
+          tenantId: TenantId("tenant-acme"),
+        });
+        const result = yield* runtime.handleEvent({
+          type: "approval.rejected",
+          approvalId: current.id,
+          caseId: caseId as never,
+          managerId: UserId("m"),
+        });
+        const fetched = yield* repo.getById(caseId as never);
+        const entries = yield* audit.forCase(caseId as never);
+        return { result, fetched, actions: entries.map((e) => e.action) };
+      }),
+    );
+
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
+    expect(out.actions).toContain("case.escalated_to_human");
+  });
+});
+
 describe("AgentRuntime — reopen on customer reply (resolved → in_progress)", () => {
   it("reopens a resolved case and audits case.reopened when the customer replies", async () => {
     const counter = { count: 0 };

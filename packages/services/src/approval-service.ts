@@ -53,6 +53,12 @@ export interface CreateApprovalInput {
   readonly reasoning: string;
   readonly riskLevel: ApprovalRiskLevel;
   readonly expiresAt: Date;
+  /**
+   * The case round (`Case.epoch`) this approval belongs to. Defaults to 0.
+   * A later round bumps the case epoch; approvals stamped with an older epoch
+   * are stale and are fenced out of bundle execution + the maintenance sweep.
+   */
+  readonly epoch?: number;
 }
 
 export interface ApproveInput {
@@ -126,6 +132,18 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
       input: RejectInput,
     ) => Effect.Effect<Approval, ApprovalServiceError>;
 
+    /**
+     * Mark an approval's decision as ACTED ON (sets `resumedAt`). Called by the
+     * runtime after it executes, dedups, or deliberately skips a decision.
+     * Idempotent — a row already resumed stays resumed. A resumed row is never
+     * re-run by a later bundle nor re-published by the maintenance sweep. No-op
+     * (not an error) when the approval is missing/cross-tenant (audit D9).
+     */
+    readonly markResumed: (
+      id: ApprovalId,
+      tenantId?: TenantId,
+    ) => Effect.Effect<void, ApprovalServiceError>;
+
     readonly listPending: (
       tenantId: TenantId,
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
@@ -162,11 +180,15 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
-     * Decided (approved/rejected) approvals older than `decidedBefore`
-     * whose case is STILL parked in `waiting_for_approval` (audit L3b):
-     * the decision committed but the workflow event was never published
-     * (or was lost), so the runtime never resumed. The maintenance sweep
-     * re-publishes their events; re-delivery is idempotent.
+     * APPROVED, not-yet-resumed approvals older than `decidedBefore` whose case
+     * is STILL parked in `waiting_for_approval` (audit L3b): the decision
+     * committed but its workflow event was never published (or was lost), so the
+     * runtime never resumed. The maintenance sweep re-publishes their events;
+     * re-delivery is idempotent.
+     *
+     * Deliberately EXCLUDES rejected/cancelled rows (a rejection has nothing to
+     * re-run — republishing one only re-forces human_takeover) and rows already
+     * marked `resumedAt` (recovery hardening).
      */
     readonly listDecidedUnresumed: (opts: {
       readonly decidedBefore: Date;
@@ -236,6 +258,8 @@ export const ApprovalServiceTest = Layer.effect(
             decisionReason: null,
             expiresAt: input.expiresAt,
             createdAt: new Date(),
+            epoch: input.epoch ?? 0,
+            resumedAt: null,
           };
           store.set(id, approval);
           return approval;
@@ -277,15 +301,23 @@ export const ApprovalServiceTest = Layer.effect(
           input.tenantId,
         ),
 
+      markResumed: (id, tenantId) =>
+        Effect.sync(() => {
+          const a = scoped(id, tenantId);
+          if (a && !a.resumedAt) store.set(id, { ...a, resumedAt: new Date() });
+        }),
+
       // In-memory approximation: no case table to join, so this returns
-      // decided rows older than the cutoff; the maintenance sweep
-      // re-checks the case status itself before republishing.
+      // APPROVED, unresumed rows older than the cutoff; the maintenance sweep
+      // re-checks the case status + epoch itself before republishing. Rejected
+      // rows are excluded (nothing to re-run) as is anything already resumed.
       listDecidedUnresumed: ({ decidedBefore, limit = 100 }) =>
         Effect.sync(() => {
           const out: Approval[] = [];
           for (const a of store.values()) {
             if (out.length >= limit) break;
-            if (a.status !== "approved" && a.status !== "rejected") continue;
+            if (a.status !== "approved") continue;
+            if (a.resumedAt) continue;
             if (!a.decidedAt || a.decidedAt.getTime() >= decidedBefore.getTime())
               continue;
             out.push(a);

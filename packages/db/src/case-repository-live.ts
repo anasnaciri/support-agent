@@ -61,6 +61,7 @@ const rowToCase = (r: CaseRow): Case => ({
   summary: r.summary,
   subject: r.subject,
   context: r.context as CaseContext,
+  epoch: r.epoch ?? 0,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
   resolvedAt: r.resolvedAt,
@@ -272,6 +273,7 @@ export const CaseRepositoryLive = Layer.effect(
         if (patch.subject !== undefined) dbPatch["subject"] = patch.subject;
         if (patch.summary !== undefined) dbPatch["summary"] = patch.summary;
         if (patch.context !== undefined) dbPatch["context"] = patch.context;
+        if (patch.epoch !== undefined) dbPatch["epoch"] = patch.epoch;
 
         const updated = yield* wrap(
           "update",

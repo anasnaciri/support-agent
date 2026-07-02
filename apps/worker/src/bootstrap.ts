@@ -30,6 +30,7 @@ import {
   type SheetsService,
   type TenantRepository,
   type KnowledgeBaseService,
+  type ProcessedEventStore,
   type TimerService,
   type TrackingService,
   type TransactionRunner,
@@ -51,6 +52,7 @@ import {
   SupplierEscalationServiceLive,
   ReplyDeliveryServiceLive,
   ImageHashStoreLive,
+  ProcessedEventStoreLive,
   ProcessedMessageStoreLive,
   ToolExecutionStoreLive,
   KnowledgeBaseServiceLive,
@@ -118,6 +120,7 @@ export interface WorkerBootstrap {
     | OrgDirectoryService
     | PlatformMailService
     | ConnectorCredentialStore
+    | ProcessedEventStore
     | DbClient,
     never,
     never
@@ -289,10 +292,11 @@ export const buildWorker = async (
     // `knowledge.search` tool the specialists call.
     KnowledgeBaseServiceLive,
     TimerServiceLive,
-    // At-least-once idempotency (audit C2/C3): processed-message dedup
-    // and tool-execution markers. The runtime treats both as optional —
-    // wiring them here is what turns the dedup on in production.
+    // At-least-once idempotency (audit C2/C3, H7): processed-message dedup,
+    // tool-execution markers, and event-level (eventId) dedup. The runtime
+    // treats them as optional — wiring them here turns the dedup on in prod.
     ProcessedMessageStoreLive,
+    ProcessedEventStoreLive,
     ToolExecutionStoreLive,
     // Exposed so workers like the retention-sweep cron can read
     // per-tenant settings (`retentionDays`). Other services that need

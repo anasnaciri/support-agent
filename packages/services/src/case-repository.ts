@@ -120,6 +120,7 @@ export type UpdatableCaseFields = Partial<
     | "subject"
     | "summary"
     | "context"
+    | "epoch"
   >
 >;
 
@@ -237,6 +238,7 @@ const buildCase = (input: CreateCaseInput, now: Date): Case => ({
   summary: input.summary ?? null,
   subject: input.subject ?? null,
   context: input.context ?? {},
+  epoch: 0,
   createdAt: now,
   updatedAt: now,
   resolvedAt: null,

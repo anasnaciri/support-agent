@@ -127,6 +127,12 @@ export const cases = pgTable(
     summary: text("summary"),
     subject: text("subject"),
     context: jsonb("context").notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Per-case "round" counter. Bumped on every resume/takeover so events and
+     * approvals created in a prior attempt (a lower epoch) can be fenced out —
+     * see `approvals.epoch`. Recovery hardening (double-send / stale-replay).
+     */
+    epoch: integer("epoch").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -296,6 +302,15 @@ export const approvals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /** The case round (`cases.epoch`) this approval was created in. */
+    epoch: integer("epoch").notNull().default(0),
+    /**
+     * Set once the decision has been ACTED ON — executed, deduped, or
+     * deliberately skipped (e.g. delivery skipped because a human took the
+     * case over). A resumed approval is never re-run by a later bundle and
+     * never re-published by the maintenance sweep. Recovery hardening.
+     */
+    resumedAt: timestamp("resumed_at", { withTimezone: true }),
   },
   (t) => [
     check(
@@ -727,6 +742,24 @@ export const processedMessages = pgTable(
 
 export type ProcessedMessageRow = typeof processedMessages.$inferSelect;
 export type ProcessedMessageInsert = typeof processedMessages.$inferInsert;
+
+/**
+ * Event-level redelivery dedup (H7). One row per pg-boss `event_id`. The
+ * consumer claims the id after a non-retryable settlement; a re-delivered job
+ * (same id) is then skipped. Distinct from `processed_messages` (which keys on
+ * the provider message id and only covers `message.received`). No FKs — the id
+ * is opaque and the row is a pure delivery record.
+ */
+export const processedEvents = pgTable("processed_events", {
+  eventId: text("event_id").primaryKey(),
+  eventType: text("event_type"),
+  processedAt: timestamp("processed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ProcessedEventRow = typeof processedEvents.$inferSelect;
+export type ProcessedEventInsert = typeof processedEvents.$inferInsert;
 
 /**
  * Tool-execution markers (audit C2). A side-effecting tool records a row

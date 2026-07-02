@@ -94,6 +94,51 @@ export const ProcessedMessageStoreTest = Layer.sync(
 );
 
 // ============================================================
+// ProcessedEventStore (H7 — event-level redelivery dedup)
+// ============================================================
+//
+// pg-boss is at-least-once at the JOB level: a worker crash between the
+// handler returning and pg-boss recording completion re-delivers the SAME
+// job (same `eventId`). C3 only covers `message.received`; every other event
+// (approval.*, timer.expired, supplier.updated, customer.replied, …) had no
+// generic guard. This store claims by the queue `eventId` at the consumer,
+// so a re-delivered job is skipped once its first run committed. The claim is
+// written only AFTER a non-retryable settlement (mirrors C3) so a genuine
+// retry still reprocesses. NB: the L3b maintenance sweep re-publishes with a
+// FRESH `eventId`, so it is intentionally NOT deduped here — that recovery is
+// governed by the approval epoch/resumed guards instead.
+
+export class ProcessedEventStore extends Context.Tag("ProcessedEventStore")<
+  ProcessedEventStore,
+  {
+    readonly seen: (
+      eventId: string,
+    ) => Effect.Effect<boolean, IdempotencyStoreDbError>;
+    /**
+     * Claim an eventId. Returns "new" exactly once; later claims for the same
+     * id return "duplicate" (INSERT … ON CONFLICT DO NOTHING).
+     */
+    readonly claim: (
+      eventId: string,
+      meta?: { readonly eventType?: string },
+    ) => Effect.Effect<ClaimMessageResult, IdempotencyStoreDbError>;
+  }
+>() {}
+
+export const ProcessedEventStoreTest = Layer.sync(ProcessedEventStore, () => {
+  const seenIds = new Set<string>();
+  return ProcessedEventStore.of({
+    seen: (eventId) => Effect.sync(() => seenIds.has(eventId)),
+    claim: (eventId) =>
+      Effect.sync(() => {
+        if (seenIds.has(eventId)) return "duplicate";
+        seenIds.add(eventId);
+        return "new";
+      }),
+  });
+});
+
+// ============================================================
 // ToolExecutionStore (C2)
 // ============================================================
 

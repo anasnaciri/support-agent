@@ -626,6 +626,12 @@ const AgentRuntimeLayer = Layer.effect(
               );
               exec = result;
             }
+            // The decision has now been ACTED ON (executed, deduped, or about to
+            // be parked on failure). Retire it so a later bundle can't re-run it
+            // and the maintenance sweep can't re-publish it (recovery hardening).
+            yield* approvals
+              .markResumed(approval.id, working.tenantId)
+              .pipe(Effect.catchAll(() => Effect.void));
             if (exec._tag === "Left") {
               // Tool failed AFTER approval — park the case in human_takeover
               // so someone can intervene. The approval row is already
@@ -701,6 +707,13 @@ const AgentRuntimeLayer = Layer.effect(
                   },
                 }),
               );
+              // H1: neutralize the skipped decision. Left `approved`, it would
+              // otherwise be swept into a LATER round's bundle (the double-send)
+              // and re-published by the maintenance sweep. Marking it resumed
+              // retires it for good — the human owns the case now.
+              yield* approvals
+                .markResumed(trigger.id, working.tenantId)
+                .pipe(Effect.catchAll(() => Effect.void));
               return { type: "PausedForHumanTakeover" } as const;
             }
             // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
@@ -730,14 +743,55 @@ const AgentRuntimeLayer = Layer.effect(
             const all = yield* approvals
               .listForCase(working.tenantId, working.id)
               .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
-            const approvedRows = all.filter((a) => a.status === "approved");
+            // H2: run only the CURRENT round's not-yet-resumed approved rows.
+            // An `approved` leftover from a prior attempt (a lower epoch) or one
+            // already acted on (`resumedAt`) must never execute here — that is
+            // the double-send: a stale approved reply swept into a new round's
+            // bundle. Fencing by (epoch, resumedAt) makes it impossible.
+            const currentEpoch = working.epoch ?? 0;
+            // A row belongs to THIS bundle only if it's an observed-approved,
+            // not-yet-resumed row of the CURRENT round.
+            const isCurrentBundleRow = (a: Approval): boolean =>
+              a.status === "approved" &&
+              (a.resumedAt ?? null) === null &&
+              (a.epoch ?? 0) === currentEpoch;
+            const approvedRows = all.filter(isCurrentBundleRow);
             let bundle = approvedRows;
             let usedFallback = false;
             if (bundle.length === 0) {
-              // The trigger hasn't been observed as `approved` yet (a lean
-              // ApprovalService without listForCase, or an event that raced the
-              // approve write): fall back to running it as a singleton if it's
-              // still runnable. A rejected/cancelled/expired row never executes.
+              // No observed-approved current row. First: is the TRIGGER itself
+              // stale — from a prior round (lower epoch) or already acted on?
+              // Such an event is a replay (at-least-once delivery / the
+              // maintenance sweep). IGNORE it — do NOT escalate (forcing
+              // human_takeover here was the spurious-takeover bug).
+              const triggerStale =
+                (trigger.resumedAt ?? null) !== null ||
+                (trigger.epoch ?? 0) !== currentEpoch;
+              if (triggerStale) {
+                yield* tx.run(
+                  audit.record({
+                    tenantId: working.tenantId,
+                    caseId: working.id,
+                    actor: { type: "system", id: "runtime" },
+                    action: "approval.ignored_stale",
+                    details: {
+                      approvalId: trigger.id,
+                      event: "approval.approved",
+                      status: trigger.status,
+                      reason:
+                        (trigger.resumedAt ?? null) !== null
+                          ? "already_resumed"
+                          : "stale_epoch",
+                      epoch: trigger.epoch ?? 0,
+                      caseEpoch: currentEpoch,
+                    },
+                  }),
+                );
+                return { type: "Completed" } as const;
+              }
+              // Current-round trigger, but terminally decided (rejected /
+              // cancelled / expired): nothing to run — park for a human
+              // (unchanged behavior).
               if (
                 trigger.status === "rejected" ||
                 trigger.status === "cancelled" ||
@@ -752,6 +806,9 @@ const AgentRuntimeLayer = Layer.effect(
                   reason: "approval_not_runnable",
                 } as const;
               }
+              // Current + runnable (pending/approved) but `listForCase` returned
+              // it unobserved (a lean ApprovalService, or an event that raced the
+              // approve write): fall back to running it as a singleton.
               bundle = [trigger];
               usedFallback = true;
             }
@@ -818,6 +875,46 @@ const AgentRuntimeLayer = Layer.effect(
           event: Extract<DomainEvent, { type: "approval.rejected" }>,
         ) =>
           Effect.gen(function* () {
+            // H4: reconcile against current state before acting. A rejection is
+            // authoritative ONLY for a CURRENT-round approval that hasn't been
+            // acted on. A rejection for a prior attempt (a lower epoch) or one
+            // already handled is a stale/replayed event — ignore it. Escalating
+            // unconditionally was the stale-reject storm: a redelivered/re-
+            // published reject from an old round yanked a case that had moved on
+            // into human_takeover, which then blocked its approved reply from
+            // ever sending.
+            const rejected = yield* approvals
+              .getById(event.approvalId, working.tenantId)
+              .pipe(
+                Effect.catchTag("ApprovalNotFound", () => Effect.succeed(null)),
+                Effect.catchAll(() => Effect.succeed(null)),
+              );
+            const stale =
+              !rejected ||
+              (rejected.resumedAt ?? null) !== null ||
+              (rejected.epoch ?? 0) !== (working.epoch ?? 0);
+            if (stale) {
+              yield* tx.run(
+                audit.record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "system", id: "runtime" },
+                  action: "approval.ignored_stale",
+                  details: {
+                    approvalId: event.approvalId,
+                    event: "approval.rejected",
+                    reason: !rejected
+                      ? "approval_not_found"
+                      : (rejected.resumedAt ?? null) !== null
+                        ? "already_resumed"
+                        : "stale_epoch",
+                    epoch: rejected?.epoch ?? null,
+                    caseEpoch: working.epoch ?? 0,
+                  },
+                }),
+              );
+              return { type: "Completed" } as const;
+            }
             working = yield* lifecycle.escalateToHuman({
               caseId: working.id,
               tenantId: working.tenantId,
@@ -828,6 +925,10 @@ const AgentRuntimeLayer = Layer.effect(
                 reason: event.reason ?? null,
               },
             });
+            // Retire the decision so a redelivery/sweep can't replay it.
+            yield* approvals
+              .markResumed(event.approvalId, working.tenantId)
+              .pipe(Effect.catchAll(() => Effect.void));
             // Confirmation ping: rejecting the draft makes the case theirs.
             yield* notifyMerchant(
               working.tenantId,

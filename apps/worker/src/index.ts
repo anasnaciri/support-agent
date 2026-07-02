@@ -1,4 +1,5 @@
 import { Effect, ManagedRuntime } from "effect";
+import { ProcessedEventStore } from "@support-agent/services";
 import { buildWorker } from "./bootstrap.js";
 import {
   DEFAULT_WORKFLOW_QUEUE_NAME,
@@ -86,15 +87,40 @@ const main = async (): Promise<void> => {
     concurrency: consumerConfig.concurrency,
     onJob: async (job) => {
       const event = reviveDomainEvent(job.data.event);
+      const eventId = job.data.eventId;
       console.log(
-        `[worker] ${event.type} eventId=${job.data.eventId} key=${job.data.key}`,
+        `[worker] ${event.type} eventId=${eventId} key=${job.data.key}`,
       );
+      // H7: skip a re-delivered job whose prior run already committed. pg-boss
+      // is at-least-once at the JOB level (crash after the handler returned but
+      // before completion re-delivers the SAME eventId). Best-effort: on a
+      // store read error we fall through and let the tick run.
+      const alreadySeen = await managedRuntime.runPromise(
+        ProcessedEventStore.pipe(
+          Effect.flatMap((s) => s.seen(eventId)),
+          Effect.catchAll(() => Effect.succeed(false)),
+        ),
+      );
+      if (alreadySeen) {
+        console.log(
+          `[worker] ${event.type} eventId=${eventId} -> duplicate (skipped)`,
+        );
+        return;
+      }
       const settlement = await processWorkflowEvent({
         runtime: managedRuntime,
         event,
         tickTimeoutMs: consumerConfig.tickTimeoutMs,
       });
       if (settlement.kind === "complete") {
+        // Claim only after a non-retryable settlement — a retry (thrown below)
+        // leaves the id unclaimed so pg-boss genuinely reprocesses it.
+        await managedRuntime.runPromise(
+          ProcessedEventStore.pipe(
+            Effect.flatMap((s) => s.claim(eventId, { eventType: event.type })),
+            Effect.catchAll(() => Effect.succeed("new" as const)),
+          ),
+        );
         const r = settlement.result;
         console.log(
           `[worker] ${event.type} -> ${r.type}` +

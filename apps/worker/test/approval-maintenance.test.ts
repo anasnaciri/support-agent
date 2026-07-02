@@ -103,6 +103,141 @@ describe("runApprovalMaintenanceOnce", () => {
     }
   });
 
+  it("never republishes a REJECTED decision (a rejection has nothing to re-run)", async () => {
+    // Recovery hardening: the stale-reject storm bug — the sweep re-fired old
+    // rejections, each re-forcing human_takeover. Rejected rows must be
+    // excluded even while the case is parked in waiting_for_approval.
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const approvals = yield* ApprovalService;
+          const row = yield* setupCase;
+          const approval = yield* approvals.create({
+            tenantId,
+            caseId: row.id,
+            agentId: AgentId("refund-review-agent"),
+            tool: "conversation.ask_customer",
+            proposedInput: {},
+            reasoning: "test",
+            riskLevel: "medium",
+            expiresAt: new Date(Date.now() + 60_000),
+          });
+          yield* approvals.reject({
+            id: approval.id,
+            decidedBy: UserId("manager-1"),
+          });
+          const published: DomainEvent[] = [];
+          const result = yield* runApprovalMaintenanceOnce({
+            publish: (e) => {
+              published.push(e);
+              return Promise.resolve();
+            },
+            now: new Date(Date.now() + 10 * 60_000),
+          });
+          return { result, published };
+        }),
+        layer,
+      ) as Effect.Effect<
+        { result: { republished: number }; published: ReadonlyArray<DomainEvent> },
+        never,
+        never
+      >,
+    );
+    expect(out.result.republished).toBe(0);
+    expect(out.published).toHaveLength(0);
+  });
+
+  it("never republishes a decision from a PRIOR round (stale epoch)", async () => {
+    // Recovery hardening: an approved-but-lost decision from an earlier attempt
+    // must not drive the case's current round.
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+          const row = yield* setupCase;
+          // Approval belongs to round 0.
+          const approval = yield* approvals.create({
+            tenantId,
+            caseId: row.id,
+            agentId: AgentId("refund-review-agent"),
+            tool: "conversation.reply",
+            proposedInput: {},
+            reasoning: "test",
+            riskLevel: "medium",
+            expiresAt: new Date(Date.now() + 60_000),
+            epoch: 0,
+          });
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: UserId("manager-1"),
+          });
+          // The case has since advanced to round 1 (a resume bumped it).
+          yield* repo.update(row.id, { epoch: 1 }, tenantId);
+          const published: DomainEvent[] = [];
+          const result = yield* runApprovalMaintenanceOnce({
+            publish: (e) => {
+              published.push(e);
+              return Promise.resolve();
+            },
+            now: new Date(Date.now() + 10 * 60_000),
+          });
+          return { result, published };
+        }),
+        layer,
+      ) as Effect.Effect<
+        { result: { republished: number }; published: ReadonlyArray<DomainEvent> },
+        never,
+        never
+      >,
+    );
+    expect(out.result.republished).toBe(0);
+    expect(out.published).toHaveLength(0);
+  });
+
+  it("never republishes an already-resumed decision", async () => {
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const approvals = yield* ApprovalService;
+          const row = yield* setupCase;
+          const approval = yield* approvals.create({
+            tenantId,
+            caseId: row.id,
+            agentId: AgentId("refund-review-agent"),
+            tool: "conversation.reply",
+            proposedInput: {},
+            reasoning: "test",
+            riskLevel: "medium",
+            expiresAt: new Date(Date.now() + 60_000),
+          });
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: UserId("manager-1"),
+          });
+          // The runtime already acted on it.
+          yield* approvals.markResumed(approval.id, tenantId);
+          const published: DomainEvent[] = [];
+          const result = yield* runApprovalMaintenanceOnce({
+            publish: (e) => {
+              published.push(e);
+              return Promise.resolve();
+            },
+            now: new Date(Date.now() + 10 * 60_000),
+          });
+          return { result, published };
+        }),
+        layer,
+      ) as Effect.Effect<
+        { result: { republished: number }; published: ReadonlyArray<DomainEvent> },
+        never,
+        never
+      >,
+    );
+    expect(out.result.republished).toBe(0);
+    expect(out.published).toHaveLength(0);
+  });
+
   it("does not republish when the case already moved on", async () => {
     const out = await Effect.runPromise(
       Effect.provide(

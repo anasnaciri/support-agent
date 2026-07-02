@@ -2,6 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { and, eq } from "drizzle-orm";
 import {
   IdempotencyStoreDbError,
+  ProcessedEventStore,
   ProcessedMessageStore,
   ToolExecutionStore,
   type ClaimMessageInput,
@@ -12,7 +13,7 @@ import {
 import { CaseId as makeCaseId } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import type { DrizzleDb } from "./client.js";
-import { processedMessages, toolExecutions } from "./schema.js";
+import { processedEvents, processedMessages, toolExecutions } from "./schema.js";
 
 const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
@@ -78,6 +79,51 @@ export const ProcessedMessageStoreLive = Layer.effect(
       });
 
     return ProcessedMessageStore.of({ seen, claim });
+  }),
+);
+
+export const ProcessedEventStoreLive = Layer.effect(
+  ProcessedEventStore,
+  Effect.gen(function* () {
+    const defaultDb = yield* DbClient;
+
+    const seen = (
+      eventId: string,
+    ): Effect.Effect<boolean, IdempotencyStoreDbError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "seen",
+          db
+            .select({ id: processedEvents.eventId })
+            .from(processedEvents)
+            .where(eq(processedEvents.eventId, eventId))
+            .limit(1),
+        );
+        return rows.length > 0;
+      });
+
+    const claim = (
+      eventId: string,
+      meta?: { readonly eventType?: string },
+    ): Effect.Effect<ClaimMessageResult, IdempotencyStoreDbError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const inserted = yield* wrap(
+          "claim",
+          db
+            .insert(processedEvents)
+            .values({
+              eventId,
+              eventType: meta?.eventType ?? null,
+            })
+            .onConflictDoNothing()
+            .returning({ id: processedEvents.eventId }),
+        );
+        return inserted.length > 0 ? "new" : "duplicate";
+      });
+
+    return ProcessedEventStore.of({ seen, claim });
   }),
 );
 

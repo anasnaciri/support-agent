@@ -31,4 +31,12 @@ export interface Approval {
   readonly decisionReason: string | null;
   readonly expiresAt: Date;
   readonly createdAt: Date;
+  /** The case round (`Case.epoch`) this approval was created in (defaults 0). */
+  readonly epoch?: number;
+  /**
+   * Set once the decision has been ACTED ON — executed, deduped, or skipped.
+   * A resumed approval is never re-run by a later bundle nor re-published by the
+   * maintenance sweep. Recovery hardening.
+   */
+  readonly resumedAt?: Date | null;
 }

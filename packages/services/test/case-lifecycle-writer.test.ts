@@ -678,6 +678,87 @@ describe("CaseLifecycleWriter", () => {
     });
   });
 
+  it("resume bumps the case round (epoch) on both hand-back and restart-from-triage", async () => {
+    // Recovery hardening: every new attempt owns a fresh round so leftovers of
+    // the prior attempt (approvals/events at a lower epoch) are fenced out.
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const tenant = TenantId("tenant-a");
+        const plain = yield* cases.create({
+          tenantId: tenant,
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          status: "human_takeover",
+        });
+        yield* lifecycle.resume({
+          caseId: plain.id,
+          tenantId: tenant,
+          actor: { type: "user", id: "m" },
+          decidedBy: UserId("m"),
+          reason: "hand back",
+        });
+        const restart = yield* cases.create({
+          tenantId: tenant,
+          channel: "email",
+          currentAgentId: AgentId("refund-review-agent"),
+          status: "human_takeover",
+          context: { classification: "refund" },
+        });
+        yield* lifecycle.resume({
+          caseId: restart.id,
+          tenantId: tenant,
+          actor: { type: "user", id: "m" },
+          decidedBy: UserId("m"),
+          reason: "retry",
+          restartFromTriage: true,
+        });
+        return {
+          plainStart: plain.epoch ?? 0,
+          plainEpoch: (yield* cases.getById(plain.id, tenant)).epoch ?? 0,
+          restartEpoch: (yield* cases.getById(restart.id, tenant)).epoch ?? 0,
+        };
+      }),
+    );
+    expect(out.plainStart).toBe(0);
+    expect(out.plainEpoch).toBe(1);
+    expect(out.restartEpoch).toBe(1);
+  });
+
+  it("parkForApproval stamps the approval with the case's current round", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const approvals = yield* ApprovalService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const tenant = TenantId("tenant-a");
+        const c = yield* cases.create({
+          tenantId: tenant,
+          channel: "email",
+          currentAgentId: AgentId("refund-review-agent"),
+          status: "in_progress",
+        });
+        yield* cases.update(c.id, { epoch: 3 }, tenant);
+        const parked = yield* lifecycle.parkForApproval({
+          caseId: c.id,
+          tenantId: tenant,
+          agentId: AgentId("refund-review-agent"),
+          tool: "conversation.reply",
+          proposedInput: { bodyText: "draft" },
+          reasoning: "reply",
+          riskLevel: "medium",
+          expiresAt: new Date(Date.now() + 60_000),
+          turn: 1,
+        });
+        return {
+          epoch: (yield* approvals.getById(parked.approval.id, tenant)).epoch ?? 0,
+        };
+      }),
+    );
+    expect(out.epoch).toBe(3);
+  });
+
   it("restartFromTriage resume rebinds the case to support-triage and clears the stale classification", async () => {
     const out = await run(
       Effect.gen(function* () {

@@ -566,6 +566,10 @@ export const CaseLifecycleWriterLive = Layer.effect(
         tx.run(
           Effect.gen(function* () {
             yield* supersedeOlderDraft(input);
+            // Stamp the approval with the case's current round so a later
+            // resume (which bumps the epoch) fences this draft out of its
+            // bundle — the double-send guard.
+            const cur = yield* cases.getById(input.caseId, input.tenantId);
             const approval = yield* approvals.create({
               tenantId: input.tenantId,
               caseId: input.caseId,
@@ -575,6 +579,7 @@ export const CaseLifecycleWriterLive = Layer.effect(
               reasoning: input.reasoning,
               riskLevel: input.riskLevel,
               expiresAt: input.expiresAt,
+              epoch: cur.epoch ?? 0,
             });
             const row = yield* cases.transitionStatus(
               input.caseId,
@@ -606,6 +611,8 @@ export const CaseLifecycleWriterLive = Layer.effect(
             // the agent keeps acting; the case parks once via
             // parkForApprovalBundle when the loop ends.
             yield* supersedeOlderDraft(input);
+            // Stamp with the case's current round (see parkForApproval).
+            const cur = yield* cases.getById(input.caseId, input.tenantId);
             const approval = yield* approvals.create({
               tenantId: input.tenantId,
               caseId: input.caseId,
@@ -615,6 +622,7 @@ export const CaseLifecycleWriterLive = Layer.effect(
               reasoning: input.reasoning,
               riskLevel: input.riskLevel,
               expiresAt: input.expiresAt,
+              epoch: cur.epoch ?? 0,
             });
             yield* audit.record({
               tenantId: input.tenantId,
@@ -870,6 +878,13 @@ export const CaseLifecycleWriterLive = Layer.effect(
                 reason: input.reason,
               },
             );
+            // Bump the round: a human now owns this attempt, so any decision
+            // from the prior round is fenced out (recovery hardening).
+            yield* cases.update(
+              case_.id,
+              { epoch: (case_.epoch ?? 0) + 1 },
+              case_.tenantId,
+            );
             yield* audit.record({
               tenantId: updated.tenantId,
               caseId: updated.id,
@@ -916,25 +931,41 @@ export const CaseLifecycleWriterLive = Layer.effect(
                 reason: input.reason,
               },
             );
-            // Full retry from triage: rebind to the primary agent, drop the
-            // stale routing key, and cancel every pending approval so the tick
-            // re-classifies + re-routes from scratch and no stale approval-link
-            // click acts on the old route's proposal. Same tx as the status
-            // flip — the rebind + cancel must be atomic with the resume.
+            // Bump the case round on EVERY resume (plain hand-back OR full
+            // retry): the new attempt owns a fresh epoch, so approvals + events
+            // from the prior attempt are fenced out — an approved-but-skipped
+            // draft can't be swept into this round's bundle (the double-send),
+            // and a stale decision can't drive this round. Same tx as the flip.
+            const newEpoch = (case_.epoch ?? 0) + 1;
             let canceledApprovals = 0;
             if (input.restartFromTriage) {
+              // Full retry from triage: rebind to the primary agent, drop the
+              // stale routing key, and cancel every pending approval so the tick
+              // re-classifies + re-routes from scratch and no stale approval-link
+              // click acts on the old route's proposal.
               const { classification: _drop, ...keptContext } =
                 case_.context as Record<string, unknown>;
-              yield* cases.update(case_.id, {
-                currentAgentId: PRIMARY_AGENT_ID,
-                context: keptContext as never,
-              });
+              yield* cases.update(
+                case_.id,
+                {
+                  currentAgentId: PRIMARY_AGENT_ID,
+                  context: keptContext as never,
+                  epoch: newEpoch,
+                },
+                case_.tenantId,
+              );
               canceledApprovals = yield* approvals.cancelPendingForCase({
                 tenantId: updated.tenantId,
                 caseId: updated.id,
                 decidedBy: input.decidedBy,
                 decisionReason: "case restarted from triage",
               });
+            } else {
+              yield* cases.update(
+                case_.id,
+                { epoch: newEpoch },
+                case_.tenantId,
+              );
             }
             yield* audit.record({
               tenantId: updated.tenantId,

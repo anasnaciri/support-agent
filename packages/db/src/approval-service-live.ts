@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ApprovalNotFound,
@@ -47,6 +47,8 @@ const rowToApproval = (r: ApprovalRow): Approval => ({
   decisionReason: r.decisionReason,
   expiresAt: r.expiresAt,
   createdAt: r.createdAt,
+  epoch: r.epoch ?? 0,
+  resumedAt: r.resumedAt ?? null,
 });
 
 const wrap = <A>(
@@ -84,6 +86,7 @@ export const ApprovalServiceLive = Layer.effect(
               riskLevel: input.riskLevel,
               status: "pending",
               expiresAt: input.expiresAt,
+              epoch: input.epoch ?? 0,
             })
             .returning(),
         );
@@ -220,6 +223,21 @@ export const ApprovalServiceLive = Layer.effect(
         input.tenantId,
       );
 
+    const markResumed = (
+      id: ReturnType<typeof ApprovalId>,
+      tenantId?: TenantId,
+    ): Effect.Effect<void, ApprovalServiceError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "markResumed",
+          db
+            .update(approvals)
+            .set({ resumedAt: new Date() })
+            .where(and(idScope(id, tenantId), isNull(approvals.resumedAt))),
+        );
+      });
+
     const cancelPendingForCase = (
       input: CancelPendingForCaseInput,
     ): Effect.Effect<number, ApprovalServiceError> =>
@@ -340,7 +358,15 @@ export const ApprovalServiceLive = Layer.effect(
             .innerJoin(cases, eq(cases.id, approvals.caseId))
             .where(
               and(
-                inArray(approvals.status, ["approved", "rejected"]),
+                // APPROVED only: a rejection has nothing to re-run, and
+                // republishing one would only re-force human_takeover (the
+                // stale-reject-storm bug). Recovery hardening.
+                eq(approvals.status, "approved"),
+                // Not already acted on.
+                isNull(approvals.resumedAt),
+                // Only the case's CURRENT round — a decision from a prior
+                // attempt (lower epoch) must never drive the new one.
+                eq(approvals.epoch, cases.epoch),
                 // NB: `lt(col, date)` binds through the column's timestamp
                 // encoder (Date -> ISO string). A raw `sql`${col} < ${date}``
                 // would pass the Date straight to the driver, which throws
@@ -361,6 +387,7 @@ export const ApprovalServiceLive = Layer.effect(
       getById,
       approve,
       reject,
+      markResumed,
       listPending,
       listForCase,
       cancelPendingForCase,

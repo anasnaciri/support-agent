@@ -151,6 +151,12 @@ export interface Case {
   readonly summary: string | null;
   readonly subject: string | null;
   readonly context: CaseContext;
+  /**
+   * Per-case "round" counter (defaults to 0). Bumped on every resume/takeover;
+   * approvals and events created in a prior round (a lower epoch) are stale and
+   * must not act on the current round. Recovery hardening.
+   */
+  readonly epoch?: number;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly resolvedAt: Date | null;
