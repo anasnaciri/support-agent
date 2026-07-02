@@ -606,6 +606,13 @@ export interface OutboundMimeOptions {
   /** Used for proper threading: `In-Reply-To` + `References`. */
   readonly inReplyToMessageId?: string | null;
   readonly references?: ReadonlyArray<string>;
+  /**
+   * Deterministic outbound Message-ID (without angle brackets). Stamped so a
+   * crash-driven redelivery can detect this exact send already landed in the
+   * thread and skip re-sending (H8 idempotent send). Omitted → Gmail assigns
+   * one as before.
+   */
+  readonly messageId?: string | null;
 }
 
 // SECURITY (S8): `to[].email` / display names are LLM-influenced. Anything
@@ -647,6 +654,10 @@ export const buildGmailMime = (opts: OutboundMimeOptions): string => {
   // RFC 2047 isn't worth pulling in a library for; ASCII-only subject keeps
   // things sane until a tenant complains. Strip control chars defensively.
   lines.push(`Subject: ${opts.subject.replace(/[\r\n]+/g, " ")}`);
+  const stampId = normaliseRfcMessageId(opts.messageId ?? null);
+  if (stampId) {
+    lines.push(`Message-ID: <${stampId}>`);
+  }
   const inReplyTo = normaliseRfcMessageId(opts.inReplyToMessageId ?? null);
   if (inReplyTo) {
     lines.push(`In-Reply-To: <${inReplyTo}>`);

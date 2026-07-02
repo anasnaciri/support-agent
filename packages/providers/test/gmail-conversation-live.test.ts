@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ConversationAuthFailed,
   ConversationAuthMissing,
+  deterministicReplyMessageId,
   TenantId,
   ThreadId,
   type ConversationReply,
@@ -199,7 +200,11 @@ describe("GmailConversationLive — fetchThread", () => {
 
 describe("GmailConversationLive — reply", () => {
   it("sends a MIME-encoded reply through users.messages.send and returns SentMessage", async () => {
-    const fetchImpl = vi.fn(async (_url, init: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      // Best-effort dedup pre-send read (H8): no prior send in the thread.
+      if (url.includes("/threads/t-1")) {
+        return okJson({ id: "t-1", messages: [] });
+      }
       const body = JSON.parse(String(init.body)) as {
         raw: string;
         threadId?: string;
@@ -323,6 +328,124 @@ describe("GmailConversationLive — reply", () => {
 
     expect(sent.id).toBe("sent-100");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-send when its deterministic Message-ID is already in the thread (H8 idempotent retry)", async () => {
+    // The prior delivery of THIS draft already sent — its deterministic
+    // Message-ID sits in the thread. A crash-driven redelivery must return the
+    // prior send, not double-send.
+    const dupId = deterministicReplyMessageId("support@merchant.com", "d-dup");
+    const sendSpy = vi.fn();
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/threads/t-1")) {
+        return okJson({
+          id: "t-1",
+          messages: [
+            {
+              id: "m-1",
+              threadId: "t-1",
+              labelIds: ["INBOX"],
+              internalDate: "1747000000000",
+              payload: {
+                headers: [
+                  { name: "From", value: "jane@example.com" },
+                  { name: "To", value: "support@merchant.com" },
+                  { name: "Subject", value: "Hi" },
+                  { name: "Message-ID", value: "<m-1@example.com>" },
+                ],
+                body: { data: "aGk" },
+              },
+            },
+            {
+              // Our own prior send for draft d-dup, already in the thread.
+              id: "already-sent-42",
+              threadId: "t-1",
+              labelIds: ["SENT"],
+              internalDate: "1747000060000",
+              payload: {
+                headers: [
+                  { name: "From", value: "support@merchant.com" },
+                  { name: "To", value: "jane@example.com" },
+                  { name: "Subject", value: "Re: Hi" },
+                  { name: "Message-ID", value: `<${dupId}>` },
+                ],
+                body: { data: "aGk" },
+              },
+            },
+          ],
+        });
+      }
+      sendSpy(init);
+      return okJson({ id: "should-not-happen", threadId: "t-1" });
+    });
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("t-1"),
+            to: [{ name: null, email: "jane@example.com" }],
+            subject: "Re: Hi",
+            bodyText: "We shipped yesterday.",
+            bodyHtml: null,
+            attachments: [],
+            inReplyToMessageId: "m-1@example.com",
+            draftId: "d-dup",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(sent.id).toBe("already-sent-42");
+    expect(sent.threadId).toBe("t-1");
+  });
+
+  it("stamps the deterministic Message-ID on the outbound reply (H8)", async () => {
+    const stampId = deterministicReplyMessageId(
+      "support@merchant.com",
+      "d-stamp",
+    );
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/threads/t-1")) {
+        // Empty-ish thread: no prior send, so the reply goes out.
+        return okJson({ id: "t-1", messages: [] });
+      }
+      const body = JSON.parse(String(init.body)) as { raw: string };
+      const decoded = Buffer.from(
+        body.raw.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString("utf8");
+      expect(decoded).toContain(`Message-ID: <${stampId}>`);
+      return okJson({ id: "sent-77", threadId: "t-1" });
+    });
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(seededStore()));
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("t-1"),
+            to: [{ name: null, email: "jane@example.com" }],
+            subject: "Re: Hi",
+            bodyText: "We shipped yesterday.",
+            bodyHtml: null,
+            attachments: [],
+            inReplyToMessageId: "m-1@example.com",
+            draftId: "d-stamp",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(sent.id).toBe("sent-77");
   });
 
   it("maps a 401 from Gmail onto ConversationAuthFailed", async () => {

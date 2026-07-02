@@ -47,23 +47,36 @@ maintenance sweep re-fired stale (and rejected) decisions.
       recovery republishes are intentionally NOT deduped here. `runtimeLayer`
       now exposes `ProcessedEventStore`. Test: `processed-event-store.test.ts`.
 
+- [x] **H8 (Gmail)** retry-safe send: the external send runs OUTSIDE the
+      marker-commit tx (`agent-runtime.ts:587`, audit D6), so a crash between send
+      and marker commit re-sends on retry; the connector didn't dedupe despite
+      its `ConversationService` contract. Fixed at the Gmail connector, NOT the
+      runtime: `deterministicReplyMessageId(mailbox, draftId)` (pure helper in
+      agent-core `conversation.ts`, FNV-1a hashed so distinct drafts can't
+      collide) is STAMPED on the outbound MIME (`buildGmailMime` gained
+      `messageId`) AND scanned for in a pre-send thread read — finding our own
+      prior send in the thread returns it instead of double-sending. Fails OPEN
+      (nothing found ⇒ send), so a legit retry is never suppressed — the exact
+      risk that deferred this. Tests: `agent-core/test/conversation.test.ts` (5,
+      helper) + `providers/test/gmail-conversation-live.test.ts` (+2: dedup +
+      stamp). `send` now always does a thread read (cheap for Gmail/HTTP).
+
 **Remaining (adopted, not yet done):**
 
-- [ ] **H8** retry-safe send: the external send runs OUTSIDE the marker-commit
-      tx (`agent-runtime.ts:587`, audit D6), so a crash between send and marker
-      commit re-sends on retry; and the Gmail connector does NOT actually dedupe
-      on `(caseId, draftId)` despite its `ConversationService` contract. Fix =
-      connector-level `(caseId, draftId)` send idempotency (claim-before-send).
-      Deferred deliberately — it's a careful change to the customer/money send
-      path (a wrong claim could suppress a legit retry), wants its own TDD cycle.
+- [ ] **H8 for other connectors**: IMAP/SMTP already STAMPS a deterministic
+      Message-ID from draftId (`makeMessageId`/`messageIdSeed`) but does NO
+      pre-send dedup scan — adding one costs an extra IMAP connect, which the
+      send-reliability work deliberately minimized (weigh before adding). Graph
+      (Outlook) can't easily set a custom Message-ID.
 - [ ] **H9** dashboard "approved but not sent" surfacing + one-click resend
       (API detection off `approval.stale_delivery_skipped` + apps/dashboard-spa).
 - [ ] **H6 extension**: timer/supplier events don't yet carry/consume the epoch
       (only approvals do). The `cases.epoch` primitive is in place to build on.
 
-Status: **6 of 8 adopted hardenings landed** (all the fixes for the two real
-prod incidents + event dedup), `pnpm build` green, 673 services+worker unit
-tests pass. NOT committed (entangled tree — needs a dedicated branch).
+Status: **7 of 8 adopted hardenings landed** (all fixes for the two real prod
+incidents + event dedup + Gmail retry-safe send), `pnpm build` green. H8 is
+complete for Gmail; other connectors + H9 remain. NOT committed (entangled tree
+— needs a dedicated branch).
 
 ---
 

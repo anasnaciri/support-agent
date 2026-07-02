@@ -111,6 +111,53 @@ export interface SentMessage {
   readonly sentAt: Date;
 }
 
+// FNV-1a (32-bit) — a tiny, dependency-free deterministic hash. Only used to
+// keep the Message-ID below collision-free after sanitisation; not security
+// sensitive.
+const fnv1a = (s: string): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+};
+
+/**
+ * Deterministic RFC-5322 Message-ID for an outbound reply, derived purely from
+ * the connector mailbox and the reply's `draftId`.
+ *
+ * H8 (retry-safe send): the send happens BEFORE the runtime commits its "sent"
+ * marker, so a crash in that window redelivers the job and — with no marker —
+ * the connector would re-send. Because `(mailbox, draftId)` always maps to the
+ * SAME id, a connector stamps it on the outbound message and, before sending,
+ * scans the thread for it: finding our own prior send means "already delivered,
+ * return it" instead of double-sending. Crucially this can only ever SUPPRESS a
+ * send that genuinely already landed (its id is in the thread) — a scan that
+ * finds nothing simply sends, so a legitimate retry is never lost.
+ *
+ * Returned WITHOUT angle brackets, matching a connector's normalised
+ * `rfcMessageId`; the connector wraps it in `<…>` when writing the header. The
+ * raw `draftId` is folded in via a hash so distinct drafts that sanitise to the
+ * same slug still produce distinct ids (a collision would be a false dedup).
+ */
+export const deterministicReplyMessageId = (
+  mailbox: string,
+  draftId: string,
+): string => {
+  const at = mailbox.lastIndexOf("@");
+  const domain =
+    at >= 0 && at < mailbox.length - 1
+      ? mailbox.slice(at + 1).trim().toLowerCase()
+      : "support-agent.local";
+  const slug =
+    draftId
+      .trim()
+      .replace(/[^A-Za-z0-9._-]/g, "-")
+      .slice(0, 96) || "draft";
+  return `sa-reply.${slug}.${fnv1a(draftId)}@${domain}`;
+};
+
 /**
  * What the runtime hands a connector to wait for a customer reply. The
  * agent pauses the case in `waiting_for_customer` after this is sent; the

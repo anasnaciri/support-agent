@@ -4,6 +4,7 @@ import {
   ConversationAuthMissing,
   ConversationProviderUnavailable,
   ConversationSendFailed,
+  deterministicReplyMessageId,
   ThreadNotFound,
   type AskCustomerDraft,
   type ConversationError,
@@ -226,20 +227,62 @@ export const makeGmailConversation = (
           let inReplyToMessageId = inReplyTo;
           let references: ReadonlyArray<string> = [];
 
-          if (!subject || !inReplyToMessageId) {
-            const thread = yield* Effect.tryPromise({
-              try: () =>
-                gmailGetThread({
-                  token: conn.accessToken,
-                  threadId: draft.threadId,
-                  ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
-                }),
-              catch: (cause) => mapHttpError(cause, {
+          // Deterministic outbound Message-ID for this exact draft (H8). We
+          // both stamp it on the send AND scan the thread for it below, so a
+          // crash between the send and the runtime's "sent" marker commit does
+          // not double-send on redelivery.
+          const dedupMessageId = deterministicReplyMessageId(
+            conn.shopDomain,
+            draft.draftId,
+          );
+
+          // Fetch the thread once — used for the idempotency scan and (when the
+          // caller didn't supply them) to derive the subject + threading
+          // headers. When those are genuinely NEEDED, a fetch failure is hard
+          // (unchanged behavior). When they were already supplied, the fetch is
+          // purely for dedup and fails OPEN: a read error must never block — or
+          // suppress a retry of — a legitimate send.
+          const threadNeeded = !subject || !inReplyToMessageId;
+          const threadEither = yield* Effect.tryPromise({
+            try: () =>
+              gmailGetThread({
+                token: conn.accessToken,
+                threadId: draft.threadId,
+                ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+              }),
+            catch: (cause) =>
+              mapHttpError(cause, {
                 tenantId,
                 threadId: draft.threadId,
                 draftId: draft.draftId,
               }),
-            });
+          }).pipe(Effect.either);
+          if (threadEither._tag === "Left") {
+            if (threadNeeded) {
+              return yield* Effect.fail(threadEither.left);
+            }
+          }
+          const thread =
+            threadEither._tag === "Right" ? threadEither.right : null;
+
+          // Idempotent send: our own prior delivery of this draft is already in
+          // the thread — return it instead of sending again. Matches only OUR
+          // deterministic id, so a scan that finds nothing simply falls through
+          // and sends (a genuine retry is never lost).
+          if (thread) {
+            const prior = thread.messages.find(
+              (m) => m.rfcMessageId === dedupMessageId,
+            );
+            if (prior) {
+              return {
+                id: prior.id,
+                threadId: draft.threadId,
+                sentAt: prior.sentAt,
+              };
+            }
+          }
+
+          if (thread && threadNeeded) {
             subject ??= replySubject(thread.subject);
             const rfcIds = thread.messages
               .map((m) => m.rfcMessageId)
@@ -256,6 +299,7 @@ export const makeGmailConversation = (
             bodyHtml: draft.bodyHtml,
             inReplyToMessageId,
             references,
+            messageId: dedupMessageId,
           });
           const result = yield* Effect.tryPromise({
             try: () =>
