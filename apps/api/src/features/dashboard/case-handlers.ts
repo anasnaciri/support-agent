@@ -65,6 +65,7 @@ import {
 } from "./case-reply.js";
 import { resendApprovedReply } from "./case-resend.js";
 import { issueCaseRefund } from "./case-refund.js";
+import { describeShopifyError } from "./shopify-error-detail.js";
 import { dashboardRefundNote } from "./refund-note.js";
 import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
 import {
@@ -1543,7 +1544,24 @@ export const handleDashboardIssueRefund = async (
           layer,
         ),
       );
-      if (result._tag === "Left") throw new Error(result.left._tag);
+      if (result._tag === "Left") {
+        // Log the FULL typed error (incl. NetworkError.cause /
+        // ShopifyResponseInvalid.message) so a Shopify-side rejection is
+        // diagnosable from the API logs — the bare `_tag` alone hid the real
+        // cause behind an opaque 502. Throw the descriptive detail too.
+        const detail = describeShopifyError(result.left);
+        req.log.error(
+          {
+            err: result.left,
+            shopifyErrorTag: result.left._tag,
+            tenantId,
+            orderId,
+            caseId: id,
+          },
+          `dashboard issue-refund: Shopify refundOrder failed — ${detail}`,
+        );
+        throw new Error(detail);
+      }
       return {
         id: result.right.id,
         amount: {

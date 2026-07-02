@@ -14,8 +14,8 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 - [x] Fix: `userErrors { field message }` + drop `code` from `RefundCreatePayload` type + map `code: null`. TDD regression test asserts the mutation never selects `code` on userErrors. Provider suite (58) + dashboard refund tests green; `pnpm build` green; `dist` verified.
 - [ ] **Deploy** the backend to Fly (fix lives in `packages/providers`; prod runs `dist`) then retry #1002 to confirm.
-- [ ] **Follow-up (diagnosability, separate commit):** stop collapsing Shopify errors to `_tag` at `case-handlers.ts:1546` — log/propagate the real `NetworkError.cause`; and split `ShopifyResponseInvalid` out of the `NetworkError` bucket in `runQuery` so GraphQL-level errors aren't mislabeled.
-- [ ] **Follow-up:** `ShopifyHttpLive` is the only outbound client with **no timeout** — add `AbortSignal.timeout(...)` so a hung Shopify call can't pin a request into a gateway 502.
+- [x] **Follow-up (diagnosability):** `runQuery` now throws a distinct `ShopifyResponseInvalid` (agent-core typed error, in the `ShopifyError` union) for top-level GraphQL errors instead of re-wrapping them as `NetworkError`; the dashboard refund handler (`case-handlers.ts`) logs the full typed error via `req.log.error` + throws the descriptive `describeShopifyError(...)` detail instead of the bare `_tag`. Pure `describeShopifyError` helper unit-tested.
+- [x] **Follow-up (timeout):** `ShopifyHttpLive` now bounds every call with `AbortSignal.timeout(shopifyHttpTimeoutMs(env))` (default 20s, `SHOPIFY_HTTP_TIMEOUT_MS`, clamped 1s–120s) — was the only outbound client without one. Helper unit-tested.
 - [ ] **Follow-up:** `orderCancel`'s `refund` argument is deprecated in 2026-04 (`Use refundMethod instead`) — still valid, but schedule a migration.
 
 ### 2026-07-02 — Suppliers bound to MANY merchants + unified workspace switcher (committed `ce75c9e` on main; DEPLOYED)
