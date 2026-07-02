@@ -21,6 +21,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { hasAnySettingsAccess } from "@/lib/settings-nav-items";
 import { SignOutButton } from "./SignOutButton";
+import { ThemeSwitch } from "./ThemeSwitch";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 interface NavItem {
@@ -185,6 +186,7 @@ export function IconRail({
         </nav>
 
         <div className="flex flex-col gap-1">
+          <ThemeSwitch />
           {showSettings ? (
             <RailLink
               item={{ href: "/settings", label: "Settings", icon: Settings }}

@@ -122,9 +122,15 @@ staged on the same branch. Remaining: H8 for other connectors, H6 extension.
       (badge-on-self-tint forces it). Added the previously missing
       `--warning-surface` dark override.
 - [x] Verification: contrast script (all pairings PASS) + `pnpm --filter dashboard-spa build` green.
-- [ ] Nothing toggles `.dark` yet — needs a theme switch (persisted preference +
-      `document.documentElement.classList`), and the always-dark rail's scoped
-      tokens should be re-checked visually once a toggle exists.
+- [x] Theme switch landed (same session): light/dark/system rail control —
+      pure logic in `lib/theme.ts` (TDD, `test/theme.test.ts`), DOM store
+      `lib/theme-store.ts` (localStorage + matchMedia + `.dark` on `<html>`,
+      cross-tab storage sync), `ThemeSwitch` rail row (collapsed = cycle
+      button, expanded = segmented control), no-flash boot script in
+      `index.html` (reads the same "theme" key — pinned by a test), and
+      `color-scheme` on `:root`/`.dark`. Verified end-to-end with Playwright
+      against the built bundle (19 runtime steps incl. live OS-scheme flips,
+      junk-storage fallback, reload persistence + first-paint class).
 - [ ] The old placeholder values in the Next `apps/dashboard` globals (if any)
       were NOT touched — mirror the graphite palette there only if dark mode
       ships before the SPA replaces it.

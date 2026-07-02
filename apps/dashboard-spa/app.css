@@ -62,6 +62,8 @@
    preference switch; nothing toggles it today. */
 :root {
   --radius: 0.625rem;
+  /* Native form controls, scrollbars, and UA defaults follow the theme */
+  color-scheme: light;
 
   /* 60% — off-white field */
   --background: #f7f7f7;
@@ -141,6 +143,8 @@
      lighter than their light-mode cousins. Darkening them re-fails the
      badge pairings. */
 .dark {
+  color-scheme: dark;
+
   --background: #141414;
   --foreground: #ededed;
 

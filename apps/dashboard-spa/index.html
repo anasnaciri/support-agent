@@ -8,6 +8,21 @@
       name="description"
       content="Manager surface for the AI Support Operations Platform."
     />
+    <script>
+      // No-flash theme boot: apply the stored preference before first paint.
+      // Reads the same "theme" key as THEME_STORAGE_KEY in lib/theme.ts
+      // (pinned by test/theme.test.ts); anything unrecognized follows the OS.
+      try {
+        var themePref = localStorage.getItem("theme");
+        if (
+          themePref === "dark" ||
+          (themePref !== "light" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches)
+        ) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body class="min-h-screen bg-sidebar text-foreground antialiased">
     <div id="root"></div>
