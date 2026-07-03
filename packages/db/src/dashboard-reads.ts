@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gt,
   gte,
   ilike,
@@ -43,12 +44,14 @@ import type { DrizzleDb } from "./client.js";
 import {
   approvals,
   auditLog,
+  caseSupplierEscalations,
   cases,
   connectorConnections,
   tenantAgentOverrides,
   tenantKnowledgeDocuments,
   tenants,
 } from "./schema.js";
+import { hasOpenEscalationForCase } from "./supplier-store.js";
 import { getActiveReplyDeliveryForCase } from "./reply-delivery-store.js";
 import { resurfaceableApprovedReply } from "./approved-not-sent.js";
 
@@ -416,6 +419,36 @@ export const casesList = async (
       >`${cases.context}->>'customerEmail'`,
       createdAt: cases.createdAt,
       updatedAt: cases.updatedAt,
+      // Concurrent wait facts, row-derived via correlated EXISTS (no join,
+      // no N+1 — approvals_case_idx / cse_case_idx cover both). `exists()`
+      // qualifies the correlated columns (`"approvals"."case_id" =
+      // "cases"."id"`); a hand-rolled sql`EXISTS(...)` does NOT and silently
+      // compares the wrong columns. A case parked `waiting_for_approval` can
+      // also carry an open escalation.
+      waitingApproval: exists(
+        db
+          .select({ one: sql`1` })
+          .from(approvals)
+          .where(
+            and(
+              eq(approvals.caseId, cases.id),
+              eq(approvals.tenantId, cases.tenantId),
+              eq(approvals.status, "pending"),
+            ),
+          ),
+      ),
+      waitingSupplier: exists(
+        db
+          .select({ one: sql`1` })
+          .from(caseSupplierEscalations)
+          .where(
+            and(
+              eq(caseSupplierEscalations.caseId, cases.id),
+              eq(caseSupplierEscalations.tenantId, cases.tenantId),
+              eq(caseSupplierEscalations.status, "open"),
+            ),
+          ),
+      ),
     })
     .from(cases)
     .where(whereExpr)
@@ -438,6 +471,10 @@ export const casesList = async (
       customerEmail: r.customerEmail,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
+      waitingOn: {
+        approval: Boolean(r.waitingApproval),
+        supplier: Boolean(r.waitingSupplier),
+      },
     })),
   };
 };
@@ -519,6 +556,14 @@ export const caseDetail = async (
   const approvalDetails = caseApprovals.map(toApprovalDetail);
   const resurfaceable = resurfaceableApprovedReply(auditEntries, approvalDetails);
 
+  // Concurrent wait facts: approval derived from the rows we already loaded;
+  // supplier is one indexed lookup (cse_case_idx). A case parked
+  // `waiting_for_approval` can also carry an open escalation.
+  const waitingOn = {
+    approval: approvalDetails.some((a) => a.status === "pending"),
+    supplier: await hasOpenEscalationForCase(db, tenantId, caseId),
+  };
+
   return {
     case: {
       id: row.id,
@@ -533,6 +578,7 @@ export const caseDetail = async (
       updatedAt: row.updatedAt.toISOString(),
       resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
       manualStatusTargets: allowedManualStatusTargets(row.status as CaseStatus),
+      waitingOn,
     },
     auditEntries,
     approvals: approvalDetails,

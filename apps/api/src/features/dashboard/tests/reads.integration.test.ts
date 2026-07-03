@@ -3,7 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import {
   approvals,
+  caseDetail,
   cases,
+  casesList,
+  createSupplier,
+  insertEscalation,
   makeDbClient,
   tenants,
 } from "@support-agent/db";
@@ -149,5 +153,115 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
     if (!raw) return;
     const res = await get(dashboardAuthHeaders("org_does_not_exist"));
     expect(res.status).toBe(403);
+  });
+});
+
+// Concurrent wait states: a case parked `waiting_for_approval` can ALSO carry
+// an open supplier escalation. casesList + caseDetail derive BOTH facts from
+// rows (pending approvals / open escalations) into `waitingOn` so the dashboard
+// can render a second "waiting on supplier" chip.
+describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
+  const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
+  const orgId = `org_${randomUUID().slice(0, 8)}`;
+  const tenantId = randomUUID();
+
+  // A case with BOTH a pending approval and an open escalation.
+  const bothCaseId = randomUUID();
+  // A case with only a pending approval (no escalation).
+  const approvalOnlyCaseId = randomUUID();
+  // A plain in_progress case with neither.
+  const plainCaseId = randomUUID();
+
+  beforeAll(async () => {
+    if (!raw) return;
+    await raw.db.insert(tenants).values({
+      id: tenantId,
+      name: "waiting-on-test",
+      workosOrganizationId: orgId,
+    });
+    const supplier = await createSupplier(raw.db, tenantId, {
+      name: "WH",
+      email: "wh@waiting.test",
+    });
+    await raw.db.insert(cases).values([
+      {
+        id: bothCaseId,
+        tenantId,
+        channel: "email",
+        status: "waiting_for_approval",
+        currentAgentId: "missing-package-agent",
+      },
+      {
+        id: approvalOnlyCaseId,
+        tenantId,
+        channel: "email",
+        status: "waiting_for_approval",
+        currentAgentId: "support-triage",
+      },
+      {
+        id: plainCaseId,
+        tenantId,
+        channel: "email",
+        status: "in_progress",
+        currentAgentId: "support-triage",
+      },
+    ]);
+    for (const caseId of [bothCaseId, approvalOnlyCaseId]) {
+      await raw.db.insert(approvals).values({
+        id: randomUUID(),
+        tenantId,
+        caseId,
+        agentId: "support-triage",
+        tool: "conversation.reply",
+        proposedInput: { draftId: randomUUID(), bodyText: "draft" },
+        riskLevel: "medium",
+        status: "pending",
+        expiresAt: new Date(Date.now() + 86_400_000),
+      });
+    }
+    await insertEscalation(raw.db, {
+      tenantId,
+      caseId: bothCaseId,
+      supplierId: supplier.id,
+      problem: "P",
+      orderRef: null,
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+  });
+
+  afterAll(async () => {
+    if (!raw) return;
+    // approvals is NO ACTION → before cases; cases cascades escalations; tenant
+    // cascades the supplier.
+    await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${tenantId}`);
+    await raw.db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+    await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
+    await raw.close();
+  });
+
+  it("casesList derives waitingOn per case (approval + supplier)", async () => {
+    if (!raw) return;
+    const page = await casesList(raw.db, tenantId, {}, 1, 50);
+    const byId = new Map(page.rows.map((r) => [r.id, r]));
+    expect(byId.get(bothCaseId)?.waitingOn).toEqual({
+      approval: true,
+      supplier: true,
+    });
+    expect(byId.get(approvalOnlyCaseId)?.waitingOn).toEqual({
+      approval: true,
+      supplier: false,
+    });
+    expect(byId.get(plainCaseId)?.waitingOn).toEqual({
+      approval: false,
+      supplier: false,
+    });
+  });
+
+  it("caseDetail derives waitingOn (both waits held at once)", async () => {
+    if (!raw) return;
+    const detail = await caseDetail(raw.db, tenantId, bothCaseId);
+    expect(detail?.case.waitingOn).toEqual({ approval: true, supplier: true });
   });
 });

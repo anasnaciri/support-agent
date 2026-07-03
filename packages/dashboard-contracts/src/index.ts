@@ -90,6 +90,21 @@ export interface TodaySummary {
 // Cases
 // ============================================================
 
+/**
+ * The two wait facts a case can hold AT ONCE (concurrent wait states). A case's
+ * `status` is the single "who acts next" pointer (`primaryWaitStatus` —
+ * approval wins), but a case parked `waiting_for_approval` can ALSO carry an
+ * open supplier escalation. Both facts are row-derived (pending `approvals`
+ * rows / open `case_supplier_escalations` rows) and surfaced here so the
+ * dashboard can render a second "waiting on supplier" chip without re-deriving
+ * anything. Optional on the wire: an older api that doesn't send it just omits
+ * the extra chip.
+ */
+export interface CaseWaitingOn {
+  readonly approval: boolean;
+  readonly supplier: boolean;
+}
+
 export interface CaseListRow {
   readonly id: string;
   readonly subject: string | null;
@@ -98,6 +113,8 @@ export interface CaseListRow {
   readonly currentAgentId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** Derived concurrent wait facts (approval + supplier); see {@link CaseWaitingOn}. */
+  readonly waitingOn?: CaseWaitingOn;
   // Row-display enrichments (all same-row on `cases`, no joins). Optional so a
   // dashboard built against a newer contract still renders against an older api
   // that doesn't send them yet.
@@ -150,6 +167,8 @@ export interface CaseDetailCase {
    * status.
    */
   readonly manualStatusTargets: ReadonlyArray<string>;
+  /** Derived concurrent wait facts (approval + supplier); see {@link CaseWaitingOn}. */
+  readonly waitingOn?: CaseWaitingOn;
 }
 
 export interface AuditEntry {
