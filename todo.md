@@ -6,6 +6,49 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-03 — Supplier update always re-engages the agent (committed `a5daebf`, main)
+
+**Caveat found (user report, confirmed):** a case could leave `waiting_for_supplier`
+while its escalation was still open — manual status change (→ resolved/failed/
+in_progress/waiting_for_customer), "Take over" (→ human_takeover), a manual reply
+resolving it, or restart-from-triage. The supplier's update then only merged
+`context.supplierUpdate`: `recordSupplierUpdate` flipped nothing and the api handler
+skipped the `supplier.updated` publish (`if (result.resumed)`), so the agent never
+saw the supplier's answer.
+
+- [x] `recordSupplierUpdate` now resumes (→ `in_progress`, transition row reason
+      `supplier.updated`) from every resting status a person can park the case in:
+      `waiting_for_supplier`, `waiting_for_customer`, `resolved`, `failed`,
+      `human_takeover` (`SUPPLIER_RESUMABLE_STATUSES`; all matrix-legal).
+- [x] `handleSupplierUpdate` ALWAYS publishes `supplier.updated` after a recorded
+      update (flip-then-publish kept); `ticked: true` now means "published".
+- [x] Dedup hardening: `SupplierUpdate` payload carries `escalationId`;
+      `deliveryScopeFor` scopes `supplier.updated` as `case:<id>:esc:<escalationId>`
+      (was bare `case:<id>`, permanent) so a case escalated TWICE can reply to each
+      update without cross-dedup. Legacy events without the id keep the fallback.
+- [x] TDD red→green: 4 escaped-status + in_progress + waiting_for_approval cases in
+      `supplier-store.integration.test.ts`; api-level escaped/active publish test in
+      `suppliers.integration.test.ts`; 3 `deliveryScopeFor` unit tests. Full suite
+      2913 pass; commit-hook ci:local green.
+
+**Deliberate exception (documented, not a bug):** a case in `waiting_for_approval`
+with a pending approval is NOT flipped — the approval invariant wins; the published
+event is held + audited (`event.held_pending_approval`) and dropped. The supplier's
+note is still in `context.supplierUpdate` for the post-decision resume.
+
+**Known residual caveats in the supplier loop (noted, not fixed):**
+- [ ] A held `supplier.updated` on a pending-approval case never replays after the
+      decision (context survives; the event doesn't). Worth a resume-time directive
+      like the orderIdentity one if it bites.
+- [ ] An escalation whose notify email exhausts `notifyAttempts` leaves the case
+      parked `waiting_for_supplier` with the supplier unaware (outbox cap; merchant
+      telegram ping exists but delivery isn't guaranteed).
+- [ ] Portal `already_resolved` (409): a supplier can't send a SECOND update to the
+      same escalation (portal only lists open ones) — a correction needs a new
+      escalation from the agent.
+
+---
+
 ### 2026-07-03 — SPA redirect loop after false-onboarding fix (apps/dashboard-spa, NOT committed → commit next)
 
 **Symptom:** after deploying the SPA false-onboarding fix, the frontend entered a
