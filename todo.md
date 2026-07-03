@@ -162,6 +162,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Case tracking checkpoint rail renders as a continuous timeline in both
       dashboard surfaces.
 - [x] Case context renders friendly labelled rows instead of raw JSON.
+- [x] Floating context card is trimmed to non-duplicated facts (customer ask,
+      return reason, photo evidence, risk flags, notes) plus a quoted-vs-bound
+      order mis-quote heads-up; card and toggle hide when there is nothing to
+      show.
 - [x] Dark-mode palette and theme switch landed for the SPA.
 - [x] SPA port uses Vite, TanStack Router, TanStack Query, cookie BFF auth,
       workspace context, and route-level read/write pages.

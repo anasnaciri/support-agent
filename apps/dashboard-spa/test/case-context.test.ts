@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildContextRows } from "../lib/case-context";
+import { buildContextCardRows, buildContextRows } from "../lib/case-context";
 
 const byKey = (rows: ReturnType<typeof buildContextRows>, key: string) =>
   rows.find((r) => r.key === key);
@@ -142,5 +142,100 @@ describe("buildContextRows", () => {
       "customerEmail",
       "zzz_custom",
     ]);
+  });
+});
+
+describe("buildContextCardRows", () => {
+  // The floating card only shows what the right-hand panels DON'T already
+  // cover: the customer's ask, evidence signals, risk flags, and notes.
+  const richContext = {
+    classification: "refund_request",
+    customerEmail: "ada@example.com",
+    verifiedCustomerEmail: "ada@example.com",
+    identifiedOrderId: "gid://shopify/Order/123",
+    identifiedCustomerId: "gid://shopify/Customer/9",
+    liveTrackingStatus: { kind: "live", status: "in_transit" },
+    scenarioKey: "delivery_issue",
+    identityVerified: true,
+    pendingOrderEmail: "ada@example.com",
+    customerResolutionTriedFor: "email:ada@example.com",
+    shopifyCustomerId: "gid://shopify/Customer/9",
+    returnReason: "defective",
+    requestedResolution: "refund",
+    productMatch: "match",
+    photoSignals: { count: 2, withExif: 1, stripped: 1, anyStripped: true },
+    riskFlags: ["refund_customer_mismatch"],
+    notes: "Customer is patient but wants an answer this week.",
+  };
+
+  it("keeps only the ask / evidence / risk / notes rows — no sidebar duplicates or machinery", () => {
+    const rows = buildContextCardRows(richContext, null);
+    expect(rows.map((r) => r.key)).toEqual([
+      "returnReason",
+      "requestedResolution",
+      "productMatch",
+      "photoSignals",
+      "riskFlags",
+      "notes",
+    ]);
+  });
+
+  it("returns nothing for a context with only sidebar-covered keys", () => {
+    expect(
+      buildContextCardRows(
+        {
+          classification: "where_is_order",
+          customerEmail: "ada@example.com",
+          identifiedOrderId: "gid://shopify/Order/123",
+        },
+        { name: "#1042", confirmationNumber: null },
+      ),
+    ).toEqual([]);
+  });
+
+  it("hides the quoted order ref when no order is bound (the Order panel shows it)", () => {
+    const rows = buildContextCardRows({ quotedOrderRef: "#1042" }, null);
+    expect(rows).toEqual([]);
+  });
+
+  it("hides the quoted order ref when it matches the bound order's name (# and case insensitive)", () => {
+    for (const quoted of ["#1042", "1042", "#1042 "]) {
+      const rows = buildContextCardRows(
+        { quotedOrderRef: quoted, identifiedOrderId: "gid://shopify/Order/123" },
+        { name: "#1042", confirmationNumber: null },
+      );
+      expect(rows.find((r) => r.key === "quotedOrderRef")).toBeUndefined();
+    }
+  });
+
+  it("hides the quoted order ref when it matches the order's confirmation number", () => {
+    const rows = buildContextCardRows(
+      {
+        quotedOrderRef: "xpav284ct",
+        identifiedOrderId: "gid://shopify/Order/123",
+      },
+      { name: "#1042", confirmationNumber: "XPAV284CT" },
+    );
+    expect(rows.find((r) => r.key === "quotedOrderRef")).toBeUndefined();
+  });
+
+  it("keeps the quoted order ref when it differs from the bound order — the mis-quote heads-up", () => {
+    const rows = buildContextCardRows(
+      {
+        quotedOrderRef: "#Q537JR5JA",
+        identifiedOrderId: "gid://shopify/Order/123",
+        notes: "n",
+      },
+      { name: "#1042", confirmationNumber: "XPAV284CT" },
+    );
+    expect(rows.map((r) => r.key)).toEqual(["quotedOrderRef", "notes"]);
+  });
+
+  it("keeps the quoted order ref when the bound order could not be fetched (match unprovable)", () => {
+    const rows = buildContextCardRows(
+      { quotedOrderRef: "#1042", identifiedOrderId: "gid://shopify/Order/123" },
+      null,
+    );
+    expect(rows.map((r) => r.key)).toEqual(["quotedOrderRef"]);
   });
 });

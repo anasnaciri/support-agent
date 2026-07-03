@@ -105,6 +105,59 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "notes",
 ]);
 
+/** The keys the floating context card shows — the customer's ask, evidence
+ *  signals, risk flags, and notes. Everything else in the context is either
+ *  already rendered by the Customer/Order/Tracking panels and the case header
+ *  (email, order, category, tracking) or internal runtime machinery
+ *  (`identityVerified`, `scenarioKey`, lookup markers). */
+const CARD_KEYS: ReadonlySet<string> = new Set([
+  "returnReason",
+  "requestedResolution",
+  "productMatch",
+  "photoSignals",
+  "riskFlags",
+  "notes",
+]);
+
+/** Normalize an order ref for equality: trim, strip a leading #, lowercase. */
+const normalizeOrderRef = (ref: string): string =>
+  ref.trim().replace(/^#/, "").toLowerCase();
+
+/** The slice of the resolved Shopify order the card comparison needs. */
+export interface ContextCardOrder {
+  readonly name: string | null;
+  readonly confirmationNumber: string | null;
+}
+
+/**
+ * The floating context card's rows: {@link buildContextRows} filtered to
+ * {@link CARD_KEYS}, plus the customer-quoted order ref ONLY as a mis-quote
+ * heads-up — an order is bound to the case but the ref the customer wrote
+ * doesn't match its name/confirmation number (or the order couldn't be
+ * fetched, so a match is unprovable). With no bound order the Order panel
+ * already shows the quoted ref; when it matches, it's redundant.
+ */
+export const buildContextCardRows = (
+  context: Readonly<Record<string, unknown>>,
+  order: ContextCardOrder | null,
+): ContextRow[] => {
+  const quoted = asString(context["quotedOrderRef"]);
+  const bound = asString(context["identifiedOrderId"]);
+  const quotedMatchesOrder =
+    quoted !== null &&
+    [order?.name, order?.confirmationNumber].some(
+      (ref) =>
+        typeof ref === "string" &&
+        ref.length > 0 &&
+        normalizeOrderRef(ref) === normalizeOrderRef(quoted),
+    );
+  const showQuoted = quoted !== null && bound !== null && !quotedMatchesOrder;
+  return buildContextRows(context).filter(
+    (row) =>
+      CARD_KEYS.has(row.key) || (row.key === "quotedOrderRef" && showQuoted),
+  );
+};
+
 export const buildContextRows = (
   context: Readonly<Record<string, unknown>>,
 ): ContextRow[] => {

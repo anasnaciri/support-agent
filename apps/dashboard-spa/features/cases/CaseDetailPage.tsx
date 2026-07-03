@@ -40,7 +40,7 @@ import {
   parseRequestedResolution,
   parseReturnReason,
 } from "@/lib/return-labels";
-import { buildContextRows } from "@/lib/case-context";
+import { buildContextCardRows, type ContextRow } from "@/lib/case-context";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { Link } from "@/components/ui/link";
@@ -181,18 +181,13 @@ const RefundRecommendationBlock = ({
 );
 
 // Rendered inside the floating context card, which owns the border/background
-// chrome — this is just the divided row list (or its empty state).
+// chrome — this is just the divided row list. The page computes the rows
+// (buildContextCardRows) and skips the whole card when there are none.
 function CaseContext({
-  context,
+  rows,
 }: {
-  readonly context: Readonly<Record<string, unknown>>;
+  readonly rows: ReadonlyArray<ContextRow>;
 }) {
-  const rows = buildContextRows(context);
-  if (rows.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
-    );
-  }
   return (
     <dl className="divide-y divide-border">
       {rows.map((row) => (
@@ -376,6 +371,17 @@ export function CaseDetailPage() {
   const requestedResolution = parseRequestedResolution(
     context["requestedResolution"],
   );
+
+  // The floating card's rows: the customer's ask / evidence / risk / notes,
+  // plus the quoted order ref only as a mis-quote heads-up. Empty → no card.
+  const contextCardRows = buildContextCardRows(
+    context,
+    order
+      ? { name: order.name, confirmationNumber: order.confirmationNumber }
+      : null,
+  );
+  const hasContextCard = contextCardRows.length > 0;
+  const showContext = contextOpen && hasContextCard;
 
   // Prefer the fresh live lookup (rich: origin/destination, transit days, full
   // checkpoint history); fall back to the on-case `liveTrackingStatus` stamp.
@@ -581,20 +587,22 @@ export function CaseDetailPage() {
             }
           />
 
-          <button
-            type="button"
-            onClick={() => setContextOpen((v) => !v)}
-            aria-expanded={contextOpen}
-            aria-label={contextOpen ? "Hide context" : "Show context"}
-            title={contextOpen ? "Hide context" : "Show context"}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {contextOpen ? (
-              <PanelRightClose className="size-4" aria-hidden />
-            ) : (
-              <PanelRightOpen className="size-4" aria-hidden />
-            )}
-          </button>
+          {hasContextCard ? (
+            <button
+              type="button"
+              onClick={() => setContextOpen((v) => !v)}
+              aria-expanded={contextOpen}
+              aria-label={contextOpen ? "Hide context" : "Show context"}
+              title={contextOpen ? "Hide context" : "Show context"}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {contextOpen ? (
+                <PanelRightClose className="size-4" aria-hidden />
+              ) : (
+                <PanelRightOpen className="size-4" aria-hidden />
+              )}
+            </button>
+          ) : null}
         </header>
 
         {/* The chat stage — overflow-hidden parks the context card just past
@@ -624,25 +632,27 @@ export function CaseDetailPage() {
             aria-hidden
             className={cn(
               "w-0 shrink-0 transition-[width] duration-300 ease-in-out",
-              contextOpen && "md:w-80",
+              showContext && "md:w-80",
             )}
           />
 
-          <aside
-            aria-hidden={!contextOpen}
-            aria-label="Case context"
-            className={cn(
-              "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
-              contextOpen
-                ? "translate-x-0"
-                : "pointer-events-none translate-x-[calc(100%+1rem)]",
-            )}
-          >
-            <h2 className="pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Context
-            </h2>
-            <CaseContext context={context} />
-          </aside>
+          {hasContextCard ? (
+            <aside
+              aria-hidden={!contextOpen}
+              aria-label="Case context"
+              className={cn(
+                "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
+                contextOpen
+                  ? "translate-x-0"
+                  : "pointer-events-none translate-x-[calc(100%+1rem)]",
+              )}
+            >
+              <h2 className="pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Context
+              </h2>
+              <CaseContext rows={contextCardRows} />
+            </aside>
+          ) : null}
         </div>
 
         <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">
