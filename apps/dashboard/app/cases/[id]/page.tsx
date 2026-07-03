@@ -17,6 +17,7 @@ import {
   toolActionLabel,
 } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
+import { extraWaitChips } from "@/lib/waiting-chips";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -790,12 +791,18 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
           "bodyText"
         ] as string)
       : null;
+  // Concurrent wait states: a case parked waiting_for_approval can ALSO carry
+  // an open supplier escalation (status shows the primary wait). Key the
+  // supplier facts off the row-derived flag, falling back to status for an
+  // older api that doesn't send waitingOn.
+  const waitingOnSupplier =
+    caseRow.waitingOn?.supplier ?? caseRow.status === "waiting_for_supplier";
   const lockedMessage =
     caseRow.status === "resolved"
       ? "This case is resolved. Reopen it from the status menu to reply."
       : caseRow.status === "failed"
         ? "This case is closed. Reopen it from the status menu to reply."
-        : caseRow.status === "waiting_for_supplier"
+        : waitingOnSupplier
           ? "Waiting on the supplier. Take over to reply to the customer."
           : "The agent is handling this conversation. Take over to reply yourself.";
   const composerMode: ComposerMode | null =
@@ -870,6 +877,17 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
               >
                 {caseStatusLabel(caseRow.status)}
               </Badge>
+              {/* Concurrent wait: show the OTHER wait(s) as a second chip when
+                  they hold but aren't already the status badge. */}
+              {extraWaitChips(caseRow.status, caseRow.waitingOn).map((s) => (
+                <Badge
+                  key={s}
+                  variant={caseStatusVariant(s)}
+                  className="px-1.5 py-0"
+                >
+                  {caseStatusLabel(s)}
+                </Badge>
+              ))}
               <span>·</span>
               <span>
                 {caseRow.category ? humanizeSlug(caseRow.category) : "Uncategorized"}

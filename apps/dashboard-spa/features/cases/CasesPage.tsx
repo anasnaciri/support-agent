@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { isDefaultCasesFilter } from "@/lib/cases-filters";
 import { caseStatusVariant } from "@/lib/status-variants";
+import { extraWaitChips } from "@/lib/waiting-chips";
 import { Link } from "@/components/ui/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,9 +159,18 @@ export function CasesPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={caseStatusVariant(r.status)}>
-                      {caseStatusLabel(r.status)}
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge variant={caseStatusVariant(r.status)}>
+                        {caseStatusLabel(r.status)}
+                      </Badge>
+                      {/* Concurrent wait: a case parked waiting_for_approval
+                          can also carry an open supplier escalation. */}
+                      {extraWaitChips(r.status, r.waitingOn).map((s) => (
+                        <Badge key={s} variant={caseStatusVariant(s)}>
+                          {caseStatusLabel(s)}
+                        </Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {r.category ? humanizeSlug(r.category) : "—"}

@@ -22,6 +22,7 @@ import {
   toolActionLabel,
 } from "@/lib/labels";
 import { caseStatusVariant } from "@/lib/status-variants";
+import { extraWaitChips } from "@/lib/waiting-chips";
 import {
   approvedNotSentTimelineItem,
   curatedTimelineEvent,
@@ -452,13 +453,20 @@ export function CaseDetailPage() {
     caseRow.summary ??
     (typeof context["notes"] === "string" ? context["notes"] : null);
 
+  // Concurrent wait states: a case parked waiting_for_approval can ALSO carry
+  // an open supplier escalation (status shows the primary wait). Key the
+  // supplier facts off the row-derived flag, falling back to the status for an
+  // older api that doesn't send waitingOn.
+  const waitingOnSupplier =
+    caseRow.waitingOn?.supplier ?? caseRow.status === "waiting_for_supplier";
+
   // Why the composer is read-only when the agent owns the conversation.
   const lockedMessage =
     caseRow.status === "resolved"
       ? "This case is resolved. Reopen it from the status menu to reply."
       : caseRow.status === "failed"
         ? "This case is closed. Reopen it from the status menu to reply."
-        : caseRow.status === "waiting_for_supplier"
+        : waitingOnSupplier
           ? "Waiting on the supplier. Take over to reply to the customer."
           : "The agent is handling this conversation. Take over to reply yourself.";
 
@@ -550,6 +558,17 @@ export function CaseDetailPage() {
               >
                 {caseStatusLabel(caseRow.status)}
               </Badge>
+              {/* Concurrent wait: show the OTHER wait(s) as a second chip when
+                  they hold but aren't already the status badge. */}
+              {extraWaitChips(caseRow.status, caseRow.waitingOn).map((s) => (
+                <Badge
+                  key={s}
+                  variant={caseStatusVariant(s)}
+                  className="px-1.5 py-0"
+                >
+                  {caseStatusLabel(s)}
+                </Badge>
+              ))}
               <span>·</span>
               <span>
                 {caseRow.category
