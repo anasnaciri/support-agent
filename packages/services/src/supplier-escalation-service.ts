@@ -71,6 +71,16 @@ export class SupplierEscalationService extends Context.Tag(
     readonly escalate: (
       input: EscalateInput,
     ) => Effect.Effect<EscalateResult, SupplierEscalationError>;
+    /**
+     * Whether the case still has an OPEN escalation — the row-derived source
+     * of truth for "waiting on a supplier" under concurrent wait states (the
+     * case status may show the primary wait, e.g. `waiting_for_approval`).
+     * The runtime consults this before resolving on an approval resume.
+     */
+    readonly hasOpenEscalationForCase: (
+      tenantId: TenantId,
+      caseId: CaseId,
+    ) => Effect.Effect<boolean, SupplierEscalationError>;
   }
 >() {}
 
@@ -89,6 +99,11 @@ export interface SupplierEscalationTestFixtures {
   readonly writeFailed?: boolean;
   /** Override the synthesized `escalated` result fields. */
   readonly result?: Partial<Extract<EscalateResult, { kind: "escalated" }>>;
+  /**
+   * Case ids `hasOpenEscalationForCase` reports as still-open. Defaults to
+   * none (false for every case).
+   */
+  readonly openEscalationCaseIds?: ReadonlyArray<string>;
 }
 
 export const SupplierEscalationServiceTest = (
@@ -114,5 +129,9 @@ export const SupplierEscalationServiceTest = (
           supplierEmail: fixtures.result?.supplierEmail ?? "supplier@example.com",
         });
       },
+      hasOpenEscalationForCase: (_tenantId, caseId) =>
+        Effect.succeed(
+          (fixtures.openEscalationCaseIds ?? []).includes(caseId as string),
+        ),
     }),
   );

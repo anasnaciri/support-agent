@@ -4,7 +4,11 @@ import {
   SupplierEscalationWriteFailed,
 } from "@support-agent/services";
 import { DbClient } from "./db-client.js";
-import { getDefaultSupplier, insertEscalation } from "./supplier-store.js";
+import {
+  getDefaultSupplier,
+  hasOpenEscalationForCase,
+  insertEscalation,
+} from "./supplier-store.js";
 
 /**
  * Live `SupplierEscalationService` over Postgres. Resolves the workspace's
@@ -49,6 +53,11 @@ export const SupplierEscalationServiceLive = Layer.effect(
             supplierId: supplier.id,
             supplierEmail: supplier.email,
           };
+        }),
+      hasOpenEscalationForCase: (tenantId, caseId) =>
+        Effect.tryPromise({
+          try: () => hasOpenEscalationForCase(db, tenantId, caseId),
+          catch: (cause) => new SupplierEscalationWriteFailed({ cause }),
         }),
     });
   }),

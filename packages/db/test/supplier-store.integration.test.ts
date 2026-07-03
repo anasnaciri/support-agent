@@ -16,6 +16,7 @@ import {
   getEscalationForSupplier,
   getSupplierByEmail,
   getSupplierForUser,
+  hasOpenEscalationForCase,
   insertEscalation,
   listOpenEscalationsForSupplier,
   listSupplierWorkspacesForUser,
@@ -539,6 +540,37 @@ describeIfDb("supplier-store", () => {
     expect(ids).not.toContain(takenOver);
     expect(ids).not.toContain(failed);
     expect(ids).not.toContain(answered);
+  });
+
+  it("hasOpenEscalationForCase is true only while an OPEN row exists for that tenant+case", async () => {
+    const tenantId = await seedTenant();
+    const otherTenant = await seedTenant();
+    const supplierId = (
+      await createSupplier(db, tenantId, { name: "A", email: "open@wh.com" })
+    ).id;
+    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+
+    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(false);
+
+    const { id: escId } = await insertEscalation(db, {
+      tenantId,
+      caseId,
+      supplierId,
+      problem: "P",
+      orderRef: null,
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(true);
+    // Tenant-scoped: another tenant asking about this case id sees nothing.
+    expect(await hasOpenEscalationForCase(db, otherTenant, caseId)).toBe(false);
+
+    await db
+      .update(caseSupplierEscalations)
+      .set({ status: "resolved", resolvedAt: new Date() })
+      .where(eq(caseSupplierEscalations.id, escId));
+    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(false);
   });
 
   it("ensureSupplierRole creates a non-owner Supplier role granting the supplier perms (idempotent)", async () => {

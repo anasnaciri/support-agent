@@ -350,6 +350,32 @@ export const listOpenEscalationsForSupplier = async (
   }));
 };
 
+/**
+ * Whether the case is (still) waiting on a supplier — i.e. at least one OPEN
+ * escalation row exists for it. The row-derived source of truth for the
+ * supplier wait under concurrent wait states: `cases.status` may show the
+ * primary wait (e.g. `waiting_for_approval`) while an open escalation keeps
+ * this true. Covered by the `cse_case_idx` index.
+ */
+export const hasOpenEscalationForCase = async (
+  db: DrizzleDb,
+  tenantId: string,
+  caseId: string,
+): Promise<boolean> => {
+  const rows = await db
+    .select({ id: caseSupplierEscalations.id })
+    .from(caseSupplierEscalations)
+    .where(
+      and(
+        eq(caseSupplierEscalations.tenantId, tenantId),
+        eq(caseSupplierEscalations.caseId, caseId),
+        eq(caseSupplierEscalations.status, "open"),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+};
+
 export const getEscalationForSupplier = async (
   db: DrizzleDb,
   supplierId: string,

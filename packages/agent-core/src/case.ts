@@ -108,6 +108,30 @@ export const allowedManualStatusTargets = (
     (to) => to !== from && isStatusTransitionAllowed(from, to),
   );
 
+export type WaitStatus = Extract<
+  CaseStatus,
+  "waiting_for_approval" | "waiting_for_supplier"
+>;
+
+/**
+ * A case can be waiting on approval AND on a supplier at once — both facts are
+ * row-derived (pending approval rows, open escalation rows), but the single
+ * `cases.status` carries the PRIMARY wait: approval wins because the merchant
+ * is the next unblocker, while the supplier wait is passive (the open
+ * escalation row + notify outbox carry it independently of status). Every
+ * site that must choose between the two parks calls this, so the precedence
+ * lives in exactly one place. Null = not waiting on either.
+ */
+export const primaryWaitStatus = (waits: {
+  readonly approvalPending: boolean;
+  readonly supplierOpen: boolean;
+}): WaitStatus | null =>
+  waits.approvalPending
+    ? "waiting_for_approval"
+    : waits.supplierOpen
+      ? "waiting_for_supplier"
+      : null;
+
 export type CasePriority = "low" | "normal" | "high" | "urgent";
 
 export type CaseChannel = "email" | "form" | "chat" | "api";

@@ -5,6 +5,7 @@ import {
   allowedManualStatusTargets,
   isMerchantSettableStatus,
   isStatusTransitionAllowed,
+  primaryWaitStatus,
 } from "../src/index.js";
 
 // Audit L1 — master-plan §10 claims "the state machine guards every
@@ -132,5 +133,37 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
         expect(isMerchantSettableStatus(to)).toBe(true);
       }
     }
+  });
+});
+
+// A case can be waiting on approval AND on a supplier at once (both facts are
+// row-derived: pending approval rows, open escalation rows). The single
+// cases.status carries the PRIMARY wait — approval wins because the merchant
+// is the next unblocker; the supplier wait is passive (the open escalation row
+// + notify outbox carry it). This helper is the one place that precedence
+// lives.
+describe("primaryWaitStatus", () => {
+  it("approval wins when both waits hold", () => {
+    expect(
+      primaryWaitStatus({ approvalPending: true, supplierOpen: true }),
+    ).toBe("waiting_for_approval");
+  });
+
+  it("approval alone parks on approval", () => {
+    expect(
+      primaryWaitStatus({ approvalPending: true, supplierOpen: false }),
+    ).toBe("waiting_for_approval");
+  });
+
+  it("supplier alone parks on the supplier", () => {
+    expect(
+      primaryWaitStatus({ approvalPending: false, supplierOpen: true }),
+    ).toBe("waiting_for_supplier");
+  });
+
+  it("no waits → null (nothing to park on)", () => {
+    expect(
+      primaryWaitStatus({ approvalPending: false, supplierOpen: false }),
+    ).toBeNull();
   });
 });
