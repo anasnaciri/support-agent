@@ -1060,6 +1060,106 @@ describe("per-action approval — no case with pending actions resolves", () => 
     expect(out.result.type).toBe("PausedWaitingForSupplier");
     expect(out.final.status).toBe("waiting_for_supplier");
   });
+
+  // Concurrent waits, resume leg: the case still has an OPEN escalation (from a
+  // PRIOR tick) while a reply approval was pending. Approving the last reply
+  // must NOT resolve the case out from under the still-open supplier wait — the
+  // row-derived `hasOpenEscalationForCase` check parks it `waiting_for_supplier`
+  // even though THIS bundle ran no escalate.
+  it("parks waiting_for_supplier (not resolved) when the case still has an open escalation, even if the approved bundle ran no escalate", async () => {
+    const convo = makeConversationServiceTest({});
+    // Mutable: the fixture reads it at call-time, so we push the real (random)
+    // case id in after seeding — the layer is built before the case exists.
+    const openIds: string[] = [];
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* seedParkedCase(repo);
+          openIds.push(created.id as string);
+          const reply = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AGENT_ID,
+            tool: "conversation.reply",
+            proposedInput: replyInput("draft-r", "cust@example.com"),
+            reasoning: "",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: reply.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: reply.id as never,
+            caseId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final, sent: convo.handle.sent.length };
+        }),
+        partialLayer(convo, [
+          SupplierEscalationServiceTest({ openEscalationCaseIds: openIds }),
+        ]),
+      ),
+    );
+
+    // The approved reply still sent...
+    expect(out.sent).toBe(1);
+    // ...but the case parks on the supplier, it does NOT resolve.
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.final.status).toBe("waiting_for_supplier");
+  });
+
+  // Back-compat: with the service present but NO open escalation for the case,
+  // approving the last action resolves as before (row-derived, not blanket).
+  it("resolves when the supplier service is present but the case has no open escalation", async () => {
+    const convo = makeConversationServiceTest({});
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* CaseRepository;
+          const approvals = yield* ApprovalService;
+
+          const created = yield* seedParkedCase(repo);
+          const reply = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            caseId: created.id,
+            agentId: AGENT_ID,
+            tool: "conversation.reply",
+            proposedInput: replyInput("draft-r2", "cust@example.com"),
+            reasoning: "",
+            riskLevel: "medium",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: reply.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: reply.id as never,
+            caseId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(convo, [SupplierEscalationServiceTest({})]),
+      ),
+    );
+
+    expect(out.result.type).toBe("Completed");
+    expect(out.final.status).toBe("resolved");
+  });
 });
 
 // Concurrent wait states: a tick that QUEUES an ask-gated action and then

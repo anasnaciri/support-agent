@@ -59,6 +59,7 @@ import {
 import { parseThreadId } from "./conversation-thread-id.js";
 import { ConversationService } from "./conversation-service.js";
 import { KnowledgeBaseService } from "./knowledge-base.js";
+import { SupplierEscalationService } from "./supplier-escalation-service.js";
 import {
   REPLY_DELIVERY_FAILED_FLAG,
   isReplyDeliverySendFailure,
@@ -170,6 +171,14 @@ const AgentRuntimeLayer = Layer.effect(
     // absent in lean test layers (which then skip the dedup, as before).
     const maybeProcessed = yield* Effect.serviceOption(ProcessedMessageStore);
     const maybeExecutions = yield* Effect.serviceOption(ToolExecutionStore);
+    // Optional supplier-escalation service. Present in the worker (which wires
+    // SupplierEscalationServiceLive); absent in lean test layers. Consulted on
+    // an approval resume to detect a STILL-OPEN escalation the just-approved
+    // bundle didn't itself create (concurrent wait states) — absent/erroring
+    // service degrades to `false` (the old resolve-if-no-escalate behavior).
+    const maybeSupplierEscalation = yield* Effect.serviceOption(
+      SupplierEscalationService,
+    );
     // Optional merchant push channel (Telegram, …) — present when the
     // deployment wires one; absent in lean test layers. Strictly
     // best-effort: a ping must never change a tick's outcome.
@@ -837,12 +846,23 @@ const AgentRuntimeLayer = Layer.effect(
             // so the agent re-engages on `supplier.updated`, exactly like the
             // in-loop escalate path. A `no_supplier` escalate (escalated:false)
             // is not a wait — it falls through to resolve.
-            const escalatedToSupplier = ran.some(
+            const escalatedInBundle = ran.some(
               (r) =>
                 r.tool === "supplier.escalate" &&
                 (r.result as { readonly escalated?: boolean } | null)
                   ?.escalated === true,
             );
+            // Concurrent wait states: the case may ALREADY carry an open
+            // escalation from a PRIOR tick (queued alongside this approval).
+            // Resolving now would close the case out from under that supplier
+            // wait. Consult the row-derived source of truth; absent/erroring
+            // service degrades to `false` (the old bundle-only behavior).
+            const hasOpenEscalation = Option.isSome(maybeSupplierEscalation)
+              ? yield* maybeSupplierEscalation.value
+                  .hasOpenEscalationForCase(working.tenantId, working.id)
+                  .pipe(Effect.catchAll(() => Effect.succeed(false)))
+              : false;
+            const escalatedToSupplier = escalatedInBundle || hasOpenEscalation;
             if (escalatedToSupplier) {
               working = yield* lifecycle.parkWaitingForSupplier({
                 caseId: working.id,
