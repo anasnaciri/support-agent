@@ -318,6 +318,78 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(missing.status).toBe(404);
   });
 
+  // The agent must ALWAYS be re-engaged by a supplier update, even when the
+  // case escaped `waiting_for_supplier` while the escalation was open (a human
+  // resolved it / took it over) or is actively `in_progress`. Depends on the
+  // supplier binding created by the e2e test above.
+  it("re-engages the agent when the case escaped waiting_for_supplier", async () => {
+    if (!raw) return;
+    const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
+    expect(supplier).not.toBeNull();
+
+    const seedEscalatedCase = async (status: string) => {
+      const caseId = randomUUID();
+      await raw.db.insert(cases).values({
+        id: caseId,
+        tenantId,
+        channel: "email",
+        status,
+        currentAgentId: "missing-package-agent",
+      });
+      const { id: escId } = await insertEscalation(raw.db, {
+        tenantId,
+        caseId,
+        supplierId: supplier!.id,
+        problem: "P",
+        orderRef: null,
+        shipCity: null,
+        shipCountry: null,
+        trackingNumber: null,
+      });
+      return { caseId, escId };
+    };
+
+    // A case a human resolved while the supplier still owed an answer: the
+    // update flips it back to in_progress AND publishes (resumed + ticked).
+    const escaped = await seedEscalatedCase("resolved");
+    const res1 = await post(
+      `/dashboard/supplier/cases/${escaped.escId}/update`,
+      { note: "Reshipped after all" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(res1.status).toBe(200);
+    const body1 = (await res1.json()) as { resumed: boolean; ticked: boolean };
+    expect(body1.resumed).toBe(true);
+    expect(body1.ticked).toBe(true);
+    const [row1] = await raw.db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(eq(cases.id, escaped.caseId));
+    expect(row1?.status).toBe("in_progress");
+
+    // A case that is actively in_progress: no status flip is needed, but the
+    // event must STILL be published so the agent sees the supplier's answer.
+    const active = await seedEscalatedCase("in_progress");
+    const res2 = await post(
+      `/dashboard/supplier/cases/${active.escId}/update`,
+      { note: "Extra detail" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(res2.status).toBe(200);
+    const body2 = (await res2.json()) as { resumed: boolean; ticked: boolean };
+    expect(body2.resumed).toBe(false);
+    expect(body2.ticked).toBe(true);
+    const [row2] = await raw.db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(eq(cases.id, active.caseId));
+    expect(row2?.status).toBe("in_progress");
+  });
+
   it("binds a supplier across ORGS + switches by x-workspace-id (org not consulted)", async () => {
     if (!raw) return;
 

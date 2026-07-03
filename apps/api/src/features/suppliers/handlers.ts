@@ -146,31 +146,40 @@ export const handleSupplierUpdate = async (
     return sendJson(res, 409, { error: "already_resolved" });
   }
 
-  if (result.resumed) {
-    try {
-      await publishSupplierUpdate(cfg.databaseUrl, {
-        type: "supplier.updated",
-        caseId: CaseId(result.caseId),
-        payload: {
-          supplierId: outcome.supplierId,
-          note,
-          proposedResolution,
-        },
-      });
-    } catch (cause) {
-      // The case is already resumed (in_progress); a lost publish just means the
-      // agent re-engages on the next event. Log loudly, don't fail the request.
-      console.error("[supplier update] publish failed; case resumed without tick", {
-        caseId: result.caseId,
-        cause,
-      });
-      return sendJson(res, 200, { ok: true, resumed: true, ticked: false });
-    }
+  // ALWAYS publish, not just when the status flipped: a supplier's answer must
+  // re-engage the agent even on a case that escaped waiting_for_supplier (a
+  // human resolved / took it over — recordSupplierUpdate flipped it back) or is
+  // actively in_progress (no flip needed). The one park the runtime still
+  // honors is a pending approval: that event is held + audited, by design.
+  try {
+    await publishSupplierUpdate(cfg.databaseUrl, {
+      type: "supplier.updated",
+      caseId: CaseId(result.caseId),
+      payload: {
+        supplierId: outcome.supplierId,
+        note,
+        proposedResolution,
+        escalationId: id,
+      },
+    });
+  } catch (cause) {
+    // The update is durably recorded (and any flip committed); a lost publish
+    // just means the agent re-engages on the next event. Log loudly, don't
+    // fail the request.
+    console.error("[supplier update] publish failed; case updated without tick", {
+      caseId: result.caseId,
+      cause,
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      resumed: result.resumed,
+      ticked: false,
+    });
   }
   return sendJson(res, 200, {
     ok: true,
     resumed: result.resumed,
-    ticked: result.resumed,
+    ticked: true,
   });
 };
 

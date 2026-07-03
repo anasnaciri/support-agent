@@ -111,6 +111,12 @@ export interface SupplierUpdate {
   readonly supplierId: string;
   readonly note: string;
   readonly proposedResolution: string | null;
+  /**
+   * The escalation this update answers. Scopes the runtime's tool-execution
+   * dedup marker per escalation, so a case escalated twice can reply to each
+   * update. Optional only for legacy in-flight events minted before it existed.
+   */
+  readonly escalationId?: string;
 }
 
 export interface SupplierEscalationPayload {

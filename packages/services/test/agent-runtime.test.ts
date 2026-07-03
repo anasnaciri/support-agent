@@ -86,6 +86,41 @@ describe("deliveryScopeFor — case.resumed retry token", () => {
   });
 });
 
+describe("deliveryScopeFor — supplier.updated per escalation", () => {
+  const update = (escalationId?: string): DomainEvent => ({
+    type: "supplier.updated",
+    caseId: CaseId("c-1"),
+    payload: {
+      supplierId: "sup-1",
+      note: "n",
+      proposedResolution: null,
+      ...(escalationId ? { escalationId } : {}),
+    },
+  });
+
+  // A case can be escalated to the supplier more than once (supplier updates
+  // always re-engage the agent, which may escalate again). Each escalation's
+  // update must get its OWN scope, or the second update's reply cross-dedups
+  // against the first and the agent silently sends nothing.
+  it("scopes by the escalation id so a second escalation's reply is not cross-deduped", () => {
+    const first = update("esc-1");
+    const second = update("esc-2");
+    expect(deliveryScopeFor(first)).toBe("case:c-1:esc:esc-1");
+    expect(deliveryScopeFor(second)).toBe("case:c-1:esc:esc-2");
+    expect(deliveryScopeFor(first)).not.toBe(deliveryScopeFor(second));
+  });
+
+  it("keeps the same scope for a redelivery of the SAME escalation's update", () => {
+    expect(deliveryScopeFor(update("esc-1"))).toBe(
+      deliveryScopeFor(update("esc-1")),
+    );
+  });
+
+  it("falls back to the case id for a legacy event without an escalation id", () => {
+    expect(deliveryScopeFor(update())).toBe("case:c-1");
+  });
+});
+
 describe("hasUnverifiedOrderMismatch", () => {
   it("is true when the mismatch flag is set and identity is not verified", () => {
     expect(

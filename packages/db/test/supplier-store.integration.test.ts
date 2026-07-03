@@ -323,6 +323,139 @@ describeIfDb("supplier-store", () => {
     expect(again.kind).toBe("already_resolved");
   });
 
+  // A case can escape `waiting_for_supplier` while the escalation is still open
+  // (manual status change, "Take over", a manual reply resolving it, restart
+  // from triage). The supplier's update must STILL re-engage the agent: every
+  // status a person can park the case in flips back to `in_progress` so the
+  // published `supplier.updated` event isn't held by a runtime park guard.
+  it.each(["resolved", "human_takeover", "failed", "waiting_for_customer"])(
+    "recordSupplierUpdate resumes a case that escaped to %s",
+    async (escapedStatus) => {
+      const tenantId = await seedTenant();
+      const supplierId = (
+        await createSupplier(db, tenantId, {
+          name: "A",
+          email: `esc-${escapedStatus}@wh.com`,
+        })
+      ).id;
+      const caseId = await seedCase(tenantId, escapedStatus);
+      const { id: escId } = await insertEscalation(db, {
+        tenantId,
+        caseId,
+        supplierId,
+        problem: "P",
+        orderRef: null,
+        shipCity: null,
+        shipCountry: null,
+        trackingNumber: null,
+      });
+
+      const res = await recordSupplierUpdate(db, {
+        tenantId,
+        supplierId,
+        escalationId: escId,
+        note: "Reshipped",
+        proposedResolution: null,
+        actorUuid: randomUUID(),
+      });
+      expect(res.kind).toBe("recorded");
+      if (res.kind === "recorded") expect(res.resumed).toBe(true);
+
+      const [row] = await db
+        .select({ status: cases.status })
+        .from(cases)
+        .where(eq(cases.id, caseId));
+      expect(row?.status).toBe("in_progress");
+
+      const transitions = await db
+        .select({
+          from: caseStateTransitions.fromStatus,
+          to: caseStateTransitions.toStatus,
+        })
+        .from(caseStateTransitions)
+        .where(eq(caseStateTransitions.caseId, caseId));
+      expect(
+        transitions.some(
+          (t) => t.from === escapedStatus && t.to === "in_progress",
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("recordSupplierUpdate on an in_progress case records without a redundant flip", async () => {
+    const tenantId = await seedTenant();
+    const supplierId = (
+      await createSupplier(db, tenantId, { name: "A", email: "a5@wh.com" })
+    ).id;
+    const caseId = await seedCase(tenantId, "in_progress");
+    const { id: escId } = await insertEscalation(db, {
+      tenantId,
+      caseId,
+      supplierId,
+      problem: "P",
+      orderRef: null,
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+    const res = await recordSupplierUpdate(db, {
+      tenantId,
+      supplierId,
+      escalationId: escId,
+      note: "n",
+      proposedResolution: null,
+      actorUuid: randomUUID(),
+    });
+    expect(res.kind).toBe("recorded");
+    if (res.kind === "recorded") expect(res.resumed).toBe(false);
+    const [row] = await db
+      .select({ status: cases.status, context: cases.context })
+      .from(cases)
+      .where(eq(cases.id, caseId));
+    expect(row?.status).toBe("in_progress");
+    expect(
+      (row?.context as Record<string, unknown>)["supplierUpdate"],
+    ).toBeTruthy();
+    const transitions = await db
+      .select({ id: caseStateTransitions.id })
+      .from(caseStateTransitions)
+      .where(eq(caseStateTransitions.caseId, caseId));
+    expect(transitions).toHaveLength(0);
+  });
+
+  it("recordSupplierUpdate leaves a waiting_for_approval case parked (approval invariant)", async () => {
+    const tenantId = await seedTenant();
+    const supplierId = (
+      await createSupplier(db, tenantId, { name: "A", email: "a6@wh.com" })
+    ).id;
+    const caseId = await seedCase(tenantId, "waiting_for_approval");
+    const { id: escId } = await insertEscalation(db, {
+      tenantId,
+      caseId,
+      supplierId,
+      problem: "P",
+      orderRef: null,
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+    const res = await recordSupplierUpdate(db, {
+      tenantId,
+      supplierId,
+      escalationId: escId,
+      note: "n",
+      proposedResolution: null,
+      actorUuid: randomUUID(),
+    });
+    expect(res.kind).toBe("recorded");
+    if (res.kind === "recorded") expect(res.resumed).toBe(false);
+    const [row] = await db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(eq(cases.id, caseId));
+    expect(row?.status).toBe("waiting_for_approval");
+  });
+
   it("recordSupplierUpdate is not_found for another supplier's escalation", async () => {
     const tenantId = await seedTenant();
     const supplierA = (

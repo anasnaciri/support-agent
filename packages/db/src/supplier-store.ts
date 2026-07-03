@@ -419,13 +419,33 @@ export type RecordSupplierUpdateResult =
   | { readonly kind: "already_resolved" };
 
 /**
+ * The statuses a supplier update flips back to `in_progress`. A case can escape
+ * `waiting_for_supplier` while its escalation is still open (manual status
+ * change, "Take over", a manual reply resolving it, restart from triage) — the
+ * supplier's answer must STILL re-engage the agent, so every such resting state
+ * resumes. All are matrix-legal `→ in_progress` moves. Deliberately absent:
+ * `waiting_for_approval` / `approved_action_running` (a pending approval owns
+ * the case — flipping would let the agent resolve out from under the manager;
+ * the runtime park guard holds the published event instead) and the active
+ * states (`in_progress`, `new`, `triaging` — nothing to flip; the published
+ * event re-enters the loop directly).
+ */
+const SUPPLIER_RESUMABLE_STATUSES: ReadonlySet<string> = new Set([
+  "waiting_for_supplier",
+  "waiting_for_customer",
+  "resolved",
+  "failed",
+  "human_takeover",
+]);
+
+/**
  * The supplier's reply, recorded atomically (master-plan §4 outbox): resolve the
- * escalation, flip the case OFF `waiting_for_supplier`, stamp the note onto case
- * context, and write the audit row — all in ONE transaction. The caller then
+ * escalation, flip the case back to `in_progress` from any resting status
+ * ({@link SUPPLIER_RESUMABLE_STATUSES}), stamp the note onto case context, and
+ * write the audit row — all in ONE transaction. The caller then ALWAYS
  * publishes `supplier.updated` (flip-then-publish, like retryCaseNow) so the
- * agent re-engages. Only flips a case that is actually `waiting_for_supplier`;
- * if a human took it over in the meantime the note is still recorded but the
- * case is left alone (`resumed: false`).
+ * agent re-engages; `resumed: false` only means no status flip was needed (or,
+ * for a pending approval, allowed — the runtime park guard holds that event).
  */
 export const recordSupplierUpdate = async (
   db: DrizzleDb,
@@ -469,7 +489,9 @@ export const recordSupplierUpdate = async (
       )
       .limit(1);
     const caseRow = caseRows[0];
-    const willResume = caseRow?.status === "waiting_for_supplier";
+    const willResume =
+      caseRow !== undefined &&
+      SUPPLIER_RESUMABLE_STATUSES.has(caseRow.status);
 
     if (caseRow) {
       const mergedContext = {
@@ -491,7 +513,7 @@ export const recordSupplierUpdate = async (
           .where(eq(cases.id, esc.caseId));
         await tx.insert(caseStateTransitions).values({
           caseId: esc.caseId,
-          fromStatus: "waiting_for_supplier",
+          fromStatus: caseRow.status,
           toStatus: "in_progress",
           reason: "supplier.updated",
         });

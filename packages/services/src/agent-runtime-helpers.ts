@@ -694,7 +694,8 @@ export const executionKeyFor = (
  * `resumeToken`, so each restart re-runs the agent's tools (a stable-`draftId`
  * reply/ask no longer cross-dedups against the PRIOR attempt) while a pg-boss
  * redelivery of the SAME retry keeps the token and still can't double-send.
- * `supplier.updated` / `manual.takeover` carry no per-delivery id, so they fall
+ * `supplier.updated` keys by its escalation id (each escalation's update is
+ * its own delivery); `manual.takeover` carries no per-delivery id, so it falls
  * back to the case id (two of the same on one case could cross-dedup — rare).
  */
 export const deliveryScopeFor = (event: DomainEvent): string => {
@@ -717,6 +718,13 @@ export const deliveryScopeFor = (event: DomainEvent): string => {
           ? `case:${event.caseId}:${event.resumeToken}`
           : `case:${event.caseId}`;
       case "supplier.updated":
+        // Per-escalation scope: a case can be escalated more than once (a
+        // supplier update always re-engages the agent, which may escalate
+        // again), and each update's reply must not cross-dedup the previous
+        // one's. Legacy events without the id fall back to the case id.
+        return event.payload.escalationId
+          ? `case:${event.caseId}:esc:${event.payload.escalationId}`
+          : `case:${event.caseId}`;
       case "manual.takeover":
         return `case:${event.caseId}`;
     }
