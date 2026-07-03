@@ -6,6 +6,35 @@ The single source of truth for **what's done**, **what's next**, and **what inva
 
 ---
 
+### 2026-07-03 — SPA redirect loop after false-onboarding fix (apps/dashboard-spa, NOT committed → commit next)
+
+**Symptom:** after deploying the SPA false-onboarding fix, the frontend entered a
+redirect loop severe enough to freeze/crash the browser tab.
+
+**Root cause:** the authed shell and public onboarding page disagreed about
+"workspace exists" vs "workspace is accessible." `/` could redirect to
+`/onboarding` while the merchant permission probe was still loading, or when
+the WorkOS org had workspaces but the current user had no accessible merchant
+or supplier workspace. The public `/onboarding` page saw the org's workspace
+list and redirected back to `/`, creating a tight `/` ↔ `/onboarding` loop.
+The `useAppNavigate()` shim also returned a fresh object every render, causing
+navigation effects to re-fire unnecessarily while a redirect condition held.
+
+- [x] Added `workspaceBootstrapRedirectTarget`: no redirect while the merchant
+      probe is loading; true empty org → `/onboarding`; org has workspaces but
+      none are accessible to the user → `/no-access`; accessible workspace →
+      no redirect.
+- [x] Wired `SessionProvider` through that helper and guarded same-path
+      redirects.
+- [x] Memoized `useAppNavigate()`'s `{ push, replace }` object so effects don't
+      re-run purely due to object identity churn.
+- [x] Verification: red→green
+      `pnpm exec vitest run apps/dashboard-spa/test/session-context-auth-error.test.ts`;
+      full SPA suite `pnpm exec vitest run apps/dashboard-spa/test` (397);
+      `pnpm --filter @support-agent/dashboard-spa build`; root `pnpm build`.
+
+---
+
 ### 2026-07-02 — SPA intermittent false onboarding / apparent logout loop (apps/api + apps/dashboard-spa, committed locally; deploy next)
 
 **Symptom:** the SPA sometimes looked like it logged the user out, landed on

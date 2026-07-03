@@ -100,6 +100,21 @@ const Splash = ({ label }: { label: string }) => (
 export const shouldStartLoginForAuthError = (error: unknown): boolean =>
   error instanceof UnauthorizedError;
 
+export type WorkspaceBootstrapRedirectTarget = "/onboarding" | "/no-access";
+
+export const workspaceBootstrapRedirectTarget = (input: {
+  readonly bootstrapReady: boolean;
+  readonly listsSettled: boolean;
+  readonly hasActiveWorkspace: boolean;
+  readonly merchantWorkspaceCount: number;
+  readonly merchantProbeLoading: boolean;
+}): WorkspaceBootstrapRedirectTarget | null => {
+  if (!input.bootstrapReady || !input.listsSettled) return null;
+  if (input.hasActiveWorkspace) return null;
+  if (input.merchantProbeLoading) return null;
+  return input.merchantWorkspaceCount > 0 ? "/no-access" : "/onboarding";
+};
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const nav = useAppNavigate();
@@ -224,8 +239,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Authenticated but no org yet (brand-new self-service user) → onboarding,
   // before the workspace fetch that would 401 without an org.
   useEffect(() => {
-    if (needsOnboarding) nav.replace("/onboarding");
-  }, [needsOnboarding, nav]);
+    if (needsOnboarding && pathname !== "/onboarding") {
+      nav.replace("/onboarding");
+    }
+  }, [needsOnboarding, nav, pathname]);
 
   // Both workspace lists resolved but the user has NO workspace of either kind
   // → onboarding. Gated on both queries settling so a supplier-only user isn't
@@ -233,11 +250,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const listsSettled =
     workspacesQuery.isSuccess &&
     (supplierWorkspacesQuery.isSuccess || supplierWorkspacesQuery.isError);
+  const workspaceRedirectTarget = workspaceBootstrapRedirectTarget({
+    bootstrapReady,
+    listsSettled,
+    hasActiveWorkspace: Boolean(active),
+    merchantWorkspaceCount: merchantWorkspaces.length,
+    merchantProbeLoading: Boolean(merchantDefaultId) && merchantMeQuery.isLoading,
+  });
   useEffect(() => {
-    if (bootstrapReady && listsSettled && !active) {
-      nav.replace("/onboarding");
+    if (workspaceRedirectTarget && pathname !== workspaceRedirectTarget) {
+      nav.replace(workspaceRedirectTarget);
     }
-  }, [bootstrapReady, listsSettled, active, nav]);
+  }, [nav, pathname, workspaceRedirectTarget]);
 
   if (authQuery.isLoading) return <Splash label="Signing in…" />;
   if (authQuery.isError) {

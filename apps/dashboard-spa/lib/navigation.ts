@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 // Thin shims replacing next/navigation so ported components change only their
@@ -14,8 +15,11 @@ export const useAppNavigate = (): {
   replace: (to: string) => void;
 } => {
   const navigate = useNavigate();
-  return {
-    push: (to) => void navigate({ to }),
-    replace: (to) => void navigate({ to, replace: true }),
-  };
+  return useMemo(
+    () => ({
+      push: (to: string) => void navigate({ to }),
+      replace: (to: string) => void navigate({ to, replace: true }),
+    }),
+    [navigate],
+  );
 };
