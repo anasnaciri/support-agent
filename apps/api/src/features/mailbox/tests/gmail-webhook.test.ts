@@ -112,7 +112,9 @@ describe("backfillUnreadGmailInbox", () => {
       if (u.includes("/users/me/messages?")) {
         operations.push("list");
         const parsed = new URL(u);
-        expect(parsed.searchParams.get("q")).toBe("in:inbox is:unread");
+        expect(parsed.searchParams.get("q")).toBe(
+          "in:inbox is:unread newer_than:30d",
+        );
         expect(parsed.searchParams.get("maxResults")).toBe("50");
         return okJson({
           messages: [

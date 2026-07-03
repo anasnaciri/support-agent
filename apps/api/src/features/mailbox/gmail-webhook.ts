@@ -146,6 +146,14 @@ export interface GmailPushHandlerOptions {
 
 const PROVIDER = "gmail" as const;
 
+// How far back the one-time install backfill reaches. A freshly connected
+// mailbox can hold arbitrarily old unread mail; without this bound we would
+// open a case for every one of them. One month keeps the backfill to
+// plausibly-still-relevant support threads. (The push reseed path uses a
+// tighter `newer_than:7d` because it is bounded by Gmail's ~7-day history
+// retention window, not by this policy.)
+const BACKFILL_LOOKBACK_QUERY = "newer_than:30d" as const;
+
 export type GmailConnectorLayer = Layer.Layer<
   ConnectorCredentialStore | BlobStorage,
   never,
@@ -320,7 +328,7 @@ export const backfillUnreadGmailInbox = async (opts: {
   );
   const messageIds = await gmailListInboxMessageIds({
     token: conn.accessToken,
-    query: "in:inbox is:unread",
+    query: `in:inbox is:unread ${BACKFILL_LOOKBACK_QUERY}`,
     maxResults: opts.maxMessages ?? 50,
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
