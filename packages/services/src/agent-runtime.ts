@@ -17,6 +17,7 @@ import {
   type ThreadId,
   type ToolContext,
   type WorkflowResult,
+  primaryWaitStatus,
   summarizePhotoSignals,
   wrapUntrusted,
   UNTRUSTED_PREAMBLE,
@@ -2075,6 +2076,25 @@ const AgentRuntimeLayer = Layer.effect(
                   // `supplier.updated` (the consumer). Runs only when escalate
                   // resolved to `allow` (per-agent) — under the default `ask`, the
                   // permission gate above parks in waiting_for_approval instead.
+                  //
+                  // Concurrent waits: if this tick already QUEUED ask-gated
+                  // actions, BOTH waits hold and `primaryWaitStatus` picks the
+                  // park — approval wins, so the queued bundle parks (one
+                  // merchant ping, guard 2.9 armed) instead of stranding the
+                  // pending rows on a waiting_for_supplier case. The open
+                  // escalation row still carries the supplier wait, and the
+                  // notify outbox emails the supplier regardless of status.
+                  // (Escalate-first ticks have an empty queue — any reply the
+                  // agent still owes is drafted when the supplier answers.)
+                  const wait = primaryWaitStatus({
+                    approvalPending:
+                      agent.autonomousLoop === true && queuedApprovals.length > 0,
+                    supplierOpen: true,
+                  });
+                  if (wait === "waiting_for_approval") {
+                    const done = yield* parkQueuedBundle(current, agent, turn);
+                    return { agent, current, done };
+                  }
                   current = yield* lifecycle.parkWaitingForSupplier({
                     caseId: current.id,
                     tenantId: current.tenantId,

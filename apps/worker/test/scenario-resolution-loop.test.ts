@@ -96,7 +96,11 @@ const loopAgent = (
   ...overrides,
 });
 
-const makeLayer = (agent: AgentConfig, script: ReadonlyArray<LLMDecision>) => {
+const makeLayer = (
+  agent: AgentConfig,
+  script: ReadonlyArray<LLMDecision>,
+  extras: ReadonlyArray<Layer.Layer<never, never, never>> = [],
+) => {
   const env = Layer.mergeAll(
     CaseRepositoryTest,
     AuditLogServiceTest,
@@ -112,11 +116,16 @@ const makeLayer = (agent: AgentConfig, script: ReadonlyArray<LLMDecision>) => {
     platformMailNoop,
     tenantOverridesEmpty,
     tenantRepoDefault,
+    ...extras,
   );
   return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 };
 
-const driveCase = (agent: AgentConfig, script: ReadonlyArray<LLMDecision>) =>
+const driveCase = (
+  agent: AgentConfig,
+  script: ReadonlyArray<LLMDecision>,
+  extras: ReadonlyArray<Layer.Layer<never, never, never>> = [],
+) =>
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
@@ -154,7 +163,7 @@ const driveCase = (agent: AgentConfig, script: ReadonlyArray<LLMDecision>) =>
         const entries = yield* audit.forCase(created.id);
         return { result, fetched, pending, entries };
       }),
-      makeLayer(agent, script),
+      makeLayer(agent, script, extras),
     ),
   );
 
@@ -1050,6 +1059,89 @@ describe("per-action approval — no case with pending actions resolves", () => 
 
     expect(out.result.type).toBe("PausedWaitingForSupplier");
     expect(out.final.status).toBe("waiting_for_supplier");
+  });
+});
+
+// Concurrent wait states: a tick that QUEUES an ask-gated action and then
+// escalates to the supplier holds BOTH waits. The bundle park must win
+// (primaryWaitStatus precedence — the merchant is the next unblocker), or the
+// queued approval is orphaned: no waiting_for_approval status, no approval
+// email/ping, park guard 2.9 never fires, and a later dashboard approval
+// would resolve the case out from under the open escalation.
+describe("concurrent waits — escalate with a queued approval parks the bundle", () => {
+  const escalatingLoopAgent = loopAgent({
+    tools: ["conversation.reply", "supplier.escalate"],
+    permissionOverrides: {
+      "conversation.reply": "ask",
+      "supplier.escalate": "allow",
+    },
+  });
+
+  it("parks waiting_for_approval (not waiting_for_supplier) when a tick queues a reply then escalates", async () => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "q0",
+        tool: "conversation.reply",
+        input: replyInput("draft-1", "cust@example.com"),
+      },
+      {
+        type: "tool_call",
+        callId: "q1",
+        tool: "supplier.escalate",
+        input: {
+          problem: "Unit damaged in transit; replacement needed",
+          orderRef: "#9001",
+          shipCity: null,
+          shipCountry: null,
+          trackingNumber: null,
+        },
+      },
+      { type: "final_message", text: "Escalated and drafted the reply." },
+    ];
+
+    const out = await driveCase(escalatingLoopAgent, script, [
+      SupplierEscalationServiceTest({}),
+    ]);
+
+    // The queued reply is NOT orphaned: the bundle park ran.
+    expect(out.result.type).toBe("PausedWaitingForApproval");
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.pending).toHaveLength(1);
+    expect(out.pending[0]!.tool).toBe("conversation.reply");
+    // Bundle-park audit written (the approval email/ping path).
+    expect(out.entries.map((e) => e.action)).toContain(
+      "case.waiting_for_approval",
+    );
+    // The escalation itself still happened (tool invoked before the park).
+    expect(
+      out.entries.filter((e) => e.action === "tool.invoked"),
+    ).not.toHaveLength(0);
+  });
+
+  it("still parks waiting_for_supplier when the tick escalated with nothing queued", async () => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "q0",
+        tool: "supplier.escalate",
+        input: {
+          problem: "Unit damaged in transit; replacement needed",
+          orderRef: "#9002",
+          shipCity: null,
+          shipCountry: null,
+          trackingNumber: null,
+        },
+      },
+    ];
+
+    const out = await driveCase(escalatingLoopAgent, script, [
+      SupplierEscalationServiceTest({}),
+    ]);
+
+    expect(out.result.type).toBe("PausedWaitingForSupplier");
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.pending).toHaveLength(0);
   });
 });
 
