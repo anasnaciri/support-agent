@@ -17,8 +17,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
-- [ ] Replay or explicitly handle held `supplier.updated` context after a
-      pending approval is decided.
+- [x] Concurrent wait states: a case can wait on approval AND a supplier at
+      once. Status stays the single `primaryWaitStatus` pointer (approval wins);
+      both waits are row-derived and shown as chips; a supplier update on a
+      waiting-for-approval case redrafts (supersedes pending approvals + resumes).
+- [ ] Remove `waiting_for_approval` / `waiting_for_supplier` from the
+      agent-settable `case.update_status` enum (`packages/tools/src/case/update-status.ts`)
+      — those are runtime-owned parks, not agent-settable; agent-visible schema
+      change, own slice.
 - [ ] Finish case-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
@@ -147,6 +153,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       resolved per active workspace kind.
 - [x] Supplier portal pages use a constrained projection and do not expose full
       customer thread data.
+- [x] Concurrent wait states: a case can hold a pending approval AND an open
+      supplier escalation at once. `cases.status` stays the single
+      `primaryWaitStatus` pointer (approval wins); both waits are row-derived
+      (pending approvals / open escalations) and surfaced as `waitingOn` chips.
+      The tick that queues an ask-gated reply then escalates parks the bundle
+      (`waiting_for_approval`), the supplier notify outbox keys on the open
+      escalation row (not status), an approval resume parks on the supplier
+      while an escalation is open, and a supplier update on a
+      waiting-for-approval case redrafts (supersedes pending approvals + resumes
+      so the agent drafts fresh).
 
 ### Dashboard And SPA
 
@@ -235,10 +251,23 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Runtime And Reliability
 
-- [ ] Add replay/resume behavior for held `supplier.updated` events after
-      approval decisions.
+- [x] Add replay/resume behavior for held `supplier.updated` events after
+      approval decisions. (Redraft: a supplier update on a
+      waiting-for-approval case supersedes the pending approvals and resumes;
+      the event is no longer held.)
 - [ ] Add merchant-facing recovery when supplier notification attempts exhaust
       and the case is still waiting for supplier.
+- [ ] `escalateSupplierNotifyFailure` keeps `onlyFromStatus:
+      "waiting_for_supplier"`, so a waiting-for-approval case with an open
+      escalation that exhausts supplier-notify attempts no-ops instead of
+      escalating to a human. Acceptable for now (the merchant is already engaged
+      via the approval), but revisit if suppliers go unreachable under
+      concurrent waits.
+- [ ] `supplier_unreachable` risk flag is not stamped on waiting-for-approval
+      cases (same `onlyFromStatus` gate as above).
+- [ ] Multi-escalation supplier note history is audit-trail only:
+      `context.supplierUpdate` is last-write-wins, so a second escalation's note
+      overwrites the first in context (the audit log preserves both).
 - [ ] Allow a supplier correction or second update to the same escalation, or
       make the required new escalation flow explicit in the UI.
 - [ ] Add epoch handling to timer and supplier events, building on
@@ -389,6 +418,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       contact primitive.
 - [x] SPA keeps the existing flat dashboard package layout instead of moving
       code under `src/`.
+- [x] Concurrent wait states do NOT make `cases.status` a set. Status stays the
+      single "who acts next" pointer; both wait facts are derived from rows
+      (pending approvals / open escalations). Precedence is encoded once in
+      `primaryWaitStatus` (agent-core) — approval wins, because the merchant is
+      the next unblocker and the supplier wait is passive (carried by the open
+      escalation row + notify outbox). This preserves the CHECK constraint, the
+      `(tenant,status)` index, `groupBy` rollups, list filters, and the cron
+      mutex-guards.
+- [x] A supplier update on a case parked `waiting_for_approval` REDRAFTS: it
+      supersedes every pending approval (they may be stale in light of the
+      supplier's note) and resumes the case so the agent drafts fresh, rather
+      than holding the event. No epoch bump — stale approve links are inert
+      (`already_decided` → 409), and the bundle filter/reminder sweep read
+      pending only.
 
 ---
 
@@ -406,6 +449,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - Failed customer-reply delivery must never resolve the case.
 - Delivery-scoped side-effect markers must not dedup distinct inbound messages.
 - Supplier portal access is by supplier binding, never by WorkOS org membership.
+- Concurrent wait states: `cases.status` is the single `primaryWaitStatus`
+  pointer (approval wins); both wait facts are row-derived (pending approvals /
+  open escalations), never a status set. The supplier notify outbox keys on the
+  open escalation row, not on `cases.status`.
 - Path-B dashboard data arrives over JSON; Date-typed API fields must be coerced
   before calling Date methods.
 - `pnpm build` must be green before stopping.
