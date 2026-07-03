@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, notInArray, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
@@ -562,7 +562,12 @@ export interface UnsentSupplierEscalation {
 /**
  * Escalations whose supplier email hasn't been sent yet (the durable outbox):
  * `notified_at IS NULL` and under the retry cap, oldest first. Joined to the
- * supplier for the recipient address.
+ * supplier for the recipient address. Keys on the ESCALATION ROW being open —
+ * not on the case sitting in `waiting_for_supplier` — because under concurrent
+ * wait states a case can carry an open escalation while parked
+ * `waiting_for_approval` (or actively in_progress) and the supplier still
+ * needs the email. Cases a human closed or owns are excluded: never email a
+ * supplier about a case that is resolved, failed, or under human takeover.
  */
 export const listUnsentSupplierEscalations = async (
   db: DrizzleDb,
@@ -586,7 +591,8 @@ export const listUnsentSupplierEscalations = async (
       and(
         sql`${caseSupplierEscalations.notifiedAt} IS NULL`,
         sql`${caseSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
-        eq(cases.status, "waiting_for_supplier"),
+        eq(caseSupplierEscalations.status, "open"),
+        notInArray(cases.status, ["resolved", "failed", "human_takeover"]),
       ),
     )
     .orderBy(asc(caseSupplierEscalations.createdAt))

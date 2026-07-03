@@ -6,6 +6,7 @@ import {
   bindSupplierUser,
   bindSupplierUserAllTenants,
   caseStateTransitions,
+  caseSupplierEscalations,
   cases,
   createInvitation,
   createSupplier,
@@ -19,6 +20,7 @@ import {
   listOpenEscalationsForSupplier,
   listSupplierWorkspacesForUser,
   listTenantsWithPendingSupplierInvitationForEmail,
+  listUnsentSupplierEscalations,
   makeDbClient,
   recordSupplierUpdate,
   suppliers,
@@ -484,6 +486,59 @@ describeIfDb("supplier-store", () => {
       actorUuid: randomUUID(),
     });
     expect(res.kind).toBe("not_found");
+  });
+
+  // The notify outbox keys on the ESCALATION ROW (open + unsent), not on the
+  // case sitting in `waiting_for_supplier`: under concurrent wait states a case
+  // can carry an open escalation while parked `waiting_for_approval` (or
+  // actively in_progress) and the supplier must still get the email. Cases a
+  // human closed or owns are excluded — never email a supplier about those.
+  it("listUnsentSupplierEscalations keys on open+unsent rows, excluding closed/owned cases", async () => {
+    const tenantId = await seedTenant();
+    const supplierId = (
+      await createSupplier(db, tenantId, { name: "A", email: "outbox@wh.com" })
+    ).id;
+
+    const seedEscalated = async (caseStatus: string): Promise<string> => {
+      const caseId = await seedCase(tenantId, caseStatus);
+      const { id } = await insertEscalation(db, {
+        tenantId,
+        caseId,
+        supplierId,
+        problem: `P-${caseStatus}`,
+        orderRef: null,
+        shipCity: null,
+        shipCountry: null,
+        trackingNumber: null,
+      });
+      return id;
+    };
+
+    const parked = await seedEscalated("waiting_for_supplier");
+    const approvalParked = await seedEscalated("waiting_for_approval");
+    const active = await seedEscalated("in_progress");
+    const resolved = await seedEscalated("resolved");
+    const takenOver = await seedEscalated("human_takeover");
+    const failed = await seedEscalated("failed");
+    // An escalation the supplier already answered is never re-sent, even on a
+    // still-parked case.
+    const answered = await seedEscalated("waiting_for_supplier");
+    await db
+      .update(caseSupplierEscalations)
+      .set({ status: "resolved", resolvedAt: new Date() })
+      .where(eq(caseSupplierEscalations.id, answered));
+
+    const listed = (await listUnsentSupplierEscalations(db, 100_000, 5)).filter(
+      (r) => r.tenantId === tenantId,
+    );
+    const ids = listed.map((r) => r.id);
+    expect(ids).toContain(parked);
+    expect(ids).toContain(approvalParked);
+    expect(ids).toContain(active);
+    expect(ids).not.toContain(resolved);
+    expect(ids).not.toContain(takenOver);
+    expect(ids).not.toContain(failed);
+    expect(ids).not.toContain(answered);
   });
 
   it("ensureSupplierRole creates a non-owner Supplier role granting the supplier perms (idempotent)", async () => {
