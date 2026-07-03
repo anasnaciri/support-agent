@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import {
+  approvals,
   auditLog,
   bindSupplierUser,
   bindSupplierUserAllTenants,
@@ -43,9 +44,12 @@ describeIfDb("supplier-store", () => {
 
   afterAll(async () => {
     if (seededTenants.length > 0) {
-      // cases.tenant_id has no ON DELETE cascade, so delete cases first
-      // (that cascades escalations + transitions); then the tenant delete
-      // cascades suppliers + any remaining escalations.
+      // approvals.case_id is NO ACTION, so seeded approval rows must go before
+      // their cases. Then cases (cascades escalations + transitions), then the
+      // tenant delete (cascades suppliers + any remaining escalations).
+      await db
+        .delete(approvals)
+        .where(inArray(approvals.tenantId, seededTenants));
       await db.delete(cases).where(inArray(cases.tenantId, seededTenants));
       await db.delete(tenants).where(inArray(tenants.id, seededTenants));
     }
@@ -75,6 +79,31 @@ describeIfDb("supplier-store", () => {
       channel: "email",
       status,
       currentAgentId: "missing-package-agent",
+    });
+    return id;
+  };
+
+  const seedApproval = async (
+    tenantId: string,
+    caseId: string,
+    status: "pending" | "approved",
+    tool = "conversation.reply",
+  ): Promise<string> => {
+    const id = randomUUID();
+    await db.insert(approvals).values({
+      id,
+      tenantId,
+      caseId,
+      agentId: "missing-package-agent",
+      tool,
+      proposedInput: { draftId: id, bodyText: "draft" },
+      reasoning: "",
+      riskLevel: "medium",
+      status,
+      expiresAt: new Date(Date.now() + 60_000),
+      ...(status === "approved"
+        ? { decidedBy: randomUUID(), decidedAt: new Date() }
+        : {}),
     });
     return id;
   };
@@ -426,12 +455,26 @@ describeIfDb("supplier-store", () => {
     expect(transitions).toHaveLength(0);
   });
 
-  it("recordSupplierUpdate leaves a waiting_for_approval case parked (approval invariant)", async () => {
+  // Redraft (concurrent wait states): a supplier update on a case parked
+  // `waiting_for_approval` supersedes every still-pending approval (the drafts
+  // may now be stale in light of the supplier's note) and re-engages the agent
+  // in ONE tx. Decided rows are untouched. The published `supplier.updated`
+  // event then re-runs the agent, which produces a fresh draft.
+  it("recordSupplierUpdate supersedes pending approvals and resumes a waiting_for_approval case", async () => {
     const tenantId = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "a6@wh.com" })
     ).id;
     const caseId = await seedCase(tenantId, "waiting_for_approval");
+    const pending1 = await seedApproval(tenantId, caseId, "pending");
+    const pending2 = await seedApproval(
+      tenantId,
+      caseId,
+      "pending",
+      "refund.create",
+    );
+    // A row decided BEFORE the supplier answered must stay decided.
+    const decided = await seedApproval(tenantId, caseId, "approved");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
       caseId,
@@ -446,17 +489,55 @@ describeIfDb("supplier-store", () => {
       tenantId,
       supplierId,
       escalationId: escId,
-      note: "n",
-      proposedResolution: null,
+      note: "Reshipped, tracking TRK1",
+      proposedResolution: "reship",
       actorUuid: randomUUID(),
     });
     expect(res.kind).toBe("recorded");
-    if (res.kind === "recorded") expect(res.resumed).toBe(false);
+    if (res.kind === "recorded") expect(res.resumed).toBe(true);
+
+    // Case flipped waiting_for_approval → in_progress.
     const [row] = await db
       .select({ status: cases.status })
       .from(cases)
       .where(eq(cases.id, caseId));
-    expect(row?.status).toBe("waiting_for_approval");
+    expect(row?.status).toBe("in_progress");
+
+    // Both pending rows cancelled with the supersede reason + null decidedBy.
+    const approvalRows = await db
+      .select({
+        id: approvals.id,
+        status: approvals.status,
+        decidedBy: approvals.decidedBy,
+        decisionReason: approvals.decisionReason,
+      })
+      .from(approvals)
+      .where(eq(approvals.caseId, caseId));
+    const byId = new Map(approvalRows.map((a) => [a.id, a]));
+    for (const pid of [pending1, pending2]) {
+      expect(byId.get(pid)?.status).toBe("cancelled");
+      expect(byId.get(pid)?.decidedBy).toBeNull();
+      expect(byId.get(pid)?.decisionReason).toBe(
+        "superseded by supplier update",
+      );
+    }
+    // The decided row is untouched.
+    expect(byId.get(decided)?.status).toBe("approved");
+
+    // One approval.superseded audit row (count = 2).
+    const superseded = await db
+      .select({ details: auditLog.details })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.caseId, caseId),
+          eq(auditLog.action, "approval.superseded"),
+        ),
+      );
+    expect(superseded).toHaveLength(1);
+    expect(
+      (superseded[0]?.details as Record<string, unknown> | undefined)?.["count"],
+    ).toBe(2);
   });
 
   it("recordSupplierUpdate is not_found for another supplier's escalation", async () => {

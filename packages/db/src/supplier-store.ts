@@ -3,6 +3,7 @@ import { and, asc, eq, notInArray, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
+  approvals,
   auditLog,
   caseStateTransitions,
   caseSupplierEscalations,
@@ -449,16 +450,22 @@ export type RecordSupplierUpdateResult =
  * `waiting_for_supplier` while its escalation is still open (manual status
  * change, "Take over", a manual reply resolving it, restart from triage) — the
  * supplier's answer must STILL re-engage the agent, so every such resting state
- * resumes. All are matrix-legal `→ in_progress` moves. Deliberately absent:
- * `waiting_for_approval` / `approved_action_running` (a pending approval owns
- * the case — flipping would let the agent resolve out from under the manager;
- * the runtime park guard holds the published event instead) and the active
- * states (`in_progress`, `new`, `triaging` — nothing to flip; the published
- * event re-enters the loop directly).
+ * resumes. All are matrix-legal `→ in_progress` moves.
+ *
+ * `waiting_for_approval` resumes too, but is special: under concurrent wait
+ * states a case can hold a pending approval AND an open escalation at once
+ * (`primaryWaitStatus` = approval). When the supplier answers, the pending
+ * draft(s) may be stale in light of the note, so the flip ALSO supersedes every
+ * pending approval (redraft) — the re-run agent produces a fresh draft. See the
+ * supersede block in `recordSupplierUpdate`.
+ *
+ * Deliberately absent: the active states (`in_progress`, `new`, `triaging` —
+ * nothing to flip; the published event re-enters the loop directly).
  */
 const SUPPLIER_RESUMABLE_STATUSES: ReadonlySet<string> = new Set([
   "waiting_for_supplier",
   "waiting_for_customer",
+  "waiting_for_approval",
   "resolved",
   "failed",
   "human_takeover",
@@ -529,6 +536,43 @@ export const recordSupplierUpdate = async (
         },
       };
       if (willResume) {
+        // Concurrent wait states: the case was parked `waiting_for_approval`
+        // with an open escalation. The supplier's answer may make the pending
+        // draft(s) stale, so supersede every pending approval (mirror
+        // `supersedePendingForCase` field semantics exactly) before the re-run
+        // agent drafts fresh. `applyApprovalDecision` returns `already_decided`
+        // for non-pending rows, so any stale approve link is an inert 409.
+        if (caseRow.status === "waiting_for_approval") {
+          const superseded = await tx
+            .update(approvals)
+            .set({
+              status: "cancelled",
+              decidedAt: new Date(),
+              decidedBy: null,
+              decisionReason: "superseded by supplier update",
+            })
+            .where(
+              and(
+                eq(approvals.tenantId, input.tenantId),
+                eq(approvals.caseId, esc.caseId),
+                eq(approvals.status, "pending"),
+              ),
+            )
+            .returning({ id: approvals.id });
+          if (superseded.length > 0) {
+            await tx.insert(auditLog).values({
+              tenantId: input.tenantId,
+              caseId: esc.caseId,
+              actorType: "user",
+              actorId: input.actorUuid,
+              action: "approval.superseded",
+              details: {
+                count: superseded.length,
+                reason: "supplier update",
+              },
+            });
+          }
+        }
         await tx
           .update(cases)
           .set({

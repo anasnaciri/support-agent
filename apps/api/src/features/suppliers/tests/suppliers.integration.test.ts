@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import {
+  approvals,
+  auditLog,
   caseSupplierEscalations,
   cases,
   createInvitation,
@@ -139,6 +141,8 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
   const cleanupTenant = async (id: string): Promise<void> => {
     if (!raw) return;
     // children first (cases cascade escalations; tenant cascade does the rest).
+    // approvals.case_id is NO ACTION, so seeded approval rows go before cases.
+    await raw.db.delete(approvals).where(eq(approvals.tenantId, id));
     await raw.db.delete(cases).where(eq(cases.tenantId, id));
     await raw.db
       .delete(caseSupplierEscalations)
@@ -388,6 +392,83 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       .from(cases)
       .where(eq(cases.id, active.caseId));
     expect(row2?.status).toBe("in_progress");
+  });
+
+  // Redraft: a case parked `waiting_for_approval` with an open escalation
+  // (concurrent wait states). The supplier's answer supersedes the pending
+  // draft and resumes the case so the agent re-runs (resumed + ticked).
+  it("redrafts a waiting_for_approval case: supersedes the pending draft and resumes", async () => {
+    if (!raw) return;
+    const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
+    expect(supplier).not.toBeNull();
+
+    const caseId = randomUUID();
+    await raw.db.insert(cases).values({
+      id: caseId,
+      tenantId,
+      channel: "email",
+      status: "waiting_for_approval",
+      currentAgentId: "missing-package-agent",
+    });
+    const approvalId = randomUUID();
+    await raw.db.insert(approvals).values({
+      id: approvalId,
+      tenantId,
+      caseId,
+      agentId: "missing-package-agent",
+      tool: "conversation.reply",
+      proposedInput: { draftId: approvalId, bodyText: "stale draft" },
+      reasoning: "",
+      riskLevel: "medium",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const { id: escId } = await insertEscalation(raw.db, {
+      tenantId,
+      caseId,
+      supplierId: supplier!.id,
+      problem: "P",
+      orderRef: null,
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+
+    const res = await post(
+      `/dashboard/supplier/cases/${escId}/update`,
+      { note: "Reshipped; use tracking TRK9" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { resumed: boolean; ticked: boolean };
+    expect(body.resumed).toBe(true);
+    expect(body.ticked).toBe(true);
+
+    const [row] = await raw.db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(eq(cases.id, caseId));
+    expect(row?.status).toBe("in_progress");
+
+    // The stale draft was superseded (cancelled), not left pending.
+    const [approval] = await raw.db
+      .select({ status: approvals.status })
+      .from(approvals)
+      .where(eq(approvals.id, approvalId));
+    expect(approval?.status).toBe("cancelled");
+
+    const superseded = await raw.db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.caseId, caseId),
+          eq(auditLog.action, "approval.superseded"),
+        ),
+      );
+    expect(superseded).toHaveLength(1);
   });
 
   it("binds a supplier across ORGS + switches by x-workspace-id (org not consulted)", async () => {

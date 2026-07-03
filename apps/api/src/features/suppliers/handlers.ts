@@ -149,8 +149,10 @@ export const handleSupplierUpdate = async (
   // ALWAYS publish, not just when the status flipped: a supplier's answer must
   // re-engage the agent even on a case that escaped waiting_for_supplier (a
   // human resolved / took it over — recordSupplierUpdate flipped it back) or is
-  // actively in_progress (no flip needed). The one park the runtime still
-  // honors is a pending approval: that event is held + audited, by design.
+  // actively in_progress (no flip needed). A case parked waiting_for_approval
+  // with an open escalation now REDRAFTS: recordSupplierUpdate supersedes the
+  // pending approvals and flips it to in_progress, so the event re-runs the
+  // agent (which produces a fresh draft) rather than being held.
   try {
     await publishSupplierUpdate(cfg.databaseUrl, {
       type: "supplier.updated",
