@@ -50,6 +50,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       runtime, dashboard, worker recovery, and manual case actions.
 - [x] Dashboard manual status changes, take-over, resume, retry last step, and
       restart-from-triage.
+- [x] Manual escalate-to-supplier from the case page (⋮ menu → dialog):
+      `POST /dashboard/cases/:id/escalate-supplier` writes the escalation row
+      (the notify outbox) and parks via `parkWaitingForSupplierManually` —
+      bridges from `human_takeover`, keeps `waiting_for_approval` primary.
+- [x] Case-header actions rework: Refund is a text button, Resolve carries its
+      label, retries live in a dedicated ↺ dropdown ("Retry last step" /
+      "Retry case"), ⋮ menu holds status changes + supplier escalation.
 - [x] Restart-from-triage rebinds to triage, clears stale classification, and
       cancels pending approvals from the abandoned route.
 - [x] Resumed cases can replay the full conversation thread so triage and
@@ -337,6 +344,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Suppliers
 
+- [ ] Manual escalate-to-supplier sends a null order projection (`orderRef`,
+      ship city/country, tracking) — the supplier only sees the merchant's
+      problem text. Consider auto-filling from the case's bound order.
 - [ ] Add merchant-facing supplier list and pending invitation management if the
       invite-only settings surface is insufficient.
 - [ ] Add per-vendor supplier routing instead of one default supplier.
@@ -362,6 +372,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
+- [ ] `apps/dashboard` (Next) still has the old case-header layout (icon-only
+      refund, retries in the ⋮ menu, no manual supplier escalation) — port the
+      SPA's rework only if that app stays user-facing.
 - [ ] Fix legacy relay cases where corrected `customerEmail` updates display but
       connector replies still target original thread recipients.
 - [ ] Mirror dark-mode or email-rendering improvements between dashboard apps
