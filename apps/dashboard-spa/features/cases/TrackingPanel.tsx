@@ -73,13 +73,13 @@ export const TrackingPanel = ({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="p-4 pb-3 2xl:p-6 2xl:pb-3">
         <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
           <Truck className="size-3.5" aria-hidden />
           Tracking
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+      <CardContent className="space-y-3 p-4 pt-0 2xl:p-6 2xl:pt-0">
         <div className="flex items-center justify-between gap-2">
           <code className="break-all font-mono text-sm">
             {tracking.trackingNumber ?? "—"}

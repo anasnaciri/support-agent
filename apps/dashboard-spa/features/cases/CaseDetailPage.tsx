@@ -247,7 +247,12 @@ export function CaseDetailPage() {
   const pathname = usePathname() ?? "";
   const id = caseIdFromPathname(pathname) ?? "";
   const [showFullAudit, setShowFullAudit] = useState(false);
-  const [contextOpen, setContextOpen] = useState(true);
+  // The floating context card pushes the chat column ~320px narrower, so it
+  // only starts open where there's room (≥2xl); smaller screens keep the
+  // header toggle.
+  const [contextOpen, setContextOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 1536,
+  );
 
   const detailQuery = useQuery({
     queryKey: qk.case(ctx.workspaceId, id),
@@ -735,7 +740,7 @@ export function CaseDetailPage() {
 
       {/* RIGHT — customer, order, context & timeline */}
       <CaseDetailsPanel>
-        <div className="space-y-4 p-4">
+        <div className="space-y-3 p-3 2xl:space-y-4 2xl:p-4">
           <CustomerPanel
             customer={customer}
             customerEmail={customerEmail}
@@ -843,7 +848,7 @@ export function CaseDetailPage() {
                     <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
                     <Card>
                       {refundRecommendationFromEntry(e) ? (
-                        <CardContent className="space-y-3 p-4">
+                        <CardContent className="space-y-3 p-3 2xl:p-4">
                           <div className="text-sm font-medium">
                             Refund recommendation
                           </div>
@@ -857,7 +862,7 @@ export function CaseDetailPage() {
                           />
                         </CardContent>
                       ) : (
-                        <CardContent className="space-y-1.5 p-4">
+                        <CardContent className="space-y-1.5 p-3 2xl:p-4">
                           <div className="text-sm font-medium">
                             {auditActionLabel(e.action)}
                           </div>
@@ -881,7 +886,7 @@ export function CaseDetailPage() {
               <div className="space-y-3">
                 {summaryText ? (
                   <Card>
-                    <CardContent className="space-y-1.5 p-4">
+                    <CardContent className="space-y-1.5 p-3 2xl:p-4">
                       <div className="text-sm font-medium">
                         {caseRow.summary ? "Summary" : "Triage notes"}
                       </div>
@@ -914,7 +919,7 @@ export function CaseDetailPage() {
                         }
                       >
                         {item.kind === "email" ? (
-                          <CardContent className="space-y-1.5 p-4">
+                          <CardContent className="space-y-1.5 p-3 2xl:p-4">
                             <div className="text-sm font-medium">
                               {item.title}
                             </div>
@@ -924,7 +929,7 @@ export function CaseDetailPage() {
                             </div>
                           </CardContent>
                         ) : item.kind === "note" ? (
-                          <CardContent className="space-y-1.5 p-4">
+                          <CardContent className="space-y-1.5 p-3 2xl:p-4">
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="text-sm font-medium">
                                 {item.title}
@@ -944,7 +949,7 @@ export function CaseDetailPage() {
                             ) : null}
                           </CardContent>
                         ) : item.kind === "status" ? (
-                          <CardContent className="space-y-1.5 p-4">
+                          <CardContent className="space-y-1.5 p-3 2xl:p-4">
                             <div className="text-sm font-medium">
                               {item.title}
                             </div>
@@ -958,7 +963,7 @@ export function CaseDetailPage() {
                             ) : null}
                           </CardContent>
                         ) : item.kind === "refundRecommendation" ? (
-                          <CardContent className="space-y-3 p-4">
+                          <CardContent className="space-y-3 p-3 2xl:p-4">
                             <div className="text-sm font-medium">
                               Refund recommendation
                             </div>
@@ -971,7 +976,7 @@ export function CaseDetailPage() {
                             />
                           </CardContent>
                         ) : item.kind === "deliveryFailed" ? (
-                          <CardContent className="space-y-2 p-4">
+                          <CardContent className="space-y-2 p-3 2xl:p-4">
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="text-sm font-medium text-destructive">
                                 {item.title}
@@ -994,7 +999,7 @@ export function CaseDetailPage() {
                             />
                           </CardContent>
                         ) : item.kind === "approvedNotSent" ? (
-                          <CardContent className="space-y-2 p-4">
+                          <CardContent className="space-y-2 p-3 2xl:p-4">
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="text-sm font-medium">
                                 Approved reply not sent
@@ -1020,7 +1025,7 @@ export function CaseDetailPage() {
                             />
                           </CardContent>
                         ) : (
-                          <CardContent className="space-y-3 p-4">
+                          <CardContent className="space-y-3 p-3 2xl:p-4">
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="text-sm font-medium">
                                 {approvalTimelineLabel(item.approval)}

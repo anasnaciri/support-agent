@@ -37,7 +37,7 @@ export function IssueRefundCard({
 
   return (
     <Card className="border-primary/40 bg-primary/5">
-      <CardContent className="space-y-2 py-4">
+      <CardContent className="space-y-2 px-4 py-4 2xl:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold">Agent recommended a refund</span>
           <Badge

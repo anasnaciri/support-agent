@@ -183,6 +183,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       order mis-quote heads-up; card and toggle hide when there is nothing to
       show.
 - [x] Dark-mode palette and theme switch landed for the SPA.
+- [x] Case-detail inbox compacts on small laptop screens (sub-`2xl`): narrower
+      details column (`lg:w-72 xl:w-80 2xl:w-96`), tighter card/panel padding,
+      and the floating context card starts closed below 1536px viewport width
+      (header toggle unchanged). `2xl+` keeps the previous layout.
 - [x] SPA port uses Vite, TanStack Router, TanStack Query, cookie BFF auth,
       workspace context, and route-level read/write pages.
 - [x] SPA case page supports mutations, approval decisions, refund modal,

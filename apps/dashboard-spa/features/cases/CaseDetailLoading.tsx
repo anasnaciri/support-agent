@@ -42,8 +42,8 @@ export function CaseDetailLoading() {
       </section>
 
       {/* RIGHT — details column (lg+ only, mirrors CaseDetailsPanel) */}
-      <aside className="hidden w-80 shrink-0 border-l border-border/60 bg-muted/20 xl:w-96 lg:block">
-        <div className="space-y-4 p-4">
+      <aside className="hidden w-72 shrink-0 border-l border-border/60 bg-muted/20 xl:w-80 2xl:w-96 lg:block">
+        <div className="space-y-3 p-3 2xl:space-y-4 2xl:p-4">
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-28 w-full" />

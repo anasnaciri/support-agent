@@ -46,7 +46,7 @@ export function CaseDetailsPanel({ children }: { readonly children: ReactNode })
           "fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] shadow-xl transition-transform duration-300 ease-in-out",
           open ? "translate-x-0" : "translate-x-full",
           // Desktop: a static in-flow column, always visible.
-          "lg:static lg:z-auto lg:w-80 lg:translate-x-0 lg:shadow-none xl:w-96",
+          "lg:static lg:z-auto lg:w-72 lg:translate-x-0 lg:shadow-none xl:w-80 2xl:w-96",
         )}
       >
         {/* Mobile close button. */}

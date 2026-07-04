@@ -101,14 +101,14 @@ export const OrderPanel = ({
   if (!order && !orderHint) {
     return (
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 p-4 pb-3 2xl:p-6 2xl:pb-3">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
             Order
           </CardTitle>
           {headerAction}
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="p-4 pt-0 2xl:p-6 2xl:pt-0">
           <p className="text-sm italic text-muted-foreground">
             No order linked to this case yet.
           </p>
@@ -120,14 +120,14 @@ export const OrderPanel = ({
   if (!order) {
     return (
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 p-4 pb-3 2xl:p-6 2xl:pb-3">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
             Order
           </CardTitle>
           {headerAction}
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="p-4 pt-0 2xl:p-6 2xl:pt-0">
           <p className="text-sm italic text-muted-foreground">
             Agent referenced order{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
@@ -147,7 +147,7 @@ export const OrderPanel = ({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-3">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 p-4 pb-3 2xl:p-6 2xl:pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
             <Package className="size-3.5" aria-hidden />
@@ -180,7 +180,7 @@ export const OrderPanel = ({
         </div>
         {headerAction}
       </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+      <CardContent className="space-y-3 p-4 pt-0 2xl:p-6 2xl:pt-0">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Placed {formatRelativeTime(order.createdAt)}</span>
           {shipTo ? (
