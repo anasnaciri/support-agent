@@ -290,7 +290,9 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/shipping-address",
     "Fix the order's shipping address before fulfillment (manager)",
     handleDashboardEditShippingAddress,
-    "cases.set_status",
+    // A store write, not a case-state correction — its own grant, like
+    // refunds.issue.
+    "orders.edit",
   );
   dashboardPost(
     "/dashboard/cases/:id/escalate-supplier",

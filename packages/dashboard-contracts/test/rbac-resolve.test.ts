@@ -54,6 +54,18 @@ describe("effectivePermissions", () => {
     expect(perms.has("audit.view")).toBe(false);
   });
 
+  it("expands orders.edit ⇒ cases.view (a store write performed from a case)", () => {
+    const perms = effectivePermissions({
+      isOwner: false,
+      grantedIds: ["orders.edit"],
+    });
+    expect(perms.has("orders.edit")).toBe(true);
+    expect(perms.has("cases.view")).toBe(true);
+    // A store write never rides along with case-state correction (or vice
+    // versa) — a role must grant each explicitly.
+    expect(perms.has("cases.set_status")).toBe(false);
+  });
+
   it("expands approvals.decide ⇒ approvals.view and knowledge.manage ⇒ knowledge.view", () => {
     const a = effectivePermissions({
       isOwner: false,

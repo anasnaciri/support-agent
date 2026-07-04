@@ -18,6 +18,7 @@ export type RbacPermissionId =
   | "cases.resume"
   | "cases.retry"
   | "cases.set_status"
+  | "orders.edit"
   | "approvals.view"
   | "approvals.decide"
   | "refunds.issue"
@@ -104,6 +105,14 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     label: "Change case status",
     description:
       "Manually set a case's status — e.g. mark it resolved, reopen it, or park it waiting on the customer.",
+    category: "Cases",
+    implies: ["cases.view"],
+  },
+  {
+    id: "orders.edit",
+    label: "Edit order details",
+    description:
+      "Change an order's details in your store from a case — currently the shipping address.",
     category: "Cases",
     implies: ["cases.view"],
   },
