@@ -14,6 +14,7 @@ import {
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
   handleDashboardEditCaseDetails,
+  handleDashboardEditShippingAddress,
   handleDashboardEscalateSupplier,
   handleDashboardIssueRefund,
   handleDashboardRefundContext,
@@ -283,6 +284,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/details",
     "Hand-correct a case's customer / order the agent couldn't extract (manager)",
     handleDashboardEditCaseDetails,
+    "cases.set_status",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/shipping-address",
+    "Fix the order's shipping address before fulfillment (manager)",
+    handleDashboardEditShippingAddress,
     "cases.set_status",
   );
   dashboardPost(

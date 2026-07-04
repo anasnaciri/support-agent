@@ -66,6 +66,7 @@ import {
 } from "./case-reply.js";
 import { resendApprovedReply } from "./case-resend.js";
 import { issueCaseRefund } from "./case-refund.js";
+import { updateCaseShippingAddress } from "./case-shipping-address.js";
 import { describeShopifyError } from "./shopify-error-detail.js";
 import { dashboardRefundNote } from "./refund-note.js";
 import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
@@ -1045,6 +1046,151 @@ export const handleDashboardEditCaseDetails = async (
       : {}),
     ...(result.orderName ? { orderName: result.orderName } : {}),
   });
+};
+
+// POST /dashboard/cases/:id/shipping-address — a manager fixes the order's
+// Ship-to (the pencil on the Order card): the customer typo'd their address
+// and wrote in before fulfillment. Unlike the details endpoint (case
+// metadata), this WRITES TO THE STORE — the case's resolved order gets its
+// shipping address replaced via Shopify's `orderUpdate`, under operator
+// authorization. The form's non-empty fields are merged over the order's
+// current address (empty = keep), so fixing the ZIP can't wipe the street.
+// The orchestration + merge live in the unit-tested
+// `updateCaseShippingAddress` core; this handler wires it to the live
+// services and records a `case.shipping_address_updated` audit row.
+export const handleDashboardEditShippingAddress = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+
+  const field = (name: string): string | undefined => {
+    const raw = body[name];
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+  const fields = {
+    ...(field("name") !== undefined ? { name: field("name")! } : {}),
+    ...(field("address1") !== undefined
+      ? { address1: field("address1")! }
+      : {}),
+    ...(field("address2") !== undefined
+      ? { address2: field("address2")! }
+      : {}),
+    ...(field("city") !== undefined ? { city: field("city")! } : {}),
+    ...(field("province") !== undefined
+      ? { province: field("province")! }
+      : {}),
+    ...(field("country") !== undefined ? { country: field("country")! } : {}),
+    ...(field("zip") !== undefined ? { zip: field("zip")! } : {}),
+    ...(field("phone") !== undefined ? { phone: field("phone")! } : {}),
+  };
+
+  const tenantId = TenantId(auth.tenantId);
+  const caseId = CaseId(id);
+  const userId = auth.userId;
+
+  const caseRow = await runWithDb(layer, (db) =>
+    caseContextForTenant(db, auth.tenantId, id),
+  );
+  if (!caseRow) return sendJson(res, 404, { kind: "case_not_found" });
+  const context = (caseRow.context ?? {}) as Record<string, unknown>;
+
+  // Captured by `update` so the audit row can name the order it changed.
+  let updatedOrderId: string | null = null;
+
+  const outcome = await updateCaseShippingAddress({
+    fields,
+    loadOrder: () =>
+      Effect.runPromise(
+        Effect.provide(
+          resolveOrderForContext(tenantId, context).pipe(
+            Effect.map((order) =>
+              order
+                ? {
+                    orderId: String(order.id),
+                    address: order.shippingAddress,
+                  }
+                : null,
+            ),
+            // No creds / revoked connector → the order can't be resolved.
+            Effect.catchAll(() => Effect.succeed(null)),
+          ),
+          layer,
+        ),
+      ),
+    update: async ({ orderId, address }) => {
+      updatedOrderId = orderId;
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const shopify = yield* ShopifyService;
+            return yield* shopify
+              .updateOrderShippingAddress(tenantId, {
+                orderId: OrderId(orderId),
+                address,
+              })
+              .pipe(Effect.either);
+          }),
+          layer,
+        ),
+      );
+      if (result._tag === "Left") {
+        const detail = describeShopifyError(result.left);
+        req.log.error(
+          {
+            err: result.left,
+            shopifyErrorTag: result.left._tag,
+            tenantId,
+            orderId,
+            caseId: id,
+          },
+          `dashboard edit shipping address: Shopify orderUpdate failed — ${detail}`,
+        );
+        throw new Error(detail);
+      }
+      return result.right;
+    },
+    recordUpdated: (address) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const audit = yield* AuditLogService;
+            yield* audit
+              .record({
+                tenantId,
+                caseId,
+                actor: { type: "user", id: userId },
+                action: "case.shipping_address_updated",
+                details: {
+                  ...(updatedOrderId ? { orderId: updatedOrderId } : {}),
+                  address,
+                  via: "dashboard",
+                },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+          }),
+          layer,
+        ),
+      ),
+  });
+
+  const status =
+    outcome.kind === "saved"
+      ? 200
+      : outcome.kind === "order_not_found"
+        ? 404
+        : outcome.kind === "update_failed"
+          ? 502
+          : 400; // nothing_to_update
+  return sendJson(res, status, outcome);
 };
 
 // POST /dashboard/cases/:id/retry — manager hands a taken-over case back

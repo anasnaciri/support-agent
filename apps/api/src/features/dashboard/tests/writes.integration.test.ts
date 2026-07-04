@@ -434,6 +434,47 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
   });
 
+  it("shipping-address with no fields is a no-op (nothing_to_update, 400)", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseDetails}/shipping-address`,
+      {},
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "nothing_to_update",
+    );
+  });
+
+  it("shipping-address 404s when the case's order can't be resolved (no Shopify creds)", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseDetails}/shipping-address`, {
+      address1: "456 New St",
+      zip: "11375",
+    });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "order_not_found",
+    );
+  });
+
+  it("shipping-address 404s for a case in another tenant", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseDetails}/shipping-address`,
+      { address1: "456 New St" },
+      dashboardAuthHeaders(
+        otherOrgId,
+        { "content-type": "application/json" },
+        `user_${randomUUID()}`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "case_not_found",
+    );
+  });
+
   it("rejects a status the merchant may not set (invalid_status, 400)", async () => {
     if (!raw) return;
     const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
