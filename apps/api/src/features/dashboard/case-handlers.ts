@@ -66,7 +66,10 @@ import {
 } from "./case-reply.js";
 import { resendApprovedReply } from "./case-resend.js";
 import { issueCaseRefund } from "./case-refund.js";
-import { updateCaseShippingAddress } from "./case-shipping-address.js";
+import {
+  parseShippingAddressFields,
+  updateCaseShippingAddress,
+} from "./case-shipping-address.js";
 import { describeShopifyError } from "./shopify-error-detail.js";
 import { dashboardRefundNote } from "./refund-note.js";
 import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
@@ -1053,8 +1056,9 @@ export const handleDashboardEditCaseDetails = async (
 // and wrote in before fulfillment. Unlike the details endpoint (case
 // metadata), this WRITES TO THE STORE — the case's resolved order gets its
 // shipping address replaced via Shopify's `orderUpdate`, under operator
-// authorization. The form's non-empty fields are merged over the order's
-// current address (empty = keep), so fixing the ZIP can't wipe the street.
+// authorization. Fields are three-state: absent = keep the current value,
+// blank = clear it, text = replace it (the pencil posts the whole prefilled
+// form, so blanking a field clears it and untouched fields carry over).
 // The orchestration + merge live in the unit-tested
 // `updateCaseShippingAddress` core; this handler wires it to the live
 // services and records a `case.shipping_address_updated` audit row.
@@ -1070,28 +1074,10 @@ export const handleDashboardEditShippingAddress = async (
   const { id } = req.params as { id: string };
   const body = parseJsonBody(req);
 
-  const field = (name: string): string | undefined => {
-    const raw = body[name];
-    if (typeof raw !== "string") return undefined;
-    const trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  };
-  const fields = {
-    ...(field("name") !== undefined ? { name: field("name")! } : {}),
-    ...(field("address1") !== undefined
-      ? { address1: field("address1")! }
-      : {}),
-    ...(field("address2") !== undefined
-      ? { address2: field("address2")! }
-      : {}),
-    ...(field("city") !== undefined ? { city: field("city")! } : {}),
-    ...(field("province") !== undefined
-      ? { province: field("province")! }
-      : {}),
-    ...(field("country") !== undefined ? { country: field("country")! } : {}),
-    ...(field("zip") !== undefined ? { zip: field("zip")! } : {}),
-    ...(field("phone") !== undefined ? { phone: field("phone")! } : {}),
-  };
+  // Three-state per field: absent = keep, blank = clear, text = set. The
+  // Ship-to pencil posts the whole prefilled form, so blanking a field is how
+  // the operator clears it.
+  const fields = parseShippingAddressFields(body);
 
   const tenantId = TenantId(auth.tenantId);
   const caseId = CaseId(id);

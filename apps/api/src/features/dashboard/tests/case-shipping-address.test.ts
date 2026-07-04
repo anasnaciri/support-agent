@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  parseShippingAddressFields,
   updateCaseShippingAddress,
   type ShippingAddressView,
 } from "../case-shipping-address.js";
@@ -127,6 +128,46 @@ describe("updateCaseShippingAddress — operator fixes the order's Ship-to", () 
     expect(recordUpdated).not.toHaveBeenCalled();
   });
 
+  it("clears a field submitted as null while keeping the rest", async () => {
+    const update = vi.fn(
+      async (args: { orderId: string; address: ShippingAddressView }) =>
+        args.address,
+    );
+    const outcome = await updateCaseShippingAddress({
+      fields: { address2: null, zip: "11375" },
+      loadOrder: async () => ({
+        ...orderView,
+        address: { ...current, address2: "Apt 9" },
+      }),
+      update,
+      recordUpdated: async () => {},
+    });
+    expect(outcome).toEqual({
+      kind: "saved",
+      address: { ...current, address2: null, zip: "11375" },
+    });
+  });
+
+  it("treats an all-clears submission as an update, not a no-op", async () => {
+    const update = vi.fn(
+      async (args: { orderId: string; address: ShippingAddressView }) =>
+        args.address,
+    );
+    const outcome = await updateCaseShippingAddress({
+      fields: { phone: null },
+      loadOrder: async () => ({
+        ...orderView,
+        address: { ...current, phone: "+1 555 000 0000" },
+      }),
+      update,
+      recordUpdated: async () => {},
+    });
+    expect(outcome).toEqual({
+      kind: "saved",
+      address: { ...current, phone: null },
+    });
+  });
+
   it("never downgrades a stored address over an audit hiccup", async () => {
     const outcome = await updateCaseShippingAddress({
       fields: { address1: "456 New St" },
@@ -137,5 +178,28 @@ describe("updateCaseShippingAddress — operator fixes the order's Ship-to", () 
       },
     });
     expect(outcome.kind).toBe("saved");
+  });
+});
+
+describe("parseShippingAddressFields — wire values → edit fields", () => {
+  it("maps absent / non-string to keep, blank to clear, text to trimmed set", () => {
+    expect(
+      parseShippingAddressFields({
+        address1: "  456 New St ", // set (trimmed)
+        address2: "", // clear
+        city: "   ", // clear (whitespace-only)
+        zip: 11375, // non-string → keep
+        country: null, // non-string → keep
+        // province, name, phone absent → keep
+      }),
+    ).toEqual({
+      address1: "456 New St",
+      address2: null,
+      city: null,
+    });
+  });
+
+  it("returns an empty object for an empty body", () => {
+    expect(parseShippingAddressFields({})).toEqual({});
   });
 });

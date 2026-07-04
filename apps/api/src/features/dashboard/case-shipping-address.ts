@@ -15,11 +15,11 @@
 // services.
 //
 // Merge semantics: Shopify's `OrderInput.shippingAddress` replaces the WHOLE
-// address, but the pencil form submits only the non-empty fields ("empty =
-// no change", like the Customer/Order pencils). So we merge the submitted
-// fields over the order's current address before writing — an operator fixing
-// the ZIP doesn't wipe the street. Consequence: a field can't be CLEARED from
-// this form, only replaced.
+// address, but the pencil form is a per-field edit. So each field is
+// three-state: `undefined` = keep the order's current value, `null` = clear
+// it, a string = replace it. The merged full address is what gets written —
+// an operator fixing the ZIP doesn't wipe the street, and blanking the
+// prefilled "Apartment" field genuinely removes it from the address.
 
 /** The full address shape, as read from and written to the order. */
 export interface ShippingAddressView {
@@ -33,17 +33,50 @@ export interface ShippingAddressView {
   readonly phone: string | null;
 }
 
-/** The submitted correction — only the fields the operator typed. */
+/**
+ * The submitted correction. Absent = keep the current value; `null` = clear
+ * it; a string = replace it.
+ */
 export interface ShippingAddressEditFields {
-  readonly name?: string;
-  readonly address1?: string;
-  readonly address2?: string;
-  readonly city?: string;
-  readonly province?: string;
-  readonly country?: string;
-  readonly zip?: string;
-  readonly phone?: string;
+  readonly name?: string | null;
+  readonly address1?: string | null;
+  readonly address2?: string | null;
+  readonly city?: string | null;
+  readonly province?: string | null;
+  readonly country?: string | null;
+  readonly zip?: string | null;
+  readonly phone?: string | null;
 }
+
+const FIELD_NAMES = [
+  "name",
+  "address1",
+  "address2",
+  "city",
+  "province",
+  "country",
+  "zip",
+  "phone",
+] as const;
+
+/**
+ * Map a JSON body to edit fields: an absent or non-string value = keep (the
+ * form always posts strings), a blank string = clear, text = set (trimmed).
+ * The full-form pencil posts EVERY field as a string, so blanking a prefilled
+ * input is how the operator clears it.
+ */
+export const parseShippingAddressFields = (
+  body: Record<string, unknown>,
+): ShippingAddressEditFields => {
+  const out: Record<string, string | null> = {};
+  for (const name of FIELD_NAMES) {
+    const raw = body[name];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    out[name] = trimmed.length > 0 ? trimmed : null;
+  }
+  return out;
+};
 
 export type UpdateShippingAddressOutcome =
   | { readonly kind: "saved"; readonly address: ShippingAddressView }
@@ -94,15 +127,16 @@ export const updateCaseShippingAddress = async (
   if (!order) return { kind: "order_not_found" };
 
   const base = order.address ?? EMPTY_ADDRESS;
+  // Three-state per field: undefined keeps, null clears, a string replaces.
   const merged: ShippingAddressView = {
-    name: f.name ?? base.name,
-    address1: f.address1 ?? base.address1,
-    address2: f.address2 ?? base.address2,
-    city: f.city ?? base.city,
-    province: f.province ?? base.province,
-    country: f.country ?? base.country,
-    zip: f.zip ?? base.zip,
-    phone: f.phone ?? base.phone,
+    name: f.name === undefined ? base.name : f.name,
+    address1: f.address1 === undefined ? base.address1 : f.address1,
+    address2: f.address2 === undefined ? base.address2 : f.address2,
+    city: f.city === undefined ? base.city : f.city,
+    province: f.province === undefined ? base.province : f.province,
+    country: f.country === undefined ? base.country : f.country,
+    zip: f.zip === undefined ? base.zip : f.zip,
+    phone: f.phone === undefined ? base.phone : f.phone,
   };
 
   let stored: ShippingAddressView;
