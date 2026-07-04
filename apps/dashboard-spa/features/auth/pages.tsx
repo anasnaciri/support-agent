@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/session-api";
 import { getWorkspaces } from "@/lib/api-client";
 import { onboardingDisposition } from "@/lib/onboarding-gate";
+import { sanitizeReturnTo } from "@/lib/return-to";
 import { qk } from "@/lib/query-keys";
 import { useAppNavigate } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
@@ -29,22 +30,51 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 export function SignInPage() {
+  // Session-expired pollers land here as /sign-in?returnTo=… (U1); carry the
+  // page the user was on through the handshake instead of dropping it.
+  const returnTo = sanitizeReturnTo(
+    new URLSearchParams(window.location.search).get("returnTo"),
+    "/",
+  );
   return (
     <Centered>
       <h1 className="text-2xl font-semibold tracking-tight">Guidezilla</h1>
       <p className="text-sm text-muted-foreground">
         Sign in to your support workspace.
       </p>
-      <Button className="w-full" onClick={() => login("/")}>
+      <Button className="w-full" onClick={() => login(returnTo)}>
         Sign in
       </Button>
       <button
         type="button"
-        onClick={() => login("/", "sign-up")}
+        onClick={() => login(returnTo, "sign-up")}
         className="text-sm text-primary hover:underline"
       >
         Create an account
       </button>
+    </Centered>
+  );
+}
+
+// /sign-up is a pure bounce into the WorkOS-hosted sign-up (screen_hint) —
+// there is no self-hosted form: consent is enforced server-side at onboarding
+// (POST /dashboard/auth/onboard rejects without legalAccepted). The route
+// exists so links, bookmarks, and the auth-redirect policy have a stable
+// logged-out front door; a `returnTo` query rides through the handshake.
+export function SignUpPage() {
+  useEffect(() => {
+    login(
+      sanitizeReturnTo(
+        new URLSearchParams(window.location.search).get("returnTo"),
+        "/",
+      ),
+      "sign-up",
+    );
+  }, []);
+  return (
+    <Centered>
+      <h1 className="text-2xl font-semibold tracking-tight">Guidezilla</h1>
+      <p className="text-sm text-muted-foreground">Redirecting to sign-up…</p>
     </Centered>
   );
 }

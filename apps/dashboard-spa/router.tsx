@@ -35,11 +35,13 @@ import { SuppliersPage } from "@/features/settings/SuppliersPage";
 import { SupplierEscalationPage } from "@/features/settings/SupplierEscalationPage";
 import { LegalPage } from "@/features/settings/LegalPage";
 import { Placeholder } from "@/features/placeholder";
+import { NewWorkspacePage } from "@/features/workspaces/NewWorkspacePage";
 import {
   GoodbyePage,
   NoAccessPage,
   OnboardingPage,
   SignInPage,
+  SignUpPage,
 } from "@/features/auth/pages";
 
 // Code-based route tree (we deliberately skip the generated route tree + type
@@ -117,6 +119,7 @@ const settingsSupplierEscalationRoute = authedChild(
   SupplierEscalationPage,
 );
 const settingsLegalRoute = authedChild("/settings/legal", LegalPage);
+const newWorkspaceRoute = authedChild("/workspaces/new", NewWorkspacePage);
 const supplierCasesRoute = authedChild("/supplier/cases", SupplierCasesPage);
 const supplierCaseDetailRoute = authedChild(
   "/supplier/cases/$escalationId",
@@ -131,6 +134,7 @@ const publicRoute = (path: string, component: () => React.JSX.Element) =>
   createRoute({ getParentRoute: () => rootRoute, path, component });
 
 const signInRoute = publicRoute("/sign-in", SignInPage);
+const signUpRoute = publicRoute("/sign-up", SignUpPage);
 const goodbyeRoute = publicRoute("/goodbye", GoodbyePage);
 const noAccessRoute = publicRoute("/no-access", NoAccessPage);
 const onboardingRoute = publicRoute("/onboarding", OnboardingPage);
@@ -163,11 +167,13 @@ const routeTree = rootRoute.addChildren([
     settingsSuppliersRoute,
     settingsSupplierEscalationRoute,
     settingsLegalRoute,
+    newWorkspaceRoute,
     supplierCasesRoute,
     supplierCaseDetailRoute,
     settingsSplatRoute,
   ]),
   signInRoute,
+  signUpRoute,
   goodbyeRoute,
   noAccessRoute,
   onboardingRoute,
