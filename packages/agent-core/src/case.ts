@@ -48,7 +48,9 @@ export const CASE_STATUSES: ReadonlyArray<CaseStatus> = [
    *     the loop) or move to retention-owned `archived`, but never flips to
    *     `failed`.
    *   - `archived`: may reopen from a customer reply; otherwise it stays parked
-   *     until the retention sweep deletes it.
+   *     until the retention sweep deletes it. Entry is restricted too: only a
+   *     `resolved` case may be archived — retention is strictly
+   *     post-resolution, whether the sweep or a person triggers it.
  *   - `failed`: reopen or hand to a human only.
  */
 const RESTRICTED_TRANSITIONS: Partial<
@@ -80,6 +82,9 @@ export const isStatusTransitionAllowed = (
   to: CaseStatus,
 ): boolean => {
   if (from === to) return true;
+  // `archived` is entry-restricted, not just exit-restricted: live statuses
+  // move freely otherwise, but none of them may skip straight to archived.
+  if (to === "archived" && from !== "resolved") return false;
   const allowed = RESTRICTED_TRANSITIONS[from];
   return allowed ? allowed.includes(to) : true;
 };
@@ -92,12 +97,16 @@ export const isStatusTransitionAllowed = (
  * `waiting_for_approval` needs a pending approval; `human_takeover` has its own
  * "Take over" action) are deliberately NOT offered — a person doesn't drive
  * those directly. Picking one of these is still re-checked against
- * `isStatusTransitionAllowed`, so the manual control never bypasses §10.
+ * `isStatusTransitionAllowed`, so the manual control never bypasses §10 —
+ * `archived` in particular is only ever offered on a `resolved` case
+ * ("Archive now" skips the 30-day retention wait; deletion still happens
+ * 12 months after `archivedAt`).
  */
 export const MERCHANT_SETTABLE_STATUSES: ReadonlyArray<CaseStatus> = [
   "in_progress",
   "waiting_for_customer",
   "resolved",
+  "archived",
   "failed",
 ];
 

@@ -373,6 +373,11 @@ const STATUS_MENU_LABEL: Partial<
     label: "Mark waiting on customer",
     title: "Park this case waiting on the customer",
   },
+  archived: {
+    label: "Archive now",
+    title:
+      "Archive this case without waiting 30 days; it is deleted 12 months after archiving",
+  },
   failed: { label: "Mark as failed", title: "Close this case as failed" },
 };
 

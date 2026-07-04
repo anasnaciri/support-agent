@@ -939,6 +939,74 @@ describe("CaseLifecycleWriter", () => {
     });
   });
 
+  it("archives a resolved case on demand but never a live one", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const resolved = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          status: "resolved",
+        });
+        const live = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+          status: "in_progress",
+        });
+
+        const archived = yield* lifecycle.setMerchantStatus({
+          caseId: resolved.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
+          toStatus: "archived",
+          reason: "archive now",
+        });
+        const refused = yield* lifecycle.setMerchantStatus({
+          caseId: live.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          decidedBy: UserId("manager-1"),
+          toStatus: "archived",
+          reason: "too early",
+        });
+
+        return {
+          archived,
+          refused,
+          fetched: yield* cases.getById(resolved.id, TenantId("tenant-a")),
+          liveFetched: yield* cases.getById(live.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(resolved.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.archived).toEqual({
+      kind: "updated",
+      fromStatus: "resolved",
+      toStatus: "archived",
+      canceledApprovals: 0,
+    });
+    expect(out.fetched.status).toBe("archived");
+    expect(out.fetched.archivedAt).not.toBeNull();
+    expect(out.refused).toEqual({
+      kind: "transition_not_allowed",
+      fromStatus: "in_progress",
+      toStatus: "archived",
+    });
+    expect(out.liveFetched.status).toBe("in_progress");
+    expect(out.entries[0]).toMatchObject({
+      action: "case.status_changed",
+      details: { fromStatus: "resolved", toStatus: "archived" },
+    });
+  });
+
   it("rejects invalid and illegal merchant status changes before writing", async () => {
     const out = await run(
       Effect.gen(function* () {

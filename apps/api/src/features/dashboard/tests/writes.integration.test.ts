@@ -303,6 +303,43 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(await caseStatus(caseSetStatus)).toBe("in_progress");
   });
 
+  it("archive-now archives a resolved case but refuses a live one", async () => {
+    if (!raw) return;
+    // caseSetStatus is in_progress — archiving a live case is forbidden.
+    const early = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "archived",
+    });
+    expect(early.status).toBe(409);
+    expect(((await early.json()) as { kind: string }).kind).toBe(
+      "transition_not_allowed",
+    );
+
+    await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "resolved",
+    });
+    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "archived",
+      reason: "archive now",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("updated");
+    const row = await raw.db
+      .select({ status: cases.status, archivedAt: cases.archivedAt })
+      .from(cases)
+      .where(eq(cases.id, caseSetStatus))
+      .limit(1)
+      .then((r) => r[0]);
+    expect(row?.status).toBe("archived");
+    expect(row?.archivedAt).not.toBeNull();
+
+    // Restore for the later tests that expect an in_progress case.
+    const reopen = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+      status: "in_progress",
+    });
+    expect(reopen.status).toBe(200);
+    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+  });
+
   it("edit-details stamps a hand-corrected customer email + name into context", async () => {
     if (!raw) return;
     const res = await post(`/dashboard/cases/${caseDetails}/details`, {

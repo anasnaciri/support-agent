@@ -82,6 +82,23 @@ describe("isStatusTransitionAllowed", () => {
       expect(isStatusTransitionAllowed(from, "human_takeover")).toBe(true);
     }
   });
+
+  it("only resolved cases may enter archived (retention is post-resolution)", () => {
+    expect(isStatusTransitionAllowed("resolved", "archived")).toBe(true);
+    for (const from of [
+      "new",
+      "triaging",
+      "in_progress",
+      "waiting_for_customer",
+      "waiting_for_supplier",
+      "waiting_for_approval",
+      "approved_action_running",
+      "human_takeover",
+      "failed",
+    ] as const) {
+      expect(isStatusTransitionAllowed(from, "archived")).toBe(false);
+    }
+  });
 });
 
 // The merchant-facing "change status manually" feature: a curated subset of
@@ -90,7 +107,7 @@ describe("isStatusTransitionAllowed", () => {
 describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
   it("only offers human-meaningful lifecycle states (never agent-internal ones)", () => {
     expect([...MERCHANT_SETTABLE_STATUSES].sort()).toEqual(
-      ["failed", "in_progress", "resolved", "waiting_for_customer"].sort(),
+      ["archived", "failed", "in_progress", "resolved", "waiting_for_customer"].sort(),
     );
     for (const internal of [
       "new",
@@ -99,7 +116,6 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
       "waiting_for_supplier",
       "waiting_for_approval",
       "human_takeover",
-      "archived",
     ] as const) {
       expect(isMerchantSettableStatus(internal)).toBe(false);
     }
@@ -117,14 +133,29 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
     );
   });
 
-  it("a resolved case can be reopened but never manually marked failed", () => {
+  it("a resolved case can be reopened or archived but never manually marked failed", () => {
     const targets = allowedManualStatusTargets("resolved");
     expect(targets).toContain("in_progress");
     expect(targets).toContain("waiting_for_customer");
+    // "Archive now" skips the 30-day retention wait.
+    expect(targets).toContain("archived");
     // §10: resolved never flips to failed.
     expect(targets).not.toContain("failed");
     // Never offers the current status as a target.
     expect(targets).not.toContain("resolved");
+  });
+
+  it("archive is only offered on resolved cases", () => {
+    for (const from of [
+      "new",
+      "in_progress",
+      "waiting_for_customer",
+      "human_takeover",
+      "failed",
+      "archived",
+    ] as const) {
+      expect(allowedManualStatusTargets(from)).not.toContain("archived");
+    }
   });
 
   it("a taken-over case can be handed back or closed-as-failed (not directly resolved)", () => {

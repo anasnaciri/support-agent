@@ -418,6 +418,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Case retention archives resolved cases after 30 days and deletes archived
       cases after 12 months; `archived` is runtime-owned and can reopen on a
       customer reply before deletion.
+- [x] "Archive now" is merchant-settable from the case-page status menu, but
+      ONLY on `resolved` cases: `archived` is entry-restricted in the §10
+      matrix (`to === "archived"` requires `from === "resolved"`), so neither
+      the menu nor any code path can archive a live case early.
 - [x] Member RBAC uses plain dashboard DB functions, not an Effect service tag,
       because agents do not consult human RBAC.
 - [x] Scenario-resolution agent was added beside legacy specialists behind a
