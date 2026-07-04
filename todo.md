@@ -25,6 +25,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       agent-settable `case.update_status` enum (`packages/tools/src/case/update-status.ts`)
       — those are runtime-owned parks, not agent-settable; agent-visible schema
       change, own slice.
+- [ ] Decide and execute a deliberate Case -> Ticket domain vocabulary
+      migration if the product term is changing: update `master-plan.md`, code
+      symbols, UI copy, routes/API compatibility, tool/audit names, DB schema
+      and migrations with tests/build green. Avoid a blind repo-wide
+      search-replace because persisted identifiers and compatibility surfaces
+      need explicit handling.
 - [ ] Finish case-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
