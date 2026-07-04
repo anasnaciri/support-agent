@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { approvals, cases, makeDbClient, tenants } from "@support-agent/db";
+import {
+  approvals,
+  cases,
+  caseSupplierEscalations,
+  createSupplier,
+  makeDbClient,
+  suppliers,
+  tenants,
+} from "@support-agent/db";
 import { startServer, type ServerHandle } from "../../../server.js";
 import {
   TEST_DASHBOARD_VERIFIER,
@@ -33,6 +41,10 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const caseSetStatus = randomUUID();
   const caseHt = randomUUID();
   const caseDetails = randomUUID();
+  const caseEscalate = randomUUID();
+  const caseEscalateApproval = randomUUID();
+  const caseEscalateFailed = randomUUID();
+  const caseEscalateOther = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
@@ -132,7 +144,17 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseSetStatus, tenantId, "waiting_for_approval"),
       mkCase(caseHt, tenantId, "human_takeover"),
       mkCase(caseDetails, tenantId, "human_takeover"),
+      mkCase(caseEscalate, tenantId, "human_takeover"),
+      mkCase(caseEscalateApproval, tenantId, "waiting_for_approval"),
+      mkCase(caseEscalateFailed, tenantId, "failed"),
+      mkCase(caseEscalateOther, otherTenantId, "in_progress"),
     ]);
+    // The escalate tests' workspace has a supplier; the OTHER tenant has none
+    // (its escalate attempt must surface no_supplier).
+    await createSupplier(raw.db, tenantId, {
+      name: "Warehouse",
+      email: `wh-${tenantId.slice(0, 8)}@example.com`,
+    });
     await raw.db.insert(approvals).values([
       mkApproval(pApprove, caseApprove, tenantId),
       mkApproval(pReject, caseReject, tenantId),
@@ -150,6 +172,12 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     if (!raw) return;
     if (handle) await handle.close();
     for (const id of [tenantId, otherTenantId]) {
+      await raw.db
+        .delete(caseSupplierEscalations)
+        .where(sql`${caseSupplierEscalations.tenantId} = ${id}`);
+      await raw.db
+        .delete(suppliers)
+        .where(sql`${suppliers.tenantId} = ${id}`);
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
       await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
@@ -458,6 +486,119 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("resolved");
     expect(await caseStatus(caseHt)).toBe("resolved");
+  });
+
+  it("escalate-supplier parks a taken-over case + writes the escalation row", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseEscalate}/escalate-supplier`, {
+      problem: "Order #1001 lost in transit — please reship",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
+    // Bridged human_takeover → in_progress → waiting_for_supplier (§10).
+    expect(await caseStatus(caseEscalate)).toBe("waiting_for_supplier");
+    const rows = await raw.db
+      .select()
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.caseId, caseEscalate));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      status: "open",
+      problem: "Order #1001 lost in transit — please reship",
+    });
+    // The escalation row is the notify outbox — the supplier email cron picks
+    // up `notified_at IS NULL` rows, same as an agent escalation.
+    expect(rows[0]?.notifiedAt).toBeNull();
+  });
+
+  it("escalate-supplier is a no-op while an escalation is already open", async () => {
+    if (!raw) return;
+    const res = await post(`/dashboard/cases/${caseEscalate}/escalate-supplier`, {
+      problem: "duplicate",
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "already_escalated",
+    );
+    const rows = await raw.db
+      .select()
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.caseId, caseEscalate));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("escalate-supplier keeps waiting_for_approval as the primary status", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseEscalateApproval}/escalate-supplier`,
+      { problem: "Confirm replacement stock for order #1002" },
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
+    // Approval wins the single primary status under concurrent waits; the open
+    // escalation row carries the supplier wait on its own.
+    expect(await caseStatus(caseEscalateApproval)).toBe("waiting_for_approval");
+    const rows = await raw.db
+      .select()
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.caseId, caseEscalateApproval));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("escalate-supplier refuses an illegal transition without writing", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseEscalateFailed}/escalate-supplier`,
+      { problem: "should not land" },
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "transition_not_allowed",
+    );
+    expect(await caseStatus(caseEscalateFailed)).toBe("failed");
+    const rows = await raw.db
+      .select()
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.caseId, caseEscalateFailed));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("escalate-supplier 400s on a missing problem statement", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseEscalate}/escalate-supplier`,
+      { problem: "   " },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("escalate-supplier reports no_supplier when the workspace has none", async () => {
+    if (!raw) return;
+    const otherHeaders = dashboardAuthHeaders(
+      otherOrgId,
+      { "content-type": "application/json" },
+      workosUser,
+    );
+    const res = await post(
+      `/dashboard/cases/${caseEscalateOther}/escalate-supplier`,
+      { problem: "no supplier configured here" },
+      otherHeaders,
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { kind: string }).kind).toBe("no_supplier");
+    expect(await caseStatus(caseEscalateOther)).toBe("in_progress");
+  });
+
+  it("escalate-supplier 404s for a case in another tenant (no mutation)", async () => {
+    if (!raw) return;
+    const res = await post(
+      `/dashboard/cases/${caseEscalateOther}/escalate-supplier`,
+      { problem: "cross-tenant" },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { kind: string }).kind).toBe(
+      "case_not_found",
+    );
   });
 
   it("set-status 404s for a case in another tenant (no mutation)", async () => {

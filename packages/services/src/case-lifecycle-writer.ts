@@ -119,6 +119,30 @@ export interface ParkForWaitInput {
   readonly callId: string;
 }
 
+export type ParkForSupplierManualOutcome =
+  | { readonly kind: "parked"; readonly toStatus: CaseStatus }
+  | {
+      readonly kind: "transition_not_allowed";
+      readonly fromStatus: CaseStatus;
+    };
+
+/**
+ * A manager escalating a case to the supplier BY HAND from the case page. The
+ * caller (db layer) writes the `case_supplier_escalations` row first; this
+ * parks the case and records the audit row. Bridges `human_takeover →
+ * in_progress → waiting_for_supplier` (like resolve's bridge) so §10 is never
+ * bypassed, and leaves a `waiting_for_approval` case where it is — approval
+ * wins the single primary status under concurrent waits; the open escalation
+ * row carries the supplier wait on its own.
+ */
+export interface ParkForSupplierManualInput {
+  readonly caseId: CaseId;
+  readonly tenantId: TenantId;
+  readonly actor: AuditActor;
+  readonly reason: string;
+  readonly escalationId: string;
+}
+
 export interface ReopenForCustomerReplyInput {
   readonly caseId: CaseId;
   readonly tenantId: TenantId;
@@ -287,6 +311,10 @@ export class CaseLifecycleWriter extends Context.Tag("CaseLifecycleWriter")<
     readonly parkWaitingForSupplier: (
       input: ParkForWaitInput,
     ) => Effect.Effect<Case, CaseLifecycleWriterError>;
+
+    readonly parkWaitingForSupplierManually: (
+      input: ParkForSupplierManualInput,
+    ) => Effect.Effect<ParkForSupplierManualOutcome, CaseLifecycleWriterError>;
 
     readonly reopenForCustomerReply: (
       input: ReopenForCustomerReplyInput,
@@ -710,6 +738,74 @@ export const CaseLifecycleWriterLive = Layer.effect(
               details: { tool: input.tool, callId: input.callId },
             });
             return updated;
+          }),
+        ),
+
+      parkWaitingForSupplierManually: (input) =>
+        tx.run(
+          Effect.gen(function* () {
+            let current = yield* cases.getById(input.caseId, input.tenantId);
+
+            // Approval stays the primary wait under concurrent waits — the
+            // escalation row (written by the caller) carries the supplier
+            // wait, so only the audit row lands here.
+            if (current.status === "waiting_for_approval") {
+              yield* audit.record({
+                tenantId: current.tenantId,
+                caseId: current.id,
+                actor: input.actor,
+                action: "case.waiting_for_supplier",
+                details: {
+                  reason: input.reason,
+                  escalationId: input.escalationId,
+                  manual: true,
+                },
+              });
+              return { kind: "parked" as const, toStatus: current.status };
+            }
+
+            if (current.status === "human_takeover") {
+              // Same bridge as resolve: the direct human_takeover →
+              // waiting_for_supplier jump is illegal under §10.
+              current = yield* cases.transitionStatus(
+                current.id,
+                "in_progress",
+                {
+                  tenantId: current.tenantId,
+                  reason: input.reason,
+                },
+              );
+            }
+
+            if (
+              !isStatusTransitionAllowed(current.status, "waiting_for_supplier")
+            ) {
+              return {
+                kind: "transition_not_allowed" as const,
+                fromStatus: current.status,
+              };
+            }
+
+            const updated = yield* cases.transitionStatus(
+              current.id,
+              "waiting_for_supplier",
+              {
+                tenantId: current.tenantId,
+                reason: input.reason,
+              },
+            );
+            yield* audit.record({
+              tenantId: updated.tenantId,
+              caseId: updated.id,
+              actor: input.actor,
+              action: "case.waiting_for_supplier",
+              details: {
+                reason: input.reason,
+                escalationId: input.escalationId,
+                manual: true,
+              },
+            });
+            return { kind: "parked" as const, toStatus: updated.status };
           }),
         ),
 

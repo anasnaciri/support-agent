@@ -371,6 +371,167 @@ describe("CaseLifecycleWriter", () => {
     });
   });
 
+  it("manually parks a live case for a supplier with a user-actor audit row", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("missing-package-agent"),
+          status: "in_progress",
+        });
+
+        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          reason: "escalated to supplier from dashboard",
+          escalationId: "esc-1",
+        });
+
+        return {
+          outcome,
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(created.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.outcome).toEqual({
+      kind: "parked",
+      toStatus: "waiting_for_supplier",
+    });
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+    expect(out.entries[0]).toMatchObject({
+      actor: { type: "user", id: "manager-1" },
+      action: "case.waiting_for_supplier",
+      details: { escalationId: "esc-1" },
+    });
+  });
+
+  it("manual supplier park bridges from human takeover (never a direct jump)", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("missing-package-agent"),
+          status: "human_takeover",
+        });
+
+        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          reason: "escalated to supplier from dashboard",
+          escalationId: "esc-2",
+        });
+
+        return {
+          outcome,
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+        };
+      }),
+    );
+
+    expect(out.outcome).toEqual({
+      kind: "parked",
+      toStatus: "waiting_for_supplier",
+    });
+    expect(out.fetched.status).toBe("waiting_for_supplier");
+  });
+
+  it("manual supplier park keeps waiting_for_approval as the primary wait", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("refund-review-agent"),
+          status: "waiting_for_approval",
+        });
+
+        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          reason: "escalated to supplier from dashboard",
+          escalationId: "esc-3",
+        });
+
+        return {
+          outcome,
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(created.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    // Approval wins the single primary status under concurrent waits; the open
+    // escalation row carries the supplier wait on its own. Audit still records
+    // the escalation.
+    expect(out.outcome).toEqual({
+      kind: "parked",
+      toStatus: "waiting_for_approval",
+    });
+    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.entries[0]).toMatchObject({
+      action: "case.waiting_for_supplier",
+      details: { escalationId: "esc-3" },
+    });
+  });
+
+  it("manual supplier park refuses an illegal transition without writing", async () => {
+    const out = await run(
+      Effect.gen(function* () {
+        const cases = yield* CaseRepository;
+        const audit = yield* AuditLogService;
+        const lifecycle = yield* CaseLifecycleWriter;
+        const created = yield* cases.create({
+          tenantId: TenantId("tenant-a"),
+          channel: "email",
+          currentAgentId: AgentId("missing-package-agent"),
+          status: "failed",
+        });
+
+        const outcome = yield* lifecycle.parkWaitingForSupplierManually({
+          caseId: created.id,
+          tenantId: TenantId("tenant-a"),
+          actor: { type: "user", id: "manager-1" },
+          reason: "escalated to supplier from dashboard",
+          escalationId: "esc-4",
+        });
+
+        return {
+          outcome,
+          fetched: yield* cases.getById(created.id, TenantId("tenant-a")),
+          entries: yield* audit.forCase(created.id, {
+            tenantId: TenantId("tenant-a"),
+          }),
+        };
+      }),
+    );
+
+    expect(out.outcome).toEqual({
+      kind: "transition_not_allowed",
+      fromStatus: "failed",
+    });
+    expect(out.fetched.status).toBe("failed");
+    expect(out.entries).toHaveLength(0);
+  });
+
   it("reopens a resolved case for an inbound customer event", async () => {
     const out = await run(
       Effect.gen(function* () {

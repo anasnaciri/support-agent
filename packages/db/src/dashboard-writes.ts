@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { Effect, Layer } from "effect";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
-import { tenants } from "./schema.js";
+import { cases, tenants } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
 import {
   CaseId,
   TenantId,
   UserId,
+  isStatusTransitionAllowed,
+  type CaseStatus,
 } from "@support-agent/agent-core";
 import {
   CaseLifecycleWriter,
@@ -18,6 +20,11 @@ import {
   type TakeOverCaseOutcome,
 } from "@support-agent/services";
 import { ensureOwnerRole } from "./member-rbac-store.js";
+import {
+  getDefaultSupplier,
+  hasOpenEscalationForCase,
+  insertEscalation,
+} from "./supplier-store.js";
 import { ApprovalServiceLive } from "./approval-service-live.js";
 import { AuditLogServiceLive } from "./audit-log-live.js";
 import { CaseRepositoryLive } from "./case-repository-live.js";
@@ -229,6 +236,94 @@ export const resolveCaseManually = async (
         );
     }),
   );
+};
+
+export type EscalateCaseToSupplierOutcome =
+  | { readonly kind: "escalated"; readonly escalationId: string }
+  | { readonly kind: "already_escalated" }
+  | { readonly kind: "no_supplier" }
+  | { readonly kind: "transition_not_allowed"; readonly fromStatus: string }
+  | { readonly kind: "case_not_found" };
+
+export interface EscalateCaseToSupplierInput {
+  readonly caseId: string;
+  readonly tenantId: string;
+  readonly managerId: string;
+  /** What the supplier should do — merchant-typed; shown in the supplier portal + email. */
+  readonly problem: string;
+  /** Free-text reason saved into the transition + audit details. */
+  readonly reason?: string | undefined;
+}
+
+/**
+ * Escalate a case to the workspace's supplier BY HAND ("Escalate to supplier"
+ * in the case-page ⋮ menu). Mirrors the agent's `supplier.escalate` tool path:
+ * write the `case_supplier_escalations` row first (the row IS the notify
+ * outbox — the worker cron emails the supplier off `notified_at IS NULL`),
+ * then park the case through `parkWaitingForSupplierManually` (transition +
+ * audit in one tx; bridges from `human_takeover`; a `waiting_for_approval`
+ * case keeps approval as its primary status while the open row carries the
+ * supplier wait). Parkability is pre-checked so an illegal move (e.g. from a
+ * `failed` case) refuses BEFORE the escalation row lands; an already-open
+ * escalation is a no-op. Cross-tenant ids surface as `case_not_found`.
+ */
+export const escalateCaseToSupplier = async (
+  db: DrizzleDb,
+  input: EscalateCaseToSupplierInput,
+): Promise<EscalateCaseToSupplierOutcome> => {
+  const row = (
+    await db
+      .select({ status: cases.status })
+      .from(cases)
+      .where(
+        and(eq(cases.id, input.caseId), eq(cases.tenantId, input.tenantId)),
+      )
+      .limit(1)
+  )[0];
+  if (!row) return { kind: "case_not_found" };
+  const from = row.status as CaseStatus;
+  const parkable =
+    from === "human_takeover" ||
+    from === "waiting_for_approval" ||
+    isStatusTransitionAllowed(from, "waiting_for_supplier");
+  if (!parkable) return { kind: "transition_not_allowed", fromStatus: from };
+  if (await hasOpenEscalationForCase(db, input.tenantId, input.caseId)) {
+    return { kind: "already_escalated" };
+  }
+  const supplier = await getDefaultSupplier(db, input.tenantId);
+  if (!supplier) return { kind: "no_supplier" };
+
+  const { id: escalationId } = await insertEscalation(db, {
+    tenantId: input.tenantId,
+    caseId: input.caseId,
+    supplierId: supplier.id,
+    problem: input.problem,
+    orderRef: null,
+    shipCity: null,
+    shipCountry: null,
+    trackingNumber: null,
+  });
+
+  const reason = input.reason ?? "case escalated to supplier from dashboard";
+  const outcome = await runCaseLifecycle(
+    db,
+    Effect.gen(function* () {
+      const lifecycle = yield* CaseLifecycleWriter;
+      return yield* lifecycle.parkWaitingForSupplierManually({
+        caseId: CaseId(input.caseId),
+        tenantId: TenantId(input.tenantId),
+        actor: { type: "user", id: input.managerId },
+        reason,
+        escalationId,
+      });
+    }),
+  );
+  if (outcome.kind === "transition_not_allowed") {
+    // Raced past the pre-check (the case moved meanwhile). The open escalation
+    // row stays valid — the supplier wait is row-derived.
+    return { kind: "transition_not_allowed", fromStatus: outcome.fromStatus };
+  }
+  return { kind: "escalated", escalationId };
 };
 
 export type EditCaseDetailsOutcome =

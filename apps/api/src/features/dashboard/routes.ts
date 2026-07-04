@@ -14,6 +14,7 @@ import {
   handleDashboardCaseEvents,
   handleDashboardCaseReply,
   handleDashboardEditCaseDetails,
+  handleDashboardEscalateSupplier,
   handleDashboardIssueRefund,
   handleDashboardRefundContext,
   handleDashboardRephrase,
@@ -282,6 +283,12 @@ export const registerDashboardRoutes = (
     "/dashboard/cases/:id/details",
     "Hand-correct a case's customer / order the agent couldn't extract (manager)",
     handleDashboardEditCaseDetails,
+    "cases.set_status",
+  );
+  dashboardPost(
+    "/dashboard/cases/:id/escalate-supplier",
+    "Escalate a case to the workspace's supplier by hand (manager)",
+    handleDashboardEscalateSupplier,
     "cases.set_status",
   );
   dashboardPost(

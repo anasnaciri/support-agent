@@ -45,6 +45,7 @@ import {
   connectionsList,
   DbClient,
   editCaseDetails,
+  escalateCaseToSupplier,
   getActiveReplyDeliveryForCase,
   getMemberAccess,
   parsePageNumber,
@@ -883,6 +884,50 @@ export const handleDashboardResolveCase = async (
     }),
   );
   return sendJson(res, outcome.kind === "case_not_found" ? 404 : 200, outcome);
+};
+
+// POST /dashboard/cases/:id/escalate-supplier — manager hands the case to the
+// workspace's supplier by hand ("Escalate to supplier" in the case-page menu).
+// Same machinery as the agent's supplier.escalate tool: the escalation row is
+// the notify outbox (worker cron emails the supplier), and the case parks in
+// waiting_for_supplier — bridging from human_takeover, or staying parked on
+// approval when that's the primary wait. The problem statement is required:
+// it's what the supplier sees in the portal + email.
+export const handleDashboardEscalateSupplier = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const body = parseJsonBody(req);
+  const problem =
+    typeof body["problem"] === "string" ? body["problem"].trim() : "";
+  if (problem.length === 0) {
+    return sendJson(res, 400, { error: "missing_problem" });
+  }
+  const reason =
+    typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
+  const outcome = await runWithDb(layer, (db) =>
+    escalateCaseToSupplier(db, {
+      caseId: id,
+      tenantId: auth.tenantId,
+      managerId: auth.userId!,
+      problem,
+      reason,
+    }),
+  );
+  const status =
+    outcome.kind === "case_not_found"
+      ? 404
+      : outcome.kind === "no_supplier" ||
+          outcome.kind === "transition_not_allowed"
+        ? 409
+        : 200; // escalated | already_escalated
+  return sendJson(res, status, outcome);
 };
 
 // POST /dashboard/cases/:id/details — a manager hand-corrects the customer
