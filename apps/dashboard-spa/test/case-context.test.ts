@@ -106,6 +106,42 @@ describe("buildContextRows", () => {
     expect(row).toMatchObject({ label: "Notes", multiline: true });
   });
 
+  it("renders the supplier update's note and proposed resolution as multiline rows", () => {
+    const rows = buildContextRows({
+      supplierUpdate: {
+        supplierId: "sup_1",
+        note: "Replacement ships Monday\nfrom the EU warehouse",
+        proposedResolution: "Send a replacement unit",
+      },
+    });
+    expect(byKey(rows, "supplierNote")).toMatchObject({
+      label: "Supplier note",
+      text: "Replacement ships Monday\nfrom the EU warehouse",
+      multiline: true,
+    });
+    expect(byKey(rows, "supplierProposedResolution")).toMatchObject({
+      label: "Supplier suggests",
+      text: "Send a replacement unit",
+      multiline: true,
+    });
+    // bespoke rows, never the raw-JSON fallback dump
+    expect(byKey(rows, "supplierUpdate")).toBeUndefined();
+  });
+
+  it("skips the supplier proposed-resolution row when the supplier left it empty", () => {
+    const rows = buildContextRows({
+      supplierUpdate: { supplierId: "sup_1", note: "Out of stock", proposedResolution: null },
+    });
+    expect(byKey(rows, "supplierNote")).toMatchObject({ text: "Out of stock" });
+    expect(byKey(rows, "supplierProposedResolution")).toBeUndefined();
+  });
+
+  it("renders no supplier rows for a malformed supplierUpdate blob", () => {
+    const rows = buildContextRows({ supplierUpdate: { note: "   " } });
+    expect(byKey(rows, "supplierNote")).toBeUndefined();
+    expect(byKey(rows, "supplierUpdate")).toBeUndefined();
+  });
+
   it("renders the runtime-verified order email as its own labeled mono row", () => {
     // Stamped by the runtime once the requester confirms the order's email on a
     // mismatch case — a trusted fact, shown distinctly from the (possibly
@@ -166,9 +202,14 @@ describe("buildContextCardRows", () => {
     photoSignals: { count: 2, withExif: 1, stripped: 1, anyStripped: true },
     riskFlags: ["refund_customer_mismatch"],
     notes: "Customer is patient but wants an answer this week.",
+    supplierUpdate: {
+      supplierId: "sup_1",
+      note: "Replacement ships Monday",
+      proposedResolution: "Send a replacement unit",
+    },
   };
 
-  it("keeps only the ask / evidence / risk / notes rows — no sidebar duplicates or machinery", () => {
+  it("keeps only the ask / evidence / risk / notes / supplier rows — no sidebar duplicates or machinery", () => {
     const rows = buildContextCardRows(richContext, null);
     expect(rows.map((r) => r.key)).toEqual([
       "returnReason",
@@ -177,6 +218,8 @@ describe("buildContextCardRows", () => {
       "photoSignals",
       "riskFlags",
       "notes",
+      "supplierNote",
+      "supplierProposedResolution",
     ]);
   });
 

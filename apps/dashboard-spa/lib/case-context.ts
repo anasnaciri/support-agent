@@ -103,10 +103,12 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "riskFlags",
   "liveTrackingStatus",
   "notes",
+  "supplierUpdate",
 ]);
 
 /** The keys the floating context card shows — the customer's ask, evidence
- *  signals, risk flags, and notes. Everything else in the context is either
+ *  signals, risk flags, notes, and the supplier's answer to an escalation.
+ *  Everything else in the context is either
  *  already rendered by the Customer/Order/Tracking panels and the case header
  *  (email, order, category, tracking) or internal runtime machinery
  *  (`identityVerified`, `scenarioKey`, lookup markers). */
@@ -117,6 +119,8 @@ const CARD_KEYS: ReadonlySet<string> = new Set([
   "photoSignals",
   "riskFlags",
   "notes",
+  "supplierNote",
+  "supplierProposedResolution",
 ]);
 
 /** Normalize an order ref for equality: trim, strip a leading #, lowercase. */
@@ -253,6 +257,30 @@ export const buildContextRows = (
   const notes = asString(context["notes"]);
   if (notes)
     rows.push({ key: "notes", label: "Notes", text: notes, multiline: true });
+
+  // Stamped by `recordSupplierUpdate` (packages/db supplier-store) when a
+  // supplier answers an escalation: { supplierId, note, proposedResolution }.
+  // Both fields are supplier-typed free text; the internal supplierId is
+  // deliberately not shown.
+  const supplierUpdate = recordOf(context["supplierUpdate"]);
+  const supplierNote = supplierUpdate ? asString(supplierUpdate["note"]) : null;
+  if (supplierNote)
+    rows.push({
+      key: "supplierNote",
+      label: "Supplier note",
+      text: supplierNote,
+      multiline: true,
+    });
+  const supplierProposedResolution = supplierUpdate
+    ? asString(supplierUpdate["proposedResolution"])
+    : null;
+  if (supplierProposedResolution)
+    rows.push({
+      key: "supplierProposedResolution",
+      label: "Supplier suggests",
+      text: supplierProposedResolution,
+      multiline: true,
+    });
 
   // Anything the agent or runtime stamped that has no bespoke row above —
   // humanize the key and stringify the value so it's never silently hidden,

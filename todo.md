@@ -338,6 +338,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Dashboard And SPA
 
+- [x] Context card shows the supplier's answer: `context.supplierUpdate`
+      (stamped by `recordSupplierUpdate`) renders as bespoke "Supplier note" /
+      "Supplier suggests" multiline rows in `lib/case-context.ts` instead of
+      being invisible (it was filtered out of `CARD_KEYS` and would have
+      JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
 - [ ] Fix legacy relay cases where corrected `customerEmail` updates display but
       connector replies still target original thread recipients.
