@@ -156,7 +156,7 @@ export const CustomerPanel = ({
   const stats = customerStats(customer);
 
   return (
-    <PanelShell>
+    <PanelShell headerAction={headerAction}>
       <Identity name={name} email={email} />
 
       <div className="mt-4 grid grid-cols-3 gap-2">
