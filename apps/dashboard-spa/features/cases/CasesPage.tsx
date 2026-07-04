@@ -72,7 +72,7 @@ export function CasesPage() {
             <div className="space-y-1.5 sm:w-64">
               <Label
                 htmlFor="status"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Status
               </Label>

@@ -209,7 +209,7 @@ export const OrderPanel = ({
                   <Package className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium">
+                  <div className="truncate text-[0.8125rem] font-medium">
                     {li.title}
                   </div>
                   {li.variantTitle ? (
@@ -227,7 +227,7 @@ export const OrderPanel = ({
         ) : null}
 
         <div className="flex items-center justify-between border-t border-border/70 pt-2.5">
-          <span className="text-[13px] font-medium text-muted-foreground">
+          <span className="text-[0.8125rem] font-medium text-muted-foreground">
             Total
           </span>
           <span className="font-mono text-sm font-medium">
@@ -248,7 +248,7 @@ export const OrderPanel = ({
                     : ""}
               </div>
               {fulfillment.trackingNumbers.length > 0 ? (
-                <div className="truncate font-mono text-[11px] text-muted-foreground">
+                <div className="truncate font-mono text-[0.6875rem] text-muted-foreground">
                   {fulfillment.trackingUrls[0] ? (
                     <a
                       href={fulfillment.trackingUrls[0]}

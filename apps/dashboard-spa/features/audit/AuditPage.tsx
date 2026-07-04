@@ -104,7 +104,7 @@ export function AuditPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="action"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Action
               </Label>
@@ -127,7 +127,7 @@ export function AuditPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="actor"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Actor
               </Label>

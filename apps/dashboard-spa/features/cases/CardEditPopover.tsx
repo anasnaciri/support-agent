@@ -113,7 +113,7 @@ export const CardEditPopover = ({
                 <div key={f.name} className="space-y-1">
                   <label
                     htmlFor={`edit-${caseId}-${f.name}`}
-                    className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                    className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground"
                   >
                     {f.label}
                   </label>

@@ -174,7 +174,7 @@ const RefundRecommendationBlock = ({
           <Badge
             key={flag}
             variant="outline"
-            className="font-mono text-[10px] uppercase tracking-wider"
+            className="font-mono text-[0.625rem] uppercase tracking-wider"
           >
             {flag}
           </Badge>
@@ -196,7 +196,7 @@ function CaseContext({
     <dl className="divide-y divide-border">
       {rows.map((row) => (
         <div key={row.key} className="py-2.5 first:pt-0 last:pb-0">
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <dt className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
             {row.label}
           </dt>
           <dd className="mt-0.5 min-w-0 text-sm text-foreground">
@@ -213,7 +213,7 @@ function CaseContext({
             ) : (
               <span
                 className={cn(
-                  row.mono && "break-all font-mono text-[13px]",
+                  row.mono && "break-all font-mono text-[0.8125rem]",
                   row.multiline && "whitespace-pre-wrap",
                 )}
               >

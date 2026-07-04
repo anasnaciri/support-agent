@@ -206,6 +206,17 @@
     @apply bg-background text-foreground;
     overscroll-behavior: none;
   }
+  /* Sub-2xl density: a 15px rem shrinks all rem-based type and spacing ~6%
+     on laptop-sized screens, so text doesn't read oversized for its
+     container. Breakpoints are unaffected (media-query rem resolves against
+     the browser default, not this), and 2xl+ keeps the regular 16px scale.
+     Pixel-sized micro text should use rem (e.g. text-[0.8125rem], not
+     text-[13px]) so it scales with this. */
+  @media (width < 96rem) {
+    html {
+      font-size: 15px;
+    }
+  }
   body {
     font-family:
       ui-sans-serif,

@@ -61,7 +61,7 @@ const Row = ({
   readonly children: React.ReactNode;
 }) => (
   <>
-    <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+    <dt className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
       {label}
     </dt>
     <dd className="text-sm">{children}</dd>

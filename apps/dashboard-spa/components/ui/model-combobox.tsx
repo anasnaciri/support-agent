@@ -218,7 +218,7 @@ export const ModelCombobox = ({
 
             {groups.map((g) => (
               <div key={g.family} className="py-1">
-                <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="px-3 pb-1 pt-2 text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground">
                   {g.family}
                 </div>
                 {g.options.map((o) => {

@@ -1141,7 +1141,7 @@ export function IntegrationDetailPage() {
               })}
             </ul>
             {missingCapability ? (
-              <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
+              <p className="pt-1 text-[0.6875rem] leading-snug text-muted-foreground">
                 Missing a capability? Click <strong>Reinstall</strong>{" "}
                 {provider === "shopify"
                   ? "above — Shopify shows the merchant an “update permissions” prompt without losing the existing connection."

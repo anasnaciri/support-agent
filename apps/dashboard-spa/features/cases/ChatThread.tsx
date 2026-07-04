@@ -32,7 +32,7 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
     >
       <div
         className={cn(
-          "flex max-w-[85%] min-w-0 items-center gap-2 px-1 text-[11px] text-muted-foreground",
+          "flex max-w-[85%] min-w-0 items-center gap-2 px-1 text-[0.6875rem] text-muted-foreground",
           outbound ? "flex-row-reverse" : "flex-row",
         )}
       >

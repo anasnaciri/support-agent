@@ -31,7 +31,7 @@ const Row = ({
   readonly children: React.ReactNode;
 }) => (
   <>
-    <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+    <dt className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
       {label}
     </dt>
     <dd className="text-sm">{children}</dd>
@@ -132,7 +132,7 @@ export const TrackingPanel = ({
 
         {shownCheckpoints.length > 0 ? (
           <div className="space-y-2 border-t border-dashed border-border pt-2">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            <div className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
               {checkpoints.length > 1 ? "Checkpoints" : "Latest update"}
             </div>
             <ol

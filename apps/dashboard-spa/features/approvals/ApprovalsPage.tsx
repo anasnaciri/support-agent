@@ -111,7 +111,7 @@ export function ApprovalsPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="status"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Status
               </Label>
@@ -132,7 +132,7 @@ export function ApprovalsPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="risk"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Risk
               </Label>
@@ -152,7 +152,7 @@ export function ApprovalsPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="tool"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Tool
               </Label>
@@ -169,7 +169,7 @@ export function ApprovalsPage() {
             <div className="space-y-1.5">
               <Label
                 htmlFor="agent"
-                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
               >
                 Agent
               </Label>

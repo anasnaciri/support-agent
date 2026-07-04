@@ -58,7 +58,7 @@ const Bubble = ({ message }: { readonly message: SupplierChatMessage }) => {
     >
       <div
         className={cn(
-          "flex max-w-[85%] min-w-0 items-center gap-2 px-1 text-[11px] text-muted-foreground",
+          "flex max-w-[85%] min-w-0 items-center gap-2 px-1 text-[0.6875rem] text-muted-foreground",
           outbound ? "flex-row-reverse" : "flex-row",
         )}
       >
@@ -82,7 +82,7 @@ const Bubble = ({ message }: { readonly message: SupplierChatMessage }) => {
       >
         <p className="whitespace-pre-wrap break-words">{message.body}</p>
         {message.resolution ? (
-          <p className="mt-2 border-t border-primary-foreground/25 pt-2 text-[13px] text-primary-foreground/85">
+          <p className="mt-2 border-t border-primary-foreground/25 pt-2 text-[0.8125rem] text-primary-foreground/85">
             Suggested resolution: {message.resolution}
           </p>
         ) : null}

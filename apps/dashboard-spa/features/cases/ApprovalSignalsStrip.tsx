@@ -39,7 +39,7 @@ export function ApprovalSignalsStrip({
 }) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-warning">
+      <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-warning">
         Awaiting your approval
       </span>
       {recommendation ? (

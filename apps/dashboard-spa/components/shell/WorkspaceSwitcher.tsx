@@ -80,7 +80,7 @@ export function WorkspaceSwitcher({ variant = "rail" }: Props) {
             <span className="flex items-center gap-1.5">
               <span className="block truncate font-medium">{w.name}</span>
               {w.kind === "supplier" ? (
-                <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
                   Supplier
                 </span>
               ) : null}

@@ -187,6 +187,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       details column (`lg:w-72 xl:w-80 2xl:w-96`), tighter card/panel padding,
       and the floating context card starts closed below 1536px viewport width
       (header toggle unchanged). `2xl+` keeps the previous layout.
+- [x] Sub-`2xl` viewports use a 15px root font size (app.css), scaling all
+      rem-based type/spacing ~6% down on laptops; `2xl+` keeps 16px. All
+      arbitrary `text-[Npx]` utilities were converted to rem equivalents so
+      micro text scales with it — new code must use rem (e.g.
+      `text-[0.8125rem]`), never `text-[13px]`.
 - [x] SPA port uses Vite, TanStack Router, TanStack Query, cookie BFF auth,
       workspace context, and route-level read/write pages.
 - [x] SPA case page supports mutations, approval decisions, refund modal,

@@ -62,15 +62,15 @@ const Stat = ({
   readonly hint: string | null;
 }) => (
   <div className="rounded-lg border border-border bg-muted/30 px-2.5 py-2">
-    <div className="truncate font-mono text-[15px] font-medium leading-tight">
+    <div className="truncate font-mono text-[0.9375rem] font-medium leading-tight">
       {value}
       {hint ? (
-        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+        <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">
           {hint}
         </span>
       ) : null}
     </div>
-    <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+    <div className="mt-1 text-[0.625rem] uppercase tracking-wider text-muted-foreground">
       {label}
     </div>
   </div>
@@ -85,7 +85,7 @@ const Detail = ({
   readonly children: React.ReactNode;
 }) => (
   <div className="flex items-baseline gap-2">
-    <dt className="w-24 shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground">
+    <dt className="w-24 shrink-0 text-[0.6875rem] uppercase tracking-wider text-muted-foreground">
       {label}
     </dt>
     <dd className="min-w-0 flex-1 break-words text-sm">{children}</dd>

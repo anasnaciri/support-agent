@@ -49,7 +49,7 @@ export function TablePagination({
         <div className="w-24 space-y-1.5">
           <Label
             htmlFor="page"
-            className="text-[11px] uppercase tracking-wider text-muted-foreground"
+            className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
           >
             Page
           </Label>
@@ -76,7 +76,7 @@ export function TablePagination({
         <div className="w-24 space-y-1.5">
           <Label
             htmlFor="limit"
-            className="text-[11px] uppercase tracking-wider text-muted-foreground"
+            className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground"
           >
             Rows
           </Label>

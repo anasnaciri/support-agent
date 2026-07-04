@@ -279,7 +279,7 @@ export function CasesSidebar() {
               aria-selected={selected}
               onClick={() => setMode(tab.mode)}
               className={cn(
-                "-mb-px whitespace-nowrap border-b-2 py-2.5 text-[13px] font-medium transition-colors",
+                "-mb-px whitespace-nowrap border-b-2 py-2.5 text-[0.8125rem] font-medium transition-colors",
                 selected
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",
@@ -357,7 +357,7 @@ export function CasesSidebar() {
                       )}
                     >
                       <div
-                        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary"
+                        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[0.6875rem] font-semibold text-primary"
                         aria-hidden
                       >
                         {initialsFrom(row.customerEmail ?? row.subject)}
@@ -366,7 +366,7 @@ export function CasesSidebar() {
                         <div className="flex items-baseline gap-2">
                           <span
                             className={cn(
-                              "min-w-0 flex-1 truncate text-[13px]",
+                              "min-w-0 flex-1 truncate text-[0.8125rem]",
                               appearance.subject,
                               !name &&
                                 !hasSubject(row.subject) &&
@@ -375,7 +375,7 @@ export function CasesSidebar() {
                           >
                             {title}
                           </span>
-                          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                          <span className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">
                             {row.updatedAt.slice(5, 10)}
                           </span>
                         </div>
@@ -397,17 +397,17 @@ export function CasesSidebar() {
                         <div className="mt-auto flex items-center gap-1.5 overflow-hidden pt-0.5">
                           <Badge
                             variant={caseStatusVariant(row.status)}
-                            className="shrink-0 px-1.5 py-0 text-[10px]"
+                            className="shrink-0 px-1.5 py-0 text-[0.625rem]"
                           >
                             {caseStatusLabel(row.status)}
                           </Badge>
                           {isPriorityCase(row.priority) ? (
-                            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary">
+                            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[0.5625rem] font-bold uppercase tracking-wide text-primary">
                               Priority
                             </span>
                           ) : null}
                           {orderRef ? (
-                            <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                            <span className="ml-auto shrink-0 font-mono text-[0.6875rem] text-muted-foreground">
                               {orderRef}
                             </span>
                           ) : null}

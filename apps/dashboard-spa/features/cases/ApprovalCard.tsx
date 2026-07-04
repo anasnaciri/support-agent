@@ -237,7 +237,7 @@ export function ApprovalCard({
                   <Badge
                     key={f}
                     variant="outline"
-                    className="font-mono text-[10px] uppercase tracking-wider"
+                    className="font-mono text-[0.625rem] uppercase tracking-wider"
                   >
                     {f}
                   </Badge>
