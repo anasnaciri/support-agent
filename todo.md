@@ -160,6 +160,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       resolved per active workspace kind.
 - [x] Supplier portal pages use a constrained projection and do not expose full
       customer thread data.
+- [x] Suppliers can fix the order's tracking number from the escalation page
+      (a reship went out under a new number): `POST
+      /dashboard/supplier/cases/:id/tracking` → unit-tested
+      `updateSupplierTracking` core → `ShopifyService.updateFulfillmentTracking`
+      (Shopify `fulfillmentTrackingInfoUpdate`, `notifyCustomer: false` — the
+      customer hears it from the agent, never a store email). Open escalations
+      only (404 walls, 409 once resolved). Fulfillment picked by matching the
+      escalation's tracking projection, else the order's single fulfillment;
+      several-without-match is refused (`ambiguous_fulfillment`), not guessed.
+      Bookkeeping tx: escalation tracking re-stamped + stale
+      `context.liveTrackingStatus` cache dropped + `supplier.tracking_updated`
+      audit row. Does NOT resolve the escalation — the supplier's posted
+      update stays the thing that re-engages the agent.
 - [x] Concurrent wait states: a case can hold a pending approval AND an open
       supplier escalation at once. `cases.status` stays the single
       `primaryWaitStatus` pointer (approval wins); both waits are row-derived
@@ -207,7 +220,27 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       when the current user has no accessible workspace.
 - [x] BFF auth supports login, callback, session refresh, logout, onboarding,
       CSRF guard, and credentialed CORS.
+- [x] BFF logout ends the WorkOS AuthKit session too: the route decodes the
+      access token's `sid` and returns the WorkOS end-session URL; the SPA
+      navigates there so sign-in after sign-out shows the account picker
+      instead of silently re-entering the previous account. Requires the SPA
+      origin's `/goodbye` to be allowlisted in WorkOS → Redirects → Logout.
 - [x] Public onboarding page redirects signed-in users with existing workspaces.
+- [x] SPA `/sign-up` route exists as a pure bounce into the WorkOS-hosted
+      sign-up (`screen_hint=sign-up`, `returnTo` honored) — no self-hosted
+      legal-checkbox form: consent is enforced server-side at onboarding.
+      `/sign-in` now carries `?returnTo` through the handshake instead of
+      dropping it. NOTE: `lib/auth-redirect.ts` (audit B2 resolver) and
+      `lib/legal-consent.ts` remain unwired in the SPA — the session gate
+      still auto-starts `login()` on 401; decide whether B2's
+      "logged-out → /sign-up" rule should replace that.
+- [x] SPA `/workspaces/new` ported (WorkspaceSwitcher's target was a dead
+      link): `createWorkspaceOutcome` routes `legal_acceptance_required` to
+      the legal page; success switches into the new workspace and lands on
+      `/?workspace_created=1`.
+- [x] SPA Legal "View notice" fixed: `lib/legal.ts` now derives the notice
+      URL from `VITE_API_BASE_URL` (was reading the Next-only
+      `DASHBOARD_API_BASE_URL`, so the button linked to itself).
 
 ### Auth, Workspaces, RBAC, And Admin
 
@@ -358,9 +391,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Suppliers
 
-- [ ] Manual escalate-to-supplier sends a null order projection (`orderRef`,
-      ship city/country, tracking) — the supplier only sees the merchant's
-      problem text. Consider auto-filling from the case's bound order.
+- [x] Manual escalate-to-supplier auto-fills the order projection (`orderRef`,
+      ship city/country, newest tracking number) server-side from the case's
+      canonically-bound order (`identifiedOrderId` GID only — never the
+      customer's quoted ref; wrong-order data must not reach a supplier).
+      Best-effort: an unreachable Shopify degrades to nulls, never blocks the
+      escalation. `escalation-projection.ts` + handler wiring in apps/api.
 - [ ] Add merchant-facing supplier list and pending invitation management if the
       invite-only settings surface is insufficient.
 - [ ] Add per-vendor supplier routing instead of one default supplier.
@@ -368,6 +404,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       notify-and-proceed is enforced after gated supplier actions.
 - [ ] Keep supplier access binding-based; never fall back to org membership for
       supplier portal authorization.
+- [ ] Supplier tracking edit needs the `write_fulfillments` Shopify scope —
+      add it to the Partner Dashboard "Required access scopes" (pilot custom
+      apps + SaaS app). Stores that haven't re-authorized surface the failure
+      as a sanitized 502 toast; consider a capability-grid row like
+      `read_inventory`'s.
 
 ### Dashboard And SPA
 
