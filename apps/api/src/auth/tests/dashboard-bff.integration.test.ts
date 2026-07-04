@@ -207,7 +207,7 @@ describeIfDb("apps/api — dashboard BFF (cookie session) integration", () => {
     expect(denied.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("logout clears the session cookie", async () => {
+  it("logout clears the session cookie (no sid in token → no WorkOS logout URL)", async () => {
     const res = await fetch(`${base}/dashboard/auth/logout`, {
       method: "POST",
       headers: { cookie: await sealedCookie(), origin: SPA_ORIGIN },
@@ -217,5 +217,67 @@ describeIfDb("apps/api — dashboard BFF (cookie session) integration", () => {
       .getSetCookie()
       .find((c) => c.startsWith("sa-dash-session="));
     expect(cleared).toMatch(/Max-Age=0/i);
+    const body = (await res.json()) as { logoutUrl?: string | null };
+    expect(body.logoutUrl ?? null).toBeNull();
+  });
+
+  it("logout ends the WorkOS session: returns the end-session URL from the token's sid", async () => {
+    // Access token shaped like a real WorkOS JWT (payload carries `sid`).
+    const b64 = (v: unknown): string =>
+      Buffer.from(JSON.stringify(v)).toString("base64url");
+    const jwtWithSid = `${b64({ alg: "RS256" })}.${b64({
+      sid: "session_01XYZ",
+      org_id: ORG,
+      sub: "user_a",
+    })}.sig`;
+    const cookie = `sa-dash-session=${await codec.seal({
+      accessToken: jwtWithSid,
+      refreshToken: "rt_1",
+      user: { id: "user_a", email: "a@example.com", firstName: "Ada", lastName: null },
+    })}`;
+
+    const res = await fetch(`${base}/dashboard/auth/logout`, {
+      method: "POST",
+      headers: {
+        cookie,
+        origin: SPA_ORIGIN,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ returnTo: "/goodbye?deleted=1" }),
+    });
+    expect(res.status).toBe(200);
+    const cleared = res.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("sa-dash-session="));
+    expect(cleared).toMatch(/Max-Age=0/i);
+
+    const body = (await res.json()) as { logoutUrl: string };
+    const url = new URL(body.logoutUrl);
+    expect(url.pathname).toBe("/user_management/sessions/logout");
+    expect(url.searchParams.get("session_id")).toBe("session_01XYZ");
+    // returnTo is sanitized to a same-origin SPA path and made absolute.
+    expect(url.searchParams.get("return_to")).toBe(
+      `${SPA_ORIGIN}/goodbye?deleted=1`,
+    );
+  });
+
+  it("logout ignores an unsafe returnTo (open-redirect guard on return_to)", async () => {
+    const b64 = (v: unknown): string =>
+      Buffer.from(JSON.stringify(v)).toString("base64url");
+    const jwtWithSid = `${b64({ alg: "RS256" })}.${b64({ sid: "session_01XYZ" })}.sig`;
+    const cookie = `sa-dash-session=${await codec.seal({
+      accessToken: jwtWithSid,
+      refreshToken: "rt_1",
+      user: { id: "user_a", email: "a@example.com", firstName: "Ada", lastName: null },
+    })}`;
+    const res = await fetch(`${base}/dashboard/auth/logout`, {
+      method: "POST",
+      headers: { cookie, origin: SPA_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ returnTo: "https://evil.com/phish" }),
+    });
+    const body = (await res.json()) as { logoutUrl: string };
+    expect(new URL(body.logoutUrl).searchParams.get("return_to")).toBe(
+      `${SPA_ORIGIN}/`,
+    );
   });
 });

@@ -287,6 +287,48 @@ export const buildAuthorizeUrl = (input: {
   return url.toString();
 };
 
+/**
+ * Extract the WorkOS session id (`sid` claim) from an access token WITHOUT
+ * verifying it. Safe here: the token comes out of our own sealed (JWE) cookie,
+ * and the sid is only used to build the WorkOS end-session redirect — a wrong
+ * sid just makes WorkOS skip the logout, never grants anything.
+ */
+export const decodeAccessTokenSessionId = (
+  accessToken: string,
+): string | null => {
+  const parts = accessToken.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload: unknown = JSON.parse(
+      Buffer.from(parts[1]!, "base64url").toString("utf8"),
+    );
+    const sid = (payload as Record<string, unknown> | null)?.["sid"];
+    return typeof sid === "string" && sid.length > 0 ? sid : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * WorkOS end-session URL. The BROWSER must navigate here (top-level) so the
+ * AuthKit session cookie on the WorkOS domain is cleared — clearing only our
+ * own cookie leaves that session alive, and the next /login silently signs the
+ * user back into the previous account. `returnTo` must be allowlisted in the
+ * WorkOS dashboard (Redirects → Logout redirect URIs) or WorkOS falls back to
+ * its default.
+ */
+export const buildWorkosLogoutUrl = (input: {
+  readonly sessionId: string;
+  readonly returnTo?: string;
+  readonly baseUrl?: string;
+}): string => {
+  const base = (input.baseUrl ?? WORKOS_BASE).replace(/\/+$/u, "");
+  const url = new URL(`${base}/user_management/sessions/logout`);
+  url.searchParams.set("session_id", input.sessionId);
+  if (input.returnTo) url.searchParams.set("return_to", input.returnTo);
+  return url.toString();
+};
+
 export type WorkosAuthOutcome =
   | {
       readonly ok: true;

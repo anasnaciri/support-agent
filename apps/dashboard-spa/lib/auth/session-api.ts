@@ -97,15 +97,32 @@ export const login = (
 /**
  * POST-only sign-out (S13), then land on the goodbye page. `returnTo` lets the
  * account-deletion flow show a deletion-specific message (`/goodbye?deleted=1`).
+ *
+ * The api clears our cookie and hands back the WorkOS end-session URL; we must
+ * NAVIGATE there so the AuthKit session cookie on the WorkOS domain dies too —
+ * otherwise the next sign-in silently picks up the previous account. WorkOS
+ * then redirects back to `returnTo`. If the api can't produce the URL (already
+ * signed out, opaque token), fall back to landing on `returnTo` directly.
  */
 export const logout = async (returnTo = "/goodbye"): Promise<void> => {
+  let dest = returnTo;
   try {
-    await fetch(`${apiOrigin()}/dashboard/auth/logout`, {
+    const res = await fetch(`${apiOrigin()}/dashboard/auth/logout`, {
       method: "POST",
       credentials: "include",
-      headers: { origin: window.location.origin },
+      headers: {
+        "content-type": "application/json",
+        origin: window.location.origin,
+      },
+      body: JSON.stringify({ returnTo }),
     });
+    const body = (await res.json().catch(() => ({}))) as {
+      logoutUrl?: string | null;
+    };
+    if (typeof body.logoutUrl === "string" && body.logoutUrl.length > 0) {
+      dest = body.logoutUrl;
+    }
   } finally {
-    window.location.assign(returnTo);
+    window.location.assign(dest);
   }
 };

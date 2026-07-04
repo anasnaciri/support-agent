@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createTenantForOrg } from "@support-agent/db";
 
 import type { RouteContext } from "../platform/context.js";
-import { parseJsonBody, sendJson } from "../platform/http.js";
+import { parseJsonBody, sendJson, strField } from "../platform/http.js";
 import { dashboardUserDecisionUuid } from "./dashboard-user-id.js";
 import {
   getDashboardSessionCodec,
@@ -17,6 +17,8 @@ import {
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE_NAME,
   buildAuthorizeUrl,
+  buildWorkosLogoutUrl,
+  decodeAccessTokenSessionId,
   exchangeAuthorizationCode,
   parseCookieHeader,
   refreshAccessToken,
@@ -418,9 +420,28 @@ export const registerDashboardAuthRoutes = (
     return sendJson(res, 200, { ...result, organizationId });
   });
 
-  // ---- Logout: clear the session cookie (POST-only, mirrors S13) ----
-  app.post("/dashboard/auth/logout", schema, async (_req, res) => {
+  // ---- Logout: clear our cookie AND end the WorkOS session (POST-only, S13).
+  // Clearing only our cookie leaves the AuthKit session on the WorkOS domain
+  // alive, so the next /login would silently re-authenticate the previous
+  // account. We can't clear a cookie on another domain server-side, so we hand
+  // the SPA the WorkOS end-session URL (keyed by the token's `sid`) and it
+  // navigates there; WorkOS then redirects back to `return_to`.
+  app.post("/dashboard/auth/logout", schema, async (req, res) => {
     res.header("set-cookie", serializeSessionClearCookie({ secure }));
-    return sendJson(res, 200, { ok: true });
+    const ready = bffReady(req);
+    const raw = cookie(req, SESSION_COOKIE_NAME);
+    const sealed = ready && raw ? await ready.codec.unseal(raw) : null;
+    const sid = sealed ? decodeAccessTokenSessionId(sealed.accessToken) : null;
+    if (!ready || !sid) return sendJson(res, 200, { ok: true, logoutUrl: null });
+    const returnTo = sanitizeReturnPath(
+      strField(parseJsonBody(req), "returnTo"),
+    );
+    return sendJson(res, 200, {
+      ok: true,
+      logoutUrl: buildWorkosLogoutUrl({
+        sessionId: sid,
+        returnTo: `${ready.spaOrigin}${returnTo}`,
+      }),
+    });
   });
 };

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   SESSION_COOKIE_NAME,
   buildAuthorizeUrl,
+  buildWorkosLogoutUrl,
+  decodeAccessTokenSessionId,
   exchangeAuthorizationCode,
   makeSessionCodec,
   parseCookieHeader,
@@ -211,6 +213,52 @@ describe("sanitizeReturnPath (open-redirect guard)", () => {
     expect(sanitizeReturnPath("")).toBe("/");
     expect(sanitizeReturnPath(null)).toBe("/");
     expect(sanitizeReturnPath("/a\tb")).toBe("/");
+  });
+});
+
+// A syntactically valid (unverified) JWT whose payload carries the given claims.
+const fakeJwt = (claims: Record<string, unknown>): string => {
+  const b64 = (v: unknown): string =>
+    Buffer.from(JSON.stringify(v)).toString("base64url");
+  return `${b64({ alg: "RS256", typ: "JWT" })}.${b64(claims)}.sig`;
+};
+
+describe("decodeAccessTokenSessionId (sid claim, no verification)", () => {
+  it("extracts sid from a JWT access token", () => {
+    const token = fakeJwt({ sid: "session_01ABC", org_id: "org_a" });
+    expect(decodeAccessTokenSessionId(token)).toBe("session_01ABC");
+  });
+
+  it("returns null when sid is absent, non-string, or the token is not a JWT", () => {
+    expect(decodeAccessTokenSessionId(fakeJwt({ org_id: "org_a" }))).toBeNull();
+    expect(decodeAccessTokenSessionId(fakeJwt({ sid: 42 }))).toBeNull();
+    expect(decodeAccessTokenSessionId("dash|org_a|user_a")).toBeNull();
+    expect(decodeAccessTokenSessionId("")).toBeNull();
+    expect(decodeAccessTokenSessionId("a.%%%not-base64%%%.c")).toBeNull();
+  });
+});
+
+describe("buildWorkosLogoutUrl", () => {
+  it("targets the WorkOS end-session endpoint with the session id", () => {
+    const url = new URL(
+      buildWorkosLogoutUrl({ sessionId: "session_01ABC" }),
+    );
+    expect(url.origin).toBe("https://api.workos.com");
+    expect(url.pathname).toBe("/user_management/sessions/logout");
+    expect(url.searchParams.get("session_id")).toBe("session_01ABC");
+    expect(url.searchParams.get("return_to")).toBeNull();
+  });
+
+  it("carries return_to when given", () => {
+    const url = new URL(
+      buildWorkosLogoutUrl({
+        sessionId: "session_01ABC",
+        returnTo: "http://localhost:3199/goodbye",
+      }),
+    );
+    expect(url.searchParams.get("return_to")).toBe(
+      "http://localhost:3199/goodbye",
+    );
   });
 });
 
