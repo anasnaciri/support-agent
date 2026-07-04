@@ -64,7 +64,7 @@ export function EscalateSupplierDialog({
             placeholder="e.g. Order #1001 seems lost in transit — please check with the carrier or reship."
             autoFocus
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-pretty text-xs text-muted-foreground">
             The supplier sees exactly this text — leave out the customer's
             personal details.
           </p>

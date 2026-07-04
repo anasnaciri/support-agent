@@ -127,7 +127,7 @@ const RefundUnavailable = ({
 }) => (
   <div className="space-y-4 p-6">
     <div className="text-base font-semibold">Refund unavailable</div>
-    <p className="text-sm text-muted-foreground">
+    <p className="text-pretty text-sm text-muted-foreground">
       {UNAVAILABLE_COPY[kind] ?? UNAVAILABLE_COPY["error"]}
     </p>
     <div className="flex justify-end">
@@ -257,7 +257,7 @@ const RefundForm = ({
     <div className="flex max-h-[85vh] flex-col">
       <div className="border-b border-border px-6 py-4">
         <h2 className="text-base font-semibold">Refund {context.orderName}</h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-pretty text-xs text-muted-foreground">
           Money is refunded to the customer&apos;s original payment method.
           Shopify emails them the confirmation. This can&apos;t be undone here.
         </p>
@@ -326,7 +326,7 @@ const RefundForm = ({
         {/* Summary */}
         <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
           <div className="text-sm font-semibold">Summary</div>
-          <dl className="space-y-1.5 text-sm">
+          <dl className="space-y-1.5 text-sm tabular-nums">
             <div className="flex justify-between">
               <dt className="text-muted-foreground">
                 Items subtotal ({totals.itemsCount})
@@ -341,14 +341,16 @@ const RefundForm = ({
             ) : null}
             {shippingRefundable > 0 ? (
               <div className="flex items-center justify-between">
-                <dt className="flex items-center gap-2 text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    className="size-4 rounded border-input"
-                    checked={refundShipping}
-                    onChange={(e) => setRefundShipping(e.target.checked)}
-                  />
-                  Refund shipping
+                <dt className="text-muted-foreground">
+                  <label className="-my-2 flex items-center gap-2 py-2">
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-input"
+                      checked={refundShipping}
+                      onChange={(e) => setRefundShipping(e.target.checked)}
+                    />
+                    Refund shipping
+                  </label>
                 </dt>
                 <dd>{fmt(refundShipping ? shippingRefundable : 0)}</dd>
               </div>
@@ -378,14 +380,15 @@ const RefundForm = ({
                   setAmountTouched(true);
                   setAmount(e.target.value);
                 }}
-                className="pl-12"
+                className={cn("pl-12 tabular-nums", amountTouched && "pr-9")}
               />
               {amountTouched ? (
                 <button
                   type="button"
                   title="Reset to the suggested amount"
+                  aria-label="Reset to the suggested amount"
                   onClick={() => setAmountTouched(false)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-0.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
                 >
                   <RotateCcw className="size-3.5" aria-hidden />
                 </button>
@@ -409,7 +412,7 @@ const RefundForm = ({
 
           <Button
             type="button"
-            className="w-full"
+            className="w-full tabular-nums"
             disabled={!validation.ok || issueM.isPending}
             onClick={() => issueM.mutate()}
           >
@@ -467,7 +470,7 @@ const LineGroup = ({
                 <img
                   src={li.imageUrl}
                   alt=""
-                  className="size-10 shrink-0 rounded border border-border object-cover"
+                  className="size-10 shrink-0 rounded object-cover outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
                 />
               ) : (
                 <div className="size-10 shrink-0 rounded border border-border bg-muted" />
@@ -485,7 +488,7 @@ const LineGroup = ({
                   </div>
                 ) : null}
               </div>
-              <div className="text-right text-sm">
+              <div className="text-right text-sm tabular-nums">
                 <div className="text-muted-foreground">
                   {money2(unit)} {currencyCode}
                 </div>
@@ -495,7 +498,7 @@ const LineGroup = ({
               </div>
             </div>
             <div className="flex items-center justify-between pl-[52px]">
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <label className="-my-2 flex items-center gap-2 py-2 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
                   className="size-4 rounded border-input disabled:opacity-50"
@@ -512,7 +515,7 @@ const LineGroup = ({
                   max={li.refundableQuantity}
                   value={qty}
                   onChange={(e) => onQuantity(li, Number(e.target.value))}
-                  className="h-8 w-16 text-right"
+                  className="h-8 w-16 text-right tabular-nums"
                   aria-label={`Refund quantity for ${li.title}`}
                 />
                 <span className="text-muted-foreground">

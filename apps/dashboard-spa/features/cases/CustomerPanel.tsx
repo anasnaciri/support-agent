@@ -127,7 +127,7 @@ export const CustomerPanel = ({
   if (!customer && !customerEmail && !verified) {
     return (
       <PanelShell headerAction={headerAction}>
-        <p className="text-sm italic text-muted-foreground">
+        <p className="text-pretty text-sm italic text-muted-foreground">
           No customer linked to this case yet.
         </p>
       </PanelShell>
@@ -143,7 +143,7 @@ export const CustomerPanel = ({
             <Detail label="Verified order email">{verified}</Detail>
           </dl>
         ) : null}
-        <p className="mt-3 text-sm italic text-muted-foreground">
+        <p className="mt-3 text-pretty text-sm italic text-muted-foreground">
           No matching Shopify customer (or store not connected).
         </p>
       </PanelShell>

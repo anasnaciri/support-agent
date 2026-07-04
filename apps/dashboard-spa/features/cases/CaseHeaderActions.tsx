@@ -54,6 +54,43 @@ interface Props {
   readonly refundSlot?: ReactNode;
 }
 
+/**
+ * Cross-fades a spinner over the action icon while a mutation is pending.
+ * Both icons stay in the DOM (spinner absolutely positioned on top) so enter
+ * and exit both animate without a motion library.
+ */
+const swapIn = "scale-100 opacity-100 blur-0";
+const swapOut = "scale-[0.25] opacity-0 blur-[4px]";
+const swapTransition =
+  "transition-[opacity,filter,scale] duration-300 ease-[cubic-bezier(0.2,0,0,1)]";
+
+const PendingSwapIcon = ({
+  pending,
+  children,
+}: {
+  readonly pending: boolean;
+  readonly children: ReactNode;
+}) => (
+  <span className="relative inline-flex" aria-hidden>
+    <span
+      className={cn(
+        "absolute inset-0 flex items-center justify-center",
+        swapTransition,
+        pending ? swapIn : swapOut,
+      )}
+    >
+      <Loader2 className="animate-spin" />
+    </span>
+    <span className={cn("inline-flex", swapTransition, pending ? swapOut : swapIn)}>
+      {children}
+    </span>
+  </span>
+);
+
+// Icon-only triggers are 36px square; the ::after pseudo-element pads the hit
+// area out to 40px without colliding with the 6px-gapped neighbors.
+const hitAreaExtension = "relative after:absolute after:-inset-0.5 after:content-['']";
+
 const IconActionButton = ({
   onClick,
   pending,
@@ -74,8 +111,9 @@ const IconActionButton = ({
     disabled={pending}
     aria-label={title}
     title={title}
+    className={hitAreaExtension}
   >
-    {pending ? <Loader2 className="animate-spin" aria-hidden /> : children}
+    <PendingSwapIcon pending={pending}>{children}</PendingSwapIcon>
   </Button>
 );
 
@@ -128,7 +166,10 @@ const HeaderMenu = ({
         aria-expanded={open}
         aria-label={label}
         title={label}
-        className="inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        className={cn(
+          "inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground shadow-sm transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-accent-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+          hitAreaExtension,
+        )}
       >
         {trigger}
       </button>
@@ -136,7 +177,7 @@ const HeaderMenu = ({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-1 min-w-[12rem] overflow-hidden rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
+          className="absolute right-0 z-50 mt-1 min-w-[12rem] origin-top-right animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 overflow-hidden rounded-md border bg-popover py-1 text-popover-foreground shadow-md duration-150"
         >
           {items.map((item) => (
             <button
@@ -271,12 +312,11 @@ export function CaseHeaderActions({
           onClick={() => resolveM.mutate()}
           disabled={resolveM.isPending}
           title="Resolve this case"
+          className="pl-3.5"
         >
-          {resolveM.isPending ? (
-            <Loader2 className="animate-spin" aria-hidden />
-          ) : (
+          <PendingSwapIcon pending={resolveM.isPending}>
             <Check aria-hidden />
-          )}
+          </PendingSwapIcon>
           Resolve
         </Button>
       ) : null}
