@@ -269,9 +269,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Ship-to pencil on the Order card → `POST
       /dashboard/cases/:id/shipping-address` →
       `ShopifyService.updateOrderShippingAddress` (Shopify `orderUpdate`, a
-      REAL store write under operator authority). Non-empty form fields merge
-      over the order's current address; records a
-      `case.shipping_address_updated` audit row; gated on `cases.set_status`.
+      REAL store write under operator authority). Fields are three-state
+      (absent = keep, blank = clear, text = set — the pencil posts the whole
+      prefilled form, so blanking a field removes it); records a
+      `case.shipping_address_updated` audit row; gated on the dedicated
+      `orders.edit` RBAC permission (implies `cases.view`, granted separately
+      from `cases.set_status`, like `refunds.issue` is for money).
 - [x] SPA CustomerPanel shows the edit-customer pencil in the
       matched-customer state again (it was dropped there, so the pencil
       vanished exactly when a Shopify customer resolved — the Next dashboard
@@ -383,12 +386,6 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
-- [ ] Shipping-address edit: a field can never be CLEARED (empty = keep, by
-      the pencil form's non-empty-only submission). Fine for the typo-fix use
-      case; revisit if "remove address line 2" becomes a real ask.
-- [ ] Shipping-address edit is gated on `cases.set_status`; consider a
-      dedicated `orders.edit` RBAC permission if store writes should be
-      grantable separately from case-state corrections.
 - [ ] `apps/dashboard` (Next) has no Ship-to pencil — the shipping-address
       edit landed SPA-only (the api endpoint is shared, so porting is just the
       popover + action).

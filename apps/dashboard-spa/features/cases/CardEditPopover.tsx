@@ -30,6 +30,13 @@ interface Props {
   readonly label: string;
   /** Which edge the popover panel aligns to (default: right). */
   readonly align?: "left" | "right";
+  /**
+   * Submit EVERY field, including blank ones (default: false — blanks are
+   * dropped, "empty = no change"). Use for full-form edits where the inputs
+   * are prefilled with the current values and blanking one means CLEAR it
+   * (the Ship-to pencil; the api reads blank as "clear this field").
+   */
+  readonly submitEmpty?: boolean;
 }
 
 /**
@@ -47,6 +54,7 @@ export const CardEditPopover = ({
   fields,
   label,
   align = "right",
+  submitEmpty = false,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,7 +66,7 @@ export const CardEditPopover = ({
     for (const f of fields) {
       const raw = fd.get(f.name);
       const trimmed = typeof raw === "string" ? raw.trim() : "";
-      if (trimmed.length > 0) values[f.name] = trimmed;
+      if (submitEmpty || trimmed.length > 0) values[f.name] = trimmed;
     }
     setSaving(true);
     try {

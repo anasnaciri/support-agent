@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
+import { ApiError } from "@/lib/errors";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
 import { usePathname } from "@/lib/navigation";
@@ -346,9 +347,11 @@ export function CaseDetailPage() {
       }
       void qc.invalidateQueries({ queryKey: qk.case(ctx.workspaceId, id) });
     },
-    onError: () =>
+    onError: (err) =>
       toast.warning(
-        "Couldn't update the address in your store. Please try again.",
+        err instanceof ApiError && err.status === 403
+          ? "You don't have permission to edit orders in this workspace."
+          : "Couldn't update the address in your store. Please try again.",
       ),
   });
   const submitShippingAddress = (
@@ -826,7 +829,8 @@ export function CaseDetailPage() {
                   onSubmit={submitShippingAddress}
                   label="Edit shipping address"
                   title="Edit shipping address"
-                  description="Fix where this order ships. Saves to the order in your store; fields you leave empty keep their current value."
+                  description="Fix where this order ships. Saves to the order in your store; clear a field to remove it from the address."
+                  submitEmpty
                   fields={[
                     {
                       name: "name",
