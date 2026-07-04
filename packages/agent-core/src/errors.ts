@@ -57,6 +57,22 @@ export class OrderCancelFailed extends Data.TaggedError("OrderCancelFailed")<{
   readonly message: string;
 }> {}
 
+/**
+ * Shopify refused to update the order (currently: the shipping address,
+ * from the dashboard's Ship-to pencil). Common causes (from
+ * `orderUpdate.userErrors[].message`): an invalid province/country
+ * combination, or an order that can no longer be edited. NOTE
+ * `orderUpdate.userErrors` is Shopify's BASE `UserError` — `field` +
+ * `message` only, no `code` (same trap as `refundCreate`), so `code` is
+ * always null on the Live path; the field exists for shape parity with
+ * the other commercial-action failures.
+ */
+export class OrderUpdateFailed extends Data.TaggedError("OrderUpdateFailed")<{
+  readonly orderId: string;
+  readonly code: string | null;
+  readonly message: string;
+}> {}
+
 export class ShopifyRateLimited extends Data.TaggedError("ShopifyRateLimited")<{
   readonly retryAfterMs: number;
 }> {}
@@ -159,6 +175,7 @@ export type ShopifyError =
   | RefundFailed
   | DiscountFailed
   | OrderCancelFailed
+  | OrderUpdateFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing

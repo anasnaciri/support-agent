@@ -27,6 +27,7 @@ import {
   DiscountFailed,
   NetworkError,
   OrderCancelFailed,
+  OrderUpdateFailed,
   OrderId as makeOrderId,
   OrderNotFound,
   ProductNotFound,
@@ -901,6 +902,57 @@ type OrderCancelPayload = {
       readonly message: string;
       readonly code: string | null;
     }>;
+  };
+};
+
+// Replaces an order's shipping address (the dashboard's "edit Ship-to"
+// pencil). `OrderInput.shippingAddress` is a whole-object replacement, so the
+// caller sends the complete merged address. NOTE `orderUpdate.userErrors` is
+// Shopify's base `UserError` — selecting `code` here would invalidate the
+// whole mutation (same trap as `refundCreate` above). Gated by
+// `write_orders`, same as `refundCreate`.
+const ORDER_UPDATE_SHIPPING_ADDRESS_MUTATION = `
+  mutation OrderUpdateShippingAddress($input: OrderInput!) {
+    orderUpdate(input: $input) {
+      order {
+        id
+        shippingAddress {
+          name address1 address2 city province country zip phone
+        }
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+type OrderUpdatePayload = {
+  readonly orderUpdate: {
+    readonly order: {
+      readonly id: string;
+      readonly shippingAddress: GqlAddress;
+    } | null;
+    // Base `UserError` — `field` + `message` only (no `code`).
+    readonly userErrors: ReadonlyArray<{
+      readonly field: ReadonlyArray<string> | null;
+      readonly message: string;
+    }>;
+  };
+};
+
+// `MailingAddressInput` has no single `name` field — split our domain's
+// display name into firstName / lastName at the first space ("Mary Jane
+// Watson" → "Mary" + "Jane Watson"). Shopify renders name as
+// `firstName lastName`, so the display value round-trips.
+const splitAddressName = (
+  name: string | null,
+): { readonly firstName?: string; readonly lastName?: string } => {
+  const trimmed = name?.trim() ?? "";
+  if (trimmed === "") return {};
+  const spaceAt = trimmed.indexOf(" ");
+  if (spaceAt === -1) return { firstName: trimmed };
+  return {
+    firstName: trimmed.slice(0, spaceAt),
+    lastName: trimmed.slice(spaceAt + 1).trim(),
   };
 };
 
@@ -1789,6 +1841,60 @@ export const ShopifyServiceLive = Layer.effect(
               accepted: true,
             };
             return result;
+          }),
+        ),
+
+      updateOrderShippingAddress: (tenantId, input) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            const orderGidStr = orderGid(input.orderId);
+            const a = input.address;
+            const data = yield* runQuery<OrderUpdatePayload>(
+              http,
+              creds,
+              tenantId,
+              ORDER_UPDATE_SHIPPING_ADDRESS_MUTATION,
+              {
+                input: {
+                  id: orderGidStr,
+                  shippingAddress: {
+                    ...splitAddressName(a.name),
+                    ...(a.address1 !== null ? { address1: a.address1 } : {}),
+                    ...(a.address2 !== null ? { address2: a.address2 } : {}),
+                    ...(a.city !== null ? { city: a.city } : {}),
+                    ...(a.province !== null ? { province: a.province } : {}),
+                    ...(a.country !== null ? { country: a.country } : {}),
+                    ...(a.zip !== null ? { zip: a.zip } : {}),
+                    ...(a.phone !== null ? { phone: a.phone } : {}),
+                  },
+                },
+              },
+            );
+
+            const payload = data.orderUpdate;
+            const firstError = payload.userErrors[0];
+            if (firstError) {
+              return yield* Effect.fail(
+                new OrderUpdateFailed({
+                  orderId: input.orderId,
+                  // Base `UserError` carries no code; see the mutation note.
+                  code: null,
+                  message: firstError.message,
+                }),
+              );
+            }
+            const stored = mapAddress(payload.order?.shippingAddress ?? null);
+            if (!stored) {
+              return yield* Effect.fail(
+                new OrderUpdateFailed({
+                  orderId: input.orderId,
+                  code: null,
+                  message:
+                    "orderUpdate returned no shipping address and no userErrors",
+                }),
+              );
+            }
+            return stored;
           }),
         ),
 

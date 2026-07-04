@@ -8,6 +8,7 @@ import {
   OrderCancelFailed,
   OrderId,
   OrderNotFound,
+  OrderUpdateFailed,
   ProductNotFound,
   RefundFailed,
   ShopifyAuthFailed,
@@ -2241,5 +2242,157 @@ describe("ShopifyServiceLive — cancelOrder", () => {
         expect(err.message).toBe("Order has already been fulfilled");
       }
     }
+  });
+});
+
+// ============================================================
+// updateOrderShippingAddress
+// ============================================================
+
+describe("ShopifyServiceLive — updateOrderShippingAddress", () => {
+  const orderGid = "gid://shopify/Order/12345";
+
+  const address = {
+    name: "Jane Doe",
+    address1: "456 New St",
+    address2: "Apt 2",
+    city: "Queens",
+    province: "NY",
+    country: "US",
+    zip: "11375",
+    phone: null,
+  };
+
+  const callUpdate = (layer: Layer.Layer<ShopifyService>) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.updateOrderShippingAddress(tenantId, {
+            orderId: OrderId(orderGid),
+            address,
+          }),
+        ),
+        layer,
+      ),
+    );
+
+  it("happy path: sends a MailingAddressInput (name split into first/last) and returns the stored address", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        orderUpdate: {
+          order: {
+            id: orderGid,
+            shippingAddress: { ...address, name: "Jane Doe" },
+          },
+          userErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    const exit = await callUpdate(layer);
+    expect(Exit.isSuccess(exit)).toBe(true);
+
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: { input: Record<string, unknown> };
+    };
+    expect(body.variables.input["id"]).toBe(orderGid);
+    const sent = body.variables.input["shippingAddress"] as Record<
+      string,
+      unknown
+    >;
+    // MailingAddressInput has no `name` — the display name is split.
+    expect(sent["firstName"]).toBe("Jane");
+    expect(sent["lastName"]).toBe("Doe");
+    expect(sent["name"]).toBeUndefined();
+    expect(sent["address1"]).toBe("456 New St");
+    expect(sent["address2"]).toBe("Apt 2");
+    expect(sent["city"]).toBe("Queens");
+    expect(sent["province"]).toBe("NY");
+    expect(sent["country"]).toBe("US");
+    expect(sent["zip"]).toBe("11375");
+    // `orderUpdate.userErrors` is Shopify's BASE UserError — selecting a
+    // `code` field would invalidate the whole mutation (same trap as
+    // refundCreate). Guard the query text itself.
+    expect(body.query).not.toMatch(/userErrors\s*{[^}]*code/);
+
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.address1).toBe("456 New St");
+      expect(exit.value.city).toBe("Queens");
+    }
+  });
+
+  it("maps userErrors → OrderUpdateFailed", async () => {
+    reset();
+    const errPayload = {
+      data: {
+        orderUpdate: {
+          order: null,
+          userErrors: [
+            {
+              field: ["input", "shippingAddress"],
+              message: "Province is not valid",
+            },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, errPayload)]));
+    const exit = await callUpdate(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderUpdateFailed);
+      if (err instanceof OrderUpdateFailed) {
+        expect(err.orderId).toBe(orderGid);
+        expect(err.message).toBe("Province is not valid");
+      }
+    }
+  });
+
+  it("fails with OrderUpdateFailed when Shopify returns no order and no userErrors", async () => {
+    reset();
+    const emptyPayload = {
+      data: { orderUpdate: { order: null, userErrors: [] } },
+    };
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, emptyPayload)]),
+    );
+    const exit = await callUpdate(layer);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(OrderUpdateFailed);
+    }
+  });
+
+  it("keeps a single-word name as firstName with empty lastName", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        orderUpdate: {
+          order: { id: orderGid, shippingAddress: address },
+          userErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.updateOrderShippingAddress(tenantId, {
+            orderId: OrderId(orderGid),
+            address: { ...address, name: "Cher" },
+          }),
+        ),
+        layer,
+      ),
+    );
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { input: { shippingAddress: Record<string, unknown> } };
+    };
+    expect(body.variables.input.shippingAddress["firstName"]).toBe("Cher");
+    expect(body.variables.input.shippingAddress["lastName"]).toBeUndefined();
   });
 });

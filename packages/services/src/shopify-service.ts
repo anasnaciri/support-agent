@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import {
   type CustomerId,
   type OrderId,
+  type ShopifyAddress,
   type ShopifyCustomer,
   type ShopifyDiscount,
   type ShopifyDiscountValueType,
@@ -93,6 +94,20 @@ export interface CancelOrderInput {
   readonly notifyCustomer: boolean;
   readonly staffNote: string | null;
   readonly idempotencyKey: string | null;
+}
+
+/**
+ * Input for `ShopifyService.updateOrderShippingAddress`. `address` is the
+ * COMPLETE replacement address in the same shape callers read it back
+ * (`ShopifyAddress`) — Shopify's `orderUpdate` replaces the whole
+ * shipping address object, so partial edits must be merged with the
+ * current address by the caller before reaching this boundary. The
+ * single display `name` is split into Shopify's firstName/lastName by
+ * the Live impl.
+ */
+export interface UpdateOrderShippingAddressInput {
+  readonly orderId: OrderId;
+  readonly address: ShopifyAddress;
 }
 
 /**
@@ -355,6 +370,22 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     ) => Effect.Effect<ShopifyOrderCancellation, ShopifyError>;
 
     /**
+     * Replace an order's shipping address via Shopify's `orderUpdate`
+     * mutation — the dashboard's "edit Ship-to" pencil (a manager fixing
+     * a customer-typo'd address before fulfillment). A store write under
+     * the operator's authority, not an agent tool, so no
+     * `PermissionService` consultation — the dashboard permission gate
+     * covers it. Returns the address as Shopify stored (normalized) it.
+     * Maps `orderUpdate.userErrors` → `OrderUpdateFailed`; structural
+     * failures reuse the existing `ShopifyError` tags. Needs the
+     * `write_orders` scope (same as refunds).
+     */
+    readonly updateOrderShippingAddress: (
+      tenantId: TenantId,
+      input: UpdateOrderShippingAddressInput,
+    ) => Effect.Effect<ShopifyAddress, ShopifyError>;
+
+    /**
      * Everything the dashboard's Shopify-style refund modal needs to render
      * and price a refund: refundable line items with per-unit pricing (from
      * Shopify's own `suggestedRefund` calculation, so partial selections price
@@ -608,6 +639,15 @@ export interface ShopifyTestFixtures {
     input: CancelOrderInput,
   ) => Effect.Effect<ShopifyOrderCancellation, ShopifyError>;
   /**
+   * Optional override for `updateOrderShippingAddress`. When unset the
+   * default Test impl echoes the input address back (Shopify stored it
+   * verbatim). Tests that assert the input shape or simulate an
+   * `OrderUpdateFailed` (order no longer editable) override this.
+   */
+  readonly updateOrderShippingAddress?: (
+    input: UpdateOrderShippingAddressInput,
+  ) => Effect.Effect<ShopifyAddress, ShopifyError>;
+  /**
    * Per-order refund-context fixture for the dashboard refund modal. When an
    * orderId isn't in the map the default Test impl fails with `OrderNotFound`
    * — the same shape the Live impl produces on a 404.
@@ -782,6 +822,10 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
           createdAt: new Date(0),
         });
       },
+      updateOrderShippingAddress: (_tenantId, input) =>
+        fixtures.updateOrderShippingAddress
+          ? fixtures.updateOrderShippingAddress(input)
+          : Effect.succeed(input.address),
       cancelOrder: (_tenantId, input) => {
         if (fixtures.cancelOrder) {
           return fixtures.cancelOrder(input);
