@@ -381,6 +381,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       only for the app that remains user-facing.
 - [ ] Add optional polish: AI-suggest reply chips, bubble avatars, status/priority
       pill audit, and order/case timeline rail.
+- [x] Micro-interaction polish pass on the case-page actions + dialogs (169df73):
+      scale-on-press + property-scoped transitions baked into the shared
+      `Button`, cross-faded pending spinners in `CaseHeaderActions`, 40px hit
+      areas on icon triggers/checkboxes, dropdown enter animation, tabular-nums
+      on live refund amounts, `text-balance`/`text-pretty` on dialog copy.
+      Extend the same treatment to other screens opportunistically.
 - [ ] Add workspace rename UI.
 - [ ] Add a distinct workspace-deleted platform email template if merchants need
       receipts for single-workspace deletion.
