@@ -340,9 +340,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - [x] Context card no longer flashes the "Customer-quoted order" heads-up on
       mount: `buildContextCardRows` order arg is tri-state (`"loading"` while
-      the Shopify fetch is pending suppresses the row; `null` = settled-without
-      -order keeps the unprovable-match heads-up). Case page passes
-      `shopifyQuery.isPending ? "loading" : …`.
+      the Shopify fetch is pending renders the slot as a skeleton row; `null` =
+      settled-without-order keeps the unprovable-match heads-up). Case page
+      passes `shopifyQuery.isPending ? "loading" : …`. Size changes animate:
+      card body wrapped in `AnimateHeight` (ResizeObserver → px height →
+      transition, `components/ui/animate-height.tsx`), and the aside stays
+      mounted so an emptying card slides out via the existing translate
+      transition instead of unmounting with a pop.
 - [x] Context card shows the supplier's answer: `context.supplierUpdate`
       (stamped by `recordSupplierUpdate`) renders as bespoke "Supplier note" /
       "Supplier suggests" multiline rows in `lib/case-context.ts` instead of

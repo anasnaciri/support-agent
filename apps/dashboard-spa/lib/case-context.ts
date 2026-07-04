@@ -34,6 +34,8 @@ export interface ContextRow {
   readonly mono?: boolean;
   /** Render `text` as a wrapped, newline-preserving paragraph (notes). */
   readonly multiline?: boolean;
+  /** Render a skeleton placeholder — the row's value hasn't resolved yet. */
+  readonly skeleton?: boolean;
 }
 
 const asString = (v: unknown): string | null =>
@@ -142,10 +144,10 @@ export interface ContextCardOrder {
  * already shows the quoted ref; when it matches, it's redundant.
  *
  * `order` is tri-state: `"loading"` means the order fetch hasn't settled yet —
- * the heads-up stays hidden (a pending fetch proves nothing, and showing it
- * would make the row pop out once the order arrives and matches); `null` means
- * the fetch settled without an order, so a match is unprovable and the
- * heads-up shows.
+ * the heads-up slot renders as a skeleton row (a pending fetch proves nothing,
+ * and showing the real value would make the row pop out once the order arrives
+ * and matches); `null` means the fetch settled without an order, so a match is
+ * unprovable and the heads-up shows.
  */
 export const buildContextCardRows = (
   context: Readonly<Record<string, unknown>>,
@@ -162,15 +164,23 @@ export const buildContextCardRows = (
         ref.length > 0 &&
         normalizeOrderRef(ref) === normalizeOrderRef(quoted),
     );
+  const quotedPending = quoted !== null && bound !== null && order === "loading";
   const showQuoted =
     quoted !== null &&
     bound !== null &&
-    order !== "loading" &&
+    !quotedPending &&
     !quotedMatchesOrder;
-  return buildContextRows(context).filter(
-    (row) =>
-      CARD_KEYS.has(row.key) || (row.key === "quotedOrderRef" && showQuoted),
-  );
+  return buildContextRows(context)
+    .filter(
+      (row) =>
+        CARD_KEYS.has(row.key) ||
+        (row.key === "quotedOrderRef" && (showQuoted || quotedPending)),
+    )
+    .map((row) =>
+      row.key === "quotedOrderRef" && quotedPending
+        ? { key: row.key, label: row.label, skeleton: true }
+        : row,
+    );
 };
 
 export const buildContextRows = (

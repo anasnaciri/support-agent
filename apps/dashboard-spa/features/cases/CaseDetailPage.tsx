@@ -45,9 +45,11 @@ import { buildContextCardRows, type ContextRow } from "@/lib/case-context";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { Link } from "@/components/ui/link";
+import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ChatThread } from "./ChatThread";
 import { ChatScrollArea } from "./ChatScrollArea";
 import { CaseDetailsPanel } from "./CaseDetailsPanel";
@@ -198,7 +200,9 @@ function CaseContext({
             {row.label}
           </dt>
           <dd className="mt-0.5 min-w-0 text-sm text-foreground">
-            {row.badges ? (
+            {row.skeleton ? (
+              <Skeleton className="h-4 w-28" />
+            ) : row.badges ? (
               <div className="flex flex-wrap gap-1.5">
                 {row.badges.map((b, i) => (
                   <Badge key={`${row.key}-${i}`} variant={b.variant}>
@@ -660,23 +664,27 @@ export function CaseDetailPage() {
             )}
           />
 
-          {hasContextCard ? (
-            <aside
-              aria-hidden={!contextOpen}
-              aria-label="Case context"
-              className={cn(
-                "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
-                contextOpen
-                  ? "translate-x-0"
-                  : "pointer-events-none translate-x-[calc(100%+1rem)]",
-              )}
-            >
-              <h2 className="pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Context
-              </h2>
+          {/* Always mounted: when the last row resolves away (e.g. the quoted
+              order ref turns out to match), the card slides out with the same
+              transition as the manual toggle instead of unmounting with a pop.
+              AnimateHeight keeps the skeleton→content size change smooth. */}
+          <aside
+            aria-hidden={!showContext}
+            aria-label="Case context"
+            className={cn(
+              "thin-scrollbar absolute right-4 top-4 z-10 max-h-[calc(100%-2rem)] w-72 max-w-[85vw] overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-md transition-transform duration-300 ease-in-out",
+              showContext
+                ? "translate-x-0"
+                : "pointer-events-none translate-x-[calc(100%+1rem)]",
+            )}
+          >
+            <h2 className="pb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Context
+            </h2>
+            <AnimateHeight>
               <CaseContext rows={contextCardRows} />
-            </aside>
-          ) : null}
+            </AnimateHeight>
+          </aside>
         </div>
 
         <div className="thin-scrollbar max-h-[60%] shrink-0 overflow-y-auto border-t border-border/60 bg-card px-4 py-3">

@@ -282,10 +282,11 @@ describe("buildContextCardRows", () => {
     expect(rows.map((r) => r.key)).toEqual(["quotedOrderRef"]);
   });
 
-  it("hides the quoted order ref while the bound order is still loading — no flicker", () => {
+  it("renders the quoted order ref as a skeleton row while the bound order is still loading", () => {
     // On mount the case detail resolves before the Shopify order fetch; a
-    // pending fetch must NOT be treated like a failed one, or the heads-up row
-    // appears and then pops out once the order arrives and matches.
+    // pending fetch must NOT be treated like a failed one (the heads-up would
+    // appear and then pop out once the order arrives and matches). Instead the
+    // slot renders as a skeleton placeholder until the fetch settles.
     const rows = buildContextCardRows(
       {
         quotedOrderRef: "#1042",
@@ -294,6 +295,23 @@ describe("buildContextCardRows", () => {
       },
       "loading",
     );
-    expect(rows.map((r) => r.key)).toEqual(["notes"]);
+    expect(rows.map((r) => r.key)).toEqual(["quotedOrderRef", "notes"]);
+    expect(byKey(rows, "quotedOrderRef")).toMatchObject({
+      label: "Customer-quoted order",
+      skeleton: true,
+    });
+    expect(byKey(rows, "quotedOrderRef")?.text).toBeUndefined();
+  });
+
+  it("emits no skeleton row while loading when no heads-up could appear (no quoted ref or no bound order)", () => {
+    expect(
+      buildContextCardRows({ quotedOrderRef: "#1042", notes: "n" }, "loading").map((r) => r.key),
+    ).toEqual(["notes"]);
+    expect(
+      buildContextCardRows(
+        { identifiedOrderId: "gid://shopify/Order/123", notes: "n" },
+        "loading",
+      ).map((r) => r.key),
+    ).toEqual(["notes"]);
   });
 });
