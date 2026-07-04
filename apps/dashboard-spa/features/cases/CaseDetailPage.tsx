@@ -473,6 +473,9 @@ export function CaseDetailPage() {
   // older api that doesn't send waitingOn.
   const waitingOnSupplier =
     caseRow.waitingOn?.supplier ?? caseRow.status === "waiting_for_supplier";
+  // Manual escalation: hidden while already with the supplier; `failed` is the
+  // one status the state machine refuses to park from.
+  const canEscalateSupplier = !waitingOnSupplier && caseRow.status !== "failed";
 
   // Why the composer is read-only when the agent owns the conversation.
   const lockedMessage =
@@ -607,11 +610,11 @@ export function CaseDetailPage() {
             canTakeOver={canTakeOver}
             canResume={canResume}
             showRetrySend={showRetrySend}
+            canEscalateSupplier={canEscalateSupplier}
             statusTargets={caseRow.manualStatusTargets ?? []}
             refundSlot={
               refundableOrder ? (
                 <RefundDialog
-                  compact
                   workspaceId={ctx.workspaceId}
                   caseId={id}
                   orderName={refundableOrder.name}

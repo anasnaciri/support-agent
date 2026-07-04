@@ -19,6 +19,7 @@ export type CaseAction =
   | "setStatus"
   | "resolve"
   | "issueRefund"
+  | "escalateSupplier"
   | "reply";
 
 const FEEDBACK: Record<CaseAction, Record<string, ActionFeedback>> = {
@@ -113,6 +114,28 @@ const FEEDBACK: Record<CaseAction, Record<string, ActionFeedback>> = {
       text: "Shopify rejected the refund. No money moved — try again or issue it in Shopify.",
     },
     invalid_amount: { tone: "warning", text: "That refund amount isn't valid." },
+  },
+  escalateSupplier: {
+    escalated: {
+      tone: "success",
+      text: "Escalated to your supplier. The case waits for their update; they've been sent a portal link.",
+    },
+    no_supplier: {
+      tone: "warning",
+      text: "No supplier is set up for this workspace. Add one in Settings → Suppliers first.",
+    },
+    already_escalated: {
+      tone: "info",
+      text: "This case is already with your supplier — no change.",
+    },
+    transition_not_allowed: {
+      tone: "warning",
+      text: "This case can't be escalated from where it is now.",
+    },
+    case_not_found: {
+      tone: "warning",
+      text: "Couldn't find that case to escalate.",
+    },
   },
   resendApproval: {
     resent: {

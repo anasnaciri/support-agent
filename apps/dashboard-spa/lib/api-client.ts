@@ -260,6 +260,11 @@ export interface SetCaseStatusOutcomeView {
 export interface ResolveCaseOutcomeView {
   readonly kind: string;
 }
+export interface EscalateSupplierOutcomeView {
+  readonly kind: string;
+  readonly escalationId?: string;
+  readonly fromStatus?: string;
+}
 export interface IssueRefundOutcomeView {
   readonly kind: string;
   readonly refundId?: string;
@@ -1024,6 +1029,22 @@ export const api = {
       ctx,
     });
     return (body as ResolveCaseOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Escalate a case to the workspace's supplier by hand. The problem statement
+  // is what the supplier sees (portal + email); the case parks waiting on them.
+  // Returns the discriminated outcome (escalated | already_escalated |
+  // no_supplier | transition_not_allowed | case_not_found).
+  escalateSupplier: async (
+    ctx: CallCtx,
+    caseId: string,
+    problem: string,
+  ): Promise<EscalateSupplierOutcomeView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/escalate-supplier`,
+      { method: "POST", body: { problem }, ctx },
+    );
+    return (body as EscalateSupplierOutcomeView | null) ?? { kind: "error" };
   },
 
   // Issue an agent-recommended refund directly on a case. The agent only

@@ -21,6 +21,15 @@ describe("caseActionFeedback", () => {
     expect(caseActionFeedback("resendApproval", "nothing_to_resend").tone).toBe(
       "info",
     );
+    expect(caseActionFeedback("escalateSupplier", "escalated").tone).toBe(
+      "success",
+    );
+    expect(caseActionFeedback("escalateSupplier", "no_supplier").tone).toBe(
+      "warning",
+    );
+    expect(
+      caseActionFeedback("escalateSupplier", "already_escalated").tone,
+    ).toBe("info");
   });
 
   it("falls back to a generic warning for an unknown/error kind", () => {

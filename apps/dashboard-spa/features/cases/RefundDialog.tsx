@@ -37,8 +37,6 @@ interface Props {
   readonly caseId: string;
   /** The order name (e.g. "#1001") for the trigger + title before context loads. */
   readonly orderName: string;
-  /** Render an icon-only trigger (for the case header's action row). */
-  readonly compact?: boolean;
 }
 
 const toNum = (s: string): number => {
@@ -55,12 +53,7 @@ const toNum = (s: string): number => {
  * (Shopify refundCreate, restocking returned units). SPA port of the Next
  * dialog: loadContext/issueAction server actions → api + useMutation.
  */
-export function RefundDialog({
-  workspaceId,
-  caseId,
-  orderName,
-  compact = false,
-}: Props) {
+export function RefundDialog({ workspaceId, caseId, orderName }: Props) {
   const [open, setOpen] = React.useState(false);
   const [outcome, setOutcome] = React.useState<RefundContextOutcome | null>(
     null,
@@ -82,23 +75,9 @@ export function RefundDialog({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogTrigger asChild>
-        {compact ? (
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Refund this order"
-            title="Refund this order in Shopify, with restocking"
-          >
-            <RotateCcw aria-hidden />
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            title="Refund this order in Shopify, with restocking"
-          >
-            Refund
-          </Button>
-        )}
+        <Button variant="outline" title="Refund this order in Shopify">
+          Refund
+        </Button>
       </AlertDialogTrigger>
       <AlertDialogContent className="max-w-3xl gap-0 p-0">
         <AlertDialogTitle className="sr-only">
@@ -120,7 +99,10 @@ export function RefundDialog({
             onDone={() => setOpen(false)}
           />
         ) : (
-          <RefundUnavailable kind={outcome.kind} onClose={() => setOpen(false)} />
+          <RefundUnavailable
+            kind={outcome.kind}
+            onClose={() => setOpen(false)}
+          />
         )}
       </AlertDialogContent>
     </AlertDialog>
@@ -336,7 +318,7 @@ const RefundForm = ({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Only you and other staff can see this reason"
-              className="min-h-[72px]"
+              className="min-h-18"
             />
           </div>
         </div>

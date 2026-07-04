@@ -1,6 +1,5 @@
-// The case-page overflow (⋮) menu. Holds case actions that don't warrant a
-// dedicated button in the header row — a home for the actions we'll keep
-// adding. Kept pure + tested so the menu's contents stay easy to reason about.
+// The case-page retry dropdown (the ↺ button in the header row). Kept pure +
+// tested so the menu's contents stay easy to reason about.
 
 export type CaseActionKey = "retryNow" | "retryFromTriage";
 
@@ -19,11 +18,11 @@ export interface CaseActionMenuInput {
 }
 
 /**
- * Which actions live in the overflow menu, given case state. Available while
+ * Which actions live in the retry dropdown, given case state. Available while
  * the case is under human takeover. Two retry shapes:
  *  - "Retry last step" re-runs the case's CURRENT agent (the bound specialist).
- *  - "Restart from triage" rebinds the case to triage so the agent
- *    re-classifies + re-routes from scratch — use when the routing was wrong.
+ *  - "Retry case" rebinds the case to triage so the agent re-classifies +
+ *    re-routes from scratch — use when the routing was wrong.
  */
 export const caseActionMenuItems = ({
   canResume,
@@ -39,10 +38,10 @@ export const caseActionMenuItems = ({
     });
     items.push({
       key: "retryFromTriage",
-      label: "Restart from triage",
+      label: "Retry case",
       pendingLabel: "Restarting…",
       title:
-        "Hand the case back and restart from triage — the agent re-classifies and re-routes from scratch",
+        "Hand the case back and restart - the agent re-classifies and re-routes from scratch",
     });
   }
   return items;

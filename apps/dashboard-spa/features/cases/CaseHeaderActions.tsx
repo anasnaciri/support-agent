@@ -6,6 +6,7 @@ import {
   Loader2,
   MoreVertical,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 
 import { api } from "@/lib/api-client";
@@ -14,6 +15,7 @@ import { caseActionMenuItems } from "@/lib/case-actions-menu";
 import { caseStatusLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { EscalateSupplierDialog } from "./EscalateSupplierDialog";
 
 // Merchant-facing copy for the hand-settable status targets; unknown targets
 // fall back to a humanized "Mark as <status>". Mirrors the Next page.
@@ -44,6 +46,8 @@ interface Props {
   readonly canTakeOver: boolean;
   readonly canResume: boolean;
   readonly showRetrySend: boolean;
+  /** Offer "Escalate to supplier" in the ⋮ menu (not already with a supplier, not terminal). */
+  readonly canEscalateSupplier: boolean;
   /** Hand-settable status targets (matrix-validated by the api). */
   readonly statusTargets: ReadonlyArray<string>;
   /** The RefundDialog trigger, when the order is refundable; sits before the ⋮ menu. */
@@ -75,6 +79,89 @@ const IconActionButton = ({
   </Button>
 );
 
+interface HeaderMenuItem {
+  readonly key: string;
+  readonly label: string;
+  readonly title: string;
+  readonly pending: boolean;
+  readonly run: () => void;
+}
+
+/** An icon trigger + dropdown, shared by the retry (↺) and overflow (⋮) menus. */
+const HeaderMenu = ({
+  open,
+  onOpenChange,
+  label,
+  trigger,
+  items,
+}: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly label: string;
+  readonly trigger: ReactNode;
+  readonly items: ReadonlyArray<HeaderMenuItem>;
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onClickOutside = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && open) {
+            e.preventDefault();
+            onOpenChange(false);
+          }
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        className="inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+      >
+        {trigger}
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 min-w-[12rem] overflow-hidden rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
+        >
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              title={item.title}
+              disabled={item.pending}
+              onClick={item.run}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {item.pending ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : null}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 export function CaseHeaderActions({
   workspaceId,
   caseId,
@@ -82,13 +169,15 @@ export function CaseHeaderActions({
   canTakeOver,
   canResume,
   showRetrySend,
+  canEscalateSupplier,
   statusTargets,
   refundSlot,
 }: Props) {
   const ctx = { workspaceId };
+  const [retryOpen, setRetryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [escalateOpen, setEscalateOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const base = { workspaceId, caseId } as const;
   const resolveM = useCaseMutation({
@@ -115,13 +204,13 @@ export function CaseHeaderActions({
     ...base,
     action: "retry",
     mutationFn: () => api.retry(ctx, caseId),
-    onDone: () => setMenuOpen(false),
+    onDone: () => setRetryOpen(false),
   });
   const retryTriageM = useCaseMutation({
     ...base,
     action: "retry",
     mutationFn: () => api.retry(ctx, caseId, { fromTriage: true }),
-    onDone: () => setMenuOpen(false),
+    onDone: () => setRetryOpen(false),
   });
   const setStatusM = useCaseMutation({
     ...base,
@@ -133,17 +222,16 @@ export function CaseHeaderActions({
     },
   });
 
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const onClickOutside = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setMenuOpen(false);
+  const retryItems = caseActionMenuItems({ canResume }).map((item) => {
+    const m = item.key === "retryNow" ? retryM : retryTriageM;
+    return {
+      key: item.key,
+      label: m.isPending ? item.pendingLabel : item.label,
+      title: item.title,
+      pending: m.isPending,
+      run: () => m.mutate(),
     };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [menuOpen]);
-
-  const retryItems = caseActionMenuItems({ canResume });
+  });
   const statusItems = statusTargets
     .filter((s) => s !== "resolved")
     .map((s) => ({
@@ -158,29 +246,39 @@ export function CaseHeaderActions({
     }));
   const menuItems = [
     ...statusItems,
-    ...retryItems.map((item) => {
-      const m = item.key === "retryNow" ? retryM : retryTriageM;
-      return {
-        key: item.key,
-        label: m.isPending ? item.pendingLabel : item.label,
-        title: item.title,
-        pending: m.isPending,
-        run: () => m.mutate(),
-      };
-    }),
+    ...(canEscalateSupplier
+      ? [
+          {
+            key: "escalateSupplier",
+            label: "Escalate to supplier",
+            title:
+              "Hand this case to your warehouse/supplier and wait for their update",
+            pending: false,
+            run: () => {
+              setMenuOpen(false);
+              setEscalateOpen(true);
+            },
+          },
+        ]
+      : []),
   ];
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1.5">
       {canResolve ? (
-        <IconActionButton
-          onClick={() => resolveM.mutate()}
-          pending={resolveM.isPending}
-          title="Resolve this case"
+        <Button
           variant="success"
+          onClick={() => resolveM.mutate()}
+          disabled={resolveM.isPending}
+          title="Resolve this case"
         >
-          <Check aria-hidden />
-        </IconActionButton>
+          {resolveM.isPending ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <Check aria-hidden />
+          )}
+          Resolve
+        </Button>
       ) : null}
       {canTakeOver ? (
         <IconActionButton
@@ -214,52 +312,32 @@ export function CaseHeaderActions({
 
       {refundSlot}
 
-      {menuItems.length > 0 ? (
-        <div ref={containerRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && menuOpen) {
-                e.preventDefault();
-                setMenuOpen(false);
-              }
-            }}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="More actions"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-input bg-transparent text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-          >
-            <MoreVertical className="size-4" aria-hidden />
-          </button>
-
-          {menuOpen ? (
-            <div
-              role="menu"
-              className="absolute right-0 z-50 mt-1 min-w-[12rem] overflow-hidden rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
-            >
-              {menuItems.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  role="menuitem"
-                  title={item.title}
-                  disabled={item.pending}
-                  onClick={item.run}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50",
-                  )}
-                >
-                  {item.pending ? (
-                    <Loader2 className="size-4 animate-spin" aria-hidden />
-                  ) : null}
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+      {retryItems.length > 0 ? (
+        <HeaderMenu
+          open={retryOpen}
+          onOpenChange={setRetryOpen}
+          label="Retry"
+          trigger={<RotateCcw className="size-4" aria-hidden />}
+          items={retryItems}
+        />
       ) : null}
+
+      {menuItems.length > 0 ? (
+        <HeaderMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          label="More actions"
+          trigger={<MoreVertical className="size-4" aria-hidden />}
+          items={menuItems}
+        />
+      ) : null}
+
+      <EscalateSupplierDialog
+        workspaceId={workspaceId}
+        caseId={caseId}
+        open={escalateOpen}
+        onOpenChange={setEscalateOpen}
+      />
     </div>
   );
 }
