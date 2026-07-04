@@ -283,6 +283,14 @@ export interface EditCaseDetailsOutcomeView {
   readonly orderName?: string;
 }
 
+export interface EditShippingAddressOutcomeView {
+  // saved | nothing_to_update | order_not_found | case_not_found |
+  // update_failed | error
+  readonly kind: string;
+  /** Shopify's rejection detail on `update_failed` (log-grade, not UI copy). */
+  readonly error?: string;
+}
+
 // One restock/refund line the dashboard refund modal sends to the issue-refund
 // endpoint. Mirrors the api's `RefundLineItemInput` (resolved client-side:
 // restockType + locationId already decided from the order's fulfillment state +
@@ -1100,6 +1108,30 @@ export const api = {
       ctx,
     });
     return (body as EditCaseDetailsOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Fix the order's shipping address (the pencil on the Order card's Ship-to).
+  // Only non-empty fields are sent; the api merges them over the order's
+  // current address and writes the result to the real Shopify order.
+  editShippingAddress: async (
+    ctx: CallCtx,
+    caseId: string,
+    fields: {
+      readonly name?: string;
+      readonly address1?: string;
+      readonly address2?: string;
+      readonly city?: string;
+      readonly province?: string;
+      readonly country?: string;
+      readonly zip?: string;
+      readonly phone?: string;
+    },
+  ): Promise<EditShippingAddressOutcomeView> => {
+    const { body } = await call(
+      `/cases/${encodeURIComponent(caseId)}/shipping-address`,
+      { method: "POST", body: fields, ctx },
+    );
+    return (body as EditShippingAddressOutcomeView | null) ?? { kind: "error" };
   },
 
   // Refundable line items + pricing for the case's order, powering the

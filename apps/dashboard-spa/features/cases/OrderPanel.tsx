@@ -19,6 +19,8 @@ interface Props {
   readonly shopDomain: string | null;
   /** Rendered in the panel header (the assign-order pencil). */
   readonly headerAction?: React.ReactNode;
+  /** Rendered beside the Ship-to line (the edit-shipping-address pencil). */
+  readonly shipToAction?: React.ReactNode;
 }
 
 /**
@@ -97,6 +99,7 @@ export const OrderPanel = ({
   orderHint,
   shopDomain,
   headerAction,
+  shipToAction,
 }: Props) => {
   if (!order && !orderHint) {
     return (
@@ -183,17 +186,20 @@ export const OrderPanel = ({
       <CardContent className="space-y-3 p-4 pt-0 2xl:p-6 2xl:pt-0">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Placed {formatRelativeTime(order.createdAt)}</span>
-          {shipTo ? (
-            <span
-              className="max-w-[60%] truncate"
-              title={shipTo.replace(/\n/g, ", ")}
-            >
-              {[
-                order.shippingAddress?.city,
-                order.shippingAddress?.province ?? order.shippingAddress?.country,
-              ]
-                .filter(Boolean)
-                .join(", ")}
+          {shipTo || shipToAction ? (
+            <span className="flex max-w-[60%] items-center gap-0.5">
+              {shipTo ? (
+                <span className="truncate" title={shipTo.replace(/\n/g, ", ")}>
+                  {[
+                    order.shippingAddress?.city,
+                    order.shippingAddress?.province ??
+                      order.shippingAddress?.country,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
+              ) : null}
+              {shipToAction}
             </span>
           ) : null}
         </div>

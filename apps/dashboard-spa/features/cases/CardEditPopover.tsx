@@ -94,7 +94,7 @@ export const CardEditPopover = ({
           />
           <div
             className={cn(
-              "absolute top-8 z-40 w-72 rounded-lg border border-border bg-card p-3 text-left shadow-lg",
+              "absolute top-8 z-40 max-h-[min(28rem,70vh)] w-72 overflow-y-auto rounded-lg border border-border bg-card p-3 text-left shadow-lg",
               align === "right" ? "right-0" : "left-0",
             )}
           >

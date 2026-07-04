@@ -265,6 +265,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] API feature modules replaced the old large composition file.
 - [x] Agent runtime was decomposed into named phases while keeping stateful
       runtime behavior in one module.
+- [x] Manager can fix the order's shipping address from the case page (SPA):
+      Ship-to pencil on the Order card → `POST
+      /dashboard/cases/:id/shipping-address` →
+      `ShopifyService.updateOrderShippingAddress` (Shopify `orderUpdate`, a
+      REAL store write under operator authority). Non-empty form fields merge
+      over the order's current address; records a
+      `case.shipping_address_updated` audit row; gated on `cases.set_status`.
+- [x] SPA CustomerPanel shows the edit-customer pencil in the
+      matched-customer state again (it was dropped there, so the pencil
+      vanished exactly when a Shopify customer resolved — the Next dashboard
+      passes it in all three states).
 
 ---
 
@@ -372,6 +383,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
+- [ ] Shipping-address edit: a field can never be CLEARED (empty = keep, by
+      the pencil form's non-empty-only submission). Fine for the typo-fix use
+      case; revisit if "remove address line 2" becomes a real ask.
+- [ ] Shipping-address edit is gated on `cases.set_status`; consider a
+      dedicated `orders.edit` RBAC permission if store writes should be
+      grantable separately from case-state corrections.
+- [ ] `apps/dashboard` (Next) has no Ship-to pencil — the shipping-address
+      edit landed SPA-only (the api endpoint is shared, so porting is just the
+      popover + action).
 - [ ] `apps/dashboard` (Next) still has the old case-header layout (icon-only
       refund, retries in the ⋮ menu, no manual supplier escalation) — port the
       SPA's rework only if that app stays user-facing.

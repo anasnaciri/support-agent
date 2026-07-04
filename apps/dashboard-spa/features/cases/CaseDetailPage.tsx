@@ -321,6 +321,41 @@ export function CaseDetailPage() {
   const submitCaseEdit = (values: Record<string, string>): Promise<void> =>
     editDetails.mutateAsync(values).then(() => undefined);
 
+  // Fix the order's Ship-to (the pencil on the Order card). Unlike the
+  // details pencils this WRITES TO THE STORE — the api merges the non-empty
+  // fields over the order's current address and updates the real Shopify
+  // order. Shopify-side rejections surface as a thrown 502 → onError.
+  const editShippingAddress = useMutation({
+    mutationFn: (fields: Record<string, string>) =>
+      api.editShippingAddress(ctx, id, fields),
+    onSuccess: (result) => {
+      if (result.kind === "saved") {
+        toast.success("Shipping address updated on the order.");
+      } else if (result.kind === "order_not_found") {
+        toast.warning(
+          "No order is linked to this case yet — assign the order first.",
+        );
+      } else if (result.kind === "nothing_to_update") {
+        toast.info("Nothing to update.");
+      } else if (result.kind === "case_not_found") {
+        toast.warning("Couldn't find that case.");
+      } else {
+        toast.warning(
+          "Couldn't update the address in your store. Please try again.",
+        );
+      }
+      void qc.invalidateQueries({ queryKey: qk.case(ctx.workspaceId, id) });
+    },
+    onError: () =>
+      toast.warning(
+        "Couldn't update the address in your store. Please try again.",
+      ),
+  });
+  const submitShippingAddress = (
+    values: Record<string, string>,
+  ): Promise<void> =>
+    editShippingAddress.mutateAsync(values).then(() => undefined);
+
   if (detailQuery.isLoading) return <CaseDetailLoading />;
 
   const detail = detailQuery.data;
@@ -784,6 +819,72 @@ export function CaseDetailPage() {
             order={order}
             orderHint={orderHint}
             shopDomain={shopDomain}
+            shipToAction={
+              order ? (
+                <CardEditPopover
+                  caseId={id}
+                  onSubmit={submitShippingAddress}
+                  label="Edit shipping address"
+                  title="Edit shipping address"
+                  description="Fix where this order ships. Saves to the order in your store; fields you leave empty keep their current value."
+                  fields={[
+                    {
+                      name: "name",
+                      label: "Recipient",
+                      placeholder: "Jane Shopper",
+                      defaultValue: order.shippingAddress?.name ?? "",
+                      autoComplete: "name",
+                    },
+                    {
+                      name: "address1",
+                      label: "Address",
+                      placeholder: "123 Main St",
+                      defaultValue: order.shippingAddress?.address1 ?? "",
+                      autoComplete: "address-line1",
+                    },
+                    {
+                      name: "address2",
+                      label: "Apartment, suite, etc.",
+                      placeholder: "Apt 4B",
+                      defaultValue: order.shippingAddress?.address2 ?? "",
+                      autoComplete: "address-line2",
+                    },
+                    {
+                      name: "city",
+                      label: "City",
+                      placeholder: "Brooklyn",
+                      defaultValue: order.shippingAddress?.city ?? "",
+                    },
+                    {
+                      name: "province",
+                      label: "State / Province",
+                      placeholder: "NY",
+                      defaultValue: order.shippingAddress?.province ?? "",
+                    },
+                    {
+                      name: "zip",
+                      label: "ZIP / Postal code",
+                      placeholder: "11201",
+                      defaultValue: order.shippingAddress?.zip ?? "",
+                      autoComplete: "postal-code",
+                    },
+                    {
+                      name: "country",
+                      label: "Country",
+                      placeholder: "United States",
+                      defaultValue: order.shippingAddress?.country ?? "",
+                    },
+                    {
+                      name: "phone",
+                      label: "Phone",
+                      type: "tel",
+                      placeholder: "+1 555 123 4567",
+                      defaultValue: order.shippingAddress?.phone ?? "",
+                    },
+                  ]}
+                />
+              ) : undefined
+            }
             headerAction={
               <CardEditPopover
                 caseId={id}
