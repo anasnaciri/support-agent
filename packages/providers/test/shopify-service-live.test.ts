@@ -4,6 +4,7 @@ import {
   CustomerId,
   CustomerNotFound,
   DiscountFailed,
+  FulfillmentUpdateFailed,
   NetworkError,
   OrderCancelFailed,
   OrderId,
@@ -2394,5 +2395,165 @@ describe("ShopifyServiceLive — updateOrderShippingAddress", () => {
     };
     expect(body.variables.input.shippingAddress["firstName"]).toBe("Cher");
     expect(body.variables.input.shippingAddress["lastName"]).toBeUndefined();
+  });
+});
+
+// ============================================================
+// updateFulfillmentTracking
+// ============================================================
+
+describe("ShopifyServiceLive — updateFulfillmentTracking", () => {
+  const fulfillmentGid = "gid://shopify/Fulfillment/987";
+
+  const fulfillmentPayload = (tracking: {
+    company: string | null;
+    number: string;
+  }) => ({
+    id: fulfillmentGid,
+    displayStatus: "IN_TRANSIT",
+    trackingInfo: [
+      { company: tracking.company, number: tracking.number, url: null },
+    ],
+    estimatedDeliveryAt: null,
+    deliveredAt: null,
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-07-04T00:00:00Z",
+  });
+
+  const callUpdate = (
+    layer: Layer.Layer<ShopifyService>,
+    input: {
+      trackingNumber: string;
+      trackingCompany: string | null;
+      notifyCustomer: boolean;
+    },
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ShopifyService, (s) =>
+          s.updateFulfillmentTracking(tenantId, {
+            fulfillmentId: fulfillmentGid,
+            ...input,
+          }),
+        ),
+        layer,
+      ),
+    );
+
+  it("happy path: sends fulfillmentId + trackingInfoInput + notifyCustomer and returns the stored fulfillment", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        fulfillmentTrackingInfoUpdate: {
+          fulfillment: fulfillmentPayload({ company: "DHL", number: "JD1" }),
+          userErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    const exit = await callUpdate(layer, {
+      trackingNumber: "JD1",
+      trackingCompany: "DHL",
+      notifyCustomer: false,
+    });
+    expect(Exit.isSuccess(exit)).toBe(true);
+
+    const body = JSON.parse(captures[0]!.body) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+    expect(body.variables["fulfillmentId"]).toBe(fulfillmentGid);
+    expect(body.variables["notifyCustomer"]).toBe(false);
+    const sent = body.variables["trackingInfoInput"] as Record<string, unknown>;
+    expect(sent["number"]).toBe("JD1");
+    expect(sent["company"]).toBe("DHL");
+    // FulfillmentTrackingInfoUpdatePayload.userErrors is Shopify's BASE
+    // UserError — selecting a `code` field would invalidate the whole
+    // mutation (same trap as refundCreate / orderUpdate).
+    expect(body.query).not.toMatch(/userErrors\s*{[^}]*code/);
+
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.id).toBe(fulfillmentGid);
+      expect(exit.value.trackingNumbers).toEqual(["JD1"]);
+      expect(exit.value.trackingCompany).toBe("DHL");
+    }
+  });
+
+  it("omits company from trackingInfoInput when trackingCompany is null", async () => {
+    reset();
+    const okPayload = {
+      data: {
+        fulfillmentTrackingInfoUpdate: {
+          fulfillment: fulfillmentPayload({ company: null, number: "JD2" }),
+          userErrors: [],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, okPayload)]));
+    const exit = await callUpdate(layer, {
+      trackingNumber: "JD2",
+      trackingCompany: null,
+      notifyCustomer: false,
+    });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    const body = JSON.parse(captures[0]!.body) as {
+      variables: { trackingInfoInput: Record<string, unknown> };
+    };
+    expect(body.variables.trackingInfoInput["number"]).toBe("JD2");
+    expect(body.variables.trackingInfoInput["company"]).toBeUndefined();
+  });
+
+  it("maps userErrors → FulfillmentUpdateFailed", async () => {
+    reset();
+    const errPayload = {
+      data: {
+        fulfillmentTrackingInfoUpdate: {
+          fulfillment: null,
+          userErrors: [
+            {
+              field: ["fulfillmentId"],
+              message: "Fulfillment does not exist",
+            },
+          ],
+        },
+      },
+    };
+    const layer = buildLayer(httpFromSequence([() => respond(200, errPayload)]));
+    const exit = await callUpdate(layer, {
+      trackingNumber: "JD3",
+      trackingCompany: null,
+      notifyCustomer: false,
+    });
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(FulfillmentUpdateFailed);
+      if (err instanceof FulfillmentUpdateFailed) {
+        expect(err.fulfillmentId).toBe(fulfillmentGid);
+        expect(err.message).toBe("Fulfillment does not exist");
+      }
+    }
+  });
+
+  it("fails with FulfillmentUpdateFailed when Shopify returns no fulfillment and no userErrors", async () => {
+    reset();
+    const emptyPayload = {
+      data: {
+        fulfillmentTrackingInfoUpdate: { fulfillment: null, userErrors: [] },
+      },
+    };
+    const layer = buildLayer(
+      httpFromSequence([() => respond(200, emptyPayload)]),
+    );
+    const exit = await callUpdate(layer, {
+      trackingNumber: "JD4",
+      trackingCompany: null,
+      notifyCustomer: false,
+    });
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error: unknown }).error;
+      expect(err).toBeInstanceOf(FulfillmentUpdateFailed);
+    }
   });
 });

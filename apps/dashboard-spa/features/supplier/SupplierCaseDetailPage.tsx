@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  ArrowLeft,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api-client";
@@ -11,9 +16,11 @@ import { useRequirePermission } from "@/lib/require-permission";
 import { cn } from "@/lib/utils";
 import {
   supplierChatMessages,
+  trackingEditFeedback,
   type SupplierChatMessage,
 } from "@/lib/supplier-case-chat";
 import { Link } from "@/components/ui/link";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -46,6 +53,120 @@ const Field = ({
       <dd className="pt-0.5 text-sm">{value}</dd>
     </div>
   ) : null;
+
+// The Tracking row of the context card, editable while the escalation is
+// open: the pencil swaps the value for a two-field form (new number +
+// optional carrier) that writes the correction to the real order. Resolved
+// escalations render the plain read-only Field instead.
+const TrackingField = ({
+  escalationId,
+  current,
+}: {
+  readonly escalationId: string;
+  readonly current: string | null;
+}) => {
+  const ctx = useWorkspaceCtx();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [carrier, setCarrier] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.supplierUpdateTracking(ctx, escalationId, {
+        trackingNumber: trackingNumber.trim(),
+        trackingCompany: carrier.trim() ? carrier.trim() : null,
+      }),
+    onSuccess: (res) => {
+      const feedback = trackingEditFeedback(res.status, res.body);
+      if (feedback.kind !== "success") {
+        toast.warning(feedback.message);
+        return;
+      }
+      toast.success(feedback.message);
+      setEditing(false);
+      void qc.invalidateQueries({
+        queryKey: qk.supplierCase(ctx.workspaceId, escalationId),
+      });
+      void qc.invalidateQueries({
+        queryKey: qk.supplierCases(ctx.workspaceId),
+      });
+    },
+    onError: () => {
+      toast.warning("Something went wrong. Please try again.");
+    },
+  });
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!trackingNumber.trim()) return;
+    save.mutate();
+  };
+
+  return (
+    <div>
+      <dt className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Tracking
+        {!editing ? (
+          <button
+            type="button"
+            aria-label="Change tracking number"
+            title="Change tracking number"
+            onClick={() => {
+              setTrackingNumber(current ?? "");
+              setCarrier("");
+              setEditing(true);
+            }}
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Pencil className="size-3" aria-hidden />
+          </button>
+        ) : null}
+      </dt>
+      {editing ? (
+        <dd className="pt-1.5">
+          <form onSubmit={onSubmit} className="space-y-2">
+            <Input
+              aria-label="New tracking number"
+              required
+              value={trackingNumber}
+              onChange={(e) => setTrackingNumber(e.target.value)}
+              placeholder="New tracking number"
+              className="h-8 text-sm"
+            />
+            <Input
+              aria-label="Carrier (optional)"
+              value={carrier}
+              onChange={(e) => setCarrier(e.target.value)}
+              placeholder="Carrier (optional, e.g. DHL)"
+              className="h-8 text-sm"
+            />
+            <div className="flex gap-2">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={save.isPending || !trackingNumber.trim()}
+              >
+                {save.isPending ? "Saving…" : "Save"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </dd>
+      ) : (
+        <dd className="pt-0.5 text-sm">{current ?? "—"}</dd>
+      )}
+    </div>
+  );
+};
 
 const Bubble = ({ message }: { readonly message: SupplierChatMessage }) => {
   const outbound = message.direction === "outbound";
@@ -245,7 +366,14 @@ export function SupplierCaseDetailPage() {
             </h2>
             <dl className="space-y-3 pt-3">
               <Field label="Order" value={detail.orderRef} />
-              <Field label="Tracking" value={detail.trackingNumber} />
+              {resolved ? (
+                <Field label="Tracking" value={detail.trackingNumber} />
+              ) : (
+                <TrackingField
+                  escalationId={detail.id}
+                  current={detail.trackingNumber}
+                />
+              )}
               <Field label="Ship to" value={shipTo || null} />
             </dl>
           </aside>

@@ -59,3 +59,62 @@ export const supplierChatMessages = (
     },
   ];
 };
+
+export interface TrackingEditFeedback {
+  readonly kind: "success" | "error";
+  readonly message: string;
+}
+
+/**
+ * Friendly feedback for the tracking-edit response (supplier-facing copy —
+ * no store/Shopify jargon, and server error detail is never echoed). Every
+ * "couldn't write it to the order" outcome redirects the supplier to their
+ * written update, which always reaches the support team.
+ */
+export const trackingEditFeedback = (
+  status: number,
+  body: unknown,
+): TrackingEditFeedback => {
+  if (status === 200) {
+    return {
+      kind: "success",
+      message: "Tracking number updated on the order.",
+    };
+  }
+  const rec =
+    typeof body === "object" && body !== null
+      ? (body as Record<string, unknown>)
+      : {};
+  const code = typeof rec["kind"] === "string" ? rec["kind"] : rec["error"];
+  switch (code) {
+    case "already_resolved":
+      return {
+        kind: "error",
+        message:
+          "You've already responded to this case — the tracking number can no longer be changed from here.",
+      };
+    case "order_not_found":
+      return {
+        kind: "error",
+        message:
+          "We couldn't match this case to an order, so the tracking number wasn't changed. Include it in your update below instead.",
+      };
+    case "no_fulfillment":
+      return {
+        kind: "error",
+        message:
+          "This order has no shipment to update yet, so the tracking number wasn't changed. Include it in your update below instead.",
+      };
+    case "ambiguous_fulfillment":
+      return {
+        kind: "error",
+        message:
+          "This order has several shipments and we can't tell which one you mean, so the tracking number wasn't changed. Include it in your update below instead.",
+      };
+    default:
+      return {
+        kind: "error",
+        message: "We couldn't update the tracking number. Please try again.",
+      };
+  }
+};

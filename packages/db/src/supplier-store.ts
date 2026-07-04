@@ -617,6 +617,86 @@ export const recordSupplierUpdate = async (
 };
 
 // ---------------------------------------------------------------------------
+// Supplier tracking edit — bookkeeping after the Shopify write
+// ---------------------------------------------------------------------------
+
+export interface RecordSupplierTrackingUpdateInput {
+  readonly tenantId: string;
+  readonly supplierId: string;
+  readonly escalationId: string;
+  /** The supplier's decision UUID, for the audit actor. */
+  readonly actorUuid: string;
+  readonly fulfillmentId: string;
+  readonly previousTrackingNumber: string | null;
+  readonly trackingNumber: string;
+  readonly trackingCompany: string | null;
+}
+
+/**
+ * Bookkeeping for a supplier's tracking-number edit, AFTER the Shopify
+ * fulfillment write succeeded: re-stamp the escalation's tracking projection
+ * (so the portal and the merchant's escalation view show the new number),
+ * drop the case's stale `liveTrackingStatus` cache (the tracking card would
+ * otherwise keep rendering the OLD number until the next lookup), and write
+ * the audit row — all in ONE transaction (§4: audit shares the tx with the
+ * state it describes). Never called for a foreign escalation — the handler
+ * resolves the escalation through `getEscalationForSupplier` first.
+ */
+export const recordSupplierTrackingUpdate = async (
+  db: DrizzleDb,
+  input: RecordSupplierTrackingUpdateInput,
+): Promise<void> => {
+  await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(caseSupplierEscalations)
+      .set({ trackingNumber: input.trackingNumber })
+      .where(
+        and(
+          eq(caseSupplierEscalations.id, input.escalationId),
+          eq(caseSupplierEscalations.tenantId, input.tenantId),
+          eq(caseSupplierEscalations.supplierId, input.supplierId),
+        ),
+      )
+      .returning({ caseId: caseSupplierEscalations.caseId });
+    const caseId = updated[0]?.caseId;
+    if (!caseId) return;
+
+    const caseRows = await tx
+      .select({ context: cases.context })
+      .from(cases)
+      .where(and(eq(cases.id, caseId), eq(cases.tenantId, input.tenantId)))
+      .limit(1);
+    const caseRow = caseRows[0];
+    if (caseRow) {
+      const context = { ...(caseRow.context as Record<string, unknown>) };
+      if ("liveTrackingStatus" in context) {
+        delete context["liveTrackingStatus"];
+        await tx
+          .update(cases)
+          .set({ context, updatedAt: new Date() })
+          .where(eq(cases.id, caseId));
+      }
+    }
+
+    await tx.insert(auditLog).values({
+      tenantId: input.tenantId,
+      caseId,
+      actorType: "user",
+      actorId: input.actorUuid,
+      action: "supplier.tracking_updated",
+      details: {
+        escalationId: input.escalationId,
+        supplierId: input.supplierId,
+        fulfillmentId: input.fulfillmentId,
+        previousTrackingNumber: input.previousTrackingNumber,
+        trackingNumber: input.trackingNumber,
+        trackingCompany: input.trackingCompany,
+      },
+    });
+  });
+};
+
+// ---------------------------------------------------------------------------
 // Notification outbox (the worker sweep — §10)
 // ---------------------------------------------------------------------------
 

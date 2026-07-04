@@ -27,6 +27,7 @@ import {
   DiscountFailed,
   NetworkError,
   OrderCancelFailed,
+  FulfillmentUpdateFailed,
   OrderUpdateFailed,
   OrderId as makeOrderId,
   OrderNotFound,
@@ -931,6 +932,45 @@ type OrderUpdatePayload = {
       readonly id: string;
       readonly shippingAddress: GqlAddress;
     } | null;
+    // Base `UserError` — `field` + `message` only (no `code`).
+    readonly userErrors: ReadonlyArray<{
+      readonly field: ReadonlyArray<string> | null;
+      readonly message: string;
+    }>;
+  };
+};
+
+// Replaces a fulfillment's tracking info (the supplier portal's "fix the
+// tracking number" edit). Selects the same fulfillment fields as
+// GET_FULFILLMENT_QUERY so the payload reuses `mapFulfillment`. NOTE the
+// payload's `userErrors` is Shopify's base `UserError` — selecting `code`
+// would invalidate the whole mutation (same trap as `orderUpdate` above).
+// Gated by `write_fulfillments`.
+const FULFILLMENT_TRACKING_UPDATE_MUTATION = `
+  mutation FulfillmentTrackingInfoUpdate($fulfillmentId: ID!, $trackingInfoInput: FulfillmentTrackingInput!, $notifyCustomer: Boolean) {
+    fulfillmentTrackingInfoUpdate(
+      fulfillmentId: $fulfillmentId
+      trackingInfoInput: $trackingInfoInput
+      notifyCustomer: $notifyCustomer
+    ) {
+      fulfillment {
+        id
+        displayStatus
+        status
+        trackingInfo { company number url }
+        estimatedDeliveryAt
+        deliveredAt
+        createdAt
+        updatedAt
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+type FulfillmentTrackingUpdatePayload = {
+  readonly fulfillmentTrackingInfoUpdate: {
+    readonly fulfillment: GqlFulfillment | null;
     // Base `UserError` — `field` + `message` only (no `code`).
     readonly userErrors: ReadonlyArray<{
       readonly field: ReadonlyArray<string> | null;
@@ -1895,6 +1935,52 @@ export const ShopifyServiceLive = Layer.effect(
               );
             }
             return stored;
+          }),
+        ),
+
+      updateFulfillmentTracking: (tenantId, input) =>
+        withCreds(tenantId, (creds) =>
+          Effect.gen(function* () {
+            const data = yield* runQuery<FulfillmentTrackingUpdatePayload>(
+              http,
+              creds,
+              tenantId,
+              FULFILLMENT_TRACKING_UPDATE_MUTATION,
+              {
+                fulfillmentId: input.fulfillmentId,
+                trackingInfoInput: {
+                  number: input.trackingNumber,
+                  ...(input.trackingCompany !== null
+                    ? { company: input.trackingCompany }
+                    : {}),
+                },
+                notifyCustomer: input.notifyCustomer,
+              },
+            );
+
+            const payload = data.fulfillmentTrackingInfoUpdate;
+            const firstError = payload.userErrors[0];
+            if (firstError) {
+              return yield* Effect.fail(
+                new FulfillmentUpdateFailed({
+                  fulfillmentId: input.fulfillmentId,
+                  // Base `UserError` carries no code; see the mutation note.
+                  code: null,
+                  message: firstError.message,
+                }),
+              );
+            }
+            if (!payload.fulfillment) {
+              return yield* Effect.fail(
+                new FulfillmentUpdateFailed({
+                  fulfillmentId: input.fulfillmentId,
+                  code: null,
+                  message:
+                    "fulfillmentTrackingInfoUpdate returned no fulfillment and no userErrors",
+                }),
+              );
+            }
+            return mapFulfillment(payload.fulfillment);
           }),
         ),
 

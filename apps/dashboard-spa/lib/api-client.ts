@@ -1356,6 +1356,21 @@ export const api = {
       on403: "return",
     }),
 
+  supplierUpdateTracking: (
+    ctx: CallCtx,
+    id: string,
+    input: {
+      readonly trackingNumber: string;
+      readonly trackingCompany?: string | null;
+    },
+  ): Promise<CallResult> =>
+    call(`/supplier/cases/${encodeURIComponent(id)}/tracking`, {
+      method: "POST",
+      body: input,
+      ctx,
+      on403: "return",
+    }),
+
   inviteSupplier: (
     ctx: CallCtx,
     input: {

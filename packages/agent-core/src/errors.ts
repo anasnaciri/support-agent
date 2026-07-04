@@ -73,6 +73,23 @@ export class OrderUpdateFailed extends Data.TaggedError("OrderUpdateFailed")<{
   readonly message: string;
 }> {}
 
+/**
+ * Shopify refused to update a fulfillment's tracking info (currently: the
+ * supplier portal's tracking-number edit via `fulfillmentTrackingInfoUpdate`).
+ * Common causes (from `userErrors[].message`): the fulfillment no longer
+ * exists, or the app lacks the `write_fulfillments` scope. NOTE the payload's
+ * `userErrors` is Shopify's BASE `UserError` — `field` + `message` only, no
+ * `code` (same trap as `orderUpdate`), so `code` is always null on the Live
+ * path; the field exists for shape parity with the other write failures.
+ */
+export class FulfillmentUpdateFailed extends Data.TaggedError(
+  "FulfillmentUpdateFailed",
+)<{
+  readonly fulfillmentId: string;
+  readonly code: string | null;
+  readonly message: string;
+}> {}
+
 export class ShopifyRateLimited extends Data.TaggedError("ShopifyRateLimited")<{
   readonly retryAfterMs: number;
 }> {}
@@ -176,6 +193,7 @@ export type ShopifyError =
   | DiscountFailed
   | OrderCancelFailed
   | OrderUpdateFailed
+  | FulfillmentUpdateFailed
   | ShopifyRateLimited
   | ShopifyAuthFailed
   | ShopifyAuthMissing

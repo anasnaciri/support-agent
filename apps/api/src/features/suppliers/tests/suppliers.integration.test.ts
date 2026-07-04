@@ -14,6 +14,7 @@ import {
   insertEscalation,
   makeDbClient,
   memberInvitations,
+  recordSupplierTrackingUpdate,
   memberRoleAssignments,
   rolePermissions,
   roles,
@@ -469,6 +470,186 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
         ),
       );
     expect(superseded).toHaveLength(1);
+  });
+
+  // POST /dashboard/supplier/cases/:id/tracking — the supplier fixes the
+  // order's tracking number. The Shopify write itself is unit-tested
+  // (supplier-tracking.test.ts + the provider suite); here we prove the HTTP
+  // walls and the DB bookkeeping.
+  it("guards the tracking edit: 400 bad input, 404 walls, 409 states", async () => {
+    if (!raw) return;
+    const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
+    expect(supplier).not.toBeNull();
+
+    const seed = async (escStatus: "open" | "resolved") => {
+      const caseId = randomUUID();
+      await raw.db.insert(cases).values({
+        id: caseId,
+        tenantId,
+        channel: "email",
+        status: "waiting_for_supplier",
+        currentAgentId: "missing-package-agent",
+        context: { customerEmail: "cust@example.com" },
+      });
+      const { id: escId } = await insertEscalation(raw.db, {
+        tenantId,
+        caseId,
+        supplierId: supplier!.id,
+        problem: "P",
+        orderRef: "#1001",
+        shipCity: null,
+        shipCountry: null,
+        trackingNumber: "TRK-OLD",
+      });
+      if (escStatus === "resolved") {
+        await raw.db
+          .update(caseSupplierEscalations)
+          .set({ status: "resolved" })
+          .where(eq(caseSupplierEscalations.id, escId));
+      }
+      return { caseId, escId };
+    };
+
+    const open = await seed("open");
+
+    // Missing tracking number → 400.
+    const bad = await post(
+      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      {},
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(bad.status).toBe(400);
+
+    // Unknown escalation → 404 (no disclosure).
+    const missing = await post(
+      `/dashboard/supplier/cases/${randomUUID()}/tracking`,
+      { trackingNumber: "TRK-NEW" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(missing.status).toBe(404);
+
+    // A stranger with no supplier binding → 404 (never 403).
+    const stranger = await post(
+      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      { trackingNumber: "TRK-NEW" },
+      strangerUuid,
+      "stranger@acme.com",
+      tenantId,
+    );
+    expect(stranger.status).toBe(404);
+
+    // A resolved escalation is read-only → 409.
+    const resolved = await seed("resolved");
+    const late = await post(
+      `/dashboard/supplier/cases/${resolved.escId}/tracking`,
+      { trackingNumber: "TRK-NEW" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as { error: string }).error).toBe(
+      "already_resolved",
+    );
+
+    // An open escalation whose case has no resolvable order (this test server
+    // has no Shopify creds and the context binds no order) → 409, and no
+    // tracking is stamped.
+    const noOrder = await post(
+      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      { trackingNumber: "TRK-NEW", trackingCompany: "DHL" },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(noOrder.status).toBe(409);
+    expect(((await noOrder.json()) as { kind: string }).kind).toBe(
+      "order_not_found",
+    );
+    const [escRow] = await raw.db
+      .select({ trackingNumber: caseSupplierEscalations.trackingNumber })
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.id, open.escId));
+    expect(escRow?.trackingNumber).toBe("TRK-OLD");
+  });
+
+  // The post-write bookkeeping tx: escalation stamp + stale live-tracking cache
+  // drop + audit row, atomically.
+  it("recordSupplierTrackingUpdate stamps the escalation, drops the stale cache, and audits", async () => {
+    if (!raw) return;
+    const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
+    expect(supplier).not.toBeNull();
+
+    const caseId = randomUUID();
+    await raw.db.insert(cases).values({
+      id: caseId,
+      tenantId,
+      channel: "email",
+      status: "waiting_for_supplier",
+      currentAgentId: "missing-package-agent",
+      context: {
+        customerEmail: "cust@example.com",
+        liveTrackingStatus: { trackingNumber: "TRK-OLD", carrier: "DHL" },
+      },
+    });
+    const { id: escId } = await insertEscalation(raw.db, {
+      tenantId,
+      caseId,
+      supplierId: supplier!.id,
+      problem: "P",
+      orderRef: "#1001",
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: "TRK-OLD",
+    });
+
+    await recordSupplierTrackingUpdate(raw.db, {
+      tenantId,
+      supplierId: supplier!.id,
+      escalationId: escId,
+      actorUuid: supplierUuid,
+      fulfillmentId: "gid://shopify/Fulfillment/1",
+      previousTrackingNumber: "TRK-OLD",
+      trackingNumber: "TRK-NEW",
+      trackingCompany: "UPS",
+    });
+
+    const [escRow] = await raw.db
+      .select({ trackingNumber: caseSupplierEscalations.trackingNumber })
+      .from(caseSupplierEscalations)
+      .where(eq(caseSupplierEscalations.id, escId));
+    expect(escRow?.trackingNumber).toBe("TRK-NEW");
+
+    const [caseRow] = await raw.db
+      .select({ context: cases.context })
+      .from(cases)
+      .where(eq(cases.id, caseId));
+    const context = caseRow?.context as Record<string, unknown>;
+    // The stale lookup cache is gone; unrelated context keys survive.
+    expect(context["liveTrackingStatus"]).toBeUndefined();
+    expect(context["customerEmail"]).toBe("cust@example.com");
+
+    const audits = await raw.db
+      .select({ details: auditLog.details, actorId: auditLog.actorId })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.caseId, caseId),
+          eq(auditLog.action, "supplier.tracking_updated"),
+        ),
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.actorId).toBe(supplierUuid);
+    expect(audits[0]!.details).toMatchObject({
+      escalationId: escId,
+      previousTrackingNumber: "TRK-OLD",
+      trackingNumber: "TRK-NEW",
+      trackingCompany: "UPS",
+    });
   });
 
   it("binds a supplier across ORGS + switches by x-workspace-id (org not consulted)", async () => {

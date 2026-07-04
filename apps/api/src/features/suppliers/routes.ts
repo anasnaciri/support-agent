@@ -7,6 +7,7 @@ import {
   handleSupplierCases,
   handleSupplierInvite,
   handleSupplierSession,
+  handleSupplierTracking,
   handleSupplierUpdate,
   handleSupplierWorkspaces,
 } from "./handlers.js";
@@ -50,6 +51,12 @@ export const registerSupplierRoutes = (
     "/dashboard/supplier/cases/:id/update",
     "Post a supplier update + resolve the escalation",
     handleSupplierUpdate,
+    "supplier.cases.respond",
+  );
+  supplierPost(
+    "/dashboard/supplier/cases/:id/tracking",
+    "Replace the order's fulfillment tracking number (Shopify store write)",
+    handleSupplierTracking,
     "supplier.cases.respond",
   );
 

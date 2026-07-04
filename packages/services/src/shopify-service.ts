@@ -111,6 +111,24 @@ export interface UpdateOrderShippingAddressInput {
 }
 
 /**
+ * Input for `ShopifyService.updateFulfillmentTracking`. Shopify's
+ * `fulfillmentTrackingInfoUpdate` REPLACES the fulfillment's tracking info,
+ * so the caller passes the complete new state: the new `trackingNumber` and
+ * the carrier it ships with. `trackingCompany: null` sends no company (the
+ * caller couldn't name the carrier) — Shopify keeps the number and derives
+ * the tracking URL only for carriers it recognizes from the number alone.
+ * `notifyCustomer` controls Shopify's own shipping-update email; callers on
+ * this platform pass `false` — customer communication goes through the
+ * agent, never a side-channel store email.
+ */
+export interface UpdateFulfillmentTrackingInput {
+  readonly fulfillmentId: string;
+  readonly trackingNumber: string;
+  readonly trackingCompany: string | null;
+  readonly notifyCustomer: boolean;
+}
+
+/**
  * Input for `ShopifyService.createDiscountCode`. Models a single-code
  * "basic" discount (`discountCodeBasicCreate`) issued as a goodwill /
  * service-recovery gesture.
@@ -386,6 +404,22 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     ) => Effect.Effect<ShopifyAddress, ShopifyError>;
 
     /**
+     * Replace a fulfillment's tracking info via Shopify's
+     * `fulfillmentTrackingInfoUpdate` mutation — the supplier portal's
+     * "fix the tracking number" edit (a reship went out under a new
+     * number). A store write under an authenticated supplier's authority,
+     * not an agent tool, so no `PermissionService` consultation — the
+     * supplier-portal permission gate covers it. Returns the fulfillment
+     * as Shopify stored it. Maps `userErrors` → `FulfillmentUpdateFailed`;
+     * structural failures reuse the existing `ShopifyError` tags. Needs
+     * the `write_fulfillments` scope.
+     */
+    readonly updateFulfillmentTracking: (
+      tenantId: TenantId,
+      input: UpdateFulfillmentTrackingInput,
+    ) => Effect.Effect<ShopifyFulfillment, ShopifyError>;
+
+    /**
      * Everything the dashboard's Shopify-style refund modal needs to render
      * and price a refund: refundable line items with per-unit pricing (from
      * Shopify's own `suggestedRefund` calculation, so partial selections price
@@ -648,6 +682,16 @@ export interface ShopifyTestFixtures {
     input: UpdateOrderShippingAddressInput,
   ) => Effect.Effect<ShopifyAddress, ShopifyError>;
   /**
+   * Optional override for `updateFulfillmentTracking`. When unset the
+   * default Test impl synthesises the updated `ShopifyFulfillment` from
+   * the input. Tests that assert the input shape (that the caller forced
+   * `notifyCustomer: false`, targeted the right fulfillment) or simulate
+   * a `FulfillmentUpdateFailed` override this.
+   */
+  readonly updateFulfillmentTracking?: (
+    input: UpdateFulfillmentTrackingInput,
+  ) => Effect.Effect<ShopifyFulfillment, ShopifyError>;
+  /**
    * Per-order refund-context fixture for the dashboard refund modal. When an
    * orderId isn't in the map the default Test impl fails with `OrderNotFound`
    * — the same shape the Live impl produces on a 404.
@@ -826,6 +870,20 @@ export const ShopifyServiceTest = (fixtures: ShopifyTestFixtures = {}) =>
         fixtures.updateOrderShippingAddress
           ? fixtures.updateOrderShippingAddress(input)
           : Effect.succeed(input.address),
+      updateFulfillmentTracking: (_tenantId, input) =>
+        fixtures.updateFulfillmentTracking
+          ? fixtures.updateFulfillmentTracking(input)
+          : Effect.succeed<ShopifyFulfillment>({
+              id: input.fulfillmentId,
+              status: "in_transit",
+              trackingCompany: input.trackingCompany,
+              trackingNumbers: [input.trackingNumber],
+              trackingUrls: [],
+              estimatedDeliveryAt: null,
+              deliveredAt: null,
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+            }),
       cancelOrder: (_tenantId, input) => {
         if (fixtures.cancelOrder) {
           return fixtures.cancelOrder(input);

@@ -1,9 +1,14 @@
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { CaseId, type DomainEvent } from "@support-agent/agent-core";
-import { makeEnqueuedWorkflowEvent } from "@support-agent/services";
+import { Effect } from "effect";
+import { CaseId, TenantId, type DomainEvent } from "@support-agent/agent-core";
+import {
+  ShopifyService,
+  makeEnqueuedWorkflowEvent,
+} from "@support-agent/services";
 import {
   bindSupplierUserAllTenants,
+  caseContextForTenant,
   createInvitation,
   createSupplier,
   ensureActingOwnerInOpenMode,
@@ -16,8 +21,12 @@ import {
   listSupplierWorkspacesForUser,
   listTenantsWithPendingSupplierInvitationForEmail,
   reconcileInvitation,
+  recordSupplierTrackingUpdate,
   recordSupplierUpdate,
 } from "@support-agent/db";
+import { resolveOrderForContext } from "../dashboard/shopify-panels.js";
+import { describeShopifyError } from "../dashboard/shopify-error-detail.js";
+import { updateSupplierTracking } from "./supplier-tracking.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { bodyStr, sendJson } from "../../platform/http.js";
 import {
@@ -183,6 +192,146 @@ export const handleSupplierUpdate = async (
     resumed: result.resumed,
     ticked: true,
   });
+};
+
+// POST /dashboard/supplier/cases/:id/tracking — the supplier fixes the order's
+// tracking number (a reship went out under a new number, or the carrier
+// re-labelled the parcel). Unlike the free-text update, this WRITES TO THE
+// STORE: the case's resolved order gets its fulfillment tracking replaced via
+// Shopify's `fulfillmentTrackingInfoUpdate`, under the authenticated
+// supplier's authority. It does NOT resolve the escalation — the supplier
+// still posts their update, which is what re-engages the agent. The
+// orchestration + fulfillment picking live in the unit-tested
+// `updateSupplierTracking` core; this handler owns the authz walls (404 for a
+// foreign escalation, 409 once resolved) and wires the live services.
+export const handleSupplierTracking = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateSupplier(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
+  const userId = auth.userId;
+  const { id } = req.params as { id: string };
+  const trackingNumber = bodyStr(req, "trackingNumber");
+  if (!trackingNumber) return sendJson(res, 400, { error: "invalid_request" });
+  const trackingCompany = bodyStr(req, "trackingCompany") ?? null;
+
+  // Resolve the escalation through the supplier binding — a foreign or
+  // unknown escalation is a 404 (never 403; don't disclose existence).
+  const pre = await runWithDb(layer, async (db) => {
+    const supplier = await getSupplierForUser(db, auth.tenantId, userId);
+    if (!supplier) return null;
+    const escalation = await getEscalationForSupplier(db, supplier.id, id);
+    if (!escalation) return null;
+    const caseRow = await caseContextForTenant(
+      db,
+      auth.tenantId,
+      escalation.caseId,
+    );
+    return {
+      supplierId: supplier.id,
+      escalation,
+      context: (caseRow?.context ?? {}) as Record<string, unknown>,
+    };
+  });
+  if (!pre) return sendJson(res, 404, { error: "not_found" });
+  if (pre.escalation.status !== "open") {
+    return sendJson(res, 409, { error: "already_resolved" });
+  }
+
+  const tenantId = TenantId(auth.tenantId);
+  const outcome = await updateSupplierTracking({
+    trackingNumber,
+    trackingCompany,
+    currentTrackingNumber: pre.escalation.trackingNumber,
+    loadFulfillments: () =>
+      Effect.runPromise(
+        Effect.provide(
+          resolveOrderForContext(tenantId, pre.context).pipe(
+            Effect.map((order) =>
+              order
+                ? order.fulfillments.map((f) => ({
+                    id: f.id,
+                    trackingNumbers: f.trackingNumbers,
+                    trackingCompany: f.trackingCompany,
+                  }))
+                : null,
+            ),
+          ),
+          layer,
+        ),
+      ),
+    update: async (args) => {
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const shopify = yield* ShopifyService;
+            return yield* shopify
+              .updateFulfillmentTracking(tenantId, {
+                fulfillmentId: args.fulfillmentId,
+                trackingNumber: args.trackingNumber,
+                trackingCompany: args.trackingCompany,
+                // Customer communication goes through the agent's reply once
+                // the supplier posts their update — never a side-channel
+                // Shopify shipping-update email.
+                notifyCustomer: false,
+              })
+              .pipe(Effect.either);
+          }),
+          layer,
+        ),
+      );
+      if (result._tag === "Left") {
+        const detail = describeShopifyError(result.left);
+        req.log.error(
+          {
+            err: result.left,
+            shopifyErrorTag: result.left._tag,
+            tenantId,
+            escalationId: id,
+            fulfillmentId: args.fulfillmentId,
+          },
+          `supplier tracking edit: Shopify fulfillmentTrackingInfoUpdate failed — ${detail}`,
+        );
+        throw new Error(detail);
+      }
+      return {
+        trackingNumbers: result.right.trackingNumbers,
+        trackingCompany: result.right.trackingCompany,
+      };
+    },
+    recordUpdated: (args) =>
+      runWithDb(layer, (db) =>
+        recordSupplierTrackingUpdate(db, {
+          tenantId: auth.tenantId,
+          supplierId: pre.supplierId,
+          escalationId: id,
+          actorUuid: userId,
+          fulfillmentId: args.fulfillmentId,
+          previousTrackingNumber: pre.escalation.trackingNumber,
+          trackingNumber: args.trackingNumber,
+          trackingCompany: args.trackingCompany,
+        }),
+      ),
+  });
+
+  // 409 for every "can't act on this order" outcome — the escalation itself
+  // was found (that wall already returned 404 above); the body's `kind` tells
+  // the portal which friendly message to show.
+  const status =
+    outcome.kind === "saved"
+      ? 200
+      : outcome.kind === "update_failed"
+        ? 502
+        : 409;
+  return sendJson(
+    res,
+    status,
+    outcome.kind === "saved" ? { ok: true, ...outcome } : outcome,
+  );
 };
 
 // GET /dashboard/supplier/workspaces — every merchant workspace the signed-in

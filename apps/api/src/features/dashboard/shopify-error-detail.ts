@@ -36,6 +36,8 @@ export const describeShopifyError = (e: ShopifyError): string => {
       return `cancel rejected${e.code ? ` [${e.code}]` : ""}: ${e.message}`;
     case "OrderUpdateFailed":
       return `order update rejected${e.code ? ` [${e.code}]` : ""}: ${e.message}`;
+    case "FulfillmentUpdateFailed":
+      return `tracking update rejected${e.code ? ` [${e.code}]` : ""}: ${e.message}`;
     case "ShopifyRateLimited":
       return "Shopify rate limited";
     case "ShopifyAuthFailed":
