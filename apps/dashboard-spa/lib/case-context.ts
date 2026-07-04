@@ -140,22 +140,33 @@ export interface ContextCardOrder {
  * doesn't match its name/confirmation number (or the order couldn't be
  * fetched, so a match is unprovable). With no bound order the Order panel
  * already shows the quoted ref; when it matches, it's redundant.
+ *
+ * `order` is tri-state: `"loading"` means the order fetch hasn't settled yet —
+ * the heads-up stays hidden (a pending fetch proves nothing, and showing it
+ * would make the row pop out once the order arrives and matches); `null` means
+ * the fetch settled without an order, so a match is unprovable and the
+ * heads-up shows.
  */
 export const buildContextCardRows = (
   context: Readonly<Record<string, unknown>>,
-  order: ContextCardOrder | null,
+  order: ContextCardOrder | "loading" | null,
 ): ContextRow[] => {
   const quoted = asString(context["quotedOrderRef"]);
   const bound = asString(context["identifiedOrderId"]);
+  const settled = order === "loading" ? null : order;
   const quotedMatchesOrder =
     quoted !== null &&
-    [order?.name, order?.confirmationNumber].some(
+    [settled?.name, settled?.confirmationNumber].some(
       (ref) =>
         typeof ref === "string" &&
         ref.length > 0 &&
         normalizeOrderRef(ref) === normalizeOrderRef(quoted),
     );
-  const showQuoted = quoted !== null && bound !== null && !quotedMatchesOrder;
+  const showQuoted =
+    quoted !== null &&
+    bound !== null &&
+    order !== "loading" &&
+    !quotedMatchesOrder;
   return buildContextRows(context).filter(
     (row) =>
       CARD_KEYS.has(row.key) || (row.key === "quotedOrderRef" && showQuoted),

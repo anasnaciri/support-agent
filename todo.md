@@ -338,6 +338,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Dashboard And SPA
 
+- [x] Context card no longer flashes the "Customer-quoted order" heads-up on
+      mount: `buildContextCardRows` order arg is tri-state (`"loading"` while
+      the Shopify fetch is pending suppresses the row; `null` = settled-without
+      -order keeps the unprovable-match heads-up). Case page passes
+      `shopifyQuery.isPending ? "loading" : …`.
 - [x] Context card shows the supplier's answer: `context.supplierUpdate`
       (stamped by `recordSupplierUpdate`) renders as bespoke "Supplier note" /
       "Supplier suggests" multiline rows in `lib/case-context.ts` instead of

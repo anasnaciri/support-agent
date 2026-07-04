@@ -281,4 +281,19 @@ describe("buildContextCardRows", () => {
     );
     expect(rows.map((r) => r.key)).toEqual(["quotedOrderRef"]);
   });
+
+  it("hides the quoted order ref while the bound order is still loading — no flicker", () => {
+    // On mount the case detail resolves before the Shopify order fetch; a
+    // pending fetch must NOT be treated like a failed one, or the heads-up row
+    // appears and then pops out once the order arrives and matches.
+    const rows = buildContextCardRows(
+      {
+        quotedOrderRef: "#1042",
+        identifiedOrderId: "gid://shopify/Order/123",
+        notes: "n",
+      },
+      "loading",
+    );
+    expect(rows.map((r) => r.key)).toEqual(["notes"]);
+  });
 });

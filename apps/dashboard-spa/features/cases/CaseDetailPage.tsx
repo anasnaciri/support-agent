@@ -376,11 +376,15 @@ export function CaseDetailPage() {
 
   // The floating card's rows: the customer's ask / evidence / risk / notes,
   // plus the quoted order ref only as a mis-quote heads-up. Empty → no card.
+  // While the Shopify lookup is in flight, pass "loading" — not null — so the
+  // heads-up row doesn't flash and then pop out once the order arrives.
   const contextCardRows = buildContextCardRows(
     context,
-    order
-      ? { name: order.name, confirmationNumber: order.confirmationNumber }
-      : null,
+    shopifyQuery.isPending
+      ? "loading"
+      : order
+        ? { name: order.name, confirmationNumber: order.confirmationNumber }
+        : null,
   );
   const hasContextCard = contextCardRows.length > 0;
   const showContext = contextOpen && hasContextCard;
