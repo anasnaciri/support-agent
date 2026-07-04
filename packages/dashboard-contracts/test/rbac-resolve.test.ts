@@ -43,27 +43,27 @@ describe("effectivePermissions", () => {
     }
   });
 
-  it("expands the implied closure (cases.reply ⇒ cases.view)", () => {
+  it("expands the implied closure (tickets.reply ⇒ tickets.view)", () => {
     const perms = effectivePermissions({
       isOwner: false,
-      grantedIds: ["cases.reply"],
+      grantedIds: ["tickets.reply"],
     });
-    expect(perms.has("cases.reply")).toBe(true);
-    expect(perms.has("cases.view")).toBe(true);
+    expect(perms.has("tickets.reply")).toBe(true);
+    expect(perms.has("tickets.view")).toBe(true);
     // No unrelated permission leaks in.
     expect(perms.has("audit.view")).toBe(false);
   });
 
-  it("expands orders.edit ⇒ cases.view (a store write performed from a case)", () => {
+  it("expands orders.edit ⇒ tickets.view (a store write performed from a ticket)", () => {
     const perms = effectivePermissions({
       isOwner: false,
       grantedIds: ["orders.edit"],
     });
     expect(perms.has("orders.edit")).toBe(true);
-    expect(perms.has("cases.view")).toBe(true);
-    // A store write never rides along with case-state correction (or vice
+    expect(perms.has("tickets.view")).toBe(true);
+    // A store write never rides along with ticket-state correction (or vice
     // versa) — a role must grant each explicitly.
-    expect(perms.has("cases.set_status")).toBe(false);
+    expect(perms.has("tickets.set_status")).toBe(false);
   });
 
   it("expands approvals.decide ⇒ approvals.view and knowledge.manage ⇒ knowledge.view", () => {
@@ -91,9 +91,9 @@ describe("effectivePermissions", () => {
   it("ignores unknown ids", () => {
     const perms = effectivePermissions({
       isOwner: false,
-      grantedIds: ["cases.view", "not.a.real.perm"],
+      grantedIds: ["tickets.view", "not.a.real.perm"],
     });
-    expect(perms.has("cases.view")).toBe(true);
+    expect(perms.has("tickets.view")).toBe(true);
     expect((perms as ReadonlySet<string>).has("not.a.real.perm")).toBe(false);
   });
 });
@@ -102,9 +102,9 @@ describe("hasPermission", () => {
   it("returns true only for a present permission", () => {
     const perms = effectivePermissions({
       isOwner: false,
-      grantedIds: ["cases.reply"],
+      grantedIds: ["tickets.reply"],
     });
-    expect(hasPermission(perms, "cases.view" as RbacPermissionId)).toBe(true);
+    expect(hasPermission(perms, "tickets.view" as RbacPermissionId)).toBe(true);
     expect(hasPermission(perms, "settings.llm" as RbacPermissionId)).toBe(false);
   });
 });

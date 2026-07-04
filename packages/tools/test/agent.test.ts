@@ -2,7 +2,7 @@ import { Effect, Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   type ToolContext,
 } from "@support-agent/agent-core";
@@ -10,7 +10,7 @@ import { agentHandoff } from "../src/index.js";
 
 const baseCtx: ToolContext = {
   tenantId: TenantId("t1"),
-  caseId: CaseId("c1"),
+  ticketId: TicketId("c1"),
   agentId: AgentId("support-triage"),
   callId: "call_1",
   attemptNumber: 1,

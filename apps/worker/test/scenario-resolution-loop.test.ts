@@ -25,8 +25,8 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   ConversationServiceTest,
   decideApprovalBundle,
   LLMServiceScripted,
@@ -83,7 +83,7 @@ const loopAgent = (
     "merchant.notify",
     "refund.recommend",
     "conversation.reply",
-    "case.update_context",
+    "ticket.update_context",
   ],
   permissionOverrides: {
     "merchant.notify": "ask",
@@ -102,7 +102,7 @@ const makeLayer = (
   extras: ReadonlyArray<Layer.Layer<never, never, never>> = [],
 ) => {
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest([agent]),
@@ -121,7 +121,7 @@ const makeLayer = (
   return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 };
 
-const driveCase = (
+const driveTicket = (
   agent: AgentConfig,
   script: ReadonlyArray<LLMDecision>,
   extras: ReadonlyArray<Layer.Layer<never, never, never>> = [],
@@ -130,7 +130,7 @@ const driveCase = (
     Effect.provide(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const audit = yield* AuditLogService;
 
@@ -144,7 +144,7 @@ const driveCase = (
 
         const result = yield* runtime.handleEvent({
           type: "customer.replied",
-          caseId: created.id,
+          ticketId: created.id,
           payload: {
             threadId: "thread-x" as never,
             messageId: "msg-1",
@@ -160,7 +160,7 @@ const driveCase = (
 
         const fetched = yield* repo.getById(created.id);
         const pending = yield* approvals.listPending(TenantId(TENANT));
-        const entries = yield* audit.forCase(created.id);
+        const entries = yield* audit.forTicket(created.id);
         return { result, fetched, pending, entries };
       }),
       makeLayer(agent, script, extras),
@@ -202,7 +202,7 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
       },
     ];
 
-    const out = await driveCase(loopAgent(), script);
+    const out = await driveTicket(loopAgent(), script);
 
     // The loop did NOT stop at the first gated tool — all three were queued.
     expect(out.pending).toHaveLength(3);
@@ -211,7 +211,7 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
     );
     for (const a of out.pending) {
       expect(a.status).toBe("pending");
-      expect(a.caseId).toBe(out.fetched.id);
+      expect(a.ticketId).toBe(out.fetched.id);
     }
     // End-of-loop: one bundle park, not three separate parks.
     expect(out.result.type).toBe("PausedWaitingForApproval");
@@ -240,7 +240,7 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
       { type: "final_message", text: "Replied to the customer." },
     ];
 
-    const out = await driveCase(autoReplyAgent, script);
+    const out = await driveTicket(autoReplyAgent, script);
 
     expect(out.pending).toHaveLength(0);
     expect(out.result.type).toBe("Completed");
@@ -252,13 +252,13 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
       {
         type: "tool_call",
         callId: "n0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: "looked into it but did nothing actionable" },
       },
       { type: "final_message", text: "Nothing to do." },
     ];
 
-    const out = await driveCase(loopAgent(), script);
+    const out = await driveTicket(loopAgent(), script);
 
     expect(out.pending).toHaveLength(0);
     expect(out.result.type).toBe("HumanTakeoverRequired");
@@ -274,7 +274,7 @@ type QueuedAction = { readonly tool: string; readonly input: unknown };
 const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
   const convo = makeConversationServiceTest({});
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest([loopAgent()]),
@@ -295,7 +295,7 @@ const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
     Effect.provide(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
 
         const created = yield* repo.create({
@@ -306,7 +306,7 @@ const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
           threadId: "thread-x" as never,
           mailbox: "support@store.test",
         });
-        // Park the case as if the autonomous loop had queued the bundle.
+        // Park the ticket as if the autonomous loop had queued the bundle.
         yield* repo.transitionStatus(created.id, "in_progress", {
           tenantId: TenantId(TENANT),
           reason: "test setup",
@@ -321,7 +321,7 @@ const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
         for (const a of actions) {
           const approval = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AgentId("scenario-resolution-agent"),
             tool: a.tool,
             proposedInput: a.input,
@@ -341,7 +341,7 @@ const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
         const result = yield* runtime.handleEvent({
           type: "approval.approved",
           approvalId: ids[0] as never,
-          caseId: created.id,
+          ticketId: created.id,
           managerId: UserId("manager-1"),
         });
 
@@ -368,7 +368,7 @@ const replyInput = (draftId: string, toEmail: string) => ({
 // ------------------------------------------------------------
 const SCENARIO_KEY = "delivery_issue";
 
-const driveScenarioCase = (
+const driveScenarioTicket = (
   resolutionPolicy: ResolutionPolicy,
   script: ReadonlyArray<LLMDecision>,
 ) => {
@@ -382,7 +382,7 @@ const driveScenarioCase = (
     resolutionPolicy,
   });
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest([scenarioResolutionAgent]),
@@ -405,7 +405,7 @@ const driveScenarioCase = (
     Effect.provide(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
 
         const created = yield* repo.create({
@@ -422,7 +422,7 @@ const driveScenarioCase = (
 
         const result = yield* runtime.handleEvent({
           type: "customer.replied",
-          caseId: created.id,
+          ticketId: created.id,
           payload: {
             threadId: "thread-x" as never,
             messageId: "msg-1",
@@ -470,7 +470,7 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
         },
       ],
     };
-    const out = await driveScenarioCase(policy, [
+    const out = await driveScenarioTicket(policy, [
       refundCall,
       { type: "final_message", text: "Queued a refund for the damaged order." },
     ]);
@@ -496,13 +496,13 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
         },
       ],
     };
-    const out = await driveScenarioCase(policy, [
+    const out = await driveScenarioTicket(policy, [
       refundCall,
       { type: "final_message", text: "Queued a refund for the order." },
     ]);
 
     // No per-scenario clamp: refund.create is governed by the agent + refund
-    // policy (ask), so it QUEUES instead of being denied — the case parks for
+    // policy (ask), so it QUEUES instead of being denied — the ticket parks for
     // bundle approval rather than escalating to a human.
     expect(out.pending.map((a) => a.tool)).toEqual(["refund.create"]);
     expect(out.result.type).toBe("PausedWaitingForApproval");
@@ -542,7 +542,7 @@ const driveTriage = (
     resolutionAgentEnabled,
   });
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest([supportTriage, scenarioResolutionAgent, orderStatusAgent]),
@@ -565,7 +565,7 @@ const driveTriage = (
     Effect.provide(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
 
         const created = yield* repo.create({
@@ -578,7 +578,7 @@ const driveTriage = (
 
         const result = yield* runtime.handleEvent({
           type: "customer.replied",
-          caseId: created.id,
+          ticketId: created.id,
           payload: {
             threadId: "thread-x" as never,
             messageId: "msg-1",
@@ -609,7 +609,7 @@ describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => 
       {
         type: "tool_call",
         callId: "s0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           scenarioKey: "refund_request",
@@ -647,7 +647,7 @@ describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => 
       {
         type: "tool_call",
         callId: "t0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { classification: "refund_request", notes: "wants a refund" },
       },
       {
@@ -663,7 +663,7 @@ describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => 
     ]);
 
     // Flag off → scenario-resolution-agent is NOT in triage's handoffs → the
-    // handoff is rejected, so the case never bound to it. A routing agent that
+    // handoff is rejected, so the ticket never bound to it. A routing agent that
     // finishes without a successful handoff parks for a human.
     expect(out.fetched.currentAgentId).toBe("support-triage");
     expect(out.result.type).toBe("HumanTakeoverRequired");
@@ -686,7 +686,7 @@ describe("scenario-resolution autonomous loop — bundle resume (slice 4d)", () 
     ]);
   });
 
-  it("stops the bundle on the first failure and parks the case for a human", async () => {
+  it("stops the bundle on the first failure and parks the ticket for a human", async () => {
     // The FIRST action is addressed to the connected mailbox → a deterministic
     // recipient-guard reject; the second must NOT run.
     const out = await seedAndResume([
@@ -741,7 +741,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
       {
         type: "tool_call",
         callId: "s-pick",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           scenarioKey: "refund_request",
@@ -779,7 +779,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, scenarioResolutionAgent]),
@@ -802,7 +802,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -816,7 +816,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
           // TICK 1 — inbound customer message drives triage → scenario → queue.
           const tick1 = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-1",
@@ -835,7 +835,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
           // OPERATOR approves the whole bundle (what the dashboard endpoint does).
           const bundle = yield* decideApprovalBundle({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             action: "approve",
             managerId: UserId("manager-1"),
           });
@@ -865,14 +865,14 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
     // One bundle approval decided both rows + emitted one event.
     expect(out.bundle.decidedCount).toBe(2);
     expect(out.bundle.event?.type).toBe("approval.approved");
-    // The resume executed the bundle and resolved the case.
+    // The resume executed the bundle and resolved the ticket.
     expect(out.tick2?.type).toBe("Completed");
     expect(out.final.status).toBe("resolved");
   });
 });
 
 // ------------------------------------------------------------
-// Per-action approval — a case with PENDING actions never resolves; an
+// Per-action approval — a ticket with PENDING actions never resolves; an
 // approved supplier escalation waits on the supplier (not resolution).
 // ------------------------------------------------------------
 const EXPIRES = new Date(Date.now() + 60_000);
@@ -884,7 +884,7 @@ const partialLayer = (
   extra: ReadonlyArray<Layer.Layer<never, never, never>> = [],
 ) => {
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest([loopAgent()]),
@@ -903,7 +903,7 @@ const partialLayer = (
   return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 };
 
-const seedParkedCase = (repo: typeof CaseRepository.Service, threadId = "thread-x") =>
+const seedParkedTicket = (repo: typeof TicketRepository.Service, threadId = "thread-x") =>
   Effect.gen(function* () {
     const created = yield* repo.create({
       tenantId: TenantId(TENANT),
@@ -924,20 +924,20 @@ const seedParkedCase = (repo: typeof CaseRepository.Service, threadId = "thread-
     return created;
   });
 
-describe("per-action approval — no case with pending actions resolves", () => {
-  it("executes an approved action but keeps the case parked while another is pending, then resolves once the last is approved", async () => {
+describe("per-action approval — no ticket with pending actions resolves", () => {
+  it("executes an approved action but keeps the ticket parked while another is pending, then resolves once the last is approved", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
-          const created = yield* seedParkedCase(repo);
+          const created = yield* seedParkedTicket(repo);
           const refund = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AGENT_ID,
             tool: "refund.create",
             proposedInput: {
@@ -951,7 +951,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
           });
           const reply = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AGENT_ID,
             tool: "conversation.reply",
             proposedInput: replyInput("a", "cust@example.com"),
@@ -969,7 +969,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
           const r1 = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: refund.id as never,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: MGR,
           });
           const afterFirst = yield* repo.getById(created.id);
@@ -987,7 +987,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
           const r2 = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: reply.id as never,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: MGR,
           });
           const final = yield* repo.getById(created.id);
@@ -1004,14 +1004,14 @@ describe("per-action approval — no case with pending actions resolves", () => 
       ),
     );
 
-    // Refund executed, but the case is NOT resolved — the reply still pends.
+    // Refund executed, but the ticket is NOT resolved — the reply still pends.
     expect(out.r1.type).toBe("PausedWaitingForApproval");
     expect(out.afterFirst.status).toBe("waiting_for_approval");
     expect(out.pendingAfterFirst.map((a) => a.tool)).toEqual([
       "conversation.reply",
     ]);
     expect(out.sentAfterFirst).toBe(0);
-    // Approving the last pending action resolves the case + sends the reply.
+    // Approving the last pending action resolves the ticket + sends the reply.
     expect(out.r2.type).toBe("Completed");
     expect(out.final.status).toBe("resolved");
     expect(convo.handle.sent.map((s) => (s.input as { draftId: string }).draftId)).toEqual([
@@ -1025,13 +1025,13 @@ describe("per-action approval — no case with pending actions resolves", () => 
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
-          const created = yield* seedParkedCase(repo);
+          const created = yield* seedParkedTicket(repo);
           const esc = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AGENT_ID,
             tool: "supplier.escalate",
             proposedInput: { problem: "unit damaged in transit, please reship" },
@@ -1047,7 +1047,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
           const result = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: esc.id as never,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: MGR,
           });
           const final = yield* repo.getById(created.id);
@@ -1061,28 +1061,28 @@ describe("per-action approval — no case with pending actions resolves", () => 
     expect(out.final.status).toBe("waiting_for_supplier");
   });
 
-  // Concurrent waits, resume leg: the case still has an OPEN escalation (from a
+  // Concurrent waits, resume leg: the ticket still has an OPEN escalation (from a
   // PRIOR tick) while a reply approval was pending. Approving the last reply
-  // must NOT resolve the case out from under the still-open supplier wait — the
-  // row-derived `hasOpenEscalationForCase` check parks it `waiting_for_supplier`
+  // must NOT resolve the ticket out from under the still-open supplier wait — the
+  // row-derived `hasOpenEscalationForTicket` check parks it `waiting_for_supplier`
   // even though THIS bundle ran no escalate.
-  it("parks waiting_for_supplier (not resolved) when the case still has an open escalation, even if the approved bundle ran no escalate", async () => {
+  it("parks waiting_for_supplier (not resolved) when the ticket still has an open escalation, even if the approved bundle ran no escalate", async () => {
     const convo = makeConversationServiceTest({});
     // Mutable: the fixture reads it at call-time, so we push the real (random)
-    // case id in after seeding — the layer is built before the case exists.
+    // ticket id in after seeding — the layer is built before the ticket exists.
     const openIds: string[] = [];
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
-          const created = yield* seedParkedCase(repo);
+          const created = yield* seedParkedTicket(repo);
           openIds.push(created.id as string);
           const reply = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AGENT_ID,
             tool: "conversation.reply",
             proposedInput: replyInput("draft-r", "cust@example.com"),
@@ -1098,40 +1098,40 @@ describe("per-action approval — no case with pending actions resolves", () => 
           const result = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: reply.id as never,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: MGR,
           });
           const final = yield* repo.getById(created.id);
           return { result, final, sent: convo.handle.sent.length };
         }),
         partialLayer(convo, [
-          SupplierEscalationServiceTest({ openEscalationCaseIds: openIds }),
+          SupplierEscalationServiceTest({ openEscalationTicketIds: openIds }),
         ]),
       ),
     );
 
     // The approved reply still sent...
     expect(out.sent).toBe(1);
-    // ...but the case parks on the supplier, it does NOT resolve.
+    // ...but the ticket parks on the supplier, it does NOT resolve.
     expect(out.result.type).toBe("PausedWaitingForSupplier");
     expect(out.final.status).toBe("waiting_for_supplier");
   });
 
-  // Back-compat: with the service present but NO open escalation for the case,
+  // Back-compat: with the service present but NO open escalation for the ticket,
   // approving the last action resolves as before (row-derived, not blanket).
-  it("resolves when the supplier service is present but the case has no open escalation", async () => {
+  it("resolves when the supplier service is present but the ticket has no open escalation", async () => {
     const convo = makeConversationServiceTest({});
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
-          const created = yield* seedParkedCase(repo);
+          const created = yield* seedParkedTicket(repo);
           const reply = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AGENT_ID,
             tool: "conversation.reply",
             proposedInput: replyInput("draft-r2", "cust@example.com"),
@@ -1147,7 +1147,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
           const result = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: reply.id as never,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: MGR,
           });
           const final = yield* repo.getById(created.id);
@@ -1167,7 +1167,7 @@ describe("per-action approval — no case with pending actions resolves", () => 
 // (primaryWaitStatus precedence — the merchant is the next unblocker), or the
 // queued approval is orphaned: no waiting_for_approval status, no approval
 // email/ping, park guard 2.9 never fires, and a later dashboard approval
-// would resolve the case out from under the open escalation.
+// would resolve the ticket out from under the open escalation.
 describe("concurrent waits — escalate with a queued approval parks the bundle", () => {
   const escalatingLoopAgent = loopAgent({
     tools: ["conversation.reply", "supplier.escalate"],
@@ -1200,7 +1200,7 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
       { type: "final_message", text: "Escalated and drafted the reply." },
     ];
 
-    const out = await driveCase(escalatingLoopAgent, script, [
+    const out = await driveTicket(escalatingLoopAgent, script, [
       SupplierEscalationServiceTest({}),
     ]);
 
@@ -1211,7 +1211,7 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
     expect(out.pending[0]!.tool).toBe("conversation.reply");
     // Bundle-park audit written (the approval email/ping path).
     expect(out.entries.map((e) => e.action)).toContain(
-      "case.waiting_for_approval",
+      "ticket.waiting_for_approval",
     );
     // The escalation itself still happened (tool invoked before the park).
     expect(
@@ -1235,7 +1235,7 @@ describe("concurrent waits — escalate with a queued approval parks the bundle"
       },
     ];
 
-    const out = await driveCase(escalatingLoopAgent, script, [
+    const out = await driveTicket(escalatingLoopAgent, script, [
       SupplierEscalationServiceTest({}),
     ]);
 
@@ -1262,7 +1262,7 @@ describe("re-engagement supersedes stale drafts", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -1276,7 +1276,7 @@ describe("re-engagement supersedes stale drafts", () => {
           // A draft left pending by a PRIOR run (the auto-escalate orphan).
           const stale = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AgentId("scenario-resolution-agent"),
             tool: "conversation.reply",
             proposedInput: replyInput("stale", "cust@example.com"),
@@ -1288,7 +1288,7 @@ describe("re-engagement supersedes stale drafts", () => {
           // The agent re-engages and drafts a fresh reply.
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-2",
@@ -1334,7 +1334,7 @@ describe("re-engagement supersedes stale drafts", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -1348,7 +1348,7 @@ describe("re-engagement supersedes stale drafts", () => {
           // A pending refund from a prior decision — NOT a draft.
           const refund = yield* approvals.create({
             tenantId: TenantId(TENANT),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: AgentId("scenario-resolution-agent"),
             tool: "refund.create",
             proposedInput: {
@@ -1363,7 +1363,7 @@ describe("re-engagement supersedes stale drafts", () => {
 
           yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-3",

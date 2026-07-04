@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   UserId,
 } from "@support-agent/agent-core";
@@ -23,7 +23,7 @@ const fixedFuture = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 const sampleCreate = {
   tenantId: TenantId("t1"),
-  caseId: CaseId("c1"),
+  ticketId: TicketId("c1"),
   agentId: AgentId("support-triage"),
   tool: "refund.create",
   proposedInput: { amountCents: 2000 },

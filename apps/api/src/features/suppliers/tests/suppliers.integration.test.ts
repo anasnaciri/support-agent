@@ -4,8 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   approvals,
   auditLog,
-  caseSupplierEscalations,
-  cases,
+  ticketSupplierEscalations,
+  tickets,
   createInvitation,
   createSupplier,
   ensureSupplierRole,
@@ -38,7 +38,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
   const org = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
-  // A SECOND merchant under a DIFFERENT WorkOS org — the cross-org supplier case.
+  // A SECOND merchant under a DIFFERENT WorkOS org — the cross-org supplier ticket.
   const orgB = `org_${randomUUID().slice(0, 8)}`;
   const tenantB = randomUUID();
 
@@ -141,13 +141,13 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
   const cleanupTenant = async (id: string): Promise<void> => {
     if (!raw) return;
-    // children first (cases cascade escalations; tenant cascade does the rest).
-    // approvals.case_id is NO ACTION, so seeded approval rows go before cases.
+    // children first (tickets cascade escalations; tenant cascade does the rest).
+    // approvals.ticket_id is NO ACTION, so seeded approval rows go before tickets.
     await raw.db.delete(approvals).where(eq(approvals.tenantId, id));
-    await raw.db.delete(cases).where(eq(cases.tenantId, id));
+    await raw.db.delete(tickets).where(eq(tickets.tenantId, id));
     await raw.db
-      .delete(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.tenantId, id));
+      .delete(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.tenantId, id));
     await raw.db.delete(suppliers).where(eq(suppliers.tenantId, id));
     await raw.db
       .delete(memberInvitations)
@@ -198,16 +198,16 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     };
     expect(sess.assigned).toBe(true);
     expect([...sess.permissions].sort()).toEqual([
-      "supplier.cases.respond",
-      "supplier.cases.view",
+      "supplier.tickets.respond",
+      "supplier.tickets.view",
     ]);
 
-    // 3) Seed a parked case + an escalation for this supplier.
+    // 3) Seed a parked ticket + an escalation for this supplier.
     const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
     expect(supplier).not.toBeNull();
-    const caseId = randomUUID();
-    await raw.db.insert(cases).values({
-      id: caseId,
+    const ticketId = randomUUID();
+    await raw.db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "waiting_for_supplier",
@@ -219,7 +219,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
     const { id: escId } = await insertEscalation(raw.db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplier!.id,
       problem: "Order #1001 to Berlin, DE stuck 12 days — please chase or reship",
       orderRef: "#1001",
@@ -231,18 +231,18 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     // 4) Supplier sees ONLY the minimal projection — no customer PII. Pins the
     // active workspace by header (binding-anchored auth requires x-workspace-id).
     const list = await get(
-      "/dashboard/supplier/cases",
+      "/dashboard/supplier/tickets",
       supplierUuid,
       "wh@acme.com",
       tenantId,
     );
     expect(list.status).toBe(200);
-    const listed = ((await list.json()) as { cases: Array<Record<string, unknown>> })
-      .cases;
+    const listed = ((await list.json()) as { tickets: Array<Record<string, unknown>> })
+      .tickets;
     expect(listed).toHaveLength(1);
     expect(Object.keys(listed[0]!).sort()).toEqual(
       [
-        "caseId",
+        "ticketId",
         "createdAt",
         "id",
         "orderRef",
@@ -258,7 +258,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     // 5) Owner previewing the supplier surface has no supplier binding for this
     // workspace → 404 (binding-anchored auth; disclosure-safe, not an empty 200).
     const ownerList = await get(
-      "/dashboard/supplier/cases",
+      "/dashboard/supplier/tickets",
       adminUuid,
       "admin@acme.com",
       tenantId,
@@ -269,16 +269,16 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     // the binding check precedes decideSupplierAuthz (whose 403 path is unit-
     // tested in auth/tests/supplier-authz.test.ts).
     const stranger = await get(
-      "/dashboard/supplier/cases",
+      "/dashboard/supplier/tickets",
       strangerUuid,
       "stranger@acme.com",
       tenantId,
     );
     expect(stranger.status).toBe(404);
 
-    // 7) Supplier posts an update → escalation resolved + case flipped, in ONE tx.
+    // 7) Supplier posts an update → escalation resolved + ticket flipped, in ONE tx.
     const update = await post(
-      `/dashboard/supplier/cases/${escId}/update`,
+      `/dashboard/supplier/tickets/${escId}/update`,
       { note: "Reshipped via DHL; new ETA Friday.", proposedResolution: "reship" },
       supplierUuid,
       "wh@acme.com",
@@ -289,22 +289,22 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
     const [escRow] = await raw.db
       .select({
-        status: caseSupplierEscalations.status,
-        note: caseSupplierEscalations.note,
+        status: ticketSupplierEscalations.status,
+        note: ticketSupplierEscalations.note,
       })
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.id, escId));
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.id, escId));
     expect(escRow?.status).toBe("resolved");
     expect(escRow?.note).toBe("Reshipped via DHL; new ETA Friday.");
-    const [caseRow] = await raw.db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, caseId));
-    expect(caseRow?.status).toBe("in_progress");
+    const [ticketRow] = await raw.db
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    expect(ticketRow?.status).toBe("in_progress");
 
     // 8) A second submission on a resolved escalation is rejected.
     const again = await post(
-      `/dashboard/supplier/cases/${escId}/update`,
+      `/dashboard/supplier/tickets/${escId}/update`,
       { note: "again" },
       supplierUuid,
       "wh@acme.com",
@@ -314,7 +314,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
     // 9) An unknown escalation id → 404 (never discloses existence).
     const missing = await post(
-      `/dashboard/supplier/cases/${randomUUID()}/update`,
+      `/dashboard/supplier/tickets/${randomUUID()}/update`,
       { note: "x" },
       supplierUuid,
       "wh@acme.com",
@@ -324,18 +324,18 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
   });
 
   // The agent must ALWAYS be re-engaged by a supplier update, even when the
-  // case escaped `waiting_for_supplier` while the escalation was open (a human
+  // ticket escaped `waiting_for_supplier` while the escalation was open (a human
   // resolved it / took it over) or is actively `in_progress`. Depends on the
   // supplier binding created by the e2e test above.
-  it("re-engages the agent when the case escaped waiting_for_supplier", async () => {
+  it("re-engages the agent when the ticket escaped waiting_for_supplier", async () => {
     if (!raw) return;
     const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
     expect(supplier).not.toBeNull();
 
-    const seedEscalatedCase = async (status: string) => {
-      const caseId = randomUUID();
-      await raw.db.insert(cases).values({
-        id: caseId,
+    const seedEscalatedTicket = async (status: string) => {
+      const ticketId = randomUUID();
+      await raw.db.insert(tickets).values({
+        id: ticketId,
         tenantId,
         channel: "email",
         status,
@@ -343,7 +343,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       });
       const { id: escId } = await insertEscalation(raw.db, {
         tenantId,
-        caseId,
+        ticketId,
         supplierId: supplier!.id,
         problem: "P",
         orderRef: null,
@@ -351,14 +351,14 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
         shipCountry: null,
         trackingNumber: null,
       });
-      return { caseId, escId };
+      return { ticketId, escId };
     };
 
-    // A case a human resolved while the supplier still owed an answer: the
+    // A ticket a human resolved while the supplier still owed an answer: the
     // update flips it back to in_progress AND publishes (resumed + ticked).
-    const escaped = await seedEscalatedCase("resolved");
+    const escaped = await seedEscalatedTicket("resolved");
     const res1 = await post(
-      `/dashboard/supplier/cases/${escaped.escId}/update`,
+      `/dashboard/supplier/tickets/${escaped.escId}/update`,
       { note: "Reshipped after all" },
       supplierUuid,
       "wh@acme.com",
@@ -369,16 +369,16 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(body1.resumed).toBe(true);
     expect(body1.ticked).toBe(true);
     const [row1] = await raw.db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, escaped.caseId));
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, escaped.ticketId));
     expect(row1?.status).toBe("in_progress");
 
-    // A case that is actively in_progress: no status flip is needed, but the
+    // A ticket that is actively in_progress: no status flip is needed, but the
     // event must STILL be published so the agent sees the supplier's answer.
-    const active = await seedEscalatedCase("in_progress");
+    const active = await seedEscalatedTicket("in_progress");
     const res2 = await post(
-      `/dashboard/supplier/cases/${active.escId}/update`,
+      `/dashboard/supplier/tickets/${active.escId}/update`,
       { note: "Extra detail" },
       supplierUuid,
       "wh@acme.com",
@@ -389,23 +389,23 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(body2.resumed).toBe(false);
     expect(body2.ticked).toBe(true);
     const [row2] = await raw.db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, active.caseId));
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, active.ticketId));
     expect(row2?.status).toBe("in_progress");
   });
 
-  // Redraft: a case parked `waiting_for_approval` with an open escalation
+  // Redraft: a ticket parked `waiting_for_approval` with an open escalation
   // (concurrent wait states). The supplier's answer supersedes the pending
-  // draft and resumes the case so the agent re-runs (resumed + ticked).
-  it("redrafts a waiting_for_approval case: supersedes the pending draft and resumes", async () => {
+  // draft and resumes the ticket so the agent re-runs (resumed + ticked).
+  it("redrafts a waiting_for_approval ticket: supersedes the pending draft and resumes", async () => {
     if (!raw) return;
     const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
     expect(supplier).not.toBeNull();
 
-    const caseId = randomUUID();
-    await raw.db.insert(cases).values({
-      id: caseId,
+    const ticketId = randomUUID();
+    await raw.db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "waiting_for_approval",
@@ -415,7 +415,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     await raw.db.insert(approvals).values({
       id: approvalId,
       tenantId,
-      caseId,
+      ticketId,
       agentId: "missing-package-agent",
       tool: "conversation.reply",
       proposedInput: { draftId: approvalId, bodyText: "stale draft" },
@@ -426,7 +426,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
     const { id: escId } = await insertEscalation(raw.db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplier!.id,
       problem: "P",
       orderRef: null,
@@ -436,7 +436,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
 
     const res = await post(
-      `/dashboard/supplier/cases/${escId}/update`,
+      `/dashboard/supplier/tickets/${escId}/update`,
       { note: "Reshipped; use tracking TRK9" },
       supplierUuid,
       "wh@acme.com",
@@ -448,9 +448,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(body.ticked).toBe(true);
 
     const [row] = await raw.db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, caseId));
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
     expect(row?.status).toBe("in_progress");
 
     // The stale draft was superseded (cancelled), not left pending.
@@ -465,14 +465,14 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       .from(auditLog)
       .where(
         and(
-          eq(auditLog.caseId, caseId),
+          eq(auditLog.ticketId, ticketId),
           eq(auditLog.action, "approval.superseded"),
         ),
       );
     expect(superseded).toHaveLength(1);
   });
 
-  // POST /dashboard/supplier/cases/:id/tracking — the supplier fixes the
+  // POST /dashboard/supplier/tickets/:id/tracking — the supplier fixes the
   // order's tracking number. The Shopify write itself is unit-tested
   // (supplier-tracking.test.ts + the provider suite); here we prove the HTTP
   // walls and the DB bookkeeping.
@@ -482,9 +482,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(supplier).not.toBeNull();
 
     const seed = async (escStatus: "open" | "resolved") => {
-      const caseId = randomUUID();
-      await raw.db.insert(cases).values({
-        id: caseId,
+      const ticketId = randomUUID();
+      await raw.db.insert(tickets).values({
+        id: ticketId,
         tenantId,
         channel: "email",
         status: "waiting_for_supplier",
@@ -493,7 +493,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       });
       const { id: escId } = await insertEscalation(raw.db, {
         tenantId,
-        caseId,
+        ticketId,
         supplierId: supplier!.id,
         problem: "P",
         orderRef: "#1001",
@@ -503,18 +503,18 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       });
       if (escStatus === "resolved") {
         await raw.db
-          .update(caseSupplierEscalations)
+          .update(ticketSupplierEscalations)
           .set({ status: "resolved" })
-          .where(eq(caseSupplierEscalations.id, escId));
+          .where(eq(ticketSupplierEscalations.id, escId));
       }
-      return { caseId, escId };
+      return { ticketId, escId };
     };
 
     const open = await seed("open");
 
     // Missing tracking number → 400.
     const bad = await post(
-      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      `/dashboard/supplier/tickets/${open.escId}/tracking`,
       {},
       supplierUuid,
       "wh@acme.com",
@@ -524,7 +524,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
     // Unknown escalation → 404 (no disclosure).
     const missing = await post(
-      `/dashboard/supplier/cases/${randomUUID()}/tracking`,
+      `/dashboard/supplier/tickets/${randomUUID()}/tracking`,
       { trackingNumber: "TRK-NEW" },
       supplierUuid,
       "wh@acme.com",
@@ -534,7 +534,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
     // A stranger with no supplier binding → 404 (never 403).
     const stranger = await post(
-      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      `/dashboard/supplier/tickets/${open.escId}/tracking`,
       { trackingNumber: "TRK-NEW" },
       strangerUuid,
       "stranger@acme.com",
@@ -545,7 +545,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     // A resolved escalation is read-only → 409.
     const resolved = await seed("resolved");
     const late = await post(
-      `/dashboard/supplier/cases/${resolved.escId}/tracking`,
+      `/dashboard/supplier/tickets/${resolved.escId}/tracking`,
       { trackingNumber: "TRK-NEW" },
       supplierUuid,
       "wh@acme.com",
@@ -556,11 +556,11 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       "already_resolved",
     );
 
-    // An open escalation whose case has no resolvable order (this test server
+    // An open escalation whose ticket has no resolvable order (this test server
     // has no Shopify creds and the context binds no order) → 409, and no
     // tracking is stamped.
     const noOrder = await post(
-      `/dashboard/supplier/cases/${open.escId}/tracking`,
+      `/dashboard/supplier/tickets/${open.escId}/tracking`,
       { trackingNumber: "TRK-NEW", trackingCompany: "DHL" },
       supplierUuid,
       "wh@acme.com",
@@ -571,9 +571,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       "order_not_found",
     );
     const [escRow] = await raw.db
-      .select({ trackingNumber: caseSupplierEscalations.trackingNumber })
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.id, open.escId));
+      .select({ trackingNumber: ticketSupplierEscalations.trackingNumber })
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.id, open.escId));
     expect(escRow?.trackingNumber).toBe("TRK-OLD");
   });
 
@@ -584,9 +584,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
     expect(supplier).not.toBeNull();
 
-    const caseId = randomUUID();
-    await raw.db.insert(cases).values({
-      id: caseId,
+    const ticketId = randomUUID();
+    await raw.db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "waiting_for_supplier",
@@ -598,7 +598,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
     const { id: escId } = await insertEscalation(raw.db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplier!.id,
       problem: "P",
       orderRef: "#1001",
@@ -619,16 +619,16 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
 
     const [escRow] = await raw.db
-      .select({ trackingNumber: caseSupplierEscalations.trackingNumber })
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.id, escId));
+      .select({ trackingNumber: ticketSupplierEscalations.trackingNumber })
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.id, escId));
     expect(escRow?.trackingNumber).toBe("TRK-NEW");
 
-    const [caseRow] = await raw.db
-      .select({ context: cases.context })
-      .from(cases)
-      .where(eq(cases.id, caseId));
-    const context = caseRow?.context as Record<string, unknown>;
+    const [ticketRow] = await raw.db
+      .select({ context: tickets.context })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    const context = ticketRow?.context as Record<string, unknown>;
     // The stale lookup cache is gone; unrelated context keys survive.
     expect(context["liveTrackingStatus"]).toBeUndefined();
     expect(context["customerEmail"]).toBe("cust@example.com");
@@ -638,7 +638,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       .from(auditLog)
       .where(
         and(
-          eq(auditLog.caseId, caseId),
+          eq(auditLog.ticketId, ticketId),
           eq(auditLog.action, "supplier.tracking_updated"),
         ),
       );
@@ -699,11 +699,11 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     // And the binding is now resolvable in tenantB.
     expect(await getSupplierForUser(raw.db, tenantB, supplierUuid)).not.toBeNull();
 
-    // Seed a parked case + escalation in tenantB.
+    // Seed a parked ticket + escalation in tenantB.
     const supplierB = await getSupplierForUser(raw.db, tenantB, supplierUuid);
-    const caseB = randomUUID();
-    await raw.db.insert(cases).values({
-      id: caseB,
+    const ticketB = randomUUID();
+    await raw.db.insert(tickets).values({
+      id: ticketB,
       tenantId: tenantB,
       channel: "email",
       status: "waiting_for_supplier",
@@ -712,7 +712,7 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     });
     const { id: escB } = await insertEscalation(raw.db, {
       tenantId: tenantB,
-      caseId: caseB,
+      ticketId: ticketB,
       supplierId: supplierB!.id,
       problem: "Order #B22 stuck",
       orderRef: "#B22",
@@ -723,16 +723,16 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
 
     // Switching to tenantB is a pure x-workspace-id swap — the JWT is still orgA,
     // proving the supplier path never consults the org.
-    const casesB = await get(
-      "/dashboard/supplier/cases",
+    const ticketsB = await get(
+      "/dashboard/supplier/tickets",
       supplierUuid,
       "wh@acme.com",
       tenantB,
     );
-    expect(casesB.status).toBe(200);
-    const listedB = ((await casesB.json()) as {
-      cases: Array<Record<string, unknown>>;
-    }).cases;
+    expect(ticketsB.status).toBe(200);
+    const listedB = ((await ticketsB.json()) as {
+      tickets: Array<Record<string, unknown>>;
+    }).tickets;
     expect(listedB).toHaveLength(1);
     expect(listedB[0]!["id"]).toBe(escB);
 
@@ -745,12 +745,12 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     );
     expect(sessB.status).toBe(200);
     const permsB = (await sessB.json()) as { permissions: string[] };
-    expect(permsB.permissions).toContain("supplier.cases.view");
+    expect(permsB.permissions).toContain("supplier.tickets.view");
 
     // A workspace the supplier has NO binding for → 404 (disclosure-safe),
     // regardless of the JWT org.
     const unbound = await get(
-      "/dashboard/supplier/cases",
+      "/dashboard/supplier/tickets",
       supplierUuid,
       "wh@acme.com",
       randomUUID(),

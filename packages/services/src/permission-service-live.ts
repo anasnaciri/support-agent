@@ -1,7 +1,7 @@
 import { Effect, Layer, Option } from "effect";
 import {
   PermissionService,
-  type CaseId,
+  type TicketId,
   type Permission,
   type AnyTool,
   type TenantId,
@@ -259,7 +259,7 @@ export const checkRequiredScopes = (
 };
 
 /**
- * Sum prior successful refund amounts for a case from its audit rows
+ * Sum prior successful refund amounts for a ticket from its audit rows
  * (audit L9). The runtime stamps `amountMinorUnits`/`currencyCode` into
  * the `tool.invoked` details for refund.create. Returns null when any
  * prior refund is in a different currency (can't sum safely — caller
@@ -292,7 +292,7 @@ export const PermissionServiceLive = Layer.effect(
     const tenants = yield* TenantRepository;
     const connectors = yield* ConnectorCredentialStore;
     // Optional — present in the worker (and in tests that exercise the
-    // aggregation); absent layers simply skip case-history aggregation
+    // aggregation); absent layers simply skip ticket-history aggregation
     // rather than failing every permission check.
     const maybeAudit = yield* Effect.serviceOption(AuditLogService);
 
@@ -307,16 +307,16 @@ export const PermissionServiceLive = Layer.effect(
         .listForTenant(tenantId)
         .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<ConnectorConnection>)));
 
-    // Case-cumulative refund total (audit L9): read the case's audit
+    // Ticket-cumulative refund total (audit L9): read the ticket's audit
     // rows and sum prior successful refund.create amounts. Best-effort —
     // audit unavailability degrades to per-call evaluation, never to a
     // failed check.
     const priorRefundTotal = (
-      caseId: CaseId | undefined,
+      ticketId: TicketId | undefined,
       currencyCode: string,
     ): Effect.Effect<number | null> =>
-      caseId !== undefined && Option.isSome(maybeAudit)
-        ? maybeAudit.value.forCase(caseId).pipe(
+      ticketId !== undefined && Option.isSome(maybeAudit)
+        ? maybeAudit.value.forTicket(ticketId).pipe(
             Effect.map((rows) =>
               sumPriorRefundsMinorUnits(rows, currencyCode),
             ),
@@ -325,7 +325,7 @@ export const PermissionServiceLive = Layer.effect(
         : Effect.succeed(0);
 
     return PermissionService.of({
-      check: ({ tenantId, agent, tool, payload, caseId }) =>
+      check: ({ tenantId, agent, tool, payload, ticketId }) =>
         Effect.gen(function* () {
           // Step 1: static rule.
           const override = agent.permissionOverrides[tool.name];
@@ -346,7 +346,7 @@ export const PermissionServiceLive = Layer.effect(
 
           // Step 3a: conditional discount-policy decision. Like the
           // refund branch below, this overlays per-tenant thresholds on
-          // top of the tool's static `ask`. Gated per-call (no case-
+          // top of the tool's static `ask`. Gated per-call (no ticket-
           // cumulative aggregation yet — coupons are single-use and
           // locked to one customer, so the per-call cap bounds exposure).
           if (tool.name === DISCOUNT_TOOL) {
@@ -388,14 +388,14 @@ export const PermissionServiceLive = Layer.effect(
 
           const amount = parseRefundAmount(payload);
 
-          // Audit L9: evaluate the policy against the case-cumulative
+          // Audit L9: evaluate the policy against the ticket-cumulative
           // refunded amount, not this call in isolation — otherwise N
           // small refunds walk past the cap one step at a time. A null
           // prior total means mixed currencies in the history: we can't
           // sum safely, so a human reviews (never auto-allow).
-          if (amount && caseId !== undefined) {
+          if (amount && ticketId !== undefined) {
             const prior = yield* priorRefundTotal(
-              caseId,
+              ticketId,
               amount.currencyCode,
             );
             if (prior === null) {

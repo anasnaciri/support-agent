@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Link } from "@/components/ui/link";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
-import { ConfirmButton } from "@/features/cases/ConfirmButton";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 import type { KnowledgeDocumentSummaryView } from "@support-agent/dashboard-contracts";
 
 // Map an api error body ({ error, reason? }) to a compact banner code so the

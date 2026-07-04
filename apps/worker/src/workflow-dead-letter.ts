@@ -1,8 +1,8 @@
 import { Effect, Layer, Option } from "effect";
 import type { DomainEvent } from "@support-agent/agent-core";
 import {
-  CaseLifecycleWriter,
-  CaseRepository,
+  TicketLifecycleWriter,
+  TicketRepository,
   MerchantNotificationService,
   humanTakeoverNotification,
 } from "@support-agent/services";
@@ -16,9 +16,9 @@ import {
  * Dead-letter handling for `workflow.events` (audit C1/L11).
  *
  * When a workflow job exhausts its pg-boss retries, the job is copied to
- * this queue. Without a consumer, retry exhaustion is invisible: the case
+ * this queue. Without a consumer, retry exhaustion is invisible: the ticket
  * sits in `new`/`in_progress` forever and the customer never hears back.
- * This consumer parks the affected case in `human_takeover` (with an audit
+ * This consumer parks the affected ticket in `human_takeover` (with an audit
  * row) so the dashboard surfaces it to a person.
  */
 export const WORKFLOW_DEAD_LETTER_QUEUE = DEFAULT_WORKFLOW_DEAD_LETTER_QUEUE;
@@ -30,10 +30,10 @@ interface DeadLetterJobData {
   readonly enqueuedAt: string;
 }
 
-const eventCaseRef = (
+const eventTicketRef = (
   event: DomainEvent,
 ):
-  | { readonly kind: "case"; readonly caseId: string }
+  | { readonly kind: "ticket"; readonly ticketId: string }
   | {
       readonly kind: "thread";
       readonly tenantId: string;
@@ -48,8 +48,8 @@ const eventCaseRef = (
     case "supplier.updated":
     case "timer.expired":
     case "manual.takeover":
-    case "case.resumed":
-      return { kind: "case", caseId: event.caseId };
+    case "ticket.resumed":
+      return { kind: "ticket", ticketId: event.ticketId };
     case "message.received":
       return {
         kind: "thread",
@@ -64,10 +64,10 @@ const eventCaseRef = (
 };
 
 /**
- * Park the case referenced by a dead-lettered event in `human_takeover`.
+ * Park the ticket referenced by a dead-lettered event in `human_takeover`.
  * Best-effort by design: a failure here must never crash the dead-letter
  * consumer (the job already exhausted its retries once), so every error
- * degrades to a log line. Idempotent: a case already parked (or resolved)
+ * degrades to a log line. Idempotent: a ticket already parked (or resolved)
  * is left untouched.
  */
 export const escalateDeadLetteredEvent = (
@@ -76,26 +76,26 @@ export const escalateDeadLetteredEvent = (
 ): Effect.Effect<
   void,
   never,
-  CaseRepository | CaseLifecycleWriter
+  TicketRepository | TicketLifecycleWriter
 > =>
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
-    const lifecycle = yield* CaseLifecycleWriter;
+    const tickets = yield* TicketRepository;
+    const lifecycle = yield* TicketLifecycleWriter;
 
-    const ref = eventCaseRef(event);
+    const ref = eventTicketRef(event);
     if (ref.kind === "none") {
       yield* Effect.logWarning(
-        `[dead-letter] no case reference on ${event.type}; skipping escalation`,
+        `[dead-letter] no ticket reference on ${event.type}; skipping escalation`,
       );
       return;
     }
 
     const row =
-      ref.kind === "case"
-        ? yield* cases
-            .getById(ref.caseId as never)
+      ref.kind === "ticket"
+        ? yield* tickets
+            .getById(ref.ticketId as never)
             .pipe(Effect.catchAll(() => Effect.succeed(null)))
-        : yield* cases
+        : yield* tickets
             .findByThreadId(
               ref.tenantId as never,
               ref.threadId as never,
@@ -106,7 +106,7 @@ export const escalateDeadLetteredEvent = (
 
     if (!row) {
       yield* Effect.logWarning(
-        `[dead-letter] case not found for ${event.type}; skipping escalation`,
+        `[dead-letter] ticket not found for ${event.type}; skipping escalation`,
       );
       return;
     }
@@ -120,7 +120,7 @@ export const escalateDeadLetteredEvent = (
 
     const parked = yield* lifecycle
       .escalateToHuman({
-        caseId: row.id,
+        ticketId: row.id,
         tenantId: row.tenantId,
         actor: { type: "system", id: "workflow-dead-letter" },
         reason: "workflow_retries_exhausted",
@@ -139,7 +139,7 @@ export const escalateDeadLetteredEvent = (
       .pipe(
         Effect.catchAllCause((cause) =>
           Effect.logError(
-            `[dead-letter] failed to escalate case ${row.id}: ${String(cause)}`,
+            `[dead-letter] failed to escalate ticket ${row.id}: ${String(cause)}`,
           ).pipe(Effect.as(null)),
         ),
       );
@@ -155,7 +155,7 @@ export const escalateDeadLetteredEvent = (
           .notify(
             parked.tenantId,
             humanTakeoverNotification({
-              caseId: parked.id,
+              ticketId: parked.id,
               subject: parked.subject,
               reason: "workflow_retries_exhausted",
             }),
@@ -168,7 +168,7 @@ export const escalateDeadLetteredEvent = (
 export const registerWorkflowDeadLetterConsumer = async (opts: {
   readonly boss: PgBoss;
   readonly runtimeLayer: Layer.Layer<
-    CaseRepository | CaseLifecycleWriter,
+    TicketRepository | TicketLifecycleWriter,
     unknown,
     never
   >;

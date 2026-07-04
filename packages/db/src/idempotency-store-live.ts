@@ -10,7 +10,7 @@ import {
   type RecordExecutionInput,
   type ToolExecutionMarker,
 } from "@support-agent/services";
-import { CaseId as makeCaseId } from "@support-agent/agent-core";
+import { TicketId as makeTicketId } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import type { DrizzleDb } from "./client.js";
 import { processedEvents, processedMessages, toolExecutions } from "./schema.js";
@@ -70,7 +70,7 @@ export const ProcessedMessageStoreLive = Layer.effect(
               provider: input.provider,
               messageId: input.messageId,
               threadId: input.threadId ?? null,
-              caseId: input.caseId ?? null,
+              ticketId: input.ticketId ?? null,
             })
             .onConflictDoNothing()
             .returning({ id: processedMessages.id }),
@@ -143,7 +143,7 @@ export const ToolExecutionStoreLive = Layer.effect(
             .insert(toolExecutions)
             .values({
               tenantId: input.tenantId,
-              caseId: input.caseId,
+              ticketId: input.ticketId,
               callId: input.callId,
               tool: input.tool,
               resultOk: input.resultOk,
@@ -153,7 +153,7 @@ export const ToolExecutionStoreLive = Layer.effect(
       });
 
     const find = (
-      caseId: ToolExecutionMarker["caseId"],
+      ticketId: ToolExecutionMarker["ticketId"],
       callId: string,
     ): Effect.Effect<ToolExecutionMarker | null, IdempotencyStoreDbError> =>
       Effect.gen(function* () {
@@ -165,7 +165,7 @@ export const ToolExecutionStoreLive = Layer.effect(
             .from(toolExecutions)
             .where(
               and(
-                eq(toolExecutions.caseId, caseId),
+                eq(toolExecutions.ticketId, ticketId),
                 eq(toolExecutions.callId, callId),
               ),
             )
@@ -174,7 +174,7 @@ export const ToolExecutionStoreLive = Layer.effect(
         const row = rows[0];
         if (!row) return null;
         return {
-          caseId: makeCaseId(row.caseId),
+          ticketId: makeTicketId(row.ticketId),
           callId: row.callId,
           tool: row.tool,
           resultOk: row.resultOk,

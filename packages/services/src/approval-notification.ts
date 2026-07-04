@@ -1,4 +1,4 @@
-import type { ApprovalId, CaseId, TenantId } from "@support-agent/agent-core";
+import type { ApprovalId, TicketId, TenantId } from "@support-agent/agent-core";
 import { signApprovalToken } from "./approval-tokens.js";
 import { derivePreview, deriveSubject } from "./agent-runtime-helpers.js";
 import {
@@ -31,7 +31,7 @@ export interface ApprovalLinkParams {
 export interface BuildApprovalNotificationInput {
   readonly approvalId: ApprovalId;
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   /** The gated tool being approved, surfaced in the email/ping copy. */
   readonly tool: string;
   /** The proposed tool input — its bodyText/subject drive the preview. */
@@ -55,7 +55,7 @@ export interface ApprovalNotification {
 export const buildApprovalNotification = (
   input: BuildApprovalNotificationInput,
 ): ApprovalNotification => {
-  const { approvalId, caseId, tenantId, tool, linkConfig } = input;
+  const { approvalId, ticketId, tenantId, tool, linkConfig } = input;
   // Each URL carries its OWN signed token with the action bound into the
   // HMAC (audit S3) — holding a reject link must not allow approving by
   // editing the path.
@@ -89,7 +89,7 @@ export const buildApprovalNotification = (
     rejectUrl,
   };
   const merchant = approvalRequestedNotification({
-    caseId,
+    ticketId,
     toolName: tool,
     draftSubject,
     draftPreview,

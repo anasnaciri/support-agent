@@ -29,8 +29,8 @@ const ACTION_FILTERS = [
   { label: "Actions taken", value: "tool.invoked" },
   { label: "Agent decisions", value: "llm.decision" },
   { label: "Messages received", value: "event.received" },
-  { label: "Cases resolved", value: "case.resolved" },
-  { label: "Escalated to you", value: "case.escalated_to_human" },
+  { label: "Tickets resolved", value: "ticket.resolved" },
+  { label: "Escalated to you", value: "ticket.escalated_to_human" },
   { label: "Data & privacy requests", value: "compliance." },
 ] as const;
 
@@ -94,7 +94,7 @@ export function AuditPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Audit log</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Everything that happened across your cases, newest first.
+          Everything that happened across your tickets, newest first.
         </p>
       </div>
 
@@ -158,7 +158,7 @@ export function AuditPage() {
               <TableHead>Time</TableHead>
               <TableHead>Action</TableHead>
               <TableHead>Actor</TableHead>
-              <TableHead>Case</TableHead>
+              <TableHead>Ticket</TableHead>
               <TableHead>Details</TableHead>
             </TableRow>
           </TableHeader>
@@ -212,12 +212,12 @@ export function AuditPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {r.caseId ? (
+                    {r.ticketId ? (
                       <Link
-                        href={`/cases/${r.caseId}`}
+                        href={`/tickets/${r.ticketId}`}
                         className="font-mono text-xs text-primary hover:underline"
                       >
-                        {r.caseId.slice(0, 8)}…
+                        {r.ticketId.slice(0, 8)}…
                       </Link>
                     ) : (
                       <span className="text-muted-foreground">—</span>

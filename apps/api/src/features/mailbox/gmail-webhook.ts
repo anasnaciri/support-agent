@@ -148,7 +148,7 @@ const PROVIDER = "gmail" as const;
 
 // How far back the one-time install backfill reaches. A freshly connected
 // mailbox can hold arbitrarily old unread mail; without this bound we would
-// open a case for every one of them. One month keeps the backfill to
+// open a ticket for every one of them. One month keeps the backfill to
 // plausibly-still-relevant support threads. (The push reseed path uses a
 // tighter `newer_than:7d` because it is bounded by Gmail's ~7-day history
 // retention window, not by this policy.)
@@ -466,7 +466,7 @@ export const handleGmailPushNotification = async (
     // directly (matching Gmail's window so nothing recoverable is left
     // on the table), publish each one, then snap the cursor forward to
     // the *current* mailbox historyId. The runtime's findByThreadId
-    // dedup means re-published messages join their existing case
+    // dedup means re-published messages join their existing ticket
     // instead of opening duplicates.
     if (cause instanceof GmailHttpError && cause.failure.kind === "not_found") {
       // eslint-disable-next-line no-console

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   approvalStatusLabel,
   auditActionLabel,
-  caseStatusLabel,
-  caseSubjectLabel,
+  ticketStatusLabel,
+  ticketSubjectLabel,
   hasSubject,
   humanizeSlug,
   toolActionLabel,
@@ -20,14 +20,14 @@ describe("humanizeSlug", () => {
   });
 
   it("also splits dotted segments", () => {
-    expect(humanizeSlug("case.escalated_to_human")).toBe(
-      "Case escalated to human",
+    expect(humanizeSlug("ticket.escalated_to_human")).toBe(
+      "Ticket escalated to human",
     );
   });
 });
 
-describe("caseStatusLabel", () => {
-  it("maps every runtime case status to merchant-friendly copy", () => {
+describe("ticketStatusLabel", () => {
+  it("maps every runtime ticket status to merchant-friendly copy", () => {
     const statuses = [
       "new",
       "triaging",
@@ -42,37 +42,37 @@ describe("caseStatusLabel", () => {
       "human_takeover",
     ];
     for (const status of statuses) {
-      const label = caseStatusLabel(status);
+      const label = ticketStatusLabel(status);
       expect(label, status).not.toMatch(/_/);
       expect(label[0], status).toBe(label[0]?.toUpperCase());
     }
   });
 
   it("never shows the human_takeover enum to a merchant", () => {
-    expect(caseStatusLabel("human_takeover")).toBe("With you");
-    expect(caseStatusLabel("waiting_for_approval")).toBe("Needs approval");
+    expect(ticketStatusLabel("human_takeover")).toBe("With you");
+    expect(ticketStatusLabel("waiting_for_approval")).toBe("Needs approval");
   });
 
   it("humanizes unknown statuses instead of leaking snake_case", () => {
-    expect(caseStatusLabel("some_future_status")).toBe("Some future status");
+    expect(ticketStatusLabel("some_future_status")).toBe("Some future status");
   });
 });
 
-describe("caseSubjectLabel", () => {
+describe("ticketSubjectLabel", () => {
   it("returns a real subject, trimmed of surrounding whitespace", () => {
-    expect(caseSubjectLabel("Refund for order #1024")).toBe(
+    expect(ticketSubjectLabel("Refund for order #1024")).toBe(
       "Refund for order #1024",
     );
-    expect(caseSubjectLabel("  Order question  ")).toBe("Order question");
+    expect(ticketSubjectLabel("  Order question  ")).toBe("Order question");
   });
 
   it("falls back when the subject is missing or only whitespace", () => {
     // `?? "(no subject)"` only caught null/undefined; an empty or
     // whitespace-only Subject header slipped through and rendered blank.
-    expect(caseSubjectLabel(null)).toBe("(No subject)");
-    expect(caseSubjectLabel(undefined)).toBe("(No subject)");
-    expect(caseSubjectLabel("")).toBe("(No subject)");
-    expect(caseSubjectLabel("   ")).toBe("(No subject)");
+    expect(ticketSubjectLabel(null)).toBe("(No subject)");
+    expect(ticketSubjectLabel(undefined)).toBe("(No subject)");
+    expect(ticketSubjectLabel("")).toBe("(No subject)");
+    expect(ticketSubjectLabel("   ")).toBe("(No subject)");
   });
 });
 
@@ -118,7 +118,7 @@ describe("auditActionLabel", () => {
     expect(auditActionLabel("tool.invoked")).toBe("Action taken");
     expect(auditActionLabel("llm.decision")).toBe("Agent decision");
     expect(auditActionLabel("event.received")).toBe("Message received");
-    expect(auditActionLabel("case.escalated_to_human")).toBe(
+    expect(auditActionLabel("ticket.escalated_to_human")).toBe(
       "Escalated to you",
     );
   });
@@ -130,8 +130,8 @@ describe("auditActionLabel", () => {
   });
 
   it("humanizes unknown action codes", () => {
-    expect(auditActionLabel("case.future_thing_happened")).toBe(
-      "Case future thing happened",
+    expect(auditActionLabel("ticket.future_thing_happened")).toBe(
+      "Ticket future thing happened",
     );
   });
 });

@@ -7,11 +7,11 @@ import { DbClientLive, TransactionRunnerLive } from "../src/index.js";
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
-// Audit L2 — per-case serialization. The workflow queue keys
-// message.received by thread and approval/timer events by case, so two
-// events for the SAME case can run concurrently across those keys (a
+// Audit L2 — per-ticket serialization. The workflow queue keys
+// message.received by thread and approval/timer events by ticket, so two
+// events for the SAME ticket can run concurrently across those keys (a
 // customer reply racing the manager's approval → double reply). The
-// runtime serializes ticks for one case behind a Postgres advisory
+// runtime serializes ticks for one ticket behind a Postgres advisory
 // lock; this pins the lock primitive itself.
 
 describeIfDb("TransactionRunner.withLock — advisory-lock serialization", () => {
@@ -21,7 +21,7 @@ describeIfDb("TransactionRunner.withLock — advisory-lock serialization", () =>
   );
 
   it("serializes concurrent effects holding the same key", async () => {
-    const key = `case-lock-test:${randomUUID()}`;
+    const key = `ticket-lock-test:${randomUUID()}`;
     let inFlight = 0;
     let maxInFlight = 0;
     const events: string[] = [];
@@ -97,7 +97,7 @@ describeIfDb("TransactionRunner.withLock — advisory-lock serialization", () =>
   });
 
   it("releases the lock when the inner effect fails", async () => {
-    const key = `case-lock-fail:${randomUUID()}`;
+    const key = `ticket-lock-fail:${randomUUID()}`;
     const failing = Effect.gen(function* () {
       const tx = yield* TransactionRunner;
       yield* tx.withLock(key, Effect.fail(new Error("boom")));

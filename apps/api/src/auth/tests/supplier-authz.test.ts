@@ -12,7 +12,7 @@ const access = (over: Partial<MemberAccess>): MemberAccess => ({
 
 // The supplier-endpoint guard is deliberately STRICTER than decideAuthz: it must
 // never honor open mode (a supplier always has an explicit assignment) and it
-// requires the supplier.cases.* permission — so a merchant member can't reach
+// requires the supplier.tickets.* permission — so a merchant member can't reach
 // supplier endpoints and an unassigned/open-mode user can't either.
 describe("decideSupplierAuthz", () => {
   it("401s when there's no acting user id", () => {
@@ -20,17 +20,17 @@ describe("decideSupplierAuthz", () => {
       decideSupplierAuthz(
         access({ anyAssignmentsInWorkspace: true, assigned: true }),
         undefined,
-        "supplier.cases.view",
+        "supplier.tickets.view",
       ),
     ).toEqual({ ok: false, status: 401, error: "missing_user" });
   });
 
-  it("does NOT honor open mode — an unassigned user is denied (the isolation case)", () => {
+  it("does NOT honor open mode — an unassigned user is denied (the isolation ticket)", () => {
     expect(
       decideSupplierAuthz(
         access({ anyAssignmentsInWorkspace: false }),
         "u",
-        "supplier.cases.view",
+        "supplier.tickets.view",
       ),
     ).toEqual({ ok: false, status: 403, error: "forbidden" });
   });
@@ -40,7 +40,7 @@ describe("decideSupplierAuthz", () => {
       decideSupplierAuthz(
         access({ anyAssignmentsInWorkspace: true, assigned: false }),
         "u",
-        "supplier.cases.view",
+        "supplier.tickets.view",
       ),
     ).toEqual({ ok: false, status: 403, error: "forbidden" });
   });
@@ -51,10 +51,10 @@ describe("decideSupplierAuthz", () => {
         access({
           anyAssignmentsInWorkspace: true,
           assigned: true,
-          grantedIds: ["cases.reply"],
+          grantedIds: ["tickets.reply"],
         }),
         "u",
-        "supplier.cases.view",
+        "supplier.tickets.view",
       ),
     ).toEqual({ ok: false, status: 403, error: "forbidden" });
   });
@@ -63,12 +63,12 @@ describe("decideSupplierAuthz", () => {
     const supplier = access({
       anyAssignmentsInWorkspace: true,
       assigned: true,
-      grantedIds: ["supplier.cases.respond"],
+      grantedIds: ["supplier.tickets.respond"],
     });
-    expect(decideSupplierAuthz(supplier, "u", "supplier.cases.respond")).toEqual(
+    expect(decideSupplierAuthz(supplier, "u", "supplier.tickets.respond")).toEqual(
       { ok: true },
     );
-    expect(decideSupplierAuthz(supplier, "u", "supplier.cases.view")).toEqual({
+    expect(decideSupplierAuthz(supplier, "u", "supplier.tickets.view")).toEqual({
       ok: true,
     });
   });
@@ -82,7 +82,7 @@ describe("decideSupplierAuthz", () => {
           isOwner: true,
         }),
         "u",
-        "supplier.cases.respond",
+        "supplier.tickets.respond",
       ),
     ).toEqual({ ok: true });
   });

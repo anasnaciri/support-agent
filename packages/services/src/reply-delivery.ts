@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { AgentId, CaseId, TenantId } from "@support-agent/agent-core";
+import type { AgentId, TicketId, TenantId } from "@support-agent/agent-core";
 
 // ============================================================
 // ReplyDeliveryService — durable retry of a FAILED customer-reply send
@@ -15,7 +15,7 @@ import type { AgentId, CaseId, TenantId } from "@support-agent/agent-core";
 // outbox through the plain db store functions directly (like supplier-notify).
 
 // ------------------------------------------------------------
-// The risk flag the runtime stamps on the case + the dashboard renders.
+// The risk flag the runtime stamps on the ticket + the dashboard renders.
 // ------------------------------------------------------------
 
 export const REPLY_DELIVERY_FAILED_FLAG = "reply_delivery_failed";
@@ -36,7 +36,7 @@ export const nextReplyDeliveryBackoffMs = (attempt: number): number => {
 
 // ------------------------------------------------------------
 // Send-failure detection (pure) — decide whether a failed tool call is a
-// RETRIABLE customer-reply delivery failure (enqueue + flag the case) vs. a
+// RETRIABLE customer-reply delivery failure (enqueue + flag the ticket) vs. a
 // validation reject (recipient guard, unbound mailbox) that a retry can't fix.
 // ------------------------------------------------------------
 
@@ -57,7 +57,7 @@ const NON_RETRIABLE_REPLY_ISSUES: ReadonlySet<string> = new Set([
 
 /**
  * Decide whether a FAILED customer-send tool call is a retriable delivery
- * failure (→ enqueue the draft into the outbox + flag the case) vs. a
+ * failure (→ enqueue the draft into the outbox + flag the ticket) vs. a
  * deterministic validation reject the agent/human must handle.
  *
  * Default-retry: for `conversation.reply` / `ask_customer`, ANY real error is a
@@ -96,7 +96,7 @@ export const isReplyDeliverySendFailure = (
 
 /**
  * The outbox row couldn't be written (DB failure). Transient/retryable — the
- * runtime logs and continues (it has already escalated/flagged the case), and
+ * runtime logs and continues (it has already escalated/flagged the ticket), and
  * the failed send simply isn't durably retriable until a later pass.
  */
 export class ReplyDeliveryWriteFailed extends Data.TaggedError(
@@ -109,7 +109,7 @@ export type ReplyDeliveryError = ReplyDeliveryWriteFailed;
 
 export interface EnqueueReplyDeliveryServiceInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly agentId: AgentId | string;
   /** `conversation.reply` | `conversation.ask_customer`. */
   readonly tool: string;

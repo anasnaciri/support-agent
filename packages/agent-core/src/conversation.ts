@@ -61,7 +61,7 @@ export interface ConversationMessage {
 
 /**
  * A conversation thread with its full message history. Used by the
- * runtime to resume a paused case and by the `conversation.fetch_thread`
+ * runtime to resume a paused ticket and by the `conversation.fetch_thread`
  * tool to give an agent the surrounding context before drafting a reply.
  */
 export interface ConversationThread {
@@ -82,7 +82,7 @@ export interface ConversationThread {
  * helpdesk ticket).
  *
  * `draftId` is the idempotency key (master-plan §9): re-running a workflow
- * tick MUST NOT cause a duplicate send. Connectors track `(caseId,
+ * tick MUST NOT cause a duplicate send. Connectors track `(ticketId,
  * draftId)` and return the prior `SentMessage` on a re-attempt.
  */
 export interface ConversationReply {
@@ -103,7 +103,7 @@ export interface ConversationReply {
  * Confirmation that a reply was accepted by the connector. The `id` is
  * the provider-assigned message id; we persist it so the next inbound
  * `customer.replied` (which references our message id as
- * `inReplyToMessageId`) threads back to the right case.
+ * `inReplyToMessageId`) threads back to the right ticket.
  */
 export interface SentMessage {
   readonly id: string;
@@ -160,7 +160,7 @@ export const deterministicReplyMessageId = (
 
 /**
  * What the runtime hands a connector to wait for a customer reply. The
- * agent pauses the case in `waiting_for_customer` after this is sent; the
+ * agent pauses the ticket in `waiting_for_customer` after this is sent; the
  * eventual `customer.replied` event resumes the tick.
  *
  * Distinct from `ConversationReply` because `ask_customer` semantically

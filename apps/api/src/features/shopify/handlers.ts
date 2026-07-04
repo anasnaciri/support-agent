@@ -753,7 +753,7 @@ export const handleInstalledPage = (req: FastifyRequest, res: FastifyReply): voi
 <body>
   <h1 class="ok">Connected</h1>
   <p>${safeShop ? `Your store <code>${safeShop}</code> is connected to support-agent.` : "Your store is connected to support-agent."}</p>
-  <p>You can ${adminAnchor} now. A dashboard for managing cases, agents, and approvals is on the way.</p>
+  <p>You can ${adminAnchor} now. A dashboard for managing tickets, agents, and approvals is on the way.</p>
 </body>
 </html>`,
   );
@@ -879,11 +879,11 @@ export const handleAppUninstalled = async (
 //     we have 30 days to comply. Today: persist to audit_log as a
 //     paper trail; ops fulfils manually.
 //   - customers/redact — Shopify-mandated erasure 10 days after the
-//     customer is redacted on the merchant side. We delete every case
+//     customer is redacted on the merchant side. We delete every ticket
 //     (and its transitions, audit, approvals) matching the email or
-//     customer id stamped at case-create time.
+//     customer id stamped at ticket-create time.
 //   - shop/redact — 48h after a merchant uninstalls. We delete every
-//     row tied to the tenant: cases, audit, approvals, connector
+//     row tied to the tenant: tickets, audit, approvals, connector
 //     credentials, and finally the tenant row.
 //
 // All three share the same HMAC + raw-body pattern as
@@ -1031,7 +1031,7 @@ export const handleCustomersRedact = async (
   sendJson(res, 200, {
     ok: true,
     action: "redacted",
-    matchedCases: redactExit.value.matchedCaseIds.length,
+    matchedTickets: redactExit.value.matchedTicketIds.length,
   });
 };
 

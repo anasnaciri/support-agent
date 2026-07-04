@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   CustomerId,
   OrderId,
   PermissionServiceDefault,
@@ -34,8 +34,8 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   ConnectorCredentialStoreTest,
   ConversationServiceTest,
   defaultRefundPolicy,
@@ -98,14 +98,14 @@ import { Effect as Eff } from "effect";
 // ------------------------------------------------------------
 // The scripted LLM run for support-triage:
 //   turn 0: write classification into context
-//   turn 1: transition the case to resolved
+//   turn 1: transition the ticket to resolved
 //   turn 2: final_message → runtime returns Completed
 // ------------------------------------------------------------
 const triageScript: ReadonlyArray<LLMDecision> = [
   {
     type: "tool_call",
     callId: "c0",
-    tool: "case.update_context",
+    tool: "ticket.update_context",
     input: {
       classification: "where_is_order",
       quotedOrderRef: "ord_42",
@@ -115,17 +115,17 @@ const triageScript: ReadonlyArray<LLMDecision> = [
   {
     type: "tool_call",
     callId: "c1",
-    tool: "case.update_status",
+    tool: "ticket.update_status",
     input: { status: "resolved", reason: "triage complete" },
   },
   {
     type: "final_message",
-    text: "Classified as where_is_order; case resolved.",
+    text: "Classified as where_is_order; ticket resolved.",
   },
 ];
 
 const tickEnv = Layer.mergeAll(
-  CaseRepositoryTest,
+  TicketRepositoryTest,
   AuditLogServiceTest,
   ApprovalServiceTest,
   AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -142,7 +142,7 @@ const tickEnv = Layer.mergeAll(
 
 const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(tickEnv));
 // Provide the inspection services on top of the runtime so the test can also
-// poke at the case + audit log after the tick.
+// poke at the ticket + audit log after the tick.
 const fullLayer = Layer.merge(runtimeLayer, tickEnv);
 
 const ticketCreated = (
@@ -166,7 +166,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const workflow = yield* runtime.handleEvent(
@@ -174,29 +174,29 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           );
 
           // Pull state back out for assertions.
-          const cases = yield* repo
+          const tickets = yield* repo
             .findByThreadId(TenantId("tenant-acme"), "never" as never)
             .pipe(Effect.map(() => null)); // unused, but exercises Tag
 
-          // We don't know the generated caseId from the outside, so we list
+          // We don't know the generated ticketId from the outside, so we list
           // pending approvals (none expected) and re-derive by querying audit
-          // entries. Simpler: walk the audit log for any case in this tenant.
-          // The Test layer doesn't expose a "all cases" listing — but the
+          // entries. Simpler: walk the audit log for any ticket in this tenant.
+          // The Test layer doesn't expose a "all tickets" listing — but the
           // workflow result + audit entries are enough for the assertions.
 
-          // Fetch all audit entries by re-using the in-memory caseId from the
-          // event.received entry. We need a caseId; the test layer stores it.
-          // We can find it via the only created case: list approvals (none),
-          // and check audit by scanning a known caseId. Since we can't, we
+          // Fetch all audit entries by re-using the in-memory ticketId from the
+          // event.received entry. We need a ticketId; the test layer stores it.
+          // We can find it via the only created ticket: list approvals (none),
+          // and check audit by scanning a known ticketId. Since we can't, we
           // resort to inspecting the workflow result + that *something*
           // happened.
 
-          // Pragmatic approach: pull the audit log by enumerating a few caseIds
+          // Pragmatic approach: pull the audit log by enumerating a few ticketIds
           // is not possible; instead expose via repo.findByThreadId(null) (we
           // didn't set a threadId). For Phase 1 minimum we assert via
           // workflow + repo.getById with a known id — see test below.
 
-          return { workflow, cases };
+          return { workflow, tickets };
         }),
         fullLayer,
       ),
@@ -206,18 +206,18 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   it("produces the expected audit trail (event.received + 3 llm.decision + 2 tool.invoked)", async () => {
-    // To assert on the audit trail we need the caseId. Take a different path:
-    // create the case explicitly via the repo first (status=new), then dispatch
+    // To assert on the audit trail we need the ticketId. Take a different path:
+    // create the ticket explicitly via the repo first (status=new), then dispatch
     // a customer.replied event to drive the runtime — same tick logic, but the
-    // caseId is known to the test.
+    // ticketId is known to the test.
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
-          // Bootstrap a fresh case in "new" state.
+          // Bootstrap a fresh ticket in "new" state.
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -227,7 +227,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-1",
@@ -242,7 +242,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         fullLayer,
@@ -259,8 +259,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.fetched.context["identifiedOrderId"]).toBeUndefined();
 
     // Audit trail shape: event.received + 3 llm.decision + 2 tool.invoked
-    // + the lifecycle audit emitted by case.update_status.
-    // No trailing `case.resolved` here because the case was already
+    // + the lifecycle audit emitted by ticket.update_status.
+    // No trailing `ticket.resolved` here because the ticket was already
     // resolved by the second tool call before the final_message turn — the
     // runtime's transition-on-final-message branch is a no-op when status
     // is already "resolved".
@@ -270,7 +270,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
-      "case.status_changed",
+      "ticket.status_changed",
       "tool.invoked",
       "llm.decision",
     ]);
@@ -321,16 +321,16 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       updatedAt: new Date("2026-05-15T00:00:00.000Z"),
     };
 
-    // turn 0 — triage classifies + records the order id on the case
+    // turn 0 — triage classifies + records the order id on the ticket
     // turn 1 — triage hands off to order-status-agent
     // turn 2 — order-status-agent fetches the order via shopify.get_order
     // turn 3 — order-status-agent drafts conversation.reply; permission
-    //          service returns "ask" -> runtime parks the case.
+    //          service returns "ask" -> runtime parks the ticket.
     const handoffScript: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "where_is_order",
           quotedOrderRef: orderId,
@@ -370,7 +370,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -396,7 +396,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const approvalsSvc = yield* ApprovalService;
 
@@ -409,7 +409,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-1",
@@ -424,7 +424,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           const pending = yield* approvalsSvc.listPending(
             TenantId("tenant-acme"),
           );
@@ -439,7 +439,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       expect(out.result.approvalId).toBeTruthy();
     }
     expect(out.fetched.status).toBe("waiting_for_approval");
-    // The handoff persisted the new agent on the case row.
+    // The handoff persisted the new agent on the ticket row.
     expect(out.fetched.currentAgentId).toBe(orderStatusAgent.id);
     expect(out.fetched.context["classification"]).toBe("where_is_order");
     expect(out.fetched.context["identifiedOrderId"]).toBe(orderId);
@@ -448,7 +448,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const approval = out.pending[0]!;
     expect(approval.tool).toBe("conversation.reply");
     expect(approval.agentId).toBe(orderStatusAgent.id);
-    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.ticketId).toBe(out.fetched.id);
     expect(approval.status).toBe("pending");
     const proposed = approval.proposedInput as {
       readonly threadId: string;
@@ -461,10 +461,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
     const actions = out.entries.map((e) => e.action);
     // event.received + (llm.decision, tool.invoked) x 3 + final llm.decision
-    // + the case.waiting_for_approval park row (written in the same tx as
+    // + the ticket.waiting_for_approval park row (written in the same tx as
     // the approval + transition). No `tool.invoked` for conversation.reply
     // because permission=ask short-circuits before execute. No
-    // `case.resolved` because we paused.
+    // `ticket.resolved` because we paused.
     expect(actions).toEqual([
       "event.received",
       "llm.decision",
@@ -474,7 +474,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
-      "case.waiting_for_approval",
+      "ticket.waiting_for_approval",
     ]);
 
     // The handoff audit row carries the source agent id (support-triage) and
@@ -533,7 +533,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     ];
     const scheduled: Array<{
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly fireAt: Date;
       readonly reason: string;
     }> = [];
@@ -543,27 +543,27 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         schedule: (input) =>
           Effect.sync(() => {
             scheduled.push({
-              caseId: input.caseId,
+              ticketId: input.ticketId,
               fireAt: input.fireAt,
               reason: input.reason,
             });
             return {
               id: "timer-ask-1",
-              caseId: input.caseId,
+              ticketId: input.ticketId,
               fireAt: input.fireAt,
               reason: input.reason,
               firedAt: null,
               cancelledAt: null,
             };
           }),
-        cancelOpenForCase: () => Effect.succeed(0),
+        cancelOpenForTicket: () => Effect.succeed(0),
         fireDue: () => Effect.succeed([]),
       }),
     );
     const { layer: conversationLayer, handle } =
       makeConversationServiceTest({});
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([askingAgent]),
@@ -590,7 +590,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -605,7 +605,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-1",
@@ -620,7 +620,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -634,7 +634,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(handle.sent[0]!.kind).toBe("askCustomer");
     expect(handle.sent[0]!.input.remindAfterHours).toBe(72);
     expect(scheduled).toHaveLength(1);
-    expect(scheduled[0]!.caseId).toBe(out.fetched.id);
+    expect(scheduled[0]!.ticketId).toBe(out.fetched.id);
     expect(scheduled[0]!.reason).toBe("follow_up");
     expect(scheduled[0]!.fireAt.getTime()).toBeGreaterThanOrEqual(
       before + horizonMs - 1_000,
@@ -646,17 +646,17 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "event.received",
       "llm.decision",
       "tool.invoked",
-      "case.waiting_for_customer",
+      "ticket.waiting_for_customer",
     ]);
   });
 
   // ----------------------------------------------------------------
   // supplier.escalate producer: an agent with the tool set to `allow`
   // hands a stuck order to the supplier; the runtime records the
-  // escalation (via SupplierEscalationService), parks the case in
+  // escalation (via SupplierEscalationService), parks the ticket in
   // waiting_for_supplier, and ends the tick (no customer reply).
   // ----------------------------------------------------------------
-  it("runs supplier.escalate and parks the case in waiting_for_supplier", async () => {
+  it("runs supplier.escalate and parks the ticket in waiting_for_supplier", async () => {
     const escalatingAgent: AgentConfig = {
       id: AgentId("escalating-agent"),
       name: "Escalating",
@@ -701,7 +701,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     });
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([escalatingAgent]),
@@ -726,7 +726,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -739,7 +739,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-e" as never,
               messageId: "msg-1",
@@ -753,7 +753,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -774,13 +774,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "event.received",
       "llm.decision",
       "tool.invoked",
-      "case.waiting_for_supplier",
+      "ticket.waiting_for_supplier",
     ]);
   });
 
   // ----------------------------------------------------------------
   // No supplier configured: supplier.escalate returns { escalated: false }
-  // (a normal result, not an error) → the runtime does NOT park the case;
+  // (a normal result, not an error) → the runtime does NOT park the ticket;
   // the agent reads the result and falls back (here, resolves). Proves the
   // agent never assumes a supplier exists.
   // ----------------------------------------------------------------
@@ -809,7 +809,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       { type: "final_message", text: "No supplier — acknowledged the delay." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([escalatingAgent]),
@@ -834,7 +834,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -847,7 +847,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-ns" as never,
               messageId: "msg-1",
@@ -861,26 +861,26 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
       ),
     );
 
-    // The case is NOT parked on the supplier — the agent kept control.
+    // The ticket is NOT parked on the supplier — the agent kept control.
     expect(out.result.type).toBe("Completed");
     expect(out.fetched.status).toBe("resolved");
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("case.waiting_for_supplier");
+    expect(actions).not.toContain("ticket.waiting_for_supplier");
     expect(actions).toContain("tool.invoked"); // the escalate attempt happened
   });
 
   // ----------------------------------------------------------------
-  // supplier park guard: a case in waiting_for_supplier holds stray
+  // supplier park guard: a ticket in waiting_for_supplier holds stray
   // events (a customer reply, a timer) so the agent never answers the
-  // customer while the warehouse still owns the case. Only
-  // supplier.updated / manual.takeover / case.resumed pass through.
+  // customer while the warehouse still owns the ticket. Only
+  // supplier.updated / manual.takeover / ticket.resumed pass through.
   // ----------------------------------------------------------------
   it("holds a stray customer reply while waiting_for_supplier (agent loop never runs)", async () => {
     const parkedAgent: AgentConfig = {
@@ -898,7 +898,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       temperature: 0,
     };
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([parkedAgent]),
@@ -924,7 +924,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -940,7 +940,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-p" as never,
               messageId: "msg-2",
@@ -954,7 +954,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -971,9 +971,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // ----------------------------------------------------------------
   // supplier.updated consumer: the complement of the guard above — a
   // supplier update PASSES the park guard, re-enters the agent loop
-  // (so it can draft the customer reply), and resolves the case.
+  // (so it can draft the customer reply), and resolves the ticket.
   // ----------------------------------------------------------------
-  it("re-enters the agent loop on supplier.updated and resolves the case", async () => {
+  it("re-enters the agent loop on supplier.updated and resolves the ticket", async () => {
     const reengageAgent: AgentConfig = {
       id: AgentId("reengage-agent"),
       name: "Re-engage",
@@ -992,7 +992,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       { type: "final_message", text: "Replied to the customer." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([reengageAgent]),
@@ -1016,7 +1016,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -1032,7 +1032,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "supplier.updated",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               supplierId: "sup-1",
               note: "Reshipped via DHL; new ETA Friday.",
@@ -1040,7 +1040,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -1115,7 +1115,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -1141,7 +1141,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId,
             channel: "email",
@@ -1151,14 +1151,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             provider: "gmail",
             mailbox,
           });
-          // Resume always runs from in_progress (resumeCase flips
-          // human_takeover → in_progress before publishing case.resumed).
+          // Resume always runs from in_progress (resumeTicket flips
+          // human_takeover → in_progress before publishing ticket.resumed).
           yield* repo.transitionStatus(created.id, "in_progress", {
             reason: "test setup",
           });
           yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
         }),
@@ -1174,11 +1174,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(firstUserMessage!).not.toContain("conversation.fetch_thread");
   });
 
-  it("never auto-resolves a where_is_order case with an UNVERIFIED order/customer mismatch (parks for a human)", async () => {
+  it("never auto-resolves a where_is_order ticket with an UNVERIFIED order/customer mismatch (parks for a human)", async () => {
     // Repro of prod 3428f154: order-status-agent, on resume, drafted a prose
     // final_message (instead of conversation.reply / ask_customer) while the
     // identity mismatch was still unverified — and the runtime silently
-    // resolved a live case. The guard must park it for a human instead.
+    // resolved a live ticket. The guard must park it for a human instead.
     const specialist: AgentConfig = {
       id: AgentId("order-status-agent"),
       name: "Order status",
@@ -1197,7 +1197,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       { type: "final_message", text: "Your order Q537JR5JA is on the way." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([specialist]),
@@ -1221,7 +1221,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -1242,12 +1242,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             reason: "test setup",
           });
           const result = yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -1257,15 +1257,15 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("case.resolved");
-    expect(actions).toContain("case.escalated_to_human");
+    expect(actions).not.toContain("ticket.resolved");
+    expect(actions).toContain("ticket.escalated_to_human");
   });
 
-  it("guard still holds when the agent calls case.update_context before the final_message (prod 3428f154 repro)", async () => {
-    // The prod resolve happened AFTER the agent ran case.update_context (it
+  it("guard still holds when the agent calls ticket.update_context before the final_message (prod 3428f154 repro)", async () => {
+    // The prod resolve happened AFTER the agent ran ticket.update_context (it
     // stamped liveTrackingStatus), then emitted a bare final_message. If
     // update_context drops the runtime-stamped riskFlags from the in-memory
-    // case, the guard reads a context without the mismatch flag and resolves.
+    // ticket, the guard reads a context without the mismatch flag and resolves.
     const specialist: AgentConfig = {
       id: AgentId("order-status-agent"),
       name: "Order status",
@@ -1274,7 +1274,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
       promptTemplate: "Answer the order status question.",
-      tools: ["case.update_context"],
+      tools: ["ticket.update_context"],
       permissionOverrides: {},
       handoffs: [],
       maxTurnsPerTick: 4,
@@ -1284,13 +1284,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "u1",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: "order is in transit" },
       },
       { type: "final_message", text: "Your order Q537JR5JA is on the way." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([specialist]),
@@ -1314,7 +1314,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -1336,12 +1336,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             reason: "test setup",
           });
           const result = yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -1351,14 +1351,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("case.resolved");
-    expect(actions).toContain("case.escalated_to_human");
+    expect(actions).not.toContain("ticket.resolved");
+    expect(actions).toContain("ticket.escalated_to_human");
   });
 
   it("guard holds through the FULL restart-from-triage flow (triage handoff -> get_order -> update_context -> final_message)", async () => {
     // Closest mirror of prod 3428f154: restart-from-triage runs support-triage
     // (re-classify + handoff), then order-status does get_order (re-detects the
-    // mismatch) + update_context, then a bare final_message. The case is seeded
+    // mismatch) + update_context, then a bare final_message. The ticket is seeded
     // WITHOUT classification (the restart clears it) but WITH the mismatch flag.
     const orderId = OrderId("gid://shopify/Order/7213253230783");
     const fixtureOrder: ShopifyOrder = {
@@ -1384,7 +1384,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       provider: "openrouter",
       model: "google/gemini-3.5-flash",
       promptTemplate: "Answer the order status question.",
-      tools: ["shopify.get_order", "case.update_context", "conversation.reply"],
+      tools: ["shopify.get_order", "ticket.update_context", "conversation.reply"],
       permissionOverrides: {},
       handoffs: [],
       maxTurnsPerTick: 13,
@@ -1394,7 +1394,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "t0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { classification: "where_is_order", quotedOrderRef: "Q537JR5JA" },
       },
       {
@@ -1412,13 +1412,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "t3",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: "order is in transit" },
       },
       { type: "final_message", text: "Your order Q537JR5JA is on the way." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, mockOrderStatus]),
@@ -1442,7 +1442,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -1465,12 +1465,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             reason: "test setup",
           });
           const result = yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -1478,7 +1478,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("case.resolved");
+    expect(actions).not.toContain("ticket.resolved");
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.result.type).toBe("HumanTakeoverRequired");
   });
@@ -1488,7 +1488,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // requests that cite a delivery problem. BRANCH B3 — the agent cannot
   // verify the claim (the tracking number resolves to `no_provider`), so it
   // pings the merchant (Telegram heads-up) AND escalates to the supplier,
-  // which parks the case in waiting_for_supplier. Exercises the REAL agent
+  // which parks the ticket in waiting_for_supplier. Exercises the REAL agent
   // config end-to-end (tools must include tracking.lookup + merchant.notify;
   // supplier.escalate must be auto-allowed; the turn budget must cover the
   // get_order -> tracking.lookup -> merchant.notify -> supplier.escalate run).
@@ -1574,7 +1574,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         }),
     });
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([missingPackageAgent]),
@@ -1611,7 +1611,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -1623,7 +1623,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-8001" as never,
               messageId: "m8",
@@ -1721,7 +1721,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([missingPackageAgent]),
@@ -1744,7 +1744,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvalsSvc = yield* ApprovalService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -1757,7 +1757,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-8002" as never,
               messageId: "m82",
@@ -1792,10 +1792,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // order-status-agent with `tracking.lookup` in the chain. The agent
   // fetches the order, sees a tracking number, calls tracking.lookup
   // (which TrackingServiceTest returns a synthetic "live" status for),
-  // stamps the result into case.context via case.update_context, then
+  // stamps the result into ticket.context via ticket.update_context, then
   // drafts the reply for approval.
   // ----------------------------------------------------------------
-  it("order-status-agent enriches the reply with tracking.lookup + case.update_context when a tracking number is present", async () => {
+  it("order-status-agent enriches the reply with tracking.lookup + ticket.update_context when a tracking number is present", async () => {
     const orderId = OrderId("gid://shopify/Order/77001");
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
@@ -1838,7 +1838,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "where_is_order",
           quotedOrderRef: orderId,
@@ -1868,7 +1868,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c4",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           liveTrackingStatus: {
             kind: "live",
@@ -1896,7 +1896,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -1925,7 +1925,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -1937,7 +1937,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-7001" as never,
               messageId: "msg-7001",
@@ -1951,7 +1951,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
 
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           const fetched = yield* repo.getById(created.id);
           return { result, entries, fetched };
         }),
@@ -1962,18 +1962,18 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.result.type).toBe("PausedWaitingForApproval");
 
     // Asserts the full chain was invoked: tracking.lookup ran, then
-    // case.update_context stamped the live status, then conversation.reply
+    // ticket.update_context stamped the live status, then conversation.reply
     // parked for approval (no tool.invoked row for it — ask short-circuits
     // BEFORE execute).
     const tools = out.entries
       .filter((e) => e.action === "tool.invoked")
       .map((e) => (e.details as Record<string, unknown>)["tool"]);
     expect(tools).toContain("tracking.lookup");
-    expect(tools).toContain("case.update_context");
+    expect(tools).toContain("ticket.update_context");
     expect(tools).toContain("shopify.get_order");
     expect(tools).not.toContain("conversation.reply");
 
-    // The live tracking status actually landed on the case context (via the
+    // The live tracking status actually landed on the ticket context (via the
     // named `liveTrackingStatus` field — the operator-visible carrier state).
     expect(out.fetched.context["liveTrackingStatus"]).toMatchObject({
       kind: "live",
@@ -2010,7 +2010,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "where_is_order",
           quotedOrderRef: orderId,
@@ -2029,7 +2029,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         input: { orderId },
       },
       // Per the prompt: no tracking number → skip tracking.lookup +
-      // case.update_context → straight to reply.
+      // ticket.update_context → straight to reply.
       {
         type: "tool_call",
         callId: "c3",
@@ -2048,7 +2048,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2075,7 +2075,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -2086,7 +2086,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-7002" as never,
               messageId: "msg-7002",
@@ -2099,7 +2099,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
               attachments: [],
             },
           });
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, entries };
         }),
         layer,
@@ -2129,7 +2129,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2152,7 +2152,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -2164,7 +2164,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-r" as never,
               messageId: "msg-r",
@@ -2179,7 +2179,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -2188,7 +2188,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
     // The handoff was rejected, so triage (a routing agent) ends the tick on
     // a bare final_message without ever routing — the runtime guard parks it
-    // for a human rather than silently resolving a case nothing handled.
+    // for a human rather than silently resolving a ticket nothing handled.
     expect(out.result.type).toBe("HumanTakeoverRequired");
     // Agent did NOT swap because the target wasn't in handoffs.
     expect(out.fetched.currentAgentId).toBe(supportTriage.id);
@@ -2209,11 +2209,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
-  // Regression for the silent-resolve bug (case e6206180-…): triage
-  // classified an order-requiring case, found no order id, emitted a bare
-  // final_message, and the runtime resolved the case with NOTHING done —
+  // Regression for the silent-resolve bug (ticket e6206180-…): triage
+  // classified an order-requiring ticket, found no order id, emitted a bare
+  // final_message, and the runtime resolved the ticket with NOTHING done —
   // no reply, no handoff. Triage is a router: it must hand off, and if it
-  // finishes without routing the runtime parks the case for a human
+  // finishes without routing the runtime parks the ticket for a human
   // instead of silently resolving it.
   // ----------------------------------------------------------------
   it("parks for human takeover when triage finishes without handing off (no silent resolve)", async () => {
@@ -2221,7 +2221,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "where_is_order",
           notes: "customer asks where their order is; no order id given",
@@ -2233,7 +2233,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2254,7 +2254,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -2264,7 +2264,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-silent" as never,
               messageId: "msg-silent",
@@ -2278,21 +2278,21 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
       ),
     );
 
-    // The case is parked for a human — NOT silently resolved.
+    // The ticket is parked for a human — NOT silently resolved.
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.fetched.status).not.toBe("resolved");
-    // Triage never routed away, and the case was never resolved.
+    // Triage never routed away, and the ticket was never resolved.
     expect(out.fetched.currentAgentId).toBe(supportTriage.id);
     const actions = out.entries.map((e) => e.action);
-    expect(actions).not.toContain("case.resolved");
+    expect(actions).not.toContain("ticket.resolved");
   });
 
   // ----------------------------------------------------------------
@@ -2333,7 +2333,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "where_is_order",
           notes: "where is my order; no number given",
@@ -2372,7 +2372,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2395,7 +2395,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const approvalsSvc = yield* ApprovalService;
           const created = yield* repo.create({
@@ -2407,7 +2407,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-solo" as never,
               messageId: "msg-solo",
@@ -2421,7 +2421,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           const pending = yield* approvalsSvc.listPending(
             TenantId("tenant-acme"),
           );
@@ -2462,14 +2462,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.pending[0]!.tool).toBe("conversation.reply");
     expect(out.pending[0]!.agentId).toBe(orderStatusAgent.id);
 
-    // The runtime BINDS the inferred order to the case context so the
+    // The runtime BINDS the inferred order to the ticket context so the
     // operator's order panel + Issue-refund button surface the SAME order the
     // agent acted on. The bound value is the order's stable GID (the single
     // source of truth) — never the fuzzy name — so every consumer re-resolves
     // it exactly. Regression: find_customer_order resolved the order for the LLM
     // but never stamped `identifiedOrderId`, so the dashboard showed "no order
     // found" even though the agent drafted a correct order-aware reply (prod
-    // case e161d86e).
+    // ticket e161d86e).
     expect(out.fetched.context["identifiedOrderId"]).toBe(
       "gid://shopify/Order/55501",
     );
@@ -2492,7 +2492,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const seenMessagesByTurn: Array<ReadonlyArray<{ role: string; toolCalls?: ReadonlyArray<{ name: string }> }>> = [];
 
     // Build an LLM that:
-    //   turn 0: calls case.update_context
+    //   turn 0: calls ticket.update_context
     //   turn 1: if a prior assistant tool-call is in the conversation,
     //           finish; otherwise loop. The runtime fix is what makes
     //           the loop terminate.
@@ -2514,7 +2514,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         return Eff.succeed({
           type: "tool_call" as const,
           callId: "c-loop",
-          tool: "case.update_context",
+          tool: "ticket.update_context",
           input: { notes: "round 1" },
         });
       }
@@ -2525,7 +2525,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage]),
@@ -2567,7 +2567,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const turn1Roles = seenMessagesByTurn[1]!.map((m) => m.role);
     expect(turn1Roles).toEqual(["user", "assistant", "tool"]);
     const turn1Assistant = seenMessagesByTurn[1]![1]!;
-    expect(turn1Assistant.toolCalls).toEqual([{ name: "case.update_context" }]);
+    expect(turn1Assistant.toolCalls).toEqual([{ name: "ticket.update_context" }]);
   });
 
   it("returns HumanTakeoverRequired when the script exhausts maxTurnsPerTick", async () => {
@@ -2579,13 +2579,13 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       (_, i) => ({
         type: "tool_call",
         callId: `c${i}`,
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: `loop ${i}` },
       }),
     );
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage]),
@@ -2621,9 +2621,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
   // ----------------------------------------------------------------
   // message.received — connector-driven inbound (Gmail, Outlook, …).
-  // The runtime resolves the case via findByThreadId: first message on
+  // The runtime resolves the ticket via findByThreadId: first message on
   // a thread → create + bind; subsequent messages → resume the same
-  // case (this is what makes Pub/Sub at-least-once retries safe).
+  // ticket (this is what makes Pub/Sub at-least-once retries safe).
   // ----------------------------------------------------------------
   const messageReceived = (
     threadId: string,
@@ -2648,17 +2648,17 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     },
   });
 
-  it("creates a case bound to the thread on the first message.received", async () => {
+  it("creates a ticket bound to the thread on the first message.received", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
 
           const result = yield* runtime.handleEvent(
             messageReceived("thread-A", "My order ord_42 is late."),
           );
-          // The runtime didn't return a caseId, so look it up via the
+          // The runtime didn't return a ticketId, so look it up via the
           // thread — the existence of this row is the assertion that
           // load-or-create wrote one bound to the thread.
           const found = yield* repo.findByThreadId(
@@ -2679,19 +2679,19 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found?.context["classification"]).toBe("where_is_order");
   });
 
-  it("resumes the same case when a second message.received arrives on the same thread", async () => {
+  it("resumes the same ticket when a second message.received arrives on the same thread", async () => {
     // Two consecutive inbound messages on the same thread must produce
-    // exactly ONE case row — that's the dedup guarantee Pub/Sub at-least-
+    // exactly ONE ticket row — that's the dedup guarantee Pub/Sub at-least-
     // once delivery is relying on.
     const continueScript: ReadonlyArray<LLMDecision> = [
       ...triageScript,
-      // Second tick: just finish. The case is already resolved from the
-      // first tick, so this is the "case already resolved" no-op path.
+      // Second tick: just finish. The ticket is already resolved from the
+      // first tick, so this is the "ticket already resolved" no-op path.
       { type: "final_message", text: "no-op resume" },
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2714,7 +2714,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           yield* runtime.handleEvent(
@@ -2734,26 +2734,26 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             TenantId("tenant-acme"),
             "thread-B" as never,
           );
-          // Same case row.
+          // Same ticket row.
           expect(second?.id).toBe(firstId);
 
-          const entries = yield* audit.forCase(firstId);
+          const entries = yield* audit.forTicket(firstId);
           return { firstId, entries };
         }),
         layer,
       ),
     );
 
-    // Two ticks → two `event.received` audit rows on the same case.
+    // Two ticks → two `event.received` audit rows on the same ticket.
     const eventReceivedCount = out.entries.filter(
       (e) => e.action === "event.received",
     ).length;
     expect(eventReceivedCount).toBe(2);
   });
 
-  it("creates separate cases for the same provider thread id in different mailboxes", async () => {
+  it("creates separate tickets for the same provider thread id in different mailboxes", async () => {
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2776,7 +2776,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const threadId = "gmail:provider-thread-collision" as never;
 
           yield* runtime.handleEvent(
@@ -2820,14 +2820,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.first?.id).not.toBe(out.second?.id);
   });
 
-  it("holds an inbound reply on a human_takeover case instead of running the agent", async () => {
-    // After a manager takes a case over, an inbound customer reply must NOT
+  it("holds an inbound reply on a human_takeover ticket instead of running the agent", async () => {
+    // After a manager takes a ticket over, an inbound customer reply must NOT
     // wake the agent — answering would step on the human handling it. The
     // empty LLM script IS the assertion: if the guard regresses and the
     // agent loop runs, the runtime consults the LLM and the empty script
     // dies, failing the test.
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2850,10 +2850,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
-          // Seed a taken-over case already bound to the thread.
+          // Seed a taken-over ticket already bound to the thread.
           const seeded = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -2867,7 +2867,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             messageReceived("thread-HT", "any update on my refund?"),
           );
           const fetched = yield* repo.getById(seeded.id);
-          const entries = yield* audit.forCase(seeded.id);
+          const entries = yield* audit.forTicket(seeded.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -2875,7 +2875,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     expect(out.result.type).toBe("PausedForHumanTakeover");
-    // The agent never acted — the case stays parked under the human.
+    // The agent never acted — the ticket stays parked under the human.
     expect(out.fetched.status).toBe("human_takeover");
     // The held reply is recorded for the audit trail.
     expect(
@@ -2883,7 +2883,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ).toBe(true);
   });
 
-  it("stamps customerEmail + shopifyCustomerId onto the case context when message.received creates a new case", async () => {
+  it("stamps customerEmail + shopifyCustomerId onto the ticket context when message.received creates a new ticket", async () => {
     // Seed a Shopify customer keyed by the inbound sender's email so the
     // runtime's post-create searchByEmail lookup returns a hit.
     const customerId = CustomerId("gid://shopify/Customer/4242");
@@ -2900,7 +2900,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     };
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -2925,7 +2925,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           yield* runtime.handleEvent(
             messageReceived("thread-cust", "Hi support, where's my order?"),
           );
@@ -2951,7 +2951,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           yield* runtime.handleEvent(
             messageReceived("thread-miss", "Hello"),
           );
@@ -2970,9 +2970,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found?.context["shopifyCustomerId"]).toBeUndefined();
   });
 
-  it("resolves + stamps shopifyCustomerId from a phone in context on a RESUME tick (old case, no email match)", async () => {
-    // Restarting an old case whose customer was identified only by phone (the
-    // order was placed under a different email). enrichCase's creation-time
+  it("resolves + stamps shopifyCustomerId from a phone in context on a RESUME tick (old ticket, no email match)", async () => {
+    // Restarting an old ticket whose customer was identified only by phone (the
+    // order was placed under a different email). enrichTicket's creation-time
     // lookup never runs on a resume, so the runtime must resolve the customer
     // from the stamped phone and stamp shopifyCustomerId — the id that
     // find_customer_order + the order/customer-mismatch guard key on.
@@ -3006,7 +3006,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       { type: "final_message", text: "Looking into it." },
     ];
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([specialist]),
@@ -3034,7 +3034,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -3048,8 +3048,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             reason: "test setup",
           });
           yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
           return { found: yield* repo.getById(created.id) };
@@ -3065,7 +3065,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // ensureCustomerResolved skips the (uncached) Shopify email→phone→name
   // lookups once they've missed for a given identifier set, keyed on the
   // identifiers so it still retries when they change. Exercised via a resume
-  // tick (enrichCase's creation lookup doesn't run on resume, so
+  // tick (enrichTicket's creation lookup doesn't run on resume, so
   // ensureCustomerResolved owns the resolution).
   const resolutionSpecialist: AgentConfig = {
     id: AgentId("order-status-agent"),
@@ -3099,7 +3099,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     fixtures: Parameters<typeof ShopifyServiceTest>[0],
   ) => {
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([resolutionSpecialist]),
@@ -3119,7 +3119,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -3130,8 +3130,8 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             reason: "test setup",
           });
           yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_full_retry",
           });
           return yield* repo.getById(created.id);
@@ -3212,7 +3212,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage]),
@@ -3267,12 +3267,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     };
 
-    const stampedCase = await Effect.runPromise(
+    const stampedTicket = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
           yield* runtime.handleEvent(inboundWithPhotos);
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           return yield* repo.findByThreadId(
             TenantId("tenant-acme"),
             "thread-photo" as never,
@@ -3282,10 +3282,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // The runtime stamps a per-case EXIF rollup onto the context. These
+    // The runtime stamps a per-ticket EXIF rollup onto the context. These
     // fixture attachments carry no `exif` field → all stripped.
     const photoSignals = (
-      stampedCase?.context as Record<string, unknown> | undefined
+      stampedTicket?.context as Record<string, unknown> | undefined
     )?.["photoSignals"];
     expect(photoSignals).toEqual({
       count: 2,
@@ -3318,17 +3318,17 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     }
   });
 
-  it("flags a duplicate photo (near pHash match) seen on another case", async () => {
+  it("flags a duplicate photo (near pHash match) seen on another ticket", async () => {
     // The damaged-product fraud guard: a photo whose perceptual hash is
-    // within Hamming distance of one already recorded on ANOTHER case for
-    // the same tenant stamps a `duplicate_photo_seen_in_case_<id>` risk
-    // flag onto the case context.
+    // within Hamming distance of one already recorded on ANOTHER ticket for
+    // the same tenant stamps a `duplicate_photo_seen_in_ticket_<id>` risk
+    // flag onto the ticket context.
     const llmFn = LLMServiceFromFn(() =>
       Eff.succeed({ type: "final_message" as const, text: "ok" }),
     );
     const imageHashLayer = ImageHashStoreTest;
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage]),
@@ -3348,7 +3348,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       env,
     );
 
-    const priorCaseId = CaseId("99999999-9999-4999-8999-999999999999");
+    const priorTicketId = TicketId("99999999-9999-4999-8999-999999999999");
     const inbound: DomainEvent = {
       type: "message.received",
       tenantId: TenantId("tenant-dup"),
@@ -3374,19 +3374,19 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       },
     };
 
-    const stampedCase = await Effect.runPromise(
+    const stampedTicket = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          // Pre-seed a near-identical hash on a different case, same tenant.
+          // Pre-seed a near-identical hash on a different ticket, same tenant.
           const store = yield* ImageHashStore;
           yield* store.record({
             tenantId: TenantId("tenant-dup"),
-            caseId: priorCaseId,
+            ticketId: priorTicketId,
             phash: 1n,
           });
           const runtime = yield* AgentRuntime;
           yield* runtime.handleEvent(inbound);
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           return yield* repo.findByThreadId(
             TenantId("tenant-dup"),
             "thread-dup" as never,
@@ -3397,10 +3397,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     const riskFlags = (
-      stampedCase?.context as Record<string, unknown> | undefined
+      stampedTicket?.context as Record<string, unknown> | undefined
     )?.["riskFlags"];
     expect(riskFlags).toEqual([
-      `duplicate_photo_seen_in_case_${priorCaseId}`,
+      `duplicate_photo_seen_in_ticket_${priorTicketId}`,
     ]);
   });
 
@@ -3412,7 +3412,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // off to `refund-review-agent`, the specialist fetches the order, then
   // proposes a customer-facing reply via `conversation.reply`. That tool's
   // defaultPermission is `"ask"`, so PermissionService returns `"ask"`,
-  // the runtime creates an approval row, transitions the case to
+  // the runtime creates an approval row, transitions the ticket to
   // `waiting_for_approval`, and returns `PausedWaitingForApproval`.
   // Nothing is sent to the customer until a human approves.
   // ----------------------------------------------------------------
@@ -3447,12 +3447,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // turn 1 — triage hands off to refund-review-agent
     // turn 2 — refund-review-agent fetches the order via shopify.get_order
     // turn 3 — refund-review-agent drafts conversation.reply; permission
-    //          service returns "ask" → runtime parks the case.
+    //          service returns "ask" → runtime parks the ticket.
     const refundScript: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           quotedOrderRef: orderId,
@@ -3492,7 +3492,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -3518,7 +3518,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const approvalsSvc = yield* ApprovalService;
 
@@ -3531,7 +3531,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-refund" as never,
               messageId: "msg-r1",
@@ -3546,7 +3546,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           const pending = yield* approvalsSvc.listPending(
             TenantId("tenant-acme"),
           );
@@ -3561,16 +3561,16 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     if (out.result.type === "PausedWaitingForApproval") {
       expect(out.result.approvalId).toBeTruthy();
     }
-    // Case is in the gated state and on the specialist agent.
+    // Ticket is in the gated state and on the specialist agent.
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.fetched.currentAgentId).toBe(refundReviewAgent.id);
 
-    // One pending approval, tied to the right tool + agent + case.
+    // One pending approval, tied to the right tool + agent + ticket.
     expect(out.pending).toHaveLength(1);
     const approval = out.pending[0]!;
     expect(approval.tool).toBe("conversation.reply");
     expect(approval.agentId).toBe(refundReviewAgent.id);
-    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.ticketId).toBe(out.fetched.id);
     expect(approval.status).toBe("pending");
     // The proposed input we'd ship through `conversation.reply`.
     const proposed = approval.proposedInput as {
@@ -3584,9 +3584,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
     // Audit trail: event.received + (llm.decision, tool.invoked) × 3 + a
     // final llm.decision (the conversation.reply tool call that was gated)
-    // + the case.waiting_for_approval park row (same tx as the approval).
+    // + the ticket.waiting_for_approval park row (same tx as the approval).
     // No `tool.invoked` for conversation.reply because permission=ask
-    // short-circuits BEFORE execute. No `case.resolved` because we paused.
+    // short-circuits BEFORE execute. No `ticket.resolved` because we paused.
     const actions = out.entries.map((e) => e.action);
     expect(actions).toEqual([
       "event.received",
@@ -3597,7 +3597,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       "llm.decision",
       "tool.invoked",
       "llm.decision",
-      "case.waiting_for_approval",
+      "ticket.waiting_for_approval",
     ]);
   });
 
@@ -3642,7 +3642,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           quotedOrderRef: orderId,
@@ -3687,7 +3687,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -3713,7 +3713,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -3725,7 +3725,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-refund-b" as never,
               messageId: "msg-8001",
@@ -3739,7 +3739,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
             },
           });
 
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, entries };
         }),
         layer,
@@ -3775,7 +3775,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
   // ----------------------------------------------------------------
   // Return request: refund-review-agent stamps the structured return
-  // intent (returnReason + requestedResolution) onto the case via the
+  // intent (returnReason + requestedResolution) onto the ticket via the
   // RETURN CAPTURE step, then drafts a reply (PATH B) — proving the
   // producer wiring lands the closed-vocabulary fields the dashboard
   // chips read. (A dedicated returns agent is deferred; see todo.md.)
@@ -3814,7 +3814,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { classification: "refund_request", quotedOrderRef: orderId },
       },
       {
@@ -3832,7 +3832,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c3",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { returnReason: "defective", requestedResolution: "replacement" },
       },
       {
@@ -3859,7 +3859,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -3880,7 +3880,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -3889,7 +3889,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-return-a" as never,
               messageId: "msg-8002",
@@ -3910,7 +3910,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     expect(out.result.type).toBe("PausedWaitingForApproval");
-    // The structured return intent landed on the case context (closed
+    // The structured return intent landed on the ticket context (closed
     // vocabulary the dashboard chips read).
     expect(out.fetched.context["returnReason"]).toBe("defective");
     expect(out.fetched.context["requestedResolution"]).toBe("replacement");
@@ -3968,7 +3968,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "missing_package",
           quotedOrderRef: orderId,
@@ -4008,7 +4008,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, missingPackageAgent]),
@@ -4034,7 +4034,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvalsSvc = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -4046,7 +4046,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-missing" as never,
               messageId: "msg-mp1",
@@ -4075,12 +4075,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.fetched.currentAgentId).toBe(missingPackageAgent.id);
 
-    // Pending approval ties to the right tool + agent + case.
+    // Pending approval ties to the right tool + agent + ticket.
     expect(out.pending).toHaveLength(1);
     const approval = out.pending[0]!;
     expect(approval.tool).toBe("conversation.reply");
     expect(approval.agentId).toBe(missingPackageAgent.id);
-    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.ticketId).toBe(out.fetched.id);
     expect(approval.status).toBe("pending");
     const proposed = approval.proposedInput as {
       readonly threadId: string;
@@ -4139,7 +4139,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "missing_package",
           quotedOrderRef: orderId,
@@ -4228,7 +4228,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     // SheetsServiceTest returns a deterministic happy result so the
     // tool.invoked audit row records a successful write.
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, missingPackageAgent]),
@@ -4260,7 +4260,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const approvalsSvc = yield* ApprovalService;
 
@@ -4273,7 +4273,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-missing-with-sheet" as never,
               messageId: "msg-mp-sheet",
@@ -4288,7 +4288,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const auditEntries = yield* audit.forCase(created.id);
+          const auditEntries = yield* audit.forTicket(created.id);
           const pending = yield* approvalsSvc.listPending(
             TenantId("tenant-acme"),
           );
@@ -4374,7 +4374,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "damaged_product",
           quotedOrderRef: orderId,
@@ -4405,11 +4405,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         tool: "shopify.get_product",
         input: { productId: "gid://shopify/Product/777" },
       },
-      // turn 4 — record the match verdict on the case context
+      // turn 4 — record the match verdict on the ticket context
       {
         type: "tool_call",
         callId: "c3b",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { productMatch: "match" },
       },
       // turn 5 — draft customer reply (gated ask)
@@ -4431,7 +4431,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, damagedProductAgent]),
@@ -4474,7 +4474,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvalsSvc = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -4486,7 +4486,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-damage" as never,
               messageId: "msg-dp1",
@@ -4527,7 +4527,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.fetched.currentAgentId).toBe(damagedProductAgent.id);
 
-    // The product-match cross-check stamped its verdict on the case
+    // The product-match cross-check stamped its verdict on the ticket
     // context so the approval card can calibrate operator confidence.
     expect(out.fetched.context["productMatch"]).toBe("match");
 
@@ -4537,7 +4537,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     const approval = out.pending[0]!;
     expect(approval.tool).toBe("conversation.reply");
     expect(approval.agentId).toBe(damagedProductAgent.id);
-    expect(approval.caseId).toBe(out.fetched.id);
+    expect(approval.ticketId).toBe(out.fetched.id);
     const proposed = approval.proposedInput as {
       readonly threadId: string;
       readonly draftId: string;
@@ -4548,7 +4548,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
   // ----------------------------------------------------------------
   // Damaged-product BRANCH B (no photos): triage → handoff →
-  // conversation.ask_customer (defaultPermission: allow). The case
+  // conversation.ask_customer (defaultPermission: allow). The ticket
   // resolves cleanly on the same tick — ask_customer auto-sends + the
   // runtime treats the trailing plain-text final_message as the
   // resolution.
@@ -4560,7 +4560,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "damaged_product",
           quotedOrderRef: orderId,
@@ -4606,19 +4606,19 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
         schedule: (input) =>
           Effect.succeed({
             id: "timer-dp-1",
-            caseId: input.caseId,
+            ticketId: input.ticketId,
             fireAt: input.fireAt,
             reason: input.reason,
             firedAt: null,
             cancelledAt: null,
           }),
-        cancelOpenForCase: () => Effect.succeed(0),
+        cancelOpenForTicket: () => Effect.succeed(0),
         fireDue: () => Effect.succeed([]),
       }),
     );
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, damagedProductAgent]),
@@ -4643,7 +4643,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -4655,7 +4655,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-damage-2" as never,
               messageId: "msg-dp2",
@@ -4670,7 +4670,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
@@ -4678,7 +4678,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     );
 
     // BRANCH B: ask_customer is defaultPermission:"allow" so it runs;
-    // the runtime then transitions the case to waiting_for_customer.
+    // the runtime then transitions the ticket to waiting_for_customer.
     expect(["Completed", "PausedWaitingForCustomer"]).toContain(
       out.result.type,
     );
@@ -4697,7 +4697,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // damage (productMatch=match) and the fix is a replacement, so the
   // agent escalates to the warehouse/supplier instead of replying. The
   // runtime records the escalation (via SupplierEscalationService), parks
-  // the case in waiting_for_supplier, and ends the tick (no customer
+  // the ticket in waiting_for_supplier, and ends the tick (no customer
   // reply yet — that happens later, on supplier.updated).
   // ----------------------------------------------------------------
   it("hands off to damaged-product-agent BRANCH A and escalates a verified replacement to the supplier", async () => {
@@ -4732,7 +4732,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "damaged_product",
           identifiedOrderId: orderId,
@@ -4767,11 +4767,11 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c3b",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { productMatch: "match" },
       },
       // turn 5 — PATH REPLACEMENT: escalate to the supplier (parks the
-      // case; no customer reply on this tick)
+      // ticket; no customer reply on this tick)
       {
         type: "tool_call",
         callId: "c4",
@@ -4800,7 +4800,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, damagedProductAgent]),
@@ -4844,7 +4844,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -4859,7 +4859,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-damage-3" as never,
               messageId: "msg-dp3",
@@ -4881,14 +4881,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         layer,
       ),
     );
 
-    // A verified-match replacement parks the case for the supplier instead
+    // A verified-match replacement parks the ticket for the supplier instead
     // of drafting a customer reply.
     expect(out.result.type).toBe("PausedWaitingForSupplier");
     expect(out.fetched.status).toBe("waiting_for_supplier");
@@ -4915,10 +4915,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   // ----------------------------------------------------------------
   // Closed-loop: triage → handoff → draft → ask-approval → manager
   // approves via approval.approved event → runtime executes the gated
-  // conversation.reply → case resolves. This is the slice that proves
+  // conversation.reply → ticket resolves. This is the slice that proves
   // the "AI proposes, human approves, AI sends" arc works end-to-end.
   // ----------------------------------------------------------------
-  it("resumes a paused case on approval.approved: executes conversation.reply and resolves", async () => {
+  it("resumes a paused ticket on approval.approved: executes conversation.reply and resolves", async () => {
     const orderId = OrderId("gid://shopify/Order/88888");
     const fixtureOrder: ShopifyOrder = {
       id: orderId,
@@ -4954,7 +4954,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           quotedOrderRef: orderId,
@@ -4993,7 +4993,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -5019,7 +5019,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -5035,7 +5035,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           // Tick #1 — runs the agent loop, parks waiting on approval.
           const r1 = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-refund-closed-loop" as never,
               messageId: "msg-cl1",
@@ -5056,16 +5056,16 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           // Tick #2 — manager clicks approve → API publishes
           // approval.approved → worker (this test stands in) dispatches
           // it to the runtime. Runtime executes the previously-gated
-          // conversation.reply and resolves the case.
+          // conversation.reply and resolves the ticket.
           const r2 = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: UserId("manager-1"),
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { r1, r2, approvalId, fetched, entries };
         }),
         layer,
@@ -5074,7 +5074,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
     // The resume tick completed cleanly.
     expect(out.r2.type).toBe("Completed");
-    // Case ended up resolved (was waiting_for_approval after tick #1).
+    // Ticket ended up resolved (was waiting_for_approval after tick #1).
     expect(out.fetched.status).toBe("resolved");
 
     // The conversation.reply actually fired against the connector —
@@ -5112,12 +5112,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     //   tick #1: event.received + 3× (llm.decision, tool.invoked) +
     //            trailing llm.decision (the gated reply call)
     //   tick #2: event.received + tool.invoked (executed reply) +
-    //            case.resolved
+    //            ticket.resolved
     const actions = out.entries.map((e) => e.action);
     expect(actions.slice(-3)).toEqual([
       "event.received",
       "tool.invoked",
-      "case.resolved",
+      "ticket.resolved",
     ]);
     // The post-approval tool.invoked carries viaApprovalId so the
     // dashboard timeline can render "Executed via approval <id>".
@@ -5162,7 +5162,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { classification: "refund_request", quotedOrderRef: orderId },
       },
       {
@@ -5194,7 +5194,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -5215,7 +5215,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const approvalsSvc = yield* ApprovalService;
 
@@ -5231,7 +5231,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 
           const r1 = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-l8" as never,
               messageId: "msg-l8",
@@ -5267,12 +5267,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           const r2 = yield* runtime.handleEvent({
             type: "approval.approved",
             approvalId: r1.approvalId,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: UserId("manager-evil"),
           });
 
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { r2, fetched, entries };
         }),
         layer,
@@ -5289,7 +5289,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(convoTest.handle.sent).toHaveLength(0);
     // Escalation was recorded with the invalid-input reason.
     const escalation = out.entries.find(
-      (e) => e.action === "case.escalated_to_human",
+      (e) => e.action === "ticket.escalated_to_human",
     );
     expect(escalation).toBeDefined();
     expect((escalation!.details as Record<string, unknown>)["reason"]).toBe(
@@ -5298,7 +5298,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // Mirror test for the rejection path: approval.rejected should
-  // escalate the case to human_takeover and NOT execute the tool.
+  // escalate the ticket to human_takeover and NOT execute the tool.
   it("escalates to human_takeover on approval.rejected and does NOT execute the gated tool", async () => {
     const convoTest = makeConversationServiceTest({});
     const mailTest = makePlatformMailServiceTest({});
@@ -5324,7 +5324,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       {
         type: "tool_call",
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: {
           classification: "refund_request",
           quotedOrderRef: orderId,
@@ -5359,7 +5359,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     ];
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -5385,7 +5385,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
 
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -5395,7 +5395,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const r1 = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-reject" as never,
               messageId: "msg-r1",
@@ -5414,7 +5414,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           const r2 = yield* runtime.handleEvent({
             type: "approval.rejected",
             approvalId: r1.approvalId,
-            caseId: created.id,
+            ticketId: created.id,
             managerId: UserId("manager-2"),
             reason: "wrong policy",
           });
@@ -5433,20 +5433,20 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
-  // Regression: a case parked in `waiting_for_approval` must NOT be
+  // Regression: a ticket parked in `waiting_for_approval` must NOT be
   // resolved (or otherwise mutated) by the agent loop when an unrelated
   // event lands while the manager's approval is still pending — e.g. the
   // customer replies again on the same thread, or a follow-up timer
   // fires. Before the guard, ANY such event re-entered the agent loop;
-  // a `final_message` decision then transitioned the case straight to
+  // a `final_message` decision then transitioned the ticket straight to
   // `resolved`, abandoning the still-pending approval (the manager never
-  // decided, yet the case reads "resolved"). The runtime must instead
-  // leave the case parked and re-report PausedWaitingForApproval. The
+  // decided, yet the ticket reads "resolved"). The runtime must instead
+  // leave the ticket parked and re-report PausedWaitingForApproval. The
   // only legitimate ways out of `waiting_for_approval` are the
   // approval.approved / approval.rejected events (handled above the loop)
   // and an out-of-band human takeover — none of which run the agent.
   // ----------------------------------------------------------------
-  it("does not resolve a case awaiting approval when a new event arrives while the approval is pending", async () => {
+  it("does not resolve a ticket awaiting approval when a new event arrives while the approval is pending", async () => {
     const parkedAgent: AgentConfig = {
       id: AgentId("parked-agent"),
       name: "Parked",
@@ -5463,7 +5463,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     };
 
     // The scripted LLM's only decision is `final_message` — under the old
-    // behavior that resolved whatever case the loop ran on. The guard must
+    // behavior that resolved whatever ticket the loop ran on. The guard must
     // short-circuit BEFORE the LLM is ever consulted, so this counter must
     // stay at zero.
     let llmCalls = 0;
@@ -5476,7 +5476,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([parkedAgent]),
@@ -5499,10 +5499,10 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvalsSvc = yield* ApprovalService;
 
-          // Seed a case already parked for approval, with a live pending
+          // Seed a ticket already parked for approval, with a live pending
           // approval row (the manager has NOT decided yet).
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -5512,7 +5512,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           });
           const approval = yield* approvalsSvc.create({
             tenantId: TenantId("tenant-acme"),
-            caseId: created.id,
+            ticketId: created.id,
             agentId: parkedAgent.id,
             tool: "conversation.reply",
             proposedInput: { threadId: "thread-park", bodyText: "draft" },
@@ -5527,7 +5527,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           // The customer replies again while the approval is still pending.
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-park" as never,
               messageId: "msg-park-2",
@@ -5551,14 +5551,14 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       ),
     );
 
-    // The case stays parked — it is NOT resolved out from under the
+    // The ticket stays parked — it is NOT resolved out from under the
     // pending approval.
     expect(out.fetched.status).toBe("waiting_for_approval");
     // The pending approval is untouched.
     expect(out.pending).toHaveLength(1);
     expect(out.pending[0]!.id).toBe(out.approvalId);
     expect(out.pending[0]!.status).toBe("pending");
-    // The runtime re-reports the case as parked for that same approval.
+    // The runtime re-reports the ticket as parked for that same approval.
     expect(out.result.type).toBe("PausedWaitingForApproval");
     if (out.result.type === "PausedWaitingForApproval") {
       expect(out.result.approvalId).toBe(out.approvalId);
@@ -5569,12 +5569,12 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
 });
 
 // BYOK: when the tenant has no LLM credential the runtime must park the
-// case in `human_takeover` instead of returning a generic Failed. This
+// ticket in `human_takeover` instead of returning a generic Failed. This
 // test injects an LLMService that always fails with LLMCredentialMissing
 // — the same shape LLMServiceLive returns when LLMCredentialResolver
 // reports a missing tenant row.
 describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
-  it("parks the case in human_takeover with reason llm_credential_missing", async () => {
+  it("parks the ticket in human_takeover with reason llm_credential_missing", async () => {
     const { LLMCredentialMissing } = await import("@support-agent/agent-core");
 
     const llmCredentialMissingLayer = LLMServiceFromFn((req) =>
@@ -5582,7 +5582,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
     );
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -5605,33 +5605,33 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const workflow = yield* runtime.handleEvent(
             ticketCreated("hello", "tenant-no-llm"),
           );
 
-          // Re-derive the just-created case via audit log.
+          // Re-derive the just-created ticket via audit log.
           const tenant = TenantId("tenant-no-llm");
-          // CaseRepositoryTest stores in-memory; the audit entry from
-          // `event.received` carries the caseId. We can fetch by listing
+          // TicketRepositoryTest stores in-memory; the audit entry from
+          // `event.received` carries the ticketId. We can fetch by listing
           // pending approvals (none) — easier path: pull all entries for
-          // any case in the tenant via a broad audit walk.
+          // any ticket in the tenant via a broad audit walk.
           // Instead, just scan repo.getById on all known ids would be
           // brittle; the runtime returned the workflow result which is
-          // enough to assert the takeover path. Use the case's `findByThreadId`
+          // enough to assert the takeover path. Use the ticket's `findByThreadId`
           // — ticket.created creates without a threadId, so we walk the
-          // audit log by fetching the workflow's case id via a trick:
-          // CaseRepositoryTest exposes data through `listForTenant` —
+          // audit log by fetching the workflow's ticket id via a trick:
+          // TicketRepositoryTest exposes data through `listForTenant` —
           // we don't have a clean API here, so just assert via audit log
           // shape and the workflow result.
 
-          // Pull audit entries for any case the tenant logged today.
+          // Pull audit entries for any ticket the tenant logged today.
           // The runtime always audits `event.received` first; we use
-          // that to fish out a caseId.
-          // CaseRepositoryTest doesn't expose listForTenant, but the
-          // workflow result + audit-log search via `forCase` on a
+          // that to fish out a ticketId.
+          // TicketRepositoryTest doesn't expose listForTenant, but the
+          // workflow result + audit-log search via `forTicket` on a
           // discovered id is enough. We use `Effect.either` so a failed
           // lookup doesn't crash the test.
 
@@ -5677,7 +5677,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -5733,7 +5733,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -5782,7 +5782,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
     });
 
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -5822,7 +5822,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
 // tenants.settings.refundPolicy). These tests exercise the runtime
 // against that Live layer instead of the static
 // PermissionServiceDefault used in earlier blocks. Asserts:
-//   - $20 below askAbove=$25 → tool auto-runs, case resolves
+//   - $20 below askAbove=$25 → tool auto-runs, ticket resolves
 //   - $100 in the ask zone   → runtime parks for approval
 //   - $500 above the cap     → tool short-circuited via denied_by_policy
 
@@ -5859,7 +5859,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     {
       type: "tool_call",
       callId: "c0",
-      tool: "case.update_context",
+      tool: "ticket.update_context",
       input: { classification: "refund_request", quotedOrderRef: refundOrderId },
     },
     {
@@ -5936,7 +5936,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     });
     const connectors = ConnectorCredentialStoreTest(connections);
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, refundReviewAgent]),
@@ -5977,7 +5977,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       ),
     );
 
-  it("auto-runs a $20 refund when askAbove=$25 (case resolves)", async () => {
+  it("auto-runs a $20 refund when askAbove=$25 (ticket resolves)", async () => {
     const layer = buildLayer("20.00", tenantSettings(2500, 20000));
     const result = await runTick(layer);
     expect(result.type).toBe("Completed");
@@ -6028,8 +6028,8 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     expect(result.type).toBe("Completed");
   });
 
-  it("flags refund_customer_mismatch when the refund order belongs to a different customer than the case", async () => {
-    // Prompt-injection scope guard: the case's bound customer (jane@,
+  it("flags refund_customer_mismatch when the refund order belongs to a different customer than the ticket", async () => {
+    // Prompt-injection scope guard: the ticket's bound customer (jane@,
     // stamped by the runtime from the inbound sender — not the LLM) differs
     // from the order's customer (buyer@). A refund steered onto an unrelated
     // order trips the guard, which stamps a risk flag the approval card shows.
@@ -6059,7 +6059,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
     });
     const connectors = ConnectorCredentialStoreTest(connectionsWithWriteOrders);
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([refundReviewAgent]),
@@ -6084,7 +6084,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: refundTenantId,
             channel: "email",
@@ -6094,7 +6094,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-mismatch" as never,
               messageId: "m-mismatch",
@@ -6133,7 +6133,7 @@ describe("AgentRuntime — merchant notifications", () => {
     notifLayer: Layer.Layer<never, never, never>,
   ) => {
     const env = Layer.mergeAll(
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       ApprovalServiceTest,
       AgentResolverTest([supportTriage, orderStatusAgent]),
@@ -6167,9 +6167,9 @@ describe("AgentRuntime — merchant notifications", () => {
     },
   };
 
-  const customerReplied = (caseId: string): DomainEvent => ({
+  const customerReplied = (ticketId: string): DomainEvent => ({
     type: "customer.replied",
-    caseId: caseId as never,
+    ticketId: ticketId as never,
     payload: {
       threadId: "thread-x" as never,
       messageId: "msg-n1",
@@ -6189,7 +6189,7 @@ describe("AgentRuntime — merchant notifications", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -6197,7 +6197,7 @@ describe("AgentRuntime — merchant notifications", () => {
             subject: "Where is my order?",
           });
           const result = yield* runtime.handleEvent(customerReplied(created.id));
-          return { result, caseId: created.id };
+          return { result, ticketId: created.id };
         }),
         notifEnv([replyCall], notifLayer as never),
       ),
@@ -6207,7 +6207,7 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(handle.sent).toHaveLength(1);
     const sent = handle.sent[0]!;
     expect(sent.notification.kind).toBe("approval_requested");
-    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.ticketId).toBe(out.ticketId);
     expect(sent.notification.body).toContain("/approve?token=");
     expect(sent.notification.body).toContain("/reject?token=");
     expect(sent.notification.body).toContain("conversation.reply");
@@ -6220,7 +6220,7 @@ describe("AgentRuntime — merchant notifications", () => {
       (_, i) => ({
         type: "tool_call",
         callId: `t${i}`,
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: `loop ${i}` },
       }),
     );
@@ -6243,7 +6243,7 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(sent.notification.title.length).toBeGreaterThan(0);
   });
 
-  it("delivers an agent_note when the agent calls merchant.notify mid-case", async () => {
+  it("delivers an agent_note when the agent calls merchant.notify mid-ticket", async () => {
     const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
     const script: ReadonlyArray<LLMDecision> = [
       {
@@ -6261,7 +6261,7 @@ describe("AgentRuntime — merchant notifications", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -6270,8 +6270,8 @@ describe("AgentRuntime — merchant notifications", () => {
             subject: "Where is my order?",
           });
           const result = yield* runtime.handleEvent(customerReplied(created.id));
-          const entries = yield* audit.forCase(created.id);
-          return { result, caseId: created.id, entries };
+          const entries = yield* audit.forTicket(created.id);
+          return { result, ticketId: created.id, entries };
         }),
         notifEnv(script, notifLayer as never),
       ),
@@ -6281,7 +6281,7 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(handle.sent).toHaveLength(1);
     const sent = handle.sent[0]!;
     expect(sent.notification.kind).toBe("agent_note");
-    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.ticketId).toBe(out.ticketId);
     expect(sent.notification.title).toBe("Unverifiable claim");
 
     // The audit row carries the heads-up content so the dashboard

@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import {
   MerchantNotificationService,
   makePlatformMailServiceTest,
@@ -19,7 +19,7 @@ const note: MerchantNotification = {
   kind: "agent_note",
   title: "Heads up",
   body: "Something the owner should know.",
-  caseId: CaseId("c-1"),
+  ticketId: TicketId("c-1"),
 };
 
 const run = (mailLayer: Layer.Layer<never, never, never> | ReturnType<typeof makePlatformMailServiceTest>["layer"]) =>

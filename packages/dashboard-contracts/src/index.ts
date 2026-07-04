@@ -64,14 +64,14 @@ export interface Page<Row> {
 
 export interface TodayPendingApproval {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly tool: string;
   readonly agentId: string;
   readonly riskLevel: string;
   readonly createdAt: string;
 }
 
-export interface TodayTakeoverCase {
+export interface TodayTakeoverTicket {
   readonly id: string;
   readonly subject: string | null;
   readonly category: string | null;
@@ -79,33 +79,33 @@ export interface TodayTakeoverCase {
 }
 
 export interface TodaySummary {
-  /** Case count per status (raw; the view derives groupings like "in progress"). */
+  /** Ticket count per status (raw; the view derives groupings like "in progress"). */
   readonly statusCounts: Record<string, number>;
   readonly resolvedTodayCount: number;
   readonly pendingApprovals: ReadonlyArray<TodayPendingApproval>;
-  readonly takeoverCases: ReadonlyArray<TodayTakeoverCase>;
+  readonly takeoverTickets: ReadonlyArray<TodayTakeoverTicket>;
 }
 
 // ============================================================
-// Cases
+// Tickets
 // ============================================================
 
 /**
- * The two wait facts a case can hold AT ONCE (concurrent wait states). A case's
+ * The two wait facts a ticket can hold AT ONCE (concurrent wait states). A ticket's
  * `status` is the single "who acts next" pointer (`primaryWaitStatus` —
- * approval wins), but a case parked `waiting_for_approval` can ALSO carry an
+ * approval wins), but a ticket parked `waiting_for_approval` can ALSO carry an
  * open supplier escalation. Both facts are row-derived (pending `approvals`
- * rows / open `case_supplier_escalations` rows) and surfaced here so the
+ * rows / open `ticket_supplier_escalations` rows) and surfaced here so the
  * dashboard can render a second "waiting on supplier" chip without re-deriving
  * anything. Optional on the wire: an older api that doesn't send it just omits
  * the extra chip.
  */
-export interface CaseWaitingOn {
+export interface TicketWaitingOn {
   readonly approval: boolean;
   readonly supplier: boolean;
 }
 
-export interface CaseListRow {
+export interface TicketListRow {
   readonly id: string;
   readonly subject: string | null;
   readonly status: string;
@@ -113,41 +113,41 @@ export interface CaseListRow {
   readonly currentAgentId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /** Derived concurrent wait facts (approval + supplier); see {@link CaseWaitingOn}. */
-  readonly waitingOn?: CaseWaitingOn;
-  // Row-display enrichments (all same-row on `cases`, no joins). Optional so a
+  /** Derived concurrent wait facts (approval + supplier); see {@link TicketWaitingOn}. */
+  readonly waitingOn?: TicketWaitingOn;
+  // Row-display enrichments (all same-row on `tickets`, no joins). Optional so a
   // dashboard built against a newer contract still renders against an older api
   // that doesn't send them yet.
-  /** Requester email (from the case context) — powers the row avatar + name. */
+  /** Requester email (from the ticket context) — powers the row avatar + name. */
   readonly customerEmail?: string | null;
-  /** Whatever order identifier was stamped on the case (name like "#1001",
+  /** Whatever order identifier was stamped on the ticket (name like "#1001",
    *  or a GID/numeric id); formatted for display in the row. */
   readonly orderRef?: string | null;
-  /** Case priority ("normal" | "high" | …); drives the PRIORITY tag. */
+  /** Ticket priority ("normal" | "high" | …); drives the PRIORITY tag. */
   readonly priority?: string | null;
-  /** The agent's short case summary, used as the row's preview snippet. */
+  /** The agent's short ticket summary, used as the row's preview snippet. */
   readonly preview?: string | null;
 }
 
-export interface CasesFilter {
+export interface TicketsFilter {
   /**
-   * Free-text query matched (case-insensitive substring) against a case's
+   * Free-text query matched (case-insensitive substring) against a ticket's
    * subject, summary, and category. Empty/absent means no filter.
    */
   readonly q?: string | undefined;
   /**
-   * Restrict to these statuses (the cases-list status picker). Empty/absent
+   * Restrict to these statuses (the tickets-list status picker). Empty/absent
    * means every status.
    */
   readonly status?: ReadonlyArray<string> | undefined;
   /**
-   * Hide these statuses (the case sidebar's "Needs attention" mode passes
+   * Hide these statuses (the ticket sidebar's "Needs attention" mode passes
    * `["resolved"]`). Empty/absent means hide nothing.
    */
   readonly excludeStatus?: ReadonlyArray<string> | undefined;
 }
 
-export interface CaseDetailCase {
+export interface TicketDetailTicket {
   readonly id: string;
   readonly subject: string | null;
   readonly status: string;
@@ -161,19 +161,19 @@ export interface CaseDetailCase {
   readonly resolvedAt: string | null;
   /**
    * The statuses a human may set BY HAND from here, matrix-validated server-side
-   * (agent-core `allowedManualStatusTargets`). The case page renders exactly
+   * (agent-core `allowedManualStatusTargets`). The ticket page renders exactly
    * these as the ⋮ "change status" options so the SPA never has to re-derive the
    * §10 transition matrix. Empty when nothing is hand-settable from the current
    * status.
    */
   readonly manualStatusTargets: ReadonlyArray<string>;
-  /** Derived concurrent wait facts (approval + supplier); see {@link CaseWaitingOn}. */
-  readonly waitingOn?: CaseWaitingOn;
+  /** Derived concurrent wait facts (approval + supplier); see {@link TicketWaitingOn}. */
+  readonly waitingOn?: TicketWaitingOn;
 }
 
 export interface AuditEntry {
   readonly id: string;
-  readonly caseId: string | null;
+  readonly ticketId: string | null;
   readonly action: string;
   readonly actorType: string;
   readonly actorId: string | null;
@@ -183,7 +183,7 @@ export interface AuditEntry {
 
 export interface ApprovalDetail {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly agentId: string;
   readonly tool: string;
   readonly proposedInput: unknown;
@@ -198,9 +198,9 @@ export interface ApprovalDetail {
   readonly createdAt: string;
 }
 
-export interface CaseDetailReplyDelivery {
+export interface TicketDetailReplyDelivery {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly status: string;
   readonly tool: string;
   readonly mailbox: string | null;
@@ -214,22 +214,22 @@ export interface CaseDetailReplyDelivery {
 }
 
 /**
- * An approved customer reply that was never sent (the case was taken over
+ * An approved customer reply that was never sent (the ticket was taken over
  * before the approval's delivery ran, so the runtime skipped it). Surfaced so
  * an operator can one-click resend it. `null` when there is nothing to resend.
  */
-export interface CaseDetailApprovedNotSent {
+export interface TicketDetailApprovedNotSent {
   readonly approvalId: string;
   readonly bodyPreview: string;
   readonly occurredAt: string;
 }
 
-export interface CaseDetail {
-  readonly case: CaseDetailCase;
+export interface TicketDetail {
+  readonly ticket: TicketDetailTicket;
   readonly auditEntries: ReadonlyArray<AuditEntry>;
   readonly approvals: ReadonlyArray<ApprovalDetail>;
-  readonly activeReplyDelivery: CaseDetailReplyDelivery | null;
-  readonly approvedNotSent: CaseDetailApprovedNotSent | null;
+  readonly activeReplyDelivery: TicketDetailReplyDelivery | null;
+  readonly approvedNotSent: TicketDetailApprovedNotSent | null;
 }
 
 export interface DashboardConversationParticipant {
@@ -261,25 +261,25 @@ export interface DashboardConversationThread {
   readonly messages: ReadonlyArray<DashboardConversationMessage>;
 }
 
-export type CaseConversationThreadUnavailableReason =
+export type TicketConversationThreadUnavailableReason =
   | "no_thread"
   | "thread_not_found"
   | "auth_required"
   | "mailbox_ambiguous"
   | "provider_unavailable";
 
-export type CaseConversationThreadResult =
+export type TicketConversationThreadResult =
   | {
       readonly status: "available";
       readonly thread: DashboardConversationThread;
     }
   | {
       readonly status: "unavailable";
-      readonly reason: CaseConversationThreadUnavailableReason;
+      readonly reason: TicketConversationThreadUnavailableReason;
     };
 
 // ============================================================
-// Live tracking (caseTracking endpoint → 17track)
+// Live tracking (ticketTracking endpoint → 17track)
 // ============================================================
 
 export type DashboardTrackingStatus =
@@ -311,13 +311,13 @@ export interface DashboardTracking {
   readonly reason: "no_api_key" | "unsupported_carrier" | null;
 }
 
-export type CaseTrackingResult =
+export type TicketTrackingResult =
   | { readonly kind: "ok"; readonly tracking: DashboardTracking }
   | { readonly kind: "no_tracking_number" }
   | { readonly kind: "not_found" }
   | { readonly kind: "unavailable" };
 
-export interface CaseEventsResult {
+export interface TicketEventsResult {
   readonly events: ReadonlyArray<{
     readonly id: string;
     readonly action: string;
@@ -344,7 +344,7 @@ export interface ApprovalsFilter {
 
 export interface ApprovalListRow {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly agentId: string;
   readonly tool: string;
   readonly status: string;
@@ -372,7 +372,7 @@ export interface AuditFilter {
 }
 
 // ============================================================
-// Connector connections (integrations pages + case-detail shop domain)
+// Connector connections (integrations pages + ticket-detail shop domain)
 // ============================================================
 
 export interface ConnectorConnectionView {
@@ -718,7 +718,7 @@ export interface OnboardingResult {
 // ============================================================
 //
 // One WorkOS org owns many workspaces (tenant rows); each has its own store,
-// mailboxes, LLM credential, cases, knowledge, and settings. Requests pin a
+// mailboxes, LLM credential, tickets, knowledge, and settings. Requests pin a
 // workspace via the `x-workspace-id` header; without it the api uses the
 // DEFAULT workspace (oldest row — `workspaces[0]`).
 
@@ -779,7 +779,7 @@ export const mergeWorkspaces = (
 
 /** Where selecting a workspace of this kind lands the user. */
 export const surfaceHomeForKind = (kind: WorkspaceKind): string =>
-  kind === "supplier" ? "/supplier/cases" : "/";
+  kind === "supplier" ? "/supplier/tickets" : "/";
 
 export interface CreateWorkspaceResult {
   readonly workspaceId: string;
@@ -872,7 +872,7 @@ export interface ResolutionScenarioView {
   /** "When does this apply" — shown for custom scenarios; null for built-ins. */
   readonly recognition: string | null;
   readonly builtin: boolean;
-  /** Whether triage routes new matching cases to the resolution agent. */
+  /** Whether triage routes new matching tickets to the resolution agent. */
   readonly enabled: boolean;
   /** Remedy tools the agent may use for this scenario + their permission. */
   readonly enabledActions: ReadonlyArray<ScenarioActionView>;
@@ -882,7 +882,7 @@ export interface ResolutionScenarioView {
 }
 
 export interface ResolutionPolicyView {
-  /** Whether triage routes new cases to the scenario agent for this tenant. */
+  /** Whether triage routes new tickets to the scenario agent for this tenant. */
   readonly resolutionAgentEnabled: boolean;
   readonly scenarios: ReadonlyArray<ResolutionScenarioView>;
 }

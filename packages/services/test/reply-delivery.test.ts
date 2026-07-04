@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 import {
   REPLY_DELIVERY_FAILED_FLAG,
   ReplyDeliveryService,
@@ -123,7 +123,7 @@ describe("makeReplyDeliveryServiceTest", () => {
         const svc = yield* ReplyDeliveryService;
         return yield* svc.enqueue({
           tenantId: "t1" as TenantId,
-          caseId: "c1" as CaseId,
+          ticketId: "c1" as TicketId,
           agentId: "order-status-agent",
           tool: "conversation.reply",
           mailbox: "support@shop.com",
@@ -146,7 +146,7 @@ describe("makeReplyDeliveryServiceTest", () => {
         const svc = yield* ReplyDeliveryService;
         return yield* svc.enqueue({
           tenantId: "t1" as TenantId,
-          caseId: "c1" as CaseId,
+          ticketId: "c1" as TicketId,
           agentId: "a",
           tool: "conversation.reply",
           mailbox: null,

@@ -168,7 +168,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(merchantDefaultId),
   });
   const isMerchant = (merchantMeQuery.data?.permissions ?? []).includes(
-    "cases.view",
+    "tickets.view",
   );
 
   const workspaces = useMemo(

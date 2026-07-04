@@ -6,13 +6,13 @@ import type { ConnectorProvider } from "./connector-credential-store.js";
 // ============================================================
 //
 // A tenant can hold several conversation connectors at once (Gmail +
-// Outlook + IMAP). The runtime keys cases on an opaque `ThreadId`, so the
+// Outlook + IMAP). The runtime keys tickets on an opaque `ThreadId`, so the
 // provider a thread lives on is encoded INTO the id at the connector
 // boundary: `gmail:<gmail threadId>`, `outlook:<Graph conversationId>`,
 // `imap:<RFC 5322 root Message-ID>`. Inbound edges namespace before
 // publishing `message.received`; the conversation router parses the prefix
 // to dispatch and hands the connector the raw provider id. Everything
-// between — events, cases, tools, agents — stays provider-blind.
+// between — events, tickets, tools, agents — stays provider-blind.
 
 /** Connector providers that carry customer conversations. */
 export const CONVERSATION_PROVIDERS = ["gmail", "outlook", "imap"] as const;

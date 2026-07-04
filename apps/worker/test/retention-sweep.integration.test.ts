@@ -10,7 +10,7 @@ import {
   TenantRepositoryLive,
   approvals,
   auditLog,
-  cases,
+  tickets,
   makeDbClient,
   tenants,
 } from "@support-agent/db";
@@ -23,10 +23,10 @@ import {
 
 // Integration test for the retention sweep cron. Exercises the real
 // Postgres retention path:
-//   - Resolved case older than 30 days → archived, with audit still retained
-//   - Archived case older than 12 months → deleted (+ its audit + approvals)
-//   - Unresolved case (in_progress / human_takeover) → kept regardless
-//   - Per-tenant scoping: another tenant's cases are NEVER touched
+//   - Resolved ticket older than 30 days → archived, with audit still retained
+//   - Archived ticket older than 12 months → deleted (+ its audit + approvals)
+//   - Unresolved ticket (in_progress / human_takeover) → kept regardless
+//   - Per-tenant scoping: another tenant's tickets are NEVER touched
 
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -75,15 +75,15 @@ describeIfDb("retention sweep (Live, integration)", () => {
       .delete(auditLog)
       .where(sql`${auditLog.tenantId} IN (${tenantA}, ${tenantB})`);
     await raw.db
-      .delete(cases)
-      .where(sql`${cases.tenantId} IN (${tenantA}, ${tenantB})`);
+      .delete(tickets)
+      .where(sql`${tickets.tenantId} IN (${tenantA}, ${tenantB})`);
     await raw.db
       .delete(tenants)
       .where(sql`${tenants.id} IN (${tenantA}, ${tenantB})`);
     await raw.close();
   });
 
-  const seedCase = async (params: {
+  const seedTicket = async (params: {
     readonly tenantId: string;
     readonly status: "resolved" | "archived" | "in_progress" | "human_takeover";
     readonly now: Date;
@@ -114,7 +114,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
               params.now.getUTCMilliseconds(),
             ),
           );
-    await raw.db.insert(cases).values({
+    await raw.db.insert(tickets).values({
       id,
       tenantId: params.tenantId,
       channel: "email",
@@ -127,7 +127,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
     if (params.withAuditEntries && params.withAuditEntries > 0) {
       const rows = Array.from({ length: params.withAuditEntries }, () => ({
         tenantId: params.tenantId,
-        caseId: id,
+        ticketId: id,
         actorType: "system",
         actorId: "test-seed",
         action: "test.event",
@@ -139,7 +139,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
       await raw.db.insert(approvals).values({
         id: randomUUID(),
         tenantId: params.tenantId,
-        caseId: id,
+        ticketId: id,
         agentId: "support-triage",
         tool: "conversation.reply",
         proposedInput: {},
@@ -152,12 +152,12 @@ describeIfDb("retention sweep (Live, integration)", () => {
     return id;
   };
 
-  const countCasesForTenant = async (tenantId: string): Promise<number> => {
+  const countTicketsForTenant = async (tenantId: string): Promise<number> => {
     if (!raw) throw new Error("no raw client");
     const rows = await raw.db
-      .select({ id: cases.id })
-      .from(cases)
-      .where(eq(cases.tenantId, tenantId));
+      .select({ id: tickets.id })
+      .from(tickets)
+      .where(eq(tickets.tenantId, tenantId));
     return rows.length;
   };
 
@@ -184,10 +184,10 @@ describeIfDb("retention sweep (Live, integration)", () => {
     throw new Error(`timed out waiting for blocked statement: ${patterns.join(", ")}`);
   };
 
-  it("archives resolved cases after 30 days without deleting their audit trail", async () => {
+  it("archives resolved tickets after 30 days without deleting their audit trail", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const oldCase = await seedCase({
+    const oldTicket = await seedTicket({
       tenantId: tenantA,
       status: "resolved",
       resolvedDaysAgo: 45, // outside the 30-day window
@@ -195,7 +195,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
       withApproval: true,
       withAuditEntries: 3,
     });
-    const recentCase = await seedCase({
+    const recentTicket = await seedTicket({
       tenantId: tenantA,
       status: "resolved",
       resolvedDaysAgo: 10, // inside the 30-day window
@@ -203,7 +203,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
       withApproval: false,
       withAuditEntries: 2,
     });
-    const openCase = await seedCase({
+    const openTicket = await seedTicket({
       tenantId: tenantA,
       status: "in_progress",
       resolvedDaysAgo: null,
@@ -215,8 +215,8 @@ describeIfDb("retention sweep (Live, integration)", () => {
     const result = await runLive(sweepTenant(tenantA, now));
     expect(result.kind).toBe("ok");
     if (result.kind === "ok") {
-      expect(result.archivedCases).toBe(1);
-      expect(result.deletedCases).toBe(0);
+      expect(result.archivedTickets).toBe(1);
+      expect(result.deletedTickets).toBe(0);
       expect(result.deletedAuditRows).toBe(0);
       expect(result.deletedApprovals).toBe(0);
       expect(result.archiveCutoff.toISOString()).toBe(
@@ -225,36 +225,36 @@ describeIfDb("retention sweep (Live, integration)", () => {
     }
 
     const remaining = await raw.db
-      .select({ id: cases.id, status: cases.status, archivedAt: cases.archivedAt })
-      .from(cases)
-      .where(eq(cases.tenantId, tenantA));
+      .select({ id: tickets.id, status: tickets.status, archivedAt: tickets.archivedAt })
+      .from(tickets)
+      .where(eq(tickets.tenantId, tenantA));
     const byId = new Map(remaining.map((r) => [r.id, r]));
-    expect(byId.get(oldCase)?.status).toBe("archived");
-    expect(byId.get(oldCase)?.archivedAt?.toISOString()).toBe(now.toISOString());
-    expect(byId.get(recentCase)?.status).toBe("resolved");
-    expect(byId.get(openCase)?.status).toBe("in_progress");
+    expect(byId.get(oldTicket)?.status).toBe("archived");
+    expect(byId.get(oldTicket)?.archivedAt?.toISOString()).toBe(now.toISOString());
+    expect(byId.get(recentTicket)?.status).toBe("resolved");
+    expect(byId.get(openTicket)?.status).toBe("in_progress");
 
     const oldAudit = await raw.db
       .select({ id: auditLog.id })
       .from(auditLog)
-      .where(eq(auditLog.caseId, oldCase));
+      .where(eq(auditLog.ticketId, oldTicket));
     expect(oldAudit.length).toBeGreaterThanOrEqual(3);
 
     // Cleanup for the next test. Archiving no longer deletes approval rows,
-    // so they must go first (FK to cases is NO ACTION).
+    // so they must go first (FK to tickets is NO ACTION).
     await raw.db
       .delete(approvals)
       .where(sql`${approvals.tenantId} = ${tenantA}`);
     await raw.db
       .delete(auditLog)
       .where(sql`${auditLog.tenantId} = ${tenantA}`);
-    await raw.db.delete(cases).where(eq(cases.tenantId, tenantA));
+    await raw.db.delete(tickets).where(eq(tickets.tenantId, tenantA));
   });
 
-  it("deletes archived cases after 12 months + cascaded audit + approvals", async () => {
+  it("deletes archived tickets after 12 months + cascaded audit + approvals", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const oldArchivedCase = await seedCase({
+    const oldArchivedTicket = await seedTicket({
       tenantId: tenantA,
       status: "archived",
       resolvedDaysAgo: 420,
@@ -263,7 +263,7 @@ describeIfDb("retention sweep (Live, integration)", () => {
       withAuditEntries: 3,
       withApproval: true,
     });
-    const recentArchivedCase = await seedCase({
+    const recentArchivedTicket = await seedTicket({
       tenantId: tenantA,
       status: "archived",
       resolvedDaysAgo: 390,
@@ -274,38 +274,38 @@ describeIfDb("retention sweep (Live, integration)", () => {
 
     const result = await runLive(sweepTenant(tenantA, now));
     if (result.kind === "ok") {
-      expect(result.deletedCases).toBe(1);
+      expect(result.deletedTickets).toBe(1);
       expect(result.deletedAuditRows).toBe(3);
       expect(result.deletedApprovals).toBe(1);
       expect(result.deleteCutoff.toISOString()).toBe("2025-05-24T12:00:00.000Z");
     }
 
     const remaining = await raw.db
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(eq(cases.tenantId, tenantA));
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.tenantId, tenantA));
     const ids = remaining.map((r) => r.id);
-    expect(ids).not.toContain(oldArchivedCase);
-    expect(ids).toContain(recentArchivedCase);
+    expect(ids).not.toContain(oldArchivedTicket);
+    expect(ids).toContain(recentArchivedTicket);
 
     // Cleanup
     await raw.db
       .delete(auditLog)
       .where(sql`${auditLog.tenantId} = ${tenantA}`);
-    await raw.db.delete(cases).where(eq(cases.tenantId, tenantA));
+    await raw.db.delete(tickets).where(eq(tickets.tenantId, tenantA));
   });
 
-  it("respects per-tenant scoping: tenantB's cases are never touched", async () => {
+  it("respects per-tenant scoping: tenantB's tickets are never touched", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const aCase = await seedCase({
+    const aTicket = await seedTicket({
       tenantId: tenantA,
       status: "resolved",
       resolvedDaysAgo: 60,
       now,
       withAuditEntries: 1,
     });
-    const bCase = await seedCase({
+    const bTicket = await seedTicket({
       tenantId: tenantB,
       status: "resolved",
       resolvedDaysAgo: 60,
@@ -315,18 +315,18 @@ describeIfDb("retention sweep (Live, integration)", () => {
 
     const result = await runLive(sweepTenant(tenantA, now));
     if (result.kind === "ok") {
-      expect(result.archivedCases).toBe(1);
-      expect(result.deletedCases).toBe(0);
+      expect(result.archivedTickets).toBe(1);
+      expect(result.deletedTickets).toBe(0);
     }
 
     const aRows = await raw.db
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, aCase));
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, aTicket));
     const bRows = await raw.db
-      .select({ id: cases.id, status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, bCase));
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, bTicket));
     expect(aRows[0]?.status).toBe("archived");
     expect(bRows[0]?.status).toBe("resolved");
 
@@ -335,14 +335,14 @@ describeIfDb("retention sweep (Live, integration)", () => {
       .delete(auditLog)
       .where(sql`${auditLog.tenantId} IN (${tenantA}, ${tenantB})`);
     await raw.db
-      .delete(cases)
-      .where(sql`${cases.tenantId} IN (${tenantA}, ${tenantB})`);
+      .delete(tickets)
+      .where(sql`${tickets.tenantId} IN (${tenantA}, ${tenantB})`);
   });
 
-  it("does NOT archive human_takeover cases even when past cutoff", async () => {
+  it("does NOT archive human_takeover tickets even when past cutoff", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const takeoverCase = await seedCase({
+    const takeoverTicket = await seedTicket({
       tenantId: tenantA,
       status: "human_takeover",
       resolvedDaysAgo: 90, // very old — but status is not resolved
@@ -352,20 +352,20 @@ describeIfDb("retention sweep (Live, integration)", () => {
 
     const result = await runLive(sweepTenant(tenantA, now));
     if (result.kind === "ok") {
-      expect(result.archivedCases).toBe(0);
-      expect(result.deletedCases).toBe(0);
+      expect(result.archivedTickets).toBe(0);
+      expect(result.deletedTickets).toBe(0);
     }
-    expect(await countCasesForTenant(tenantA)).toBe(1);
+    expect(await countTicketsForTenant(tenantA)).toBe(1);
 
     // Cleanup
-    await raw.db.delete(auditLog).where(eq(auditLog.caseId, takeoverCase));
-    await raw.db.delete(cases).where(eq(cases.id, takeoverCase));
+    await raw.db.delete(auditLog).where(eq(auditLog.ticketId, takeoverTicket));
+    await raw.db.delete(tickets).where(eq(tickets.id, takeoverTicket));
   });
 
-  it("does not archive a resolved case that reopens while the sweep waits on its row lock", async () => {
+  it("does not archive a resolved ticket that reopens while the sweep waits on its row lock", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const reopenedCase = await seedCase({
+    const reopenedTicket = await seedTicket({
       tenantId: tenantA,
       status: "resolved",
       resolvedDaysAgo: 60,
@@ -383,9 +383,9 @@ describeIfDb("retention sweep (Live, integration)", () => {
     });
     const lockStarted = raw.sql.begin(async (tx) => {
       await tx`
-        UPDATE cases
+        UPDATE tickets
         SET status = 'in_progress', updated_at = ${now.toISOString()}, archived_at = NULL
-        WHERE id = ${reopenedCase}
+        WHERE id = ${reopenedTicket}
       `;
       markLockAcquired();
       await lockReleased;
@@ -394,34 +394,34 @@ describeIfDb("retention sweep (Live, integration)", () => {
     await lockAcquired;
     const sweep = runLive(sweepTenant(tenantA, now));
     try {
-      await waitForBlockedStatement(['%update "cases"%']);
+      await waitForBlockedStatement(['%update "tickets"%']);
       releaseLock();
       const result = await sweep;
       expect(result.kind).toBe("ok");
       if (result.kind === "ok") {
-        expect(result.archivedCases).toBe(0);
-        expect(result.deletedCases).toBe(0);
+        expect(result.archivedTickets).toBe(0);
+        expect(result.deletedTickets).toBe(0);
       }
       await lockStarted;
 
       const rows = await raw.db
-        .select({ status: cases.status, archivedAt: cases.archivedAt })
-        .from(cases)
-        .where(eq(cases.id, reopenedCase));
+        .select({ status: tickets.status, archivedAt: tickets.archivedAt })
+        .from(tickets)
+        .where(eq(tickets.id, reopenedTicket));
       expect(rows[0]?.status).toBe("in_progress");
       expect(rows[0]?.archivedAt).toBeNull();
     } finally {
       releaseLock();
       await lockStarted.catch(() => undefined);
-      await raw.db.delete(auditLog).where(eq(auditLog.caseId, reopenedCase));
-      await raw.db.delete(cases).where(eq(cases.id, reopenedCase));
+      await raw.db.delete(auditLog).where(eq(auditLog.ticketId, reopenedTicket));
+      await raw.db.delete(tickets).where(eq(tickets.id, reopenedTicket));
     }
   });
 
-  it("does not delete an archived case that reopens while the sweep waits on its row lock", async () => {
+  it("does not delete an archived ticket that reopens while the sweep waits on its row lock", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    const reopenedCase = await seedCase({
+    const reopenedTicket = await seedTicket({
       tenantId: tenantA,
       status: "archived",
       resolvedDaysAgo: 420,
@@ -441,9 +441,9 @@ describeIfDb("retention sweep (Live, integration)", () => {
     });
     const lockStarted = raw.sql.begin(async (tx) => {
       await tx`
-        UPDATE cases
+        UPDATE tickets
         SET status = 'in_progress', updated_at = ${now.toISOString()}, archived_at = NULL
-        WHERE id = ${reopenedCase}
+        WHERE id = ${reopenedTicket}
       `;
       markLockAcquired();
       await lockReleased;
@@ -452,55 +452,55 @@ describeIfDb("retention sweep (Live, integration)", () => {
     await lockAcquired;
     const sweep = runLive(sweepTenant(tenantA, now));
     try {
-      await waitForBlockedStatement(['%for update%', '%delete from "cases"%']);
+      await waitForBlockedStatement(['%for update%', '%delete from "tickets"%']);
       releaseLock();
       const result = await sweep;
       expect(result.kind).toBe("ok");
       if (result.kind === "ok") {
-        expect(result.archivedCases).toBe(0);
-        expect(result.deletedCases).toBe(0);
+        expect(result.archivedTickets).toBe(0);
+        expect(result.deletedTickets).toBe(0);
         expect(result.deletedAuditRows).toBe(0);
         expect(result.deletedApprovals).toBe(0);
       }
       await lockStarted;
 
-      const caseRows = await raw.db
-        .select({ status: cases.status, archivedAt: cases.archivedAt })
-        .from(cases)
-        .where(eq(cases.id, reopenedCase));
-      expect(caseRows[0]?.status).toBe("in_progress");
-      expect(caseRows[0]?.archivedAt).toBeNull();
+      const ticketRows = await raw.db
+        .select({ status: tickets.status, archivedAt: tickets.archivedAt })
+        .from(tickets)
+        .where(eq(tickets.id, reopenedTicket));
+      expect(ticketRows[0]?.status).toBe("in_progress");
+      expect(ticketRows[0]?.archivedAt).toBeNull();
 
       const auditRows = await raw.db
         .select({ id: auditLog.id })
         .from(auditLog)
-        .where(eq(auditLog.caseId, reopenedCase));
+        .where(eq(auditLog.ticketId, reopenedTicket));
       const approvalRows = await raw.db
         .select({ id: approvals.id })
         .from(approvals)
-        .where(eq(approvals.caseId, reopenedCase));
+        .where(eq(approvals.ticketId, reopenedTicket));
       expect(auditRows).toHaveLength(2);
       expect(approvalRows).toHaveLength(1);
     } finally {
       releaseLock();
       await lockStarted.catch(() => undefined);
-      await raw.db.delete(approvals).where(eq(approvals.caseId, reopenedCase));
-      await raw.db.delete(auditLog).where(eq(auditLog.caseId, reopenedCase));
-      await raw.db.delete(cases).where(eq(cases.id, reopenedCase));
+      await raw.db.delete(approvals).where(eq(approvals.ticketId, reopenedTicket));
+      await raw.db.delete(auditLog).where(eq(auditLog.ticketId, reopenedTicket));
+      await raw.db.delete(tickets).where(eq(tickets.id, reopenedTicket));
     }
   });
 
   it("sweepAllTenants iterates every tenant with the same archive window", async () => {
     if (!raw) return;
     const now = new Date("2026-05-24T12:00:00.000Z");
-    await seedCase({
+    await seedTicket({
       tenantId: tenantA,
       status: "resolved",
       resolvedDaysAgo: 60,
       now,
       withAuditEntries: 1,
     });
-    await seedCase({
+    await seedTicket({
       tenantId: tenantB,
       status: "resolved",
       resolvedDaysAgo: 60,
@@ -517,12 +517,12 @@ describeIfDb("retention sweep (Live, integration)", () => {
     expect(a?.kind).toBe("ok");
     expect(b?.kind).toBe("ok");
     if (a?.kind === "ok") {
-      expect(a.archivedCases).toBe(1);
-      expect(a.deletedCases).toBe(0);
+      expect(a.archivedTickets).toBe(1);
+      expect(a.deletedTickets).toBe(0);
     }
     if (b?.kind === "ok") {
-      expect(b.archivedCases).toBe(1);
-      expect(b.deletedCases).toBe(0);
+      expect(b.archivedTickets).toBe(1);
+      expect(b.deletedTickets).toBe(0);
     }
   });
 

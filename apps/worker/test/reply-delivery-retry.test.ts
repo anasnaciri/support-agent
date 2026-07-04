@@ -9,7 +9,7 @@ import {
 const due = (over: Partial<DueReplyDelivery> = {}): DueReplyDelivery => ({
   id: "rd-1",
   tenantId: "t1",
-  caseId: "c1",
+  ticketId: "c1",
   agentId: "order-status-agent",
   tool: "conversation.reply",
   mailbox: "support@shop.com",
@@ -37,8 +37,8 @@ const makeDeps = (
       calls.sent.push(id);
       return Promise.resolve();
     },
-    resolveCase: (caseId) => {
-      calls.resolved.push(caseId);
+    resolveTicket: (ticketId) => {
+      calls.resolved.push(ticketId);
       return Promise.resolve();
     },
     recordFailure: (id, _err, attempt) => {
@@ -54,7 +54,7 @@ const makeDeps = (
 };
 
 describe("fireReplyDeliveryRetryOnce", () => {
-  it("on a successful re-send: marks sent + auto-resolves the case", async () => {
+  it("on a successful re-send: marks sent + auto-resolves the ticket", async () => {
     const { deps, calls } = makeDeps([due()], () => "sent");
     const out = await fireReplyDeliveryRetryOnce(deps);
     expect(out).toEqual({ sent: 1, failed: 0, abandoned: 0, skipped: 0 });
@@ -88,7 +88,7 @@ describe("fireReplyDeliveryRetryOnce", () => {
     expect(calls.failed).toHaveLength(0);
   });
 
-  it("skips re-sending when the case moved on (human handled it): marks sent, no resolve", async () => {
+  it("skips re-sending when the ticket moved on (human handled it): marks sent, no resolve", async () => {
     const { deps, calls } = makeDeps([due()], () => "skip");
     const out = await fireReplyDeliveryRetryOnce(deps);
     expect(out.skipped).toBe(1);
@@ -100,9 +100,9 @@ describe("fireReplyDeliveryRetryOnce", () => {
 
   it("processes a mixed batch independently", async () => {
     const rows = [
-      due({ id: "ok", caseId: "cok" }),
-      due({ id: "retry", caseId: "cr", attempts: 1 }),
-      due({ id: "cap", caseId: "cc", attempts: 5 }),
+      due({ id: "ok", ticketId: "cok" }),
+      due({ id: "retry", ticketId: "cr", attempts: 1 }),
+      due({ id: "cap", ticketId: "cc", attempts: 5 }),
     ];
     const { deps, calls } = makeDeps(rows, (d) =>
       d.id === "ok" ? "sent" : { error: "boom" },

@@ -53,7 +53,7 @@ export const decideAuthz = (
  * Supplier-endpoint authorization — deliberately STRICTER than decideAuthz. A
  * supplier is an external party with a heavily-constrained Supplier role, so
  * supplier endpoints must NOT honor open mode (a real supplier always has an
- * explicit assignment row) and must require a `supplier.cases.*` permission. A
+ * explicit assignment row) and must require a `supplier.tickets.*` permission. A
  * merchant member who lacks those is denied; an owner may preview.
  *
  * - No acting user id → 401.

@@ -29,7 +29,7 @@ export interface AgentConfig {
    * Opt-in to the autonomous resolution loop (master-plan: scenario agent).
    *
    * `false`/absent (every legacy agent) → the terminal loop: a gated (`ask`)
-   * tool parks the case in `waiting_for_approval` and ends the tick; the agent
+   * tool parks the ticket in `waiting_for_approval` and ends the tick; the agent
    * stops the moment the harness decides a tool is terminal.
    *
    * `true` → tools are non-blocking. A gated (`ask`) action is QUEUED (a pending

@@ -10,7 +10,7 @@ import {
 
 import { api, getDashboardContext } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/format";
-import { caseSubjectLabel, hasSubject, toolActionLabel } from "@/lib/labels";
+import { ticketSubjectLabel, hasSubject, toolActionLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { resolveFeedback } from "@/lib/toast-feedback";
 import {
@@ -38,10 +38,10 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
   // A supplier (constrained external role) has no merchant surface — send them
   // to their portal instead of a "Today" page whose data they can't read.
   if (
-    ctx.permissions.has("supplier.cases.view") &&
-    !ctx.permissions.has("cases.view")
+    ctx.permissions.has("supplier.tickets.view") &&
+    !ctx.permissions.has("tickets.view")
   ) {
-    redirect("/supplier/cases");
+    redirect("/supplier/tickets");
   }
   const summary = await api.today(ctx);
 
@@ -51,7 +51,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
       kind: "success",
       message: "Your workspace is ready",
       description:
-        "Connect Shopify or Gmail from Settings → Integrations to start receiving cases.",
+        "Connect Shopify or Gmail from Settings → Integrations to start receiving tickets.",
       action: { label: "Open Integrations", href: "/settings/integrations" },
     },
     {
@@ -59,7 +59,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
       kind: "success",
       message: `Workspace created — you're now in ${ctx.tenantName}`,
       description:
-        "Connect this workspace's store and mailbox from Settings → Integrations to start receiving cases.",
+        "Connect this workspace's store and mailbox from Settings → Integrations to start receiving tickets.",
       action: { label: "Open Integrations", href: "/settings/integrations" },
     },
     {
@@ -70,12 +70,12 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
     },
   ]);
 
-  const { pendingApprovals, takeoverCases } = summary;
+  const { pendingApprovals, takeoverTickets } = summary;
   const countOf = (status: string): number =>
     summary.statusCounts[status] ?? 0;
 
   const pendingCount = pendingApprovals.length;
-  const takeoverCount = takeoverCases.length;
+  const takeoverCount = takeoverTickets.length;
   const inProgress =
     countOf("new") + countOf("in_progress") + countOf("triaging");
   const waitingCustomer = countOf("waiting_for_customer");
@@ -136,10 +136,10 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
                     <div className="mt-0.5 text-xs text-muted-foreground">
                       {a.agentId} ·{" "}
                       <Link
-                        href={`/cases/${a.caseId}`}
+                        href={`/tickets/${a.ticketId}`}
                         className="hover:underline"
                       >
-                        case {a.caseId.slice(0, 8)}…
+                        ticket {a.ticketId.slice(0, 8)}…
                       </Link>
                     </div>
                   </div>
@@ -173,27 +173,27 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
           <Badge variant="destructive">{takeoverCount}</Badge>
         </CardHeader>
         <CardContent className="pt-0">
-          {takeoverCases.length === 0 ? (
+          {takeoverTickets.length === 0 ? (
             <p className="text-sm italic text-muted-foreground">
-              Nothing escalated. Cases that need a human will appear here.
+              Nothing escalated. Tickets that need a human will appear here.
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {takeoverCases.map((c) => (
+              {takeoverTickets.map((c) => (
                 <li
                   key={c.id}
                   className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
                 >
                   <div className="min-w-0">
                     <Link
-                      href={`/cases/${c.id}`}
+                      href={`/tickets/${c.id}`}
                       className={cn(
                         "text-sm font-medium hover:underline",
                         !hasSubject(c.subject) &&
                           "font-normal italic text-muted-foreground",
                       )}
                     >
-                      {caseSubjectLabel(c.subject)}
+                      {ticketSubjectLabel(c.subject)}
                     </Link>
                     <div className="mt-0.5 text-xs text-muted-foreground">
                       {c.category ?? "uncategorized"}
@@ -209,10 +209,10 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
           {takeoverCount >= TOP_N ? (
             <div className="mt-4 flex justify-end border-t border-border pt-3">
               <Link
-                href="/cases"
+                href="/tickets"
                 className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
               >
-                View all cases
+                View all tickets
                 <ArrowRight className="size-3.5" />
               </Link>
             </div>
@@ -226,7 +226,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
         <StatTile
           label="In progress"
           value={inProgress}
-          hint="Cases the agent is actively handling right now (new, triaging, in progress) — not cases parked waiting for approval, a customer, or a supplier to be resolved."
+          hint="Tickets the agent is actively handling right now (new, triaging, in progress) — not tickets parked waiting for approval, a customer, or a supplier to be resolved."
         />
         <StatTile
           label="Resolved (all-time)"

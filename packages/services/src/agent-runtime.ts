@@ -7,7 +7,7 @@ import {
   type Approval,
   type ApprovalId,
   type ApprovalRiskLevel,
-  type CaseChannel,
+  type TicketChannel,
   type ChatMessage,
   type DomainEvent,
   type InboundMessage,
@@ -25,7 +25,7 @@ import {
   TenantId as makeTenantId,
   ThreadId as makeThreadId,
 } from "@support-agent/agent-core";
-import { CaseRepository } from "./case-repository.js";
+import { TicketRepository } from "./ticket-repository.js";
 import { AuditLogService } from "./audit-log.js";
 import { ApprovalService } from "./approval-service.js";
 import { LLMService } from "./llm-service.js";
@@ -65,9 +65,9 @@ import {
   isReplyDeliverySendFailure,
 } from "./reply-delivery.js";
 import {
-  CaseLifecycleWriter,
-  CaseLifecycleWriterLive,
-} from "./case-lifecycle-writer.js";
+  TicketLifecycleWriter,
+  TicketLifecycleWriterLive,
+} from "./ticket-lifecycle-writer.js";
 
 
 // ------------------------------------------------------------
@@ -78,7 +78,7 @@ import {
 // ------------------------------------------------------------
 export * from "./agent-runtime-helpers.js";
 import {
-  eventToCaseLookup,
+  eventToTicketLookup,
   buildSystemPrompt,
   buildInitialMessages,
   inboundCustomerEmail,
@@ -129,7 +129,7 @@ export class AgentRuntime extends Context.Tag("AgentRuntime")<
 const AgentRuntimeLayer = Layer.effect(
   AgentRuntime,
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
+    const tickets = yield* TicketRepository;
     const audit = yield* AuditLogService;
     // Tenant-aware resolution: built-in agents first, then the tenant's
     // merchant-authored custom agents. Replaces direct AgentRegistry lookups so
@@ -141,7 +141,7 @@ const AgentRuntimeLayer = Layer.effect(
     const llm = yield* LLMService;
     const shopify = yield* ShopifyService;
     const tx = yield* TransactionRunner;
-    const lifecycle = yield* CaseLifecycleWriter;
+    const lifecycle = yield* TicketLifecycleWriter;
     const mail = yield* PlatformMailService;
     const linkConfig = yield* ApprovalLinkConfig;
     const overrides = yield* TenantAgentOverridesService;
@@ -152,17 +152,17 @@ const AgentRuntimeLayer = Layer.effect(
     const defaultToolTimeoutMs = toolCallTimeoutMs(process.env);
     // Optional — like ImageHashStore below. Present in the worker (which wires
     // KnowledgeBaseServiceLive); absent in the many runtime test layers that
-    // don't, in which case the knowledge-base title header is simply omitted.
+    // don't, in which ticket the knowledge-base title header is simply omitted.
     // The `knowledge.search` tool resolves the service itself at execute time.
     const maybeKnowledge = yield* Effect.serviceOption(KnowledgeBaseService);
     // Optional — captured at layer-build time so `tick` can close over it.
     // Present in the worker (which wires ImageHashStoreLive); absent in the
-    // many test layers that don't, in which case duplicate-photo detection
+    // many test layers that don't, in which ticket duplicate-photo detection
     // is simply skipped.
     const maybeImageHashStore = yield* Effect.serviceOption(ImageHashStore);
     // Optional conversation connector. Present in the worker (which wires a
     // ConversationRouter); absent in lean test layers. Used ONLY to pre-fetch
-    // the thread on a `case.resumed` tick so the resumed agent (esp. triage,
+    // the thread on a `ticket.resumed` tick so the resumed agent (esp. triage,
     // which lacks the conversation.fetch_thread tool) sees the whole
     // conversation + what was already done. Strictly best-effort — a fetch
     // failure must never break a resume.
@@ -205,7 +205,7 @@ const AgentRuntimeLayer = Layer.effect(
       event: DomainEvent,
     ): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
-        const lookup = eventToCaseLookup(event);
+        const lookup = eventToTicketLookup(event);
         if (!lookup) {
           return {
             type: "Failed",
@@ -214,19 +214,19 @@ const AgentRuntimeLayer = Layer.effect(
           } as const;
         }
 
-        // 1+2. Load/create case and audit event arrival in one tx
-        // (master-plan §4 invariant: event → case write must be atomic
+        // 1+2. Load/create ticket and audit event arrival in one tx
+        // (master-plan §4 invariant: event → ticket write must be atomic
         // with audit). Subsequent per-turn writes happen outside this tx;
         // a fully transactional tick is deferred until we can scope an LLM
         // call outside the SQL tx without holding a connection open.
-        const { row: caseRow, wasCreated } = yield* tx.run(
+        const { row: ticketRow, wasCreated } = yield* tx.run(
           Effect.gen(function* () {
             let row;
             let wasCreated = false;
             if (lookup.kind === "load") {
-              row = yield* cases.getById(lookup.caseId as never);
+              row = yield* tickets.getById(lookup.ticketId as never);
             } else if (lookup.kind === "create") {
-              row = yield* cases.create({
+              row = yield* tickets.create({
                 tenantId: lookup.tenantId as never,
                 channel: lookup.channel,
                 currentAgentId: makeAgentId("support-triage"),
@@ -237,9 +237,9 @@ const AgentRuntimeLayer = Layer.effect(
               // loadOrCreateByThread: connector-driven inbound message.
               // The thread is the natural correlation key; a duplicate
               // `message.received` from a retried Pub/Sub push finds the
-              // same case and just appends another tick (Audit log will
+              // same ticket and just appends another tick (Audit log will
               // show double `event.received` but no double-create).
-              const existing = yield* cases.findByThreadId(
+              const existing = yield* tickets.findByThreadId(
                 makeTenantId(lookup.tenantId),
                 makeThreadId(lookup.threadId),
                 // Scope by the connector that owns the thread (audit D2)
@@ -251,29 +251,29 @@ const AgentRuntimeLayer = Layer.effect(
                 row = existing;
               } else {
                 // The derived thread-id didn't exact-match. Before minting a
-                // new case, correlate by the message-id index: the reply's
+                // new ticket, correlate by the message-id index: the reply's
                 // In-Reply-To / References point at a message we already
-                // recorded for some case (a prior inbound, or our own outbound
+                // recorded for some ticket (a prior inbound, or our own outbound
                 // reply). This is what keeps a reply whose client reordered or
                 // dropped the `References` chain from splitting off a duplicate
-                // case (the IMAP `references[0]` thread-root is unreliable).
+                // ticket (the IMAP `references[0]` thread-root is unreliable).
                 const candidateIds =
                   event.type === "message.received"
                     ? inboundReplyCandidateIds(event.payload)
                     : [];
                 const byMessageId =
                   candidateIds.length > 0
-                    ? yield* cases.findByMessageIds(
+                    ? yield* tickets.findByMessageIds(
                         makeTenantId(lookup.tenantId),
                         candidateIds,
                       )
                     : null;
                 if (byMessageId) {
-                  // Attach to the existing case; keep its stored threadId so
+                  // Attach to the existing ticket; keep its stored threadId so
                   // outbound replies keep threading through the original root.
                   row = byMessageId;
                 } else {
-                  row = yield* cases.create({
+                  row = yield* tickets.create({
                     tenantId: makeTenantId(lookup.tenantId),
                     channel: lookup.channel,
                     currentAgentId: makeAgentId("support-triage"),
@@ -287,24 +287,24 @@ const AgentRuntimeLayer = Layer.effect(
             }
             yield* audit.record({
               tenantId: row.tenantId,
-              caseId: row.id,
+              ticketId: row.id,
               actor: { type: "system", id: "runtime" },
               action: "event.received",
               details: { eventType: event.type },
             });
             // Index this inbound message id so a later reply that cites it —
             // even one whose own References never reach the thread root —
-            // resolves back to this case. Best-effort: a recording hiccup must
-            // not roll back the case create + audit it shares this tx with.
+            // resolves back to this ticket. Best-effort: a recording hiccup must
+            // not roll back the ticket create + audit it shares this tx with.
             if (
               (event.type === "message.received" ||
                 event.type === "customer.replied") &&
               event.payload.messageId
             ) {
-              yield* cases
+              yield* tickets
                 .recordMessageId({
                   tenantId: row.tenantId,
-                  caseId: row.id,
+                  ticketId: row.id,
                   messageId: event.payload.messageId,
                   direction: "inbound",
                 })
@@ -314,31 +314,31 @@ const AgentRuntimeLayer = Layer.effect(
           }),
         );
 
-        let working = caseRow;
+        let working = ticketRow;
 
-        // Park the case in `human_takeover` with an audit row, in one tx.
+        // Park the ticket in `human_takeover` with an audit row, in one tx.
         // Every path that returns `HumanTakeoverRequired` must leave the
-        // case durably parked (audit L4) — a result the worker merely logs
-        // is invisible to the dashboard and the case dangles forever.
+        // ticket durably parked (audit L4) — a result the worker merely logs
+        // is invisible to the dashboard and the ticket dangles forever.
         const escalateToHuman = (
-          caseId: typeof working.id,
+          ticketId: typeof working.id,
           reason: string,
           details: Record<string, unknown> = {},
         ) =>
           Effect.gen(function* () {
             const updated = yield* lifecycle.escalateToHuman({
-              caseId,
+              ticketId,
               tenantId: working.tenantId,
               actor: { type: "system", id: "agent-runtime" },
               reason,
               details,
             });
             // Ping the merchant AFTER the park committed (and outside the
-            // tx): the case just became theirs.
+            // tx): the ticket just became theirs.
             yield* notifyMerchant(
               updated.tenantId,
               humanTakeoverNotification({
-                caseId: updated.id,
+                ticketId: updated.id,
                 subject: updated.subject,
                 reason,
               }),
@@ -348,14 +348,14 @@ const AgentRuntimeLayer = Layer.effect(
 
         // Index the RFC Message-ID of an outbound customer reply so a later
         // inbound reply that cites it (In-Reply-To / References) correlates
-        // back to this case — even when the customer's client truncates the
+        // back to this ticket — even when the customer's client truncates the
         // `References` chain to just our message and the derived thread-root
         // no longer matches. Best-effort: a recording failure never fails the
         // send (the customer already got the email). `conversation.reply` /
         // `ask_customer` return `{ id, threadId, sentAt }`; the dedup short-
         // circuit returns `{ deduped: true }`, which has no `id` and is skipped.
         const recordOutboundReplyId = (
-          caseRow: typeof working,
+          ticketRow: typeof working,
           toolName: string,
           result: unknown,
         ): Effect.Effect<void> =>
@@ -368,23 +368,23 @@ const AgentRuntimeLayer = Layer.effect(
             }
             const id = (result as { readonly id?: unknown } | null)?.id;
             if (typeof id !== "string" || id.length === 0) return;
-            yield* cases
+            yield* tickets
               .recordMessageId({
-                tenantId: caseRow.tenantId,
-                caseId: caseRow.id,
+                tenantId: ticketRow.tenantId,
+                ticketId: ticketRow.id,
                 messageId: id,
                 direction: "outbound",
               })
               .pipe(Effect.catchAll(() => Effect.void));
           });
 
-        // Add a single risk-flag to the case context (deduped), best-effort:
+        // Add a single risk-flag to the ticket context (deduped), best-effort:
         // a write failure degrades to the unchanged row rather than aborting.
         const addRiskFlag = (row: typeof working, flag: string) =>
           Effect.gen(function* () {
             const existing = readRiskFlags(row.context);
             if (existing.includes(flag)) return row;
-            return yield* cases
+            return yield* tickets
               .update(row.id, {
                 context: { ...row.context, riskFlags: [...existing, flag] } as never,
               })
@@ -392,19 +392,19 @@ const AgentRuntimeLayer = Layer.effect(
           });
 
         // A customer-reply (`conversation.reply` / `ask_customer`) send FAILED.
-        // Don't lose it and don't let the case resolve as if it went out:
+        // Don't lose it and don't let the ticket resolve as if it went out:
         //   1. persist the verbatim draft into the reply-delivery outbox so the
         //      worker sweep + the dashboard "Retry sending email" button can
         //      re-send the SAME email (no LLM re-run);
         //   2. stamp the `reply_delivery_failed` risk flag so the dashboard
         //      shows it + the merchant knows the customer wasn't reached;
-        //   3. park the case in `human_takeover` (NEEDS ATTENTION, never
+        //   3. park the ticket in `human_takeover` (NEEDS ATTENTION, never
         //      resolved) — a successful retry later auto-resolves it.
         // All recovery writes succeed together. If the durable draft capture
         // fails, the tick fails retryably so the worker can redeliver instead
-        // of parking a case with no resend path.
+        // of parking a ticket with no resend path.
         const parkForReplyDeliveryFailure = (
-          caseRow: typeof working,
+          ticketRow: typeof working,
           agentId: string,
           toolName: string,
           draftInput: unknown,
@@ -413,8 +413,8 @@ const AgentRuntimeLayer = Layer.effect(
         ) =>
           Effect.gen(function* () {
             const updated = yield* lifecycle.parkForReplyDeliveryFailure({
-              caseId: caseRow.id,
-              tenantId: caseRow.tenantId,
+              ticketId: ticketRow.id,
+              tenantId: ticketRow.tenantId,
               agentId,
               tool: toolName,
               draftInput,
@@ -424,7 +424,7 @@ const AgentRuntimeLayer = Layer.effect(
             yield* notifyMerchant(
               updated.tenantId,
               humanTakeoverNotification({
-                caseId: updated.id,
+                ticketId: updated.id,
                 subject: updated.subject,
                 reason: REPLY_DELIVERY_FAILED_FLAG,
               }),
@@ -440,15 +440,15 @@ const AgentRuntimeLayer = Layer.effect(
         //
         // Assumption today: gated tools are TERMINAL — once they run
         // (e.g. `conversation.reply` sends a customer-facing message),
-        // the agent's job is done and the case resolves. When a gated
+        // the agent's job is done and the ticket resolves. When a gated
         // tool is mid-workflow (`refund.create` followed by a reply),
         // widen this branch to push the tool result into a fresh tick
         // and re-enter the agent loop.
         // Execute ONE approved approval row: re-validate the input, re-check
         // policy (deny-only), dedup, run the tool, audit. Returns a terminal
-        // WorkflowResult on any problem (so bundle resume STOPS and the case
-        // parks for a human), or `{ ok, tool, result }` on success — the case is
-        // NOT resolved here. The caller decides the case outcome once every
+        // WorkflowResult on any problem (so bundle resume STOPS and the ticket
+        // parks for a human), or `{ ok, tool, result }` on success — the ticket is
+        // NOT resolved here. The caller decides the ticket outcome once every
         // approved row has run (and never while other rows are still pending).
         const executeOneApproval = (
           approval: Approval,
@@ -512,7 +512,7 @@ const AgentRuntimeLayer = Layer.effect(
                 agent: applyOverride(resumeAgent.value, resumeOverrides),
                 tool: toolToRun,
                 payload: decodedInput.right,
-                caseId: working.id,
+                ticketId: working.id,
               });
               if (recheck === "deny") {
                 yield* escalateToHuman(
@@ -548,7 +548,7 @@ const AgentRuntimeLayer = Layer.effect(
               : null;
             if (priorMarker && priorMarker.resultOk === false) {
               // The original execution failed and that run already parked
-              // the case; nothing to redo here.
+              // the ticket; nothing to redo here.
               return {
                 type: "HumanTakeoverRequired",
                 reason: `approved tool ${approval.tool} failed`,
@@ -556,7 +556,7 @@ const AgentRuntimeLayer = Layer.effect(
             }
             const ctx: ToolContext = {
               tenantId: working.tenantId,
-              caseId: working.id,
+              ticketId: working.id,
               ...(working.mailbox ? { mailbox: working.mailbox } : {}),
               agentId: approval.agentId,
               callId,
@@ -580,7 +580,7 @@ const AgentRuntimeLayer = Layer.effect(
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "tool.execution_deduped",
                   details: {
@@ -597,7 +597,7 @@ const AgentRuntimeLayer = Layer.effect(
                 Effect.gen(function* () {
                   yield* audit.record({
                     tenantId: working.tenantId,
-                    caseId: working.id,
+                    ticketId: working.id,
                     actor: { type: "user", id: event.managerId },
                     action: "tool.invoked",
                     details: {
@@ -623,7 +623,7 @@ const AgentRuntimeLayer = Layer.effect(
                     yield* maybeExecutions.value
                       .record({
                         tenantId: working.tenantId,
-                        caseId: working.id,
+                        ticketId: working.id,
                         callId: executionKey,
                         tool: approval.tool,
                         resultOk: result._tag === "Right",
@@ -641,17 +641,17 @@ const AgentRuntimeLayer = Layer.effect(
               .markResumed(approval.id, working.tenantId)
               .pipe(Effect.catchAll(() => Effect.void));
             if (exec._tag === "Left") {
-              // Tool failed AFTER approval — park the case in human_takeover
+              // Tool failed AFTER approval — park the ticket in human_takeover
               // so someone can intervene. The approval row is already
               // approved, which is the right audit shape (the manager said
               // yes; the platform tried; the platform failed). Without the
-              // transition the case dangles in `waiting_for_approval` with no
+              // transition the ticket dangles in `waiting_for_approval` with no
               // pending row and nothing surfaces the failure (audit L4).
               //
               // A customer-reply SEND failure is special: the approved draft is
               // captured into the reply-delivery outbox (so the worker sweep + the
               // dashboard "Retry sending email" button can re-send the SAME email)
-              // and the case is flagged `reply_delivery_failed` — otherwise it's a
+              // and the ticket is flagged `reply_delivery_failed` — otherwise it's a
               // generic `approved_tool_failed` escalation.
               if (isReplyDeliverySendFailure(approval.tool, exec.left)) {
                 yield* parkForReplyDeliveryFailure(
@@ -698,15 +698,15 @@ const AgentRuntimeLayer = Layer.effect(
                 retryable: false,
               } as const;
             }
-            // A manager takeover means the human owns the case now. Approval
+            // A manager takeover means the human owns the ticket now. Approval
             // events can arrive late or race with takeover/reject/manual-status
             // actions; never let a stale approval execute tools or try to move
-            // the case out from under the human.
+            // the ticket out from under the human.
             if (working.status === "human_takeover") {
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "approval.stale_delivery_skipped",
                   details: {
@@ -718,21 +718,21 @@ const AgentRuntimeLayer = Layer.effect(
               // H1: neutralize the skipped decision. Left `approved`, it would
               // otherwise be swept into a LATER round's bundle (the double-send)
               // and re-published by the maintenance sweep. Marking it resumed
-              // retires it for good — the human owns the case now.
+              // retires it for good — the human owns the ticket now.
               yield* approvals
                 .markResumed(trigger.id, working.tenantId)
                 .pipe(Effect.catchAll(() => Effect.void));
               return { type: "PausedForHumanTakeover" } as const;
             }
             // Duplicate-delivery guard (audit C2): pg-boss is at-least-once.
-            // A re-delivered `approval.approved` for a case that already ran
+            // A re-delivered `approval.approved` for a ticket that already ran
             // to completion must NOT execute the gated tool(s) a second time —
             // that's a double refund / double customer email.
             if (working.status === "resolved" || working.status === "archived") {
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "approval.duplicate_delivery_skipped",
                   details: { approvalId: trigger.id },
@@ -741,15 +741,15 @@ const AgentRuntimeLayer = Layer.effect(
               return { type: "Completed" } as const;
             }
             // Bundle resume (slice 4d): the autonomous loop can queue SEVERAL
-            // gated actions on one case, all approved together — one
+            // gated actions on one ticket, all approved together — one
             // `approval.approved` event executes the whole bundle. Gather every
-            // already-approved row for the case and run them in creation order
+            // already-approved row for the ticket and run them in creation order
             // (= the order the agent proposed them). The legacy single-approval
             // path is just a bundle of one. Each row's own execution marker
-            // keeps a redelivery idempotent; the first failure parks the case
+            // keeps a redelivery idempotent; the first failure parks the ticket
             // and STOPS the bundle (the rest don't run).
             const all = yield* approvals
-              .listForCase(working.tenantId, working.id)
+              .listForTicket(working.tenantId, working.id)
               .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
             // H2: run only the CURRENT round's not-yet-resumed approved rows.
             // An `approved` leftover from a prior attempt (a lower epoch) or one
@@ -779,7 +779,7 @@ const AgentRuntimeLayer = Layer.effect(
                 yield* tx.run(
                   audit.record({
                     tenantId: working.tenantId,
-                    caseId: working.id,
+                    ticketId: working.id,
                     actor: { type: "system", id: "runtime" },
                     action: "approval.ignored_stale",
                     details: {
@@ -791,7 +791,7 @@ const AgentRuntimeLayer = Layer.effect(
                           ? "already_resumed"
                           : "stale_epoch",
                       epoch: trigger.epoch ?? 0,
-                      caseEpoch: currentEpoch,
+                      ticketEpoch: currentEpoch,
                     },
                   }),
                 );
@@ -814,7 +814,7 @@ const AgentRuntimeLayer = Layer.effect(
                   reason: "approval_not_runnable",
                 } as const;
               }
-              // Current + runnable (pending/approved) but `listForCase` returned
+              // Current + runnable (pending/approved) but `listForTicket` returned
               // it unobserved (a lean ApprovalService, or an event that raced the
               // approve write): fall back to running it as a singleton.
               bundle = [trigger];
@@ -825,13 +825,13 @@ const AgentRuntimeLayer = Layer.effect(
             for (const approval of bundle) {
               const outcome = yield* executeOneApproval(approval, event);
               // A WorkflowResult (no `ok`) means this action failed / couldn't
-              // run; the case is already parked. Stop — don't run later actions.
+              // run; the ticket is already parked. Stop — don't run later actions.
               if (!("ok" in outcome)) return outcome;
               ran.push({ tool: outcome.tool, result: outcome.result });
             }
-            // Per-action approval: NEVER resolve a case that still has actions
+            // Per-action approval: NEVER resolve a ticket that still has actions
             // awaiting a decision. The operator may approve some now and decide
-            // the rest later; keep the case parked until every row is decided.
+            // the rest later; keep the ticket parked until every row is decided.
             const stillPending = usedFallback
               ? []
               : all.filter((a) => a.status === "pending");
@@ -841,7 +841,7 @@ const AgentRuntimeLayer = Layer.effect(
                 approvalId: stillPending[0]!.id,
               } as const;
             }
-            // All actions decided. If one was a supplier escalation, the case is
+            // All actions decided. If one was a supplier escalation, the ticket is
             // now waiting on the SUPPLIER (not done): park `waiting_for_supplier`
             // so the agent re-engages on `supplier.updated`, exactly like the
             // in-loop escalate path. A `no_supplier` escalate (escalated:false)
@@ -852,20 +852,20 @@ const AgentRuntimeLayer = Layer.effect(
                 (r.result as { readonly escalated?: boolean } | null)
                   ?.escalated === true,
             );
-            // Concurrent wait states: the case may ALREADY carry an open
+            // Concurrent wait states: the ticket may ALREADY carry an open
             // escalation from a PRIOR tick (queued alongside this approval).
-            // Resolving now would close the case out from under that supplier
+            // Resolving now would close the ticket out from under that supplier
             // wait. Consult the row-derived source of truth; absent/erroring
             // service degrades to `false` (the old bundle-only behavior).
             const hasOpenEscalation = Option.isSome(maybeSupplierEscalation)
               ? yield* maybeSupplierEscalation.value
-                  .hasOpenEscalationForCase(working.tenantId, working.id)
+                  .hasOpenEscalationForTicket(working.tenantId, working.id)
                   .pipe(Effect.catchAll(() => Effect.succeed(false)))
               : false;
             const escalatedToSupplier = escalatedInBundle || hasOpenEscalation;
             if (escalatedToSupplier) {
               working = yield* lifecycle.parkWaitingForSupplier({
-                caseId: working.id,
+                ticketId: working.id,
                 tenantId: working.tenantId,
                 agentId: trigger.agentId,
                 tool: "supplier.escalate",
@@ -875,7 +875,7 @@ const AgentRuntimeLayer = Layer.effect(
             }
             // Nothing left to wait on — resolve once.
             working = yield* lifecycle.resolve({
-              caseId: working.id,
+              ticketId: working.id,
               tenantId: working.tenantId,
               actor: { type: "user", id: event.managerId },
               reason:
@@ -899,7 +899,7 @@ const AgentRuntimeLayer = Layer.effect(
             // acted on. A rejection for a prior attempt (a lower epoch) or one
             // already handled is a stale/replayed event — ignore it. Escalating
             // unconditionally was the stale-reject storm: a redelivered/re-
-            // published reject from an old round yanked a case that had moved on
+            // published reject from an old round yanked a ticket that had moved on
             // into human_takeover, which then blocked its approved reply from
             // ever sending.
             const rejected = yield* approvals
@@ -916,7 +916,7 @@ const AgentRuntimeLayer = Layer.effect(
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "approval.ignored_stale",
                   details: {
@@ -928,14 +928,14 @@ const AgentRuntimeLayer = Layer.effect(
                         ? "already_resumed"
                         : "stale_epoch",
                     epoch: rejected?.epoch ?? null,
-                    caseEpoch: working.epoch ?? 0,
+                    ticketEpoch: working.epoch ?? 0,
                   },
                 }),
               );
               return { type: "Completed" } as const;
             }
             working = yield* lifecycle.escalateToHuman({
-              caseId: working.id,
+              ticketId: working.id,
               tenantId: working.tenantId,
               actor: { type: "user", id: event.managerId },
               reason: "approval rejected",
@@ -948,11 +948,11 @@ const AgentRuntimeLayer = Layer.effect(
             yield* approvals
               .markResumed(event.approvalId, working.tenantId)
               .pipe(Effect.catchAll(() => Effect.void));
-            // Confirmation ping: rejecting the draft makes the case theirs.
+            // Confirmation ping: rejecting the draft makes the ticket theirs.
             yield* notifyMerchant(
               working.tenantId,
               humanTakeoverNotification({
-                caseId: working.id,
+                ticketId: working.id,
                 subject: working.subject,
                 reason: "approval rejected",
               }),
@@ -963,13 +963,13 @@ const AgentRuntimeLayer = Layer.effect(
             } as const;
         });
 
-        const enrichCase = Effect.gen(function* () {
-          // 2a. Customer identification — only on a freshly-created case
+        const enrichTicket = Effect.gen(function* () {
+          // 2a. Customer identification — only on a freshly-created ticket
           // bound to an inbound message. Best-effort: the tick proceeds
           // even if Shopify is down / not configured / has no match for
           // this email. Persists `customerEmail` (always when we have one)
           // and `shopifyCustomerId` (only on a positive match) into the
-          // case context. Specialists like refund-review can read these
+          // ticket context. Specialists like refund-review can read these
           // without firing their own searchByEmail per tick.
           if (wasCreated && event.type === "message.received") {
             // Prefer Reply-To over From: relay-delivered mail (Shopify
@@ -981,7 +981,7 @@ const AgentRuntimeLayer = Layer.effect(
                 ...working.context,
                 customerEmail: email,
               };
-              // Capture the sender's display name too, so cases are searchable
+              // Capture the sender's display name too, so tickets are searchable
               // by customer name (not just email). Best-effort — many emails
               // carry no name.
               const name = inboundCustomerName(event.payload);
@@ -1017,7 +1017,7 @@ const AgentRuntimeLayer = Layer.effect(
                 );
               }
               if (customer) contextPatch["shopifyCustomerId"] = customer.id;
-              working = yield* cases
+              working = yield* tickets
                 .update(working.id, { context: contextPatch as never })
                 .pipe(
                   Effect.catchAll(() => Effect.succeed(working)),
@@ -1026,18 +1026,18 @@ const AgentRuntimeLayer = Layer.effect(
           }
 
           // 2a-bis. Order-status identity verification — when a customer replies
-          // to a case we flagged as an order/customer mismatch, check (in the
+          // to a ticket we flagged as an order/customer mismatch, check (in the
           // runtime, never the model) whether their reply states the email the
           // order was placed under. A match clears the disclosure gate so the
-          // status reply can proceed automatically; a miss leaves the case gated
+          // status reply can proceed automatically; a miss leaves the ticket gated
           // (the reply still routes to human approval via the backstop at the
           // permission check). Keyed off `pendingOrderEmail`, persisted at
           // detection time. Best-effort: a write failure simply leaves the gate
           // up. The model cannot set `identityVerified`/`verifiedCustomerEmail` —
-          // they're stamped here and absent from the case.update_context
+          // they're stamped here and absent from the ticket.update_context
           // allowlist — so a prompt-injected reply body can't fake a pass. The
           // saved `verifiedCustomerEmail` is the TRUSTED order email, surfaced on
-          // the case (Context panel + Customer card) once the requester confirms
+          // the ticket (Context panel + Customer card) once the requester confirms
           // it; see `orderIdentityVerificationPatch`.
           if (
             event.type === "message.received" ||
@@ -1048,7 +1048,7 @@ const AgentRuntimeLayer = Layer.effect(
               working.context,
             );
             if (verification) {
-              working = yield* cases
+              working = yield* tickets
                 .update(working.id, {
                   context: {
                     ...working.context,
@@ -1059,9 +1059,9 @@ const AgentRuntimeLayer = Layer.effect(
               yield* audit
                 .record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
-                  action: "case.identity_verified",
+                  action: "ticket.identity_verified",
                   details: { method: "order_email_confirmed" },
                 })
                 .pipe(Effect.catchAll(() => Effect.void));
@@ -1069,7 +1069,7 @@ const AgentRuntimeLayer = Layer.effect(
           }
 
           // 2b. Photo signals — when an inbound message carries image
-          // attachments, stamp a per-case EXIF rollup onto the context. A
+          // attachments, stamp a per-ticket EXIF rollup onto the context. A
           // stripped image (no camera metadata) is a cheap fraud signal for
           // the damaged-product flow; the dashboard ApprovalCard surfaces it
           // as a chip. Best-effort — a context-write failure never blocks the
@@ -1085,14 +1085,14 @@ const AgentRuntimeLayer = Layer.effect(
             // Duplicate-photo guard: when an ImageHashStore is wired (it's
             // optional — absent in many test layers, present in the worker),
             // compare each photo's perceptual hash against the tenant's
-            // recent hashes. A near-match on ANOTHER case flags the re-used
+            // recent hashes. A near-match on ANOTHER ticket flags the re-used
             // "broken item" photo scam. Best-effort: store failures degrade
             // to no flag rather than aborting the tick.
             const maybeStore = maybeImageHashStore;
             const dupFlags: string[] = [];
             if (Option.isSome(maybeStore)) {
               const store = maybeStore.value;
-              const seenCaseIds = new Set<string>();
+              const seenTicketIds = new Set<string>();
               for (const att of attachments) {
                 if (
                   !att.contentType.startsWith("image/") ||
@@ -1109,7 +1109,7 @@ const AgentRuntimeLayer = Layer.effect(
                 const hits = yield* store
                   .findSimilar({
                     tenantId: working.tenantId,
-                    caseId: working.id,
+                    ticketId: working.id,
                     phash,
                     maxDistance: 5,
                     sinceDays: 90,
@@ -1122,16 +1122,16 @@ const AgentRuntimeLayer = Layer.effect(
                     ),
                   );
                 for (const hit of hits) {
-                  if (!seenCaseIds.has(hit.caseId)) {
-                    seenCaseIds.add(hit.caseId);
-                    dupFlags.push(`duplicate_photo_seen_in_case_${hit.caseId}`);
+                  if (!seenTicketIds.has(hit.ticketId)) {
+                    seenTicketIds.add(hit.ticketId);
+                    dupFlags.push(`duplicate_photo_seen_in_ticket_${hit.ticketId}`);
                   }
                 }
                 // Record this photo's hash so future uploads can match it.
                 yield* store
                   .record({
                     tenantId: working.tenantId,
-                    caseId: working.id,
+                    ticketId: working.id,
                     phash,
                   })
                   .pipe(Effect.catchAll(() => Effect.void));
@@ -1150,7 +1150,7 @@ const AgentRuntimeLayer = Layer.effect(
               const patch: Record<string, unknown> = { ...working.context };
               if (signals) patch["photoSignals"] = signals;
               if (mergedFlags.length > 0) patch["riskFlags"] = mergedFlags;
-              working = yield* cases
+              working = yield* tickets
                 .update(working.id, { context: patch as never })
                 .pipe(Effect.catchAll(() => Effect.succeed(working)));
             }
@@ -1159,29 +1159,29 @@ const AgentRuntimeLayer = Layer.effect(
 
         const checkParkGuards = Effect.gen(function* () {
           // 2.9. Hold events that arrive while an approval is still pending.
-          // A case parked in `waiting_for_approval` must stay parked until
+          // A ticket parked in `waiting_for_approval` must stay parked until
           // the manager decides (`approval.approved` / `approval.rejected`,
           // short-circuited above) or a human takes over out-of-band (which
           // cancels the approval without running the agent). ANY other event
           // that reaches here — the customer replying again on the same
           // thread, a follow-up timer firing — must NOT re-enter the agent
-          // loop: a `final_message` (or a `case.update_status`) decision would
-          // then resolve the case out from under the still-pending approval,
+          // loop: a `final_message` (or a `ticket.update_status`) decision would
+          // then resolve the ticket out from under the still-pending approval,
           // so the manager would see "resolved" for a draft they never
           // approved. We re-park instead. (If the status says
           // `waiting_for_approval` but no pending row exists — a stale /
-          // inconsistent case — we fall through so the agent can still make
+          // inconsistent ticket — we fall through so the agent can still make
           // progress; the pending approval row is the source of truth.)
           if (working.status === "waiting_for_approval") {
-            const pendingForCase = yield* approvals
+            const pendingForTicket = yield* approvals
               .listPending(working.tenantId)
               .pipe(Effect.catchAll(() => Effect.succeed([])));
-            const open = pendingForCase.find((a) => a.caseId === working.id);
+            const open = pendingForTicket.find((a) => a.ticketId === working.id);
             if (open) {
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "event.held_pending_approval",
                   details: { eventType: event.type, approvalId: open.id },
@@ -1194,12 +1194,12 @@ const AgentRuntimeLayer = Layer.effect(
             }
           }
 
-          // 2.95. Hold every event once a human has taken the case over.
+          // 2.95. Hold every event once a human has taken the ticket over.
           // `human_takeover` means a person owns this conversation; an inbound
           // customer reply, a follow-up timer, or any other event must NOT
           // re-enter the agent loop and answer over the human (the runtime
           // also has no message-history replay, so it would respond with only
-          // the latest message as context — doubly wrong). The case stays
+          // the latest message as context — doubly wrong). The ticket stays
           // parked until a manager hands it back from the dashboard, which
           // transitions it out of `human_takeover` so subsequent events flow
           // through normally. We record the held event for the audit trail.
@@ -1207,7 +1207,7 @@ const AgentRuntimeLayer = Layer.effect(
             yield* tx.run(
               audit.record({
                 tenantId: working.tenantId,
-                caseId: working.id,
+                ticketId: working.id,
                 actor: { type: "system", id: "runtime" },
                 action: "event.held_human_takeover",
                 details: { eventType: event.type },
@@ -1223,7 +1223,7 @@ const AgentRuntimeLayer = Layer.effect(
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "event.held_archived",
                   details: { eventType: event.type },
@@ -1233,24 +1233,24 @@ const AgentRuntimeLayer = Layer.effect(
             }
           }
 
-          // 2.96. Hold events while the case is parked on the supplier. A case in
+          // 2.96. Hold events while the ticket is parked on the supplier. A ticket in
           // `waiting_for_supplier` belongs to the warehouse until they respond, so
           // a stray customer reply or follow-up timer must NOT re-enter the agent
           // loop (the agent would answer the customer while the supplier still
-          // owns the case — mirrors the approval/takeover park guards above). Only
+          // owns the ticket — mirrors the approval/takeover park guards above). Only
           // `supplier.updated` (the supplier responded — the loop below drafts the
           // customer reply) and the human-control events (`manual.takeover` /
-          // `case.resumed`) pass through.
+          // `ticket.resumed`) pass through.
           if (working.status === "waiting_for_supplier") {
             const passthrough =
               event.type === "supplier.updated" ||
               event.type === "manual.takeover" ||
-              event.type === "case.resumed";
+              event.type === "ticket.resumed";
             if (!passthrough) {
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
-                  caseId: working.id,
+                  ticketId: working.id,
                   actor: { type: "system", id: "runtime" },
                   action: "event.held_waiting_for_supplier",
                   details: { eventType: event.type },
@@ -1263,24 +1263,24 @@ const AgentRuntimeLayer = Layer.effect(
         });
 
         const maybeReopen = Effect.gen(function* () {
-          // 2.97. Reopen a resolved/archived case when the customer writes back
+          // 2.97. Reopen a resolved/archived ticket when the customer writes back
           // on the thread. The state machine permits `resolved|archived →
           // in_progress` (a reply re-enters the loop) but nothing performed the
-          // transition: the case stayed visually `resolved` while the agent
+          // transition: the ticket stayed visually `resolved` while the agent
           // re-ran, and a closing
           // `final_message` then short-circuited (status already resolved) so a
           // genuine re-engagement could finish invisibly. Transitioning here
           // surfaces the reopen on the timeline and lets the normal
           // resolve/await paths run against a coherent status. Only inbound
           // customer messages reopen; system events (timers, approvals) never
-          // resurrect a resolved case.
+          // resurrect a resolved ticket.
           if (
             (event.type === "message.received" ||
               event.type === "customer.replied") &&
             (working.status === "resolved" || working.status === "archived")
           ) {
             working = yield* lifecycle.reopenForCustomerReply({
-              caseId: working.id,
+              ticketId: working.id,
               tenantId: working.tenantId,
               eventType: event.type,
             });
@@ -1331,9 +1331,9 @@ const AgentRuntimeLayer = Layer.effect(
           const allSpecialists = yield* resolver.customSpecialists(
             working.tenantId,
           );
-          // Resolve the case's current agent (built-in or custom). A miss means
+          // Resolve the ticket's current agent (built-in or custom). A miss means
           // the agent was deleted/disabled (or the id is otherwise unknown):
-          // park the case for a human rather than letting an UnknownAgent crash
+          // park the ticket for a human rather than letting an UnknownAgent crash
           // bubble to the outer classifier as a retryable Failed — that would
           // loop forever in pg-boss (audit C1 / L4).
           const resolved = yield* resolver.tryResolve(
@@ -1351,7 +1351,7 @@ const AgentRuntimeLayer = Layer.effect(
           }
           // Scenario envelope (slice 5): when an autonomous agent runs under a
           // merchant scenario, clamp its tool/permission envelope and inject the
-          // playbook header. Triage picks the scenario and stamps it on the case
+          // playbook header. Triage picks the scenario and stamps it on the ticket
           // as `context.scenarioKey`; the policy comes from tenant settings
           // (defaults-on-read). No flag / no key / no match → the agent runs
           // unclamped. Applied at every point the active agent is (re)bound — the
@@ -1378,11 +1378,11 @@ const AgentRuntimeLayer = Layer.effect(
             return scenario ? applyScenarioSteering(a, scenario) : a;
           };
           // Resolution-agent-direct (2026-06-28): when the tenant has the
-          // resolution agent enabled, inbound cases bound to the primary
+          // resolution agent enabled, inbound tickets bound to the primary
           // (support-triage) run the scenario-resolution-agent DIRECTLY — it
           // picks the matching scenario itself (sets `scenarioKey`) and resolves
           // end-to-end. This replaces the old triage→handoff routing, whose
-          // brittle classification step intermittently silently-resolved cases
+          // brittle classification step intermittently silently-resolved tickets
           // (a weak triage model bailing to `final_message` instead of handing
           // off). Flag off → legacy triage + specialist routing is untouched.
           // (Supersedes `applyTriageScenarioRouting`, which is retained + tested
@@ -1398,18 +1398,18 @@ const AgentRuntimeLayer = Layer.effect(
             if (resolutionAgent) {
               entryBase = applyOverride(resolutionAgent, overrideMap);
               // Persist the entry binding so the dashboard shows the agent that
-              // is actually handling the case and a later resume runs it
+              // is actually handling the ticket and a later resume runs it
               // directly (resolves straight to the resolution agent, no re-swap).
               // One-time write per entry; a restart-from-triage rebinds to
               // support-triage and re-enters here.
               working = yield* tx.run(
                 Effect.gen(function* () {
-                  const updated = yield* cases.update(working.id, {
+                  const updated = yield* tickets.update(working.id, {
                     currentAgentId: makeAgentId(SCENARIO_RESOLUTION_AGENT_ID),
                   });
                   yield* audit.record({
                     tenantId: updated.tenantId,
-                    caseId: updated.id,
+                    ticketId: updated.id,
                     actor: { type: "system", id: "runtime" },
                     action: "agent.routed",
                     details: {
@@ -1441,7 +1441,7 @@ const AgentRuntimeLayer = Layer.effect(
           // without ConversationService falls back to the fetch directive.
           let resumeTranscript: string | null = null;
           if (
-            event.type === "case.resumed" &&
+            event.type === "ticket.resumed" &&
             working.threadId &&
             working.mailbox &&
             Option.isSome(maybeConversation)
@@ -1466,7 +1466,7 @@ const AgentRuntimeLayer = Layer.effect(
           let current = working;
           // Order id/name → customer email, populated as `shopify.get_order`
           // results come back this tick. Used to flag a `refund.create` that
-          // targets an order belonging to a different customer than the case
+          // targets an order belonging to a different customer than the ticket
           // (prompt-injection scope guard — see refundCustomerMismatchFlag).
           const seenOrderEmails = new Map<string, string | null>();
           // Autonomous loop (slice 4b/4c): in autonomous mode a gated (`ask`)
@@ -1496,7 +1496,7 @@ const AgentRuntimeLayer = Layer.effect(
                     ? "llm_credential_missing"
                     : "llm_credential_revoked";
                 current = yield* lifecycle.escalateToHuman({
-                  caseId: current.id,
+                  ticketId: current.id,
                   tenantId: current.tenantId,
                   actor: { type: "system", id: "agent-runtime" },
                   reason,
@@ -1508,7 +1508,7 @@ const AgentRuntimeLayer = Layer.effect(
                 yield* notifyMerchant(
                   current.tenantId,
                   humanTakeoverNotification({
-                    caseId: current.id,
+                    ticketId: current.id,
                     subject: current.subject,
                     reason,
                   }),
@@ -1526,7 +1526,7 @@ const AgentRuntimeLayer = Layer.effect(
               // up. (Previously a 402 mapped to NetworkError → retryable.)
               if (err._tag === "InsufficientCredits") {
                 current = yield* lifecycle.escalateToHuman({
-                  caseId: current.id,
+                  ticketId: current.id,
                   tenantId: current.tenantId,
                   actor: { type: "system", id: "agent-runtime" },
                   reason: "llm_insufficient_credits",
@@ -1535,7 +1535,7 @@ const AgentRuntimeLayer = Layer.effect(
                 yield* notifyMerchant(
                   current.tenantId,
                   humanTakeoverNotification({
-                    caseId: current.id,
+                    ticketId: current.id,
                     subject: current.subject,
                     reason: "llm_insufficient_credits",
                   }),
@@ -1546,7 +1546,7 @@ const AgentRuntimeLayer = Layer.effect(
                 } as const;
               }
               // Deterministic LLM failures: retrying replays the exact same
-              // request, so park the case for a human instead of burning
+              // request, so park the ticket for a human instead of burning
               // retries (audit C1).
               if (
                 err._tag === "ContextTooLarge" ||
@@ -1571,7 +1571,7 @@ const AgentRuntimeLayer = Layer.effect(
               } as const;
             });
 
-          // Park the case in waiting_for_approval (approval row + transition +
+          // Park the ticket in waiting_for_approval (approval row + transition +
           // audit in one tx) and fan out the signed approval links. Always ends
           // the tick with PausedWaitingForApproval.
           const parkForApproval = (
@@ -1585,11 +1585,11 @@ const AgentRuntimeLayer = Layer.effect(
             Effect.gen(function* () {
               // Approval row + park transition + audit row in ONE tx (audit
               // L6) — a crash between them previously left a pending approval
-              // on an un-parked case, so the agent could keep acting and a
+              // on an un-parked ticket, so the agent could keep acting and a
               // second approval could be created. master-plan §4: the audit
               // write shares the transaction with the state change.
               const parked = yield* lifecycle.parkForApproval({
-                caseId: current.id,
+                ticketId: current.id,
                 tenantId: current.tenantId,
                 agentId: agent.id,
                 tool: tool.name,
@@ -1600,11 +1600,11 @@ const AgentRuntimeLayer = Layer.effect(
                 turn,
               });
               const approval = parked.approval;
-              current = parked.case_;
+              current = parked.ticket_;
 
               // Fire the approval-link email + merchant ping. Best-effort: a
               // Resend outage, a tenant without `notificationEmail` configured,
-              // or any other mail failure must NOT block the case. The approval
+              // or any other mail failure must NOT block the ticket. The approval
               // row is the source of truth and the dashboard picks it up
               // regardless; the maintenance cron re-sends this same
               // notification if the first send was dropped. `buildApprovalNotification`
@@ -1614,7 +1614,7 @@ const AgentRuntimeLayer = Layer.effect(
               const notification = buildApprovalNotification({
                 approvalId: approval.id,
                 tenantId: current.tenantId,
-                caseId: current.id,
+                ticketId: current.id,
                 tool: tool.name,
                 proposedInput: callInput,
                 linkConfig,
@@ -1631,14 +1631,14 @@ const AgentRuntimeLayer = Layer.effect(
             });
 
           // Autonomous loop end-of-run (slice 4c): the agent stopped with one or
-          // more QUEUED gated actions. Park the case ONCE in waiting_for_approval
+          // more QUEUED gated actions. Park the ticket ONCE in waiting_for_approval
           // (a single transition covering the whole bundle) and send ONE merchant
           // ping. The dashboard (slice 7) is the bundle approve/reject surface;
           // on approval the runtime executes the queued rows in order (slice 4d).
           const parkQueuedBundle = (current: typeof working, agent: AgentConfig, turn: number) =>
             Effect.gen(function* () {
               const parked = yield* lifecycle.parkForApprovalBundle({
-                caseId: current.id,
+                ticketId: current.id,
                 tenantId: current.tenantId,
                 agentId: agent.id,
                 approvalIds: queuedApprovals,
@@ -1647,12 +1647,12 @@ const AgentRuntimeLayer = Layer.effect(
               yield* notifyMerchant(
                 parked.tenantId,
                 approvalRequestedNotification({
-                  caseId: parked.id,
+                  ticketId: parked.id,
                   toolName: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"}`,
                   draftSubject: parked.subject,
                   draftPreview: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"} are queued and awaiting your approval.`,
-                  approveUrl: `${linkConfig.baseUrl}/cases/${parked.id}`,
-                  rejectUrl: `${linkConfig.baseUrl}/cases/${parked.id}`,
+                  approveUrl: `${linkConfig.baseUrl}/tickets/${parked.id}`,
+                  rejectUrl: `${linkConfig.baseUrl}/tickets/${parked.id}`,
                 }),
               );
               return {
@@ -1663,7 +1663,7 @@ const AgentRuntimeLayer = Layer.effect(
 
           // Run one tool_call decision: push the assistant message, intercept
           // agent.handoff, validate + dedup + permission-gate, then execute (or
-          // park). Returns the (possibly handed-off) agent, the refreshed case,
+          // park). Returns the (possibly handed-off) agent, the refreshed ticket,
           // and `done`: a terminal WorkflowResult to end the tick, or null to
           // continue the loop. messages/seenOrderEmails are mutated in place.
           const executeToolCall = (
@@ -1722,7 +1722,7 @@ const AgentRuntimeLayer = Layer.effect(
                   yield* tx.run(
                     audit.record({
                       tenantId: current.tenantId,
-                      caseId: current.id,
+                      ticketId: current.id,
                       actor: { type: "agent", id: agent.id },
                       action: "tool.invoked",
                       details: {
@@ -1761,7 +1761,7 @@ const AgentRuntimeLayer = Layer.effect(
                   yield* tx.run(
                     audit.record({
                       tenantId: current.tenantId,
-                      caseId: current.id,
+                      ticketId: current.id,
                       actor: { type: "agent", id: agent.id },
                       action: "tool.invoked",
                       details: {
@@ -1791,12 +1791,12 @@ const AgentRuntimeLayer = Layer.effect(
                 );
                 current = yield* tx.run(
                   Effect.gen(function* () {
-                    const updated = yield* cases.update(current.id, {
+                    const updated = yield* tickets.update(current.id, {
                       currentAgentId: targetAgentId,
                     });
                     yield* audit.record({
                       tenantId: updated.tenantId,
-                      caseId: updated.id,
+                      ticketId: updated.id,
                       actor: { type: "agent", id: agent.id },
                       action: "tool.invoked",
                       details: {
@@ -1888,8 +1888,8 @@ const AgentRuntimeLayer = Layer.effect(
 
               // Refund scope guard (prompt-injection mitigation): before gating a
               // refund, check whether it targets an order whose customer differs
-              // from the case's bound customer and, if so, stamp a risk flag onto
-              // the case context. The approval card surfaces riskFlags as chips,
+              // from the ticket's bound customer and, if so, stamp a risk flag onto
+              // the ticket context. The approval card surfaces riskFlags as chips,
               // so the human approver is warned the refund may be aimed at an
               // unrelated order. Best-effort and additive — a write failure or a
               // fail-open (unknown) result never blocks the refund.
@@ -1909,7 +1909,7 @@ const AgentRuntimeLayer = Layer.effect(
                 agent,
                 tool,
                 payload: callInput,
-                caseId: current.id,
+                ticketId: current.id,
               });
 
               // Order-status disclosure backstop: a `where_is_order` reply on an
@@ -1937,11 +1937,11 @@ const AgentRuntimeLayer = Layer.effect(
                 // Autonomous loop (slice 4b): a gated action is NON-BLOCKING.
                 // Queue it (pending approval row, NO park) and feed back a
                 // "queued, not executed" observation so the agent keeps looping
-                // and drafts its reply conditionally. The case parks once, as a
+                // and drafts its reply conditionally. The ticket parks once, as a
                 // bundle, when the loop ends (parkQueuedBundle).
                 if (agent.autonomousLoop) {
                   const approval = yield* lifecycle.queueApproval({
-                    caseId: current.id,
+                    ticketId: current.id,
                     tenantId: current.tenantId,
                     agentId: agent.id,
                     tool: tool.name,
@@ -1985,11 +1985,11 @@ const AgentRuntimeLayer = Layer.effect(
               // a send that really happened. The audit row + execution marker
               // then commit together in one tx (master-plan §4: the audit write
               // shares the transaction with the state change — the external
-              // effect itself was never transactional). Tools that mutate case
+              // effect itself was never transactional). Tools that mutate ticket
               // state route those writes through their own lifecycle services.
               const ctx: ToolContext = {
                 tenantId: current.tenantId,
-                caseId: current.id,
+                ticketId: current.id,
                 ...(current.mailbox ? { mailbox: current.mailbox } : {}),
                 agentId: agent.id,
                 callId: decision.callId,
@@ -2040,7 +2040,7 @@ const AgentRuntimeLayer = Layer.effect(
                         : {};
                   yield* audit.record({
                     tenantId: current.tenantId,
-                    caseId: current.id,
+                    ticketId: current.id,
                     actor: { type: "agent", id: agent.id },
                     action: "tool.invoked",
                     details: {
@@ -2067,7 +2067,7 @@ const AgentRuntimeLayer = Layer.effect(
                     yield* maybeExecutions.value
                       .record({
                         tenantId: current.tenantId,
-                        caseId: current.id,
+                        ticketId: current.id,
                         callId: loopExecutionKey,
                         tool: tool.name,
                         resultOk: result._tag === "Right",
@@ -2092,7 +2092,7 @@ const AgentRuntimeLayer = Layer.effect(
                 }
                 if (tool.name === "conversation.ask_customer") {
                   current = yield* lifecycle.parkWaitingForCustomer({
-                    caseId: current.id,
+                    ticketId: current.id,
                     tenantId: current.tenantId,
                     agentId: agent.id,
                     tool: tool.name,
@@ -2108,9 +2108,9 @@ const AgentRuntimeLayer = Layer.effect(
                   // ONLY when a supplier was actually found (`escalated: true`). A
                   // `no_supplier` result falls through to the generic tool-result
                   // push below so the agent reads it and falls back to a direct
-                  // reply (it must NOT park a case nobody is working). The escalation
-                  // row was written by the tool's service; here we park the case +
-                  // audit in one tx, then end the tick. The case re-engages on
+                  // reply (it must NOT park a ticket nobody is working). The escalation
+                  // row was written by the tool's service; here we park the ticket +
+                  // audit in one tx, then end the tick. The ticket re-engages on
                   // `supplier.updated` (the consumer). Runs only when escalate
                   // resolved to `allow` (per-agent) — under the default `ask`, the
                   // permission gate above parks in waiting_for_approval instead.
@@ -2119,7 +2119,7 @@ const AgentRuntimeLayer = Layer.effect(
                   // actions, BOTH waits hold and `primaryWaitStatus` picks the
                   // park — approval wins, so the queued bundle parks (one
                   // merchant ping, guard 2.9 armed) instead of stranding the
-                  // pending rows on a waiting_for_supplier case. The open
+                  // pending rows on a waiting_for_supplier ticket. The open
                   // escalation row still carries the supplier wait, and the
                   // notify outbox emails the supplier regardless of status.
                   // (Escalate-first ticks have an empty queue — any reply the
@@ -2134,7 +2134,7 @@ const AgentRuntimeLayer = Layer.effect(
                     return { agent, current, done };
                   }
                   current = yield* lifecycle.parkWaitingForSupplier({
-                    caseId: current.id,
+                    ticketId: current.id,
                     tenantId: current.tenantId,
                     agentId: agent.id,
                     tool: tool.name,
@@ -2150,7 +2150,7 @@ const AgentRuntimeLayer = Layer.effect(
                 });
                 // Capture the order→customer-email mapping from any get_order
                 // result so a later refund.create can be checked against the
-                // case's bound customer (refund scope guard).
+                // ticket's bound customer (refund scope guard).
                 if (
                   tool.name === "shopify.get_order" &&
                   exec.right &&
@@ -2171,7 +2171,7 @@ const AgentRuntimeLayer = Layer.effect(
                   // dashboard warns, and persist the order's email so the customer's
                   // later confirmation reply can be verified by the runtime (not the
                   // model). Additive + best-effort — a write failure never blocks
-                  // the tick, and a fail-open (null) result leaves the case alone.
+                  // the tick, and a fail-open (null) result leaves the ticket alone.
                   if (current.context["classification"] === "where_is_order") {
                     const orderCustomerId =
                       typeof o["customerId"] === "string"
@@ -2191,13 +2191,13 @@ const AgentRuntimeLayer = Layer.effect(
                       if (!existingFlags.includes(mismatchFlag)) {
                         patch["riskFlags"] = [...existingFlags, mismatchFlag];
                       }
-                      current = yield* cases
+                      current = yield* tickets
                         .update(current.id, { context: patch as never })
                         .pipe(Effect.catchAll(() => Effect.succeed(current)));
                     }
                   }
                 }
-                // Bind the resolved order's canonical GID to the case context as
+                // Bind the resolved order's canonical GID to the ticket context as
                 // the single source of truth: the operator's view (order panel +
                 // Issue-refund button) and the agent's `boundOrderDirective`
                 // re-resolve it EXACTLY via getOrder(gid) — never a fuzzy
@@ -2212,7 +2212,7 @@ const AgentRuntimeLayer = Layer.effect(
                 // bound is never rebound (first concrete order wins, preserving
                 // the identity-gate intent). find_customer_order is keyed on the
                 // customer's own sender email, so its order already belongs to
-                // them. Best-effort: a write failure leaves the case alone.
+                // them. Best-effort: a write failure leaves the ticket alone.
                 const resolvedOrder =
                   tool.name === "shopify.get_order" &&
                   exec.right &&
@@ -2238,7 +2238,7 @@ const AgentRuntimeLayer = Layer.effect(
                 if (resolvedOrder && !existingIsGid) {
                   const ref = orderContextRef(resolvedOrder);
                   if (ref) {
-                    current = yield* cases
+                    current = yield* tickets
                       .update(current.id, {
                         context: {
                           ...current.context,
@@ -2248,8 +2248,8 @@ const AgentRuntimeLayer = Layer.effect(
                       .pipe(Effect.catchAll(() => Effect.succeed(current)));
                   }
                 }
-                // The tool may have mutated the case (e.g. transitioned status).
-                current = yield* cases.getById(current.id, current.tenantId);
+                // The tool may have mutated the ticket (e.g. transitioned status).
+                current = yield* tickets.getById(current.id, current.tenantId);
               } else {
                 const errTag =
                   (exec.left as { readonly _tag?: string })._tag ?? "ToolFailure";
@@ -2261,8 +2261,8 @@ const AgentRuntimeLayer = Layer.effect(
                 });
                 // A customer-reply SEND failure must NOT be swallowed: feeding the
                 // error back to the LLM lets it emit `final_message` and resolve a
-                // case whose reply never reached the customer (the silent-delivery
-                // bug). Capture the draft for retry, flag + park the case, and end
+                // ticket whose reply never reached the customer (the silent-delivery
+                // bug). Capture the draft for retry, flag + park the ticket, and end
                 // the tick — a later successful retry auto-resolves it.
                 if (isReplyDeliverySendFailure(tool.name, exec.left)) {
                   yield* parkForReplyDeliveryFailure(
@@ -2287,7 +2287,7 @@ const AgentRuntimeLayer = Layer.effect(
             });
 
           // NOTE: a new customer-email draft superseding an older still-pending
-          // draft is enforced generally at approval-creation time (CaseLifecycle
+          // draft is enforced generally at approval-creation time (TicketLifecycle
           // Writer.parkForApproval / queueApproval call supersedeOlderDraft), so
           // it holds for every agent + path — not just this loop.
 
@@ -2319,8 +2319,8 @@ const AgentRuntimeLayer = Layer.effect(
             const decision: LLMDecision = decisionEither.right;
 
             // Stamp the LLM token usage (when the provider reported it)
-            // into the audit row. The dashboard case detail rolls these
-            // up across `llm.decision` rows to surface per-case totals;
+            // into the audit row. The dashboard ticket detail rolls these
+            // up across `llm.decision` rows to surface per-ticket totals;
             // a future Phase 6 cost dashboard turns tokens into USD.
             // Test layers (Scripted, FromFn) leave `usage` undefined →
             // we just don't include the field; existing tests that assert
@@ -2337,7 +2337,7 @@ const AgentRuntimeLayer = Layer.effect(
               : null;
             yield* audit.record({
               tenantId: current.tenantId,
-              caseId: current.id,
+              ticketId: current.id,
               actor: { type: "agent", id: agent.id },
               action: "llm.decision",
               details: {
@@ -2359,15 +2359,15 @@ const AgentRuntimeLayer = Layer.effect(
                   return yield* parkQueuedBundle(current, agent, turn);
                 }
                 // GUARD: a routing agent (one with handoff targets, e.g.
-                // triage) must never resolve a case with a bare final
+                // triage) must never resolve a ticket with a bare final
                 // message. Its only legitimate terminal move is
                 // `agent.handoff` — after a successful handoff `agent` is the
                 // specialist (handoffs: []), so this check no longer trips.
                 // A still-routing agent that reaches final_message has failed
-                // to route; silently resolving here would close the case with
+                // to route; silently resolving here would close the ticket with
                 // nothing done (a triage classify → no order id → "done"
                 // message used to leave customers with no reply). Park for a
-                // human instead of swallowing the case. Keyed on `handoffs`,
+                // human instead of swallowing the ticket. Keyed on `handoffs`,
                 // not `mode`: a terminal `mode: "primary"` agent with no
                 // handoffs is a legitimate resolver, not a router.
                 if (agent.handoffs.length > 0) {
@@ -2384,11 +2384,11 @@ const AgentRuntimeLayer = Layer.effect(
                 // GUARD: an UNVERIFIED order/customer identity mismatch means we
                 // never cleared the disclosure gate — we couldn't confirm we're
                 // talking to the right person. Auto-resolving on a bare
-                // final_message here closes a live case with nothing safely sent
+                // final_message here closes a live ticket with nothing safely sent
                 // (prod 3428f154: order-status-agent drafted a prose answer
-                // instead of conversation.reply / ask_customer and the case
+                // instead of conversation.reply / ask_customer and the ticket
                 // silently resolved). Park for a human, who can verify identity
-                // and reply, instead of swallowing the case.
+                // and reply, instead of swallowing the ticket.
                 if (hasUnverifiedOrderMismatch(current.context)) {
                   yield* escalateToHuman(
                     current.id,
@@ -2415,10 +2415,10 @@ const AgentRuntimeLayer = Layer.effect(
                   } as const;
                 }
                 // The lifecycle writer wraps the final transition +
-                // "case.resolved" audit in one tx (master-plan §4).
+                // "ticket.resolved" audit in one tx (master-plan §4).
                 const resolveExit = yield* lifecycle
                   .resolve({
-                    caseId: current.id,
+                    ticketId: current.id,
                     tenantId: current.tenantId,
                     actor: { type: "agent", id: agent.id },
                     reason: "runtime: final_message",
@@ -2427,7 +2427,7 @@ const AgentRuntimeLayer = Layer.effect(
                   .pipe(Effect.either);
                 if (resolveExit._tag === "Left") {
                   // The transition matrix blocked the resolve (audit L1):
-                  // a manager took the case over mid-tick. The person owns
+                  // a manager took the ticket over mid-tick. The person owns
                   // the conversation now — hold, don't fight.
                   if (
                     (resolveExit.left as { readonly _tag?: string })._tag ===
@@ -2441,14 +2441,14 @@ const AgentRuntimeLayer = Layer.effect(
                 }
                 current = resolveExit.right;
                 // The lifecycle writer can REFUSE to resolve (its bypass-proof
-                // identity backstop) and park the case for a human instead. When
-                // it does, the case did not resolve — report the takeover, not
+                // identity backstop) and park the ticket for a human instead. When
+                // it does, the ticket did not resolve — report the takeover, not
                 // Completed, so the outer classifier doesn't treat the tick as a
                 // clean close.
                 if (current.status !== "resolved" && current.status !== "archived") {
                   return {
                     type: "HumanTakeoverRequired",
-                    reason: "resolve blocked: case parked for a human",
+                    reason: "resolve blocked: ticket parked for a human",
                   } as const;
                 }
               }
@@ -2467,7 +2467,7 @@ const AgentRuntimeLayer = Layer.effect(
                 yield* tx.run(
                   audit.record({
                     tenantId: current.tenantId,
-                    caseId: current.id,
+                    ticketId: current.id,
                     actor: { type: "agent", id: agent.id },
                     action: "agent.handoff_blocked",
                     details: {
@@ -2489,7 +2489,7 @@ const AgentRuntimeLayer = Layer.effect(
                 yield* tx.run(
                   audit.record({
                     tenantId: current.tenantId,
-                    caseId: current.id,
+                    ticketId: current.id,
                     actor: { type: "agent", id: agent.id },
                     action: "agent.handoff_blocked",
                     details: {
@@ -2508,12 +2508,12 @@ const AgentRuntimeLayer = Layer.effect(
               );
               current = yield* tx.run(
                 Effect.gen(function* () {
-                  const updated = yield* cases.update(current.id, {
+                  const updated = yield* tickets.update(current.id, {
                     currentAgentId: decision.targetAgent,
                   });
                   yield* audit.record({
                     tenantId: updated.tenantId,
-                    caseId: updated.id,
+                    ticketId: updated.id,
                     actor: { type: "agent", id: agent.id },
                     action: "agent.handoff",
                     details: {
@@ -2530,7 +2530,7 @@ const AgentRuntimeLayer = Layer.effect(
             }
 
             if (decision.type === "wait_for_customer") {
-              // Not wired in Phase 1 — park the case durably instead of
+              // Not wired in Phase 1 — park the ticket durably instead of
               // returning a result the worker merely logs (audit L4).
               yield* escalateToHuman(current.id, "wait_for_customer_not_wired", {
                 turn,
@@ -2566,7 +2566,7 @@ const AgentRuntimeLayer = Layer.effect(
             }
           }
 
-          // Turn budget exhausted — park the case durably (audit L4). Guard
+          // Turn budget exhausted — park the ticket durably (audit L4). Guard
           // against clobbering a terminal status a tool legitimately set on
           // the final turn.
           // Autonomous loop: if the agent queued gated actions before running
@@ -2601,24 +2601,24 @@ const AgentRuntimeLayer = Layer.effect(
           } as const;
         });
 
-        // Resolve the case's Shopify customer from its stamped identifiers
+        // Resolve the ticket's Shopify customer from its stamped identifiers
         // (email → phone → name) and stamp the canonical `shopifyCustomerId`
-        // when it isn't set yet — on EVERY tick, not just at creation. So a case
+        // when it isn't set yet — on EVERY tick, not just at creation. So a ticket
         // whose customer was identified only by phone/name (a merchant
-        // pencil-edit, or a RESTART of an old case where the creation-time email
+        // pencil-edit, or a RESTART of an old ticket where the creation-time email
         // lookup missed because the order was placed under a different address)
         // gets the id that `shopify.find_customer_order` and the
         // order/customer-mismatch guard both key on. Idempotent (skips once
         // stamped) + best-effort (each leg fails to null; a write failure just
         // leaves it unstamped and the tick proceeds).
         //
-        // The Shopify lookups are uncached network calls, so a case with
+        // The Shopify lookups are uncached network calls, so a ticket with
         // identifiers but NO Shopify match (e.g. a pre-sales emailer with no
         // account) would otherwise repeat them on every tick. A negative-attempt
         // marker (`customerResolutionTriedFor`, keyed on the exact identifier
         // set) records a miss so later ticks skip the lookup, while a change to
         // the identifiers produces a new key and re-triggers. Trade-off: if the
-        // same customer becomes resolvable under UNCHANGED identifiers mid-case,
+        // same customer becomes resolvable under UNCHANGED identifiers mid-ticket,
         // we won't retry — an acceptable miss vs. hammering the API each tick.
         const ensureCustomerResolved = Effect.gen(function* () {
           const ctx = working.context as Record<string, unknown>;
@@ -2659,7 +2659,7 @@ const AgentRuntimeLayer = Layer.effect(
           // Missed: record the attempt so the next tick skips the lookup unless
           // the identifiers change. Best-effort — a write failure just retries.
           if (!customer) {
-            working = yield* cases
+            working = yield* tickets
               .update(working.id, {
                 context: {
                   ...ctx,
@@ -2669,7 +2669,7 @@ const AgentRuntimeLayer = Layer.effect(
               .pipe(Effect.catchAll(() => Effect.succeed(working)));
             return;
           }
-          working = yield* cases
+          working = yield* tickets
             .update(working.id, {
               context: { ...ctx, shopifyCustomerId: customer.id } as never,
             })
@@ -2682,7 +2682,7 @@ const AgentRuntimeLayer = Layer.effect(
         if (event.type === "approval.rejected") {
           return yield* handleApprovalRejected(event);
         }
-        yield* enrichCase;
+        yield* enrichTicket;
         yield* ensureCustomerResolved;
         const held = yield* checkParkGuards;
         if (held) {
@@ -2729,15 +2729,15 @@ const AgentRuntimeLayer = Layer.effect(
             return { type: "Completed" } as const;
           }
         }
-        // Per-case serialization (audit L2): the queue keys
+        // Per-ticket serialization (audit L2): the queue keys
         // message.received by THREAD and approval/timer/resume events by
-        // CASE, so two events for the same case can run concurrently
+        // TICKET, so two events for the same ticket can run concurrently
         // across those keys (a customer reply racing the manager's
         // approval → double reply). Hold a cluster-wide advisory lock on
-        // the case for the whole tick; a not-yet-created case locks on
+        // the ticket for the whole tick; a not-yet-created ticket locks on
         // its thread key instead (creation itself is guarded by the
         // unique (tenant, thread) index).
-        const lockKey = yield* deriveTickLockKey(event, cases);
+        const lockKey = yield* deriveTickLockKey(event, tickets);
         const result = lockKey
           ? yield* tx.withLock(lockKey, tickBody(event))
           : yield* tickBody(event);
@@ -2763,5 +2763,5 @@ const AgentRuntimeLayer = Layer.effect(
 
 export const AgentRuntimeDefault = Layer.provideMerge(
   AgentRuntimeLayer,
-  CaseLifecycleWriterLive,
+  TicketLifecycleWriterLive,
 );

@@ -1,6 +1,6 @@
 import type {
   ApprovalId,
-  CaseId,
+  TicketId,
   OrderId,
   TenantId,
   ThreadId,
@@ -22,7 +22,7 @@ export type DomainEvent =
     }
   | {
       readonly type: "customer.replied";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly payload: InboundMessage;
     }
   | {
@@ -34,20 +34,20 @@ export type DomainEvent =
   | {
       readonly type: "approval.approved";
       readonly approvalId: ApprovalId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
       readonly edits?: unknown;
     }
   | {
       readonly type: "approval.rejected";
       readonly approvalId: ApprovalId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
       readonly reason?: string;
     }
   | {
       readonly type: "supplier.updated";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly payload: SupplierUpdate;
     }
   | {
@@ -57,18 +57,18 @@ export type DomainEvent =
     }
   | {
       readonly type: "timer.expired";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly timerId: string;
       readonly reason: "follow_up" | "sla" | "escalation";
     }
   | {
       readonly type: "manual.takeover";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
     }
   | {
-      readonly type: "case.resumed";
-      readonly caseId: CaseId;
+      readonly type: "ticket.resumed";
+      readonly ticketId: TicketId;
       readonly trigger: string;
       /**
        * Unique per manager-initiated restart, stable across pg-boss

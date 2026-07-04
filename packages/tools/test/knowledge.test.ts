@@ -2,7 +2,7 @@ import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   UNTRUSTED_OPEN,
   UNTRUSTED_CLOSE,
@@ -14,7 +14,7 @@ import { knowledgeSearch } from "../src/index.js";
 const tenantId = TenantId("00000000-0000-0000-0000-0000000000aa");
 const baseCtx: ToolContext = {
   tenantId,
-  caseId: CaseId("c-1"),
+  ticketId: TicketId("c-1"),
   agentId: AgentId("refund-review-agent"),
   callId: "call_1",
   attemptNumber: 1,

@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
-import { ConfirmButton } from "@/features/cases/ConfirmButton";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 
 // The Next actions used post-redirect-get (`?error=<code>`) read by a FEEDBACK
 // rule array; here we fire the same copy directly from the mutation callbacks.
@@ -112,7 +112,7 @@ function DeleteWorkspaceForm({
       </div>
       <ConfirmButton
         title="Delete this workspace permanently?"
-        description={`This permanently removes the ${workspaceName} workspace and all its cases, conversations, approvals, audit records, and connected integrations. Your other workspaces are not affected. This cannot be undone.`}
+        description={`This permanently removes the ${workspaceName} workspace and all its tickets, conversations, approvals, audit records, and connected integrations. Your other workspaces are not affected. This cannot be undone.`}
         confirmLabel="Delete workspace"
         pending={mutation.isPending}
         disabled={!armed}
@@ -227,7 +227,7 @@ export function AccountSettingsPage() {
                 <span className="font-medium text-foreground">
                   {tenantName}
                 </span>{" "}
-                workspace: its cases, conversations, approvals, audit records,
+                workspace: its tickets, conversations, approvals, audit records,
                 and connected integrations. Your other{" "}
                 {workspaces.length - 1 === 1 ? "workspace" : "workspaces"} and
                 your team&apos;s sign-in are not affected.
@@ -265,7 +265,7 @@ export function AccountSettingsPage() {
               )}
             </p>
             <ul className="list-disc space-y-1 pl-5">
-              <li>every case, conversation, approval, and audit record;</li>
+              <li>every ticket, conversation, approval, and audit record;</li>
               <li>
                 all connected integrations (Shopify, Gmail, Sheets, AI keys);
               </li>

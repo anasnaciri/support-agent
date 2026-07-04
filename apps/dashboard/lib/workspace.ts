@@ -14,7 +14,7 @@ export const WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 /**
  * Resolve the active workspace: the cookie's, if the org owns it, else the
  * default (the API lists workspaces default-first). Null only when the org
- * has no workspaces at all — the onboarding case.
+ * has no workspaces at all — the onboarding ticket.
  */
 export const pickActiveWorkspace = (
   workspaces: ReadonlyArray<WorkspaceSummary>,

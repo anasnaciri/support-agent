@@ -18,7 +18,7 @@ const Output = Schema.Struct({
  * code (~240). Above this threshold the list collapses to
  * `shipsWorldwide: true` with NO list — dropping it entirely, because a
  * truncated list would read as "only these countries" and produce wrong
- * ship-to answers. Real per-country lists (the common curated case) sit
+ * ship-to answers. Real per-country lists (the common curated ticket) sit
  * far below this.
  */
 const SHIPS_WORLDWIDE_THRESHOLD = 100;

@@ -8,8 +8,8 @@ import {
 } from "@support-agent/agent-core";
 import { ShopifyService } from "@support-agent/services";
 
-// Case-detail Shopify panels (Path B slice 6). Ported from the dashboard's
-// lib/shopify.ts: read the ids the agent stamped onto `case.context` and
+// Ticket-detail Shopify panels (Path B slice 6). Ported from the dashboard's
+// lib/shopify.ts: read the ids the agent stamped onto `ticket.context` and
 // fetch the matching Shopify entity. Best-effort — any failure (no creds,
 // network, 404) resolves to null so the panel renders a graceful fallback.
 
@@ -22,14 +22,14 @@ export const looksLikeGid = (s: string): boolean =>
   s.startsWith("gid://shopify/Order/") ||
   s.startsWith("gid://shopify/Customer/");
 
-type CaseContext = Readonly<Record<string, unknown>>;
+type TicketContext = Readonly<Record<string, unknown>>;
 
 /**
- * Best-effort order for the case's bound order. The single source of truth is
+ * Best-effort order for the ticket's bound order. The single source of truth is
  * the canonical `identifiedOrderId` — a stable Shopify GID the runtime stamps
  * once an order tool resolves the order — which we resolve EXACTLY via
- * `getOrder(gid)`. Before that has happened (an in-flight case) we fall back to
- * the customer's `quotedOrderRef` hint so the panel isn't blank; legacy cases
+ * `getOrder(gid)`. Before that has happened (an in-flight ticket) we fall back to
+ * the customer's `quotedOrderRef` hint so the panel isn't blank; legacy tickets
  * whose `identifiedOrderId` still holds a fuzzy name/confirmation code resolve
  * through the same `shopify.get_order`-style heuristics (`findOrderByName` for a
  * `#1001`, `findOrderByConfirmationNumber` for an alphanumeric code). Errors map
@@ -37,7 +37,7 @@ type CaseContext = Readonly<Record<string, unknown>>;
  */
 export const resolveOrderForContext = (
   tenantId: TenantId,
-  context: CaseContext,
+  context: TicketContext,
 ): Effect.Effect<ShopifyOrder | null, never, ShopifyService> =>
   Effect.gen(function* () {
     const canonical = context["identifiedOrderId"];
@@ -74,19 +74,19 @@ export const resolveShopCurrencyCode = (
   });
 
 /**
- * Single source of truth for the case's customer, resolved through ONE ordered
+ * Single source of truth for the ticket's customer, resolved through ONE ordered
  * chain of fallbacks (never several independent lookups racing to fill the same
  * slot). Precedence, most-trusted first:
  *
  *   1. `shopifyCustomerId` — the CANONICAL id the runtime stamps only on a
- *      positive email match (`agent-runtime` enrichCase). Trusted; agents
+ *      positive email match (`agent-runtime` enrichTicket). Trusted; agents
  *      cannot write it.
  *   2. the bound order's `customerId` — when the order resolved but the sender
  *      address didn't match (a typo'd-at-checkout email), the order still
  *      carries its real customer. This is what keeps the panel from showing
- *      "No matching Shopify customer" on an otherwise-identified case.
+ *      "No matching Shopify customer" on an otherwise-identified ticket.
  *   3. `searchByEmail(customerEmail)` — the sender address, in case Shopify
- *      creds were connected only after the case was created (so step 1 never
+ *      creds were connected only after the ticket was created (so step 1 never
  *      ran) and the addresses do line up.
  *   4. `searchByPhone(customerPhone)` — when the email matched no account
  *      (guest checkout, or a personal reply-to that differs from the store
@@ -96,7 +96,7 @@ export const resolveShopCurrencyCode = (
  *      a common name, so it's only ever used to populate the display panel,
  *      never as an identity gate.
  *   6. `identifiedCustomerId` — the UNTRUSTED hint an agent recorded via
- *      `case.update_context`. Last resort, never ahead of the verified id.
+ *      `ticket.update_context`. Last resort, never ahead of the verified id.
  *
  * Steps 3–5 (email → phone → name) are the merchant-fillable identifiers on the
  * Customer-card pencil: whatever they know, tried in order of reliability.
@@ -108,7 +108,7 @@ export const resolveShopCurrencyCode = (
  */
 export const resolveCustomerForContext = (
   tenantId: TenantId,
-  context: CaseContext,
+  context: TicketContext,
   boundOrder: ShopifyOrder | null,
 ): Effect.Effect<ShopifyCustomer | null, never, ShopifyService> =>
   Effect.gen(function* () {

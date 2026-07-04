@@ -225,7 +225,7 @@ describe("selectImportablePages (conservative heuristic)", () => {
   const titles = (pages: ReadonlyArray<ShopPage>) =>
     selectImportablePages(pages).map((p) => p.title);
 
-  it("matches About / Contact / FAQ by handle or title, tolerant of case and punctuation", () => {
+  it("matches About / Contact / FAQ by handle or title, tolerant of ticket and punctuation", () => {
     const pages = [
       page({ title: "About Us", handle: "about-us" }),
       page({ title: "Get in touch", handle: "contact" }),

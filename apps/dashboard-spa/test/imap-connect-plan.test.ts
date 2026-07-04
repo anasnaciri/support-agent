@@ -270,7 +270,7 @@ describe("passwordGuidanceForFailure", () => {
     expect(g.link).toBeNull();
   });
 
-  it("explains the 2FA-only app-password case (Namecheap)", () => {
+  it("explains the 2FA-only app-password ticket (Namecheap)", () => {
     const g = passwordGuidanceForFailure(
       prefill({
         providerName: "Namecheap Private Email",

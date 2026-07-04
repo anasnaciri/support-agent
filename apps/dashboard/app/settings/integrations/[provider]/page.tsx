@@ -61,7 +61,7 @@ const SHEETS_FEEDBACK: readonly FeedbackRule[] = [
     param: "cleared",
     kind: "message",
     message:
-      "Sheet target cleared. The agent will skip the sheet write on future missing-package cases.",
+      "Sheet target cleared. The agent will skip the sheet write on future missing-package tickets.",
   },
   {
     param: "error",
@@ -328,7 +328,7 @@ export default async function ConnectorManagePage({
                       ? "The agent loses order, customer, and refund access for this store until you reconnect."
                       : provider === "google_sheets"
                         ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
-                        : "The agent stops reading and replying to this mailbox immediately. Open cases can't send replies until you reconnect."
+                        : "The agent stops reading and replying to this mailbox immediately. Open tickets can't send replies until you reconnect."
                   }
                   confirmLabel="Disconnect"
                 >
@@ -502,7 +502,7 @@ export default async function ConnectorManagePage({
                 </p>
                 <ul className="list-disc space-y-1 pl-5">
                   <li>
-                    <strong>Case</strong> / Case ID / Ticket — the support case
+                    <strong>Ticket</strong> / Ticket ID / Ticket — the support ticket
                     id
                   </li>
                   <li>

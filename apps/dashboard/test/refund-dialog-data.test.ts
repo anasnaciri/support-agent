@@ -7,7 +7,7 @@ import {
   defaultSelections,
   resolveRestockType,
   validateRefundAmount,
-} from "../app/cases/[id]/refund-dialog-data";
+} from "../app/tickets/[id]/refund-dialog-data";
 
 const line = (
   over: Partial<ShopifyRefundLineItem> = {},

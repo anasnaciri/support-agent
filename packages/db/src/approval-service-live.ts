@@ -7,7 +7,7 @@ import {
   ApprovalServiceDbError,
   ApprovalStateConflict,
   type ApproveInput,
-  type CancelPendingForCaseInput,
+  type CancelPendingForTicketInput,
   type CreateApprovalInput,
   type ApprovalServiceError,
   type RejectInput,
@@ -15,13 +15,13 @@ import {
 import {
   AgentId as makeAgentId,
   ApprovalId,
-  CaseId as makeCaseId,
+  TicketId as makeTicketId,
   TenantId as makeTenantId,
   UserId as makeUserId,
   type Approval,
   type ApprovalRiskLevel,
   type ApprovalStatus,
-  type CaseId,
+  type TicketId,
   type TenantId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -29,12 +29,12 @@ import type { DrizzleDb } from "./client.js";
 
 const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
-import { approvals, cases, type ApprovalRow } from "./schema.js";
+import { approvals, tickets, type ApprovalRow } from "./schema.js";
 
 const rowToApproval = (r: ApprovalRow): Approval => ({
   id: ApprovalId(r.id),
   tenantId: makeTenantId(r.tenantId),
-  caseId: makeCaseId(r.caseId),
+  ticketId: makeTicketId(r.ticketId),
   agentId: makeAgentId(r.agentId),
   tool: r.tool,
   proposedInput: r.proposedInput as unknown,
@@ -78,7 +78,7 @@ export const ApprovalServiceLive = Layer.effect(
             .values({
               id,
               tenantId: input.tenantId,
-              caseId: input.caseId,
+              ticketId: input.ticketId,
               agentId: input.agentId,
               tool: input.tool,
               proposedInput: input.proposedInput as object,
@@ -238,13 +238,13 @@ export const ApprovalServiceLive = Layer.effect(
         );
       });
 
-    const cancelPendingForCase = (
-      input: CancelPendingForCaseInput,
+    const cancelPendingForTicket = (
+      input: CancelPendingForTicketInput,
     ): Effect.Effect<number, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
-          "cancelPendingForCase",
+          "cancelPendingForTicket",
           db
             .update(approvals)
             .set({
@@ -256,7 +256,7 @@ export const ApprovalServiceLive = Layer.effect(
             .where(
               and(
                 eq(approvals.tenantId, input.tenantId),
-                eq(approvals.caseId, input.caseId),
+                eq(approvals.ticketId, input.ticketId),
                 eq(approvals.status, "pending"),
               ),
             )
@@ -286,16 +286,16 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
-    const supersedePendingForCase = (input: {
+    const supersedePendingForTicket = (input: {
       readonly tenantId: TenantId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly reason: string;
       readonly tools?: ReadonlyArray<string>;
     }): Effect.Effect<number, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
-          "supersedePendingForCase",
+          "supersedePendingForTicket",
           db
             .update(approvals)
             .set({
@@ -307,7 +307,7 @@ export const ApprovalServiceLive = Layer.effect(
             .where(
               and(
                 eq(approvals.tenantId, input.tenantId),
-                eq(approvals.caseId, input.caseId),
+                eq(approvals.ticketId, input.ticketId),
                 eq(approvals.status, "pending"),
                 ...(input.tools && input.tools.length > 0
                   ? [inArray(approvals.tool, [...input.tools])]
@@ -319,21 +319,21 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.length;
       });
 
-    const listForCase = (
+    const listForTicket = (
       tenantId: TenantId,
-      caseId: CaseId,
+      ticketId: TicketId,
     ): Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const rows = yield* wrap(
-          "listForCase",
+          "listForTicket",
           db
             .select()
             .from(approvals)
             .where(
               and(
                 eq(approvals.tenantId, tenantId),
-                eq(approvals.caseId, caseId),
+                eq(approvals.ticketId, ticketId),
               ),
             )
             .orderBy(sql`${approvals.createdAt} ASC`, sql`${approvals.id} ASC`),
@@ -341,8 +341,8 @@ export const ApprovalServiceLive = Layer.effect(
         return rows.map(rowToApproval);
       });
 
-    // Audit L3b: decided rows whose case never resumed — the decision
-    // committed but the workflow event was lost. Joined against cases so
+    // Audit L3b: decided rows whose ticket never resumed — the decision
+    // committed but the workflow event was lost. Joined against tickets so
     // the sweep doesn't rescan history forever.
     const listDecidedUnresumed = (opts: {
       readonly decidedBefore: Date;
@@ -355,7 +355,7 @@ export const ApprovalServiceLive = Layer.effect(
           db
             .select({ approval: approvals })
             .from(approvals)
-            .innerJoin(cases, eq(cases.id, approvals.caseId))
+            .innerJoin(tickets, eq(tickets.id, approvals.ticketId))
             .where(
               and(
                 // APPROVED only: a rejection has nothing to re-run, and
@@ -364,16 +364,16 @@ export const ApprovalServiceLive = Layer.effect(
                 eq(approvals.status, "approved"),
                 // Not already acted on.
                 isNull(approvals.resumedAt),
-                // Only the case's CURRENT round — a decision from a prior
+                // Only the ticket's CURRENT round — a decision from a prior
                 // attempt (lower epoch) must never drive the new one.
-                eq(approvals.epoch, cases.epoch),
+                eq(approvals.epoch, tickets.epoch),
                 // NB: `lt(col, date)` binds through the column's timestamp
                 // encoder (Date -> ISO string). A raw `sql`${col} < ${date}``
                 // would pass the Date straight to the driver, which throws
                 // `TypeError: ... Received an instance of Date` and silently
                 // killed this sweep in prod. Keep comparisons operator-based.
                 lt(approvals.decidedAt, opts.decidedBefore),
-                eq(cases.status, "waiting_for_approval"),
+                eq(tickets.status, "waiting_for_approval"),
               ),
             )
             .orderBy(sql`${approvals.decidedAt} ASC`)
@@ -439,9 +439,9 @@ export const ApprovalServiceLive = Layer.effect(
       reject,
       markResumed,
       listPending,
-      listForCase,
-      cancelPendingForCase,
-      supersedePendingForCase,
+      listForTicket,
+      cancelPendingForTicket,
+      supersedePendingForTicket,
       listDecidedUnresumed,
       listPendingNeedingReminder,
       recordReminderSent,

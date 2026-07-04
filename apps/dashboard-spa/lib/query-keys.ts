@@ -1,12 +1,12 @@
 import type {
   ApprovalsFilter,
   AuditFilter,
-  CasesFilter,
+  TicketsFilter,
 } from "@support-agent/dashboard-contracts";
 
 // TanStack Query key factory. THE load-bearing rule: `workspaceId` is part of
 // every workspace-scoped key, so switching the active workspace automatically
-// stops serving another workspace's cached cases/approvals/settings. Reads →
+// stops serving another workspace's cached tickets/approvals/settings. Reads →
 // useQuery(qk.*); writes invalidate the matching prefixes.
 export const qk = {
   authSession: ["auth-session"] as const,
@@ -17,13 +17,13 @@ export const qk = {
   supplierSession: (w: string) => ["supplier-session", w] as const,
 
   today: (w: string) => ["today", w] as const,
-  cases: (w: string, f: CasesFilter, page: number, limit: number) =>
-    ["cases", w, f, page, limit] as const,
-  case: (w: string, id: string) => ["case", w, id] as const,
-  caseThread: (w: string, id: string) => ["case", w, id, "thread"] as const,
-  caseShopify: (w: string, id: string) => ["case", w, id, "shopify"] as const,
-  caseTracking: (w: string, id: string) => ["case", w, id, "tracking"] as const,
-  caseEvents: (w: string, id: string) => ["case-events", w, id] as const,
+  tickets: (w: string, f: TicketsFilter, page: number, limit: number) =>
+    ["tickets", w, f, page, limit] as const,
+  ticket: (w: string, id: string) => ["ticket", w, id] as const,
+  ticketThread: (w: string, id: string) => ["ticket", w, id, "thread"] as const,
+  ticketShopify: (w: string, id: string) => ["ticket", w, id, "shopify"] as const,
+  ticketTracking: (w: string, id: string) => ["ticket", w, id, "tracking"] as const,
+  ticketEvents: (w: string, id: string) => ["ticket-events", w, id] as const,
 
   approvals: (w: string, f: ApprovalsFilter, page: number, limit: number) =>
     ["approvals", w, f, page, limit] as const,
@@ -49,8 +49,8 @@ export const qk = {
   roles: (w: string) => ["roles", w] as const,
   permissionCatalog: (w: string) => ["permission-catalog", w] as const,
   shopCurrency: (w: string) => ["shop-currency", w] as const,
-  supplierCases: (w: string) => ["supplier-cases", w] as const,
-  supplierCase: (w: string, id: string) => ["supplier-case", w, id] as const,
+  supplierTickets: (w: string) => ["supplier-tickets", w] as const,
+  supplierTicket: (w: string, id: string) => ["supplier-ticket", w, id] as const,
 } as const;
 
 /** Everything scoped to a workspace shares this prefix — invalidate on switch. */
@@ -58,9 +58,9 @@ export const workspaceScopedKeyPrefixes = [
   "me",
   "supplier-session",
   "today",
-  "cases",
-  "case",
-  "case-events",
+  "tickets",
+  "ticket",
+  "ticket-events",
   "approvals",
   "approval",
   "audit",
@@ -79,6 +79,6 @@ export const workspaceScopedKeyPrefixes = [
   "roles",
   "permission-catalog",
   "shop-currency",
-  "supplier-cases",
-  "supplier-case",
+  "supplier-tickets",
+  "supplier-ticket",
 ] as const;

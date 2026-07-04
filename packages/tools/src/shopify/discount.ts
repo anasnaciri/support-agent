@@ -179,7 +179,7 @@ export const shopifyDiscountCreate = defineTool({
         .createDiscountCode(ctx.tenantId, {
           customerId: order.customerId,
           code: discountCodeFromSeed(ctx.callId),
-          title: `Goodwill discount for ${order.name} (case ${ctx.caseId})`,
+          title: `Goodwill discount for ${order.name} (ticket ${ctx.ticketId})`,
           valueType: input.valueType,
           value: input.value,
           currencyCode,

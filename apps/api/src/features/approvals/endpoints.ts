@@ -116,7 +116,7 @@ export interface DecideApprovalOptions {
   readonly layer: ApiLayer;
   /**
    * Publishes the resulting `approval.approved` / `approval.rejected`
-   * workflow event so the worker resumes the case. Injected as a hook
+   * workflow event so the worker resumes the ticket. Injected as a hook
    * so tests can assert publish without standing up pg-boss.
    */
   readonly publish: (event: DomainEvent) => Promise<void>;
@@ -192,7 +192,7 @@ export const decideApproval = async (
 // Plain inline HTML — no template engine, no asset pipeline. The pages
 // are confirmation receipts opened from email clicks; the only
 // requirement is "looks fine in any browser, in <2KB". When the
-// dashboard lands, these become redirects to the dashboard case page.
+// dashboard lands, these become redirects to the dashboard ticket page.
 
 const SHELL_HEAD = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Support Agent</title><style>
 body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f6f6;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}
@@ -256,7 +256,7 @@ export const renderApprovalConfirmPage = (input: {
   const ok = input.action === "approve";
   return {
     status: 200,
-    body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approve" : "Reject"}</span><h1 class="title">Confirm: ${ok ? "approve this reply?" : "reject this reply?"}</h1><p class="muted">${ok ? "Your support agent will send the proposed reply to the customer." : "The case will be escalated to your team for human handling."}</p><form method="post" action="/approvals/${escapeHtml(input.approvalId)}/${input.action}"><input type="hidden" name="token" value="${escapeHtml(input.token)}"><button class="btn ${ok ? "ok" : "bad"}" type="submit">${ok ? "Approve and send" : "Reject"}</button></form>${SHELL_FOOT}`,
+    body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approve" : "Reject"}</span><h1 class="title">Confirm: ${ok ? "approve this reply?" : "reject this reply?"}</h1><p class="muted">${ok ? "Your support agent will send the proposed reply to the customer." : "The ticket will be escalated to your team for human handling."}</p><form method="post" action="/approvals/${escapeHtml(input.approvalId)}/${input.action}"><input type="hidden" name="token" value="${escapeHtml(input.token)}"><button class="btn ${ok ? "ok" : "bad"}" type="submit">${ok ? "Approve and send" : "Reject"}</button></form>${SHELL_FOOT}`,
   };
 };
 
@@ -270,7 +270,7 @@ export const renderApprovalPage = (
       const ok = action === "approve";
       return {
         status: 200,
-        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${ok ? "Reply approved" : "Reply rejected"}</h1><p class="muted">${ok ? "Your support agent will send the reply to the customer in a moment." : "The case has been escalated to human takeover."}</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
+        body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${ok ? "Reply approved" : "Reply rejected"}</h1><p class="muted">${ok ? "Your support agent will send the reply to the customer in a moment." : "The ticket has been escalated to human takeover."}</p>${dashboardLink(outcome.approval.id, opts)}${SHELL_FOOT}`,
       };
     }
     case "already_decided": {

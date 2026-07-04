@@ -29,7 +29,7 @@ import type { TenantId } from "@support-agent/agent-core";
  *   - amountMinorUnits > denyAboveMinorUnits       → deny (escalate)
  *
  * `mode` selects how the policy behaves and sits above the zones:
- *   - `thresholds`  — the amount-based zones above (the normal case)
+ *   - `thresholds`  — the amount-based zones above (the normal ticket)
  *   - `always_ask`  — every refund waits for human approval (never
  *     auto-allows), no matter the amount; the thresholds are ignored
  *   - `always_deny` — every refund is blocked regardless of amount,
@@ -72,7 +72,7 @@ export const defaultRefundPolicy: RefundPolicy = {
  * allow / ask / deny — it never silently rewrites the value (a coupon
  * that differs from what the agent told the customer would be worse than
  * an escalation). The agent never sets the other coupon parameters: the
- * `discount.create` tool forces single-use, locks the code to the case
+ * `discount.create` tool forces single-use, locks the code to the ticket
  * customer, makes it non-combinable, and caps the expiry at
  * `maxValidityDays` — see the tool for the full guardrail list.
  *
@@ -95,7 +95,7 @@ export const defaultRefundPolicy: RefundPolicy = {
  * the tool always sets `endsAt = now + maxValidityDays`, never longer.
  *
  * `mode` sits above the zones, identical to refunds:
- *   - `thresholds`  — the zones above (normal case)
+ *   - `thresholds`  — the zones above (normal ticket)
  *   - `always_ask`  — every coupon waits for human approval
  *   - `always_deny` — the agent can never issue a coupon
  *
@@ -169,10 +169,10 @@ export interface ScenarioPolicy {
   /** Seeded + (for built-ins) backed by a tuned flow, vs merchant-authored. */
   readonly builtin: boolean;
   /**
-   * Whether triage may route NEW cases to the resolution agent for this
+   * Whether triage may route NEW tickets to the resolution agent for this
    * scenario. Optional for back-compat (absent ⇒ enabled); the decoder
    * normalizes it, so a decoded scenario always carries a boolean. A disabled
-   * scenario is simply not offered to triage — in-flight cases keep theirs.
+   * scenario is simply not offered to triage — in-flight tickets keep theirs.
    */
   readonly enabled?: boolean;
   /** Remedy tools this scenario may use + auto/ask each. Absent ⇒ denied. */
@@ -493,7 +493,7 @@ export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => 
 
 /**
  * Deprecated tenant-settings default retained so older tenant JSON and test
- * fixtures still decode. It no longer drives case retention; the worker's
+ * fixtures still decode. It no longer drives ticket retention; the worker's
  * current fixed policy lives in `apps/worker/src/retention-sweep.ts`.
  */
 export const DEFAULT_RETENTION_DAYS = 365;
@@ -563,8 +563,8 @@ export class TenantSettings extends Data.Class<{
   readonly discountPolicy: DiscountPolicy;
   /**
    * Legacy compatibility setting retained for older stored tenant JSON and
-   * test fixtures. The current worker policy is fixed: archive resolved cases
-   * after 30 days, then delete archived cases after 12 calendar months.
+   * test fixtures. The current worker policy is fixed: archive resolved tickets
+   * after 30 days, then delete archived tickets after 12 calendar months.
    */
   readonly retentionDays: number;
   /**
@@ -607,7 +607,7 @@ export class TenantSettings extends Data.Class<{
    */
   readonly resolutionPolicy?: ResolutionPolicy;
   /**
-   * Per-tenant A/B flag: when true, triage routes cases to the new
+   * Per-tenant A/B flag: when true, triage routes tickets to the new
    * scenario-resolution agent instead of the legacy specialists. Optional;
    * absent ⇒ false (legacy routing). Lets a merchant test the new agent then
    * adopt or drop it.

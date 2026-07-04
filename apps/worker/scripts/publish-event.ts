@@ -60,7 +60,7 @@ const main = async () => {
   console.log(`[publish] subject=${opts.subject}`);
   console.log(`[publish] body=${opts.body}`);
 
-  // Tenant must exist (cases.tenant_id FK). Upsert idempotently so re-runs
+  // Tenant must exist (tickets.tenant_id FK). Upsert idempotently so re-runs
   // with the same tenant id reuse the same row.
   const raw = makeDbClient({ databaseUrl });
   try {

@@ -11,31 +11,31 @@ import {
   ApprovalService,
   ApprovalServiceTest,
   AuditLogServiceTest,
-  CaseLifecycleWriterLive,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketLifecycleWriterLive,
+  TicketRepository,
+  TicketRepositoryTest,
   TransactionRunnerPassthrough,
 } from "@support-agent/services";
 import { runApprovalMaintenanceOnce } from "../src/approval-maintenance-schedule.js";
 
-// Audit L3b — approvals maintenance: decided approvals whose case never
+// Audit L3b — approvals maintenance: decided approvals whose ticket never
 // resumed (the workflow event was lost between decision-commit and
 // publish) are re-published. (Time-based expiry of overdue pendings was
 // removed — approval drafts no longer expire by age for any tool.)
 
 const deps = Layer.mergeAll(
   ApprovalServiceTest,
-  CaseRepositoryTest,
+  TicketRepositoryTest,
   AuditLogServiceTest,
   TransactionRunnerPassthrough,
 );
 
-const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
 
 const tenantId = TenantId("tenant-acme");
 
-const setupCase = Effect.gen(function* () {
-  const repo = yield* CaseRepository;
+const setupTicket = Effect.gen(function* () {
+  const repo = yield* TicketRepository;
   const created = yield* repo.create({
     tenantId,
     channel: "email",
@@ -49,15 +49,15 @@ const setupCase = Effect.gen(function* () {
 });
 
 describe("runApprovalMaintenanceOnce", () => {
-  it("re-publishes the event for a decided approval whose case never resumed (audit L3b)", async () => {
+  it("re-publishes the event for a decided approval whose ticket never resumed (audit L3b)", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const approvals = yield* ApprovalService;
-          const row = yield* setupCase;
+          const row = yield* setupTicket;
           const approval = yield* approvals.create({
             tenantId,
-            caseId: row.id,
+            ticketId: row.id,
             agentId: AgentId("refund-review-agent"),
             tool: "conversation.reply",
             proposedInput: {},
@@ -65,7 +65,7 @@ describe("runApprovalMaintenanceOnce", () => {
             riskLevel: "medium",
             expiresAt: new Date(Date.now() + 60_000),
           });
-          // Decided 10 minutes ago — but the case is still parked
+          // Decided 10 minutes ago — but the ticket is still parked
           // (the publish was lost).
           yield* approvals.approve({
             id: approval.id,
@@ -79,7 +79,7 @@ describe("runApprovalMaintenanceOnce", () => {
             },
             now: new Date(Date.now() + 10 * 60_000),
           });
-          return { result, published, approvalId: approval.id, caseId: row.id };
+          return { result, published, approvalId: approval.id, ticketId: row.id };
         }),
         layer,
       ) as Effect.Effect<
@@ -87,7 +87,7 @@ describe("runApprovalMaintenanceOnce", () => {
           result: { republished: number };
           published: ReadonlyArray<DomainEvent>;
           approvalId: string;
-          caseId: string;
+          ticketId: string;
         },
         never,
         never
@@ -100,22 +100,22 @@ describe("runApprovalMaintenanceOnce", () => {
     expect(event.type).toBe("approval.approved");
     if (event.type === "approval.approved") {
       expect(event.approvalId).toBe(out.approvalId);
-      expect(event.caseId).toBe(out.caseId);
+      expect(event.ticketId).toBe(out.ticketId);
     }
   });
 
   it("never republishes a REJECTED decision (a rejection has nothing to re-run)", async () => {
     // Recovery hardening: the stale-reject storm bug — the sweep re-fired old
     // rejections, each re-forcing human_takeover. Rejected rows must be
-    // excluded even while the case is parked in waiting_for_approval.
+    // excluded even while the ticket is parked in waiting_for_approval.
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const approvals = yield* ApprovalService;
-          const row = yield* setupCase;
+          const row = yield* setupTicket;
           const approval = yield* approvals.create({
             tenantId,
-            caseId: row.id,
+            ticketId: row.id,
             agentId: AgentId("refund-review-agent"),
             tool: "conversation.ask_customer",
             proposedInput: {},
@@ -150,17 +150,17 @@ describe("runApprovalMaintenanceOnce", () => {
 
   it("never republishes a decision from a PRIOR round (stale epoch)", async () => {
     // Recovery hardening: an approved-but-lost decision from an earlier attempt
-    // must not drive the case's current round.
+    // must not drive the ticket's current round.
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
-          const row = yield* setupCase;
+          const row = yield* setupTicket;
           // Approval belongs to round 0.
           const approval = yield* approvals.create({
             tenantId,
-            caseId: row.id,
+            ticketId: row.id,
             agentId: AgentId("refund-review-agent"),
             tool: "conversation.reply",
             proposedInput: {},
@@ -173,7 +173,7 @@ describe("runApprovalMaintenanceOnce", () => {
             id: approval.id,
             decidedBy: UserId("manager-1"),
           });
-          // The case has since advanced to round 1 (a resume bumped it).
+          // The ticket has since advanced to round 1 (a resume bumped it).
           yield* repo.update(row.id, { epoch: 1 }, tenantId);
           const published: DomainEvent[] = [];
           const result = yield* runApprovalMaintenanceOnce({
@@ -201,10 +201,10 @@ describe("runApprovalMaintenanceOnce", () => {
       Effect.provide(
         Effect.gen(function* () {
           const approvals = yield* ApprovalService;
-          const row = yield* setupCase;
+          const row = yield* setupTicket;
           const approval = yield* approvals.create({
             tenantId,
-            caseId: row.id,
+            ticketId: row.id,
             agentId: AgentId("refund-review-agent"),
             tool: "conversation.reply",
             proposedInput: {},
@@ -239,16 +239,16 @@ describe("runApprovalMaintenanceOnce", () => {
     expect(out.published).toHaveLength(0);
   });
 
-  it("does not republish when the case already moved on", async () => {
+  it("does not republish when the ticket already moved on", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvals = yield* ApprovalService;
-          const row = yield* setupCase;
+          const row = yield* setupTicket;
           const approval = yield* approvals.create({
             tenantId,
-            caseId: row.id,
+            ticketId: row.id,
             agentId: AgentId("refund-review-agent"),
             tool: "conversation.reply",
             proposedInput: {},
@@ -260,7 +260,7 @@ describe("runApprovalMaintenanceOnce", () => {
             id: approval.id,
             decidedBy: UserId("manager-1"),
           });
-          // The runtime already resumed and resolved the case.
+          // The runtime already resumed and resolved the ticket.
           yield* repo.transitionStatus(row.id, "resolved", {
             reason: "resumed normally",
           });
@@ -298,10 +298,10 @@ describe("runApprovalMaintenanceOnce — pending reminders", () => {
 
   const seedPending = Effect.gen(function* () {
     const approvals = yield* ApprovalService;
-    const row = yield* setupCase;
+    const row = yield* setupTicket;
     const approval = yield* approvals.create({
       tenantId,
-      caseId: row.id,
+      ticketId: row.id,
       agentId: AgentId("refund-review-agent"),
       tool: "conversation.reply",
       proposedInput: { subject: "Re: order", bodyText: "Draft reply" },
@@ -415,13 +415,13 @@ describe("runApprovalMaintenanceOnce — pending reminders", () => {
     expect(out.reminded).toHaveLength(0);
   });
 
-  it("skips a reminder when the case is no longer parked for approval", async () => {
+  it("skips a reminder when the ticket is no longer parked for approval", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const { row } = yield* seedPending;
-          // The case was taken over by a human, but the approval row lingers.
+          // The ticket was taken over by a human, but the approval row lingers.
           yield* repo.transitionStatus(row.id, "human_takeover", {
             reason: "manual takeover",
           });

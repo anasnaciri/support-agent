@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { riskFlagLabel } from "../app/cases/[id]/risk-flag-label";
+import { riskFlagLabel } from "../app/tickets/[id]/risk-flag-label";
 
 describe("riskFlagLabel", () => {
   it("humanises the duplicate-photo guard flag", () => {
-    expect(riskFlagLabel("duplicate_photo_seen_in_case_abc")).toBe(
-      "Duplicate photo seen on another case",
+    expect(riskFlagLabel("duplicate_photo_seen_in_ticket_abc")).toBe(
+      "Duplicate photo seen on another ticket",
     );
   });
 

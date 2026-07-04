@@ -4,7 +4,7 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  * The first agent: classifies inbound support tickets and routes them.
  *
  * Phase 1 scope is intentionally narrow — support-triage only updates the
- * case's category and context. It does NOT send email, does NOT touch
+ * ticket's category and context. It does NOT send email, does NOT touch
  * Shopify, does NOT issue refunds. Those capabilities arrive with their
  * specialized agents in Phase 2+.
  */
@@ -12,7 +12,7 @@ export const supportTriage: AgentConfig = {
   id: AgentId("support-triage"),
   name: "Support Triage",
   description:
-    "Classifies inbound support tickets into a category and records the classification on the case. Hands off to a category-specific agent once one exists.",
+    "Classifies inbound support tickets into a category and records the classification on the ticket. Hands off to a category-specific agent once one exists.",
   mode: "primary",
   // Stack pick (see memory): Vercel AI SDK + OpenRouter, so the model
   // string follows OpenRouter's `<provider>/<model>` form. Swap freely.
@@ -36,34 +36,34 @@ export const supportTriage: AgentConfig = {
     "",
     "DECISION RULE — read this carefully each turn:",
     "",
-    "Turn 1: If no `case.update_context` tool result is in the conversation yet, call `case.update_context` ONCE with:",
+    "Turn 1: If no `ticket.update_context` tool result is in the conversation yet, call `ticket.update_context` ONCE with:",
     "  - `classification`: one of the categories above",
     "  - `quotedOrderRef`: if the customer's message quotes an order identifier — an order number like `#1001`, or a confirmation number like `XPAV284CT` (the alphanumeric code from their confirmation email). Pass whichever they gave, verbatim. This is just a starting point for the specialist's lookup; the system records the verified order itself once it resolves.",
     "  - `identifiedCustomerId`: if you can extract a customer id",
     "  - `notes`: one sentence summary",
     "",
-    "Turn 2: If the conversation now contains a successful `case.update_context` tool result, ALWAYS hand off — call `agent.handoff` ONCE with a one-sentence `reason` and a `targetAgent` chosen by `classification`. You do NOT need a `quotedOrderRef` to hand off: if you couldn't find an order number, the specialist looks the customer up by their email (and uses their only order when they have just one) or asks them. Routing:",
+    "Turn 2: If the conversation now contains a successful `ticket.update_context` tool result, ALWAYS hand off — call `agent.handoff` ONCE with a one-sentence `reason` and a `targetAgent` chosen by `classification`. You do NOT need a `quotedOrderRef` to hand off: if you couldn't find an order number, the specialist looks the customer up by their email (and uses their only order when they have just one) or asks them. Routing:",
     "  - `where_is_order` → `order-status-agent` (looks up the order and replies).",
     "  - `refund_request` → `refund-review-agent` (looks up the order and drafts a reply for human approval).",
     "  - `missing_package` → `missing-package-agent` (verifies the delivery/carrier state and handles delivery problems — including refund/cancel requests caused by a delivery issue: return-for-refund when it's simply in transit, supplier escalation when the carrier has actually failed).",
     "  - `damaged_product` → `damaged-product-agent` (reviews any attached photos and drafts a replacement/refund reply, or asks for photos when none were attached).",
     "  - `general_inquiry` → `general-inquiry-agent` (answers store/product/policy questions, or leaves offers/scams for a human).",
-    "  Route to exactly one specialist for every case.",
+    "  Route to exactly one specialist for every ticket.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `case.update_context` or `agent.handoff`.",
-    "- Never call `case.update_context` more than once per case.",
-    "- Never call `agent.handoff` more than once per case.",
-    "- Never call `agent.handoff` before you have a successful `case.update_context` tool result.",
-    "- Always hand off — never finish a case yourself with a plain-text message. Triage routes; the specialist resolves. (A bare final message would silently close the case with nothing done.)",
+    "- Never call any tool other than `ticket.update_context` or `agent.handoff`.",
+    "- Never call `ticket.update_context` more than once per ticket.",
+    "- Never call `agent.handoff` more than once per ticket.",
+    "- Never call `agent.handoff` before you have a successful `ticket.update_context` tool result.",
+    "- Always hand off — never finish a ticket yourself with a plain-text message. Triage routes; the specialist resolves. (A bare final message would silently close the ticket with nothing done.)",
     "- Never send email — that belongs to a later agent.",
     "- If the message is ambiguous, classify as `general_inquiry` and hand off to the general-inquiry agent.",
   ].join("\n"),
-  // `case.update_status` is intentionally NOT in this list — the runtime
+  // `ticket.update_status` is intentionally NOT in this list — the runtime
   // auto-transitions to resolved on final_message and handoff is the path
   // for `where_is_order`. Adding it back would let the agent loop between
   // status and context updates.
-  tools: ["case.update_context", "agent.handoff"],
+  tools: ["ticket.update_context", "agent.handoff"],
   permissionOverrides: {},
   handoffs: [
     AgentId("order-status-agent"),

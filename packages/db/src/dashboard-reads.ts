@@ -24,11 +24,11 @@ import {
   type ApprovalsListResult,
   type AuditEntry,
   type AuditFilter,
-  type CaseDetail,
-  type CaseDetailReplyDelivery,
-  type CasesFilter,
-  type CaseEventsResult,
-  type CaseListRow,
+  type TicketDetail,
+  type TicketDetailReplyDelivery,
+  type TicketsFilter,
+  type TicketEventsResult,
+  type TicketListRow,
   type ConnectorConnectionView,
   type KnowledgeDocumentSummaryView,
   type KnowledgeSourceType,
@@ -38,21 +38,21 @@ import {
 } from "@support-agent/dashboard-contracts";
 import {
   allowedManualStatusTargets,
-  type CaseStatus,
+  type TicketStatus,
 } from "@support-agent/agent-core";
 import type { DrizzleDb } from "./client.js";
 import {
   approvals,
   auditLog,
-  caseSupplierEscalations,
-  cases,
+  ticketSupplierEscalations,
+  tickets,
   connectorConnections,
   tenantAgentOverrides,
   tenantKnowledgeDocuments,
   tenants,
 } from "./schema.js";
-import { hasOpenEscalationForCase } from "./supplier-store.js";
-import { getActiveReplyDeliveryForCase } from "./reply-delivery-store.js";
+import { hasOpenEscalationForTicket } from "./supplier-store.js";
+import { getActiveReplyDeliveryForTicket } from "./reply-delivery-store.js";
 import { resurfaceableApprovedReply } from "./approved-not-sent.js";
 
 // Read queries backing the dashboard's HTTP API (Path B). The dashboard
@@ -76,15 +76,15 @@ export {
 export type {
   Page,
   TodayPendingApproval,
-  TodayTakeoverCase,
+  TodayTakeoverTicket,
   TodaySummary,
-  CaseListRow,
-  CaseDetailCase,
-  CaseDetailReplyDelivery,
+  TicketListRow,
+  TicketDetailTicket,
+  TicketDetailReplyDelivery,
   AuditEntry,
   ApprovalDetail,
-  CaseDetail,
-  CaseEventsResult,
+  TicketDetail,
+  TicketEventsResult,
   ApprovalsFilter,
   ApprovalListRow,
   ApprovalsListResult,
@@ -97,13 +97,13 @@ export type {
 
 const TOP_N = 5;
 
-const toCaseDetailReplyDelivery = (
-  row: Awaited<ReturnType<typeof getActiveReplyDeliveryForCase>>,
-): CaseDetailReplyDelivery | null =>
+const toTicketDetailReplyDelivery = (
+  row: Awaited<ReturnType<typeof getActiveReplyDeliveryForTicket>>,
+): TicketDetailReplyDelivery | null =>
   row
     ? {
         id: row.id,
-        caseId: row.caseId,
+        ticketId: row.ticketId,
         status: row.status,
         tool: row.tool,
         mailbox: row.mailbox,
@@ -267,14 +267,14 @@ export const todaySummary = async (
 
   const [byStatus, pending, takeover, resolvedToday] = await Promise.all([
     db
-      .select({ status: cases.status, count: sql<number>`count(*)::int` })
-      .from(cases)
-      .where(eq(cases.tenantId, tenantId))
-      .groupBy(cases.status),
+      .select({ status: tickets.status, count: sql<number>`count(*)::int` })
+      .from(tickets)
+      .where(eq(tickets.tenantId, tenantId))
+      .groupBy(tickets.status),
     db
       .select({
         id: approvals.id,
-        caseId: approvals.caseId,
+        ticketId: approvals.ticketId,
         tool: approvals.tool,
         agentId: approvals.agentId,
         riskLevel: approvals.riskLevel,
@@ -288,28 +288,28 @@ export const todaySummary = async (
       .limit(TOP_N),
     db
       .select({
-        id: cases.id,
-        subject: cases.subject,
-        category: cases.category,
-        updatedAt: cases.updatedAt,
+        id: tickets.id,
+        subject: tickets.subject,
+        category: tickets.category,
+        updatedAt: tickets.updatedAt,
       })
-      .from(cases)
+      .from(tickets)
       .where(
         and(
-          eq(cases.tenantId, tenantId),
-          eq(cases.status, "human_takeover"),
+          eq(tickets.tenantId, tenantId),
+          eq(tickets.status, "human_takeover"),
         ),
       )
-      .orderBy(desc(cases.updatedAt))
+      .orderBy(desc(tickets.updatedAt))
       .limit(TOP_N),
     db
       .select({ count: sql<number>`count(*)::int` })
-      .from(cases)
+      .from(tickets)
       .where(
         and(
-          eq(cases.tenantId, tenantId),
-          eq(cases.status, "resolved"),
-          gte(cases.resolvedAt, dayStart),
+          eq(tickets.tenantId, tenantId),
+          eq(tickets.status, "resolved"),
+          gte(tickets.resolvedAt, dayStart),
         ),
       ),
   ]);
@@ -322,13 +322,13 @@ export const todaySummary = async (
     resolvedTodayCount: resolvedToday[0]?.count ?? 0,
     pendingApprovals: pending.map((a) => ({
       id: a.id,
-      caseId: a.caseId,
+      ticketId: a.ticketId,
       tool: a.tool,
       agentId: a.agentId,
       riskLevel: a.riskLevel,
       createdAt: a.createdAt.toISOString(),
     })),
-    takeoverCases: takeover.map((c) => ({
+    takeoverTickets: takeover.map((c) => ({
       id: c.id,
       subject: c.subject,
       category: c.category,
@@ -338,68 +338,68 @@ export const todaySummary = async (
 };
 
 // ============================================================
-// Cases
+// Tickets
 // ============================================================
 
 /** Postgres LIKE/ILIKE wildcards, so a user typing `%` or `_` stays literal. */
 const escapeLike = (raw: string): string => raw.replace(/[\\%_]/g, "\\$&");
 
-/** Paginated cases list for one tenant, newest activity first. */
-export const casesList = async (
+/** Paginated tickets list for one tenant, newest activity first. */
+export const ticketsList = async (
   db: DrizzleDb,
   tenantId: string,
-  filter: CasesFilter,
+  filter: TicketsFilter,
   requestedPage: number,
   pageSize: number,
-): Promise<Page<CaseListRow>> => {
-  const whereParts: SQL[] = [eq(cases.tenantId, tenantId)];
+): Promise<Page<TicketListRow>> => {
+  const whereParts: SQL[] = [eq(tickets.tenantId, tenantId)];
   const q = filter.q?.trim();
   if (q) {
     const term = `%${escapeLike(q)}%`;
     whereParts.push(
       or(
-        ilike(cases.subject, term),
-        ilike(cases.summary, term),
-        ilike(cases.category, term),
-        // Customer identity, stamped on the case context.
-        ilike(sql`${cases.context}->>'customerEmail'`, term),
-        ilike(sql`${cases.context}->>'customerName'`, term),
+        ilike(tickets.subject, term),
+        ilike(tickets.summary, term),
+        ilike(tickets.category, term),
+        // Customer identity, stamped on the ticket context.
+        ilike(sql`${tickets.context}->>'customerEmail'`, term),
+        ilike(sql`${tickets.context}->>'customerName'`, term),
         // Order references. `shopify_order_id` holds the RESOLVED id and is
         // often set on only one thread of an order, so searching an order
-        // number there returns a single case. `quotedOrderRef` is the number
+        // number there returns a single ticket. `quotedOrderRef` is the number
         // the customer wrote — stamped per thread — so matching it surfaces
         // EVERY email thread tied to that order. `identifiedOrderId` lets a
         // pasted GID match too.
-        ilike(sql`${cases.context}->>'quotedOrderRef'`, term),
-        ilike(sql`${cases.context}->>'identifiedOrderId'`, term),
-        ilike(cases.shopifyOrderId, term),
+        ilike(sql`${tickets.context}->>'quotedOrderRef'`, term),
+        ilike(sql`${tickets.context}->>'identifiedOrderId'`, term),
+        ilike(tickets.shopifyOrderId, term),
       )!,
     );
   }
   if (filter.status?.length) {
-    whereParts.push(inArray(cases.status, [...filter.status]));
+    whereParts.push(inArray(tickets.status, [...filter.status]));
   }
   if (filter.excludeStatus?.length) {
-    whereParts.push(notInArray(cases.status, [...filter.excludeStatus]));
+    whereParts.push(notInArray(tickets.status, [...filter.excludeStatus]));
   }
   const whereExpr = and(...whereParts);
 
   const [countRow] = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(cases)
+    .from(tickets)
     .where(whereExpr);
   const totalRows = countRow?.count ?? 0;
   const page = clampPage(requestedPage, totalRows, pageSize);
   const rows = await db
     .select({
-      id: cases.id,
-      subject: cases.subject,
-      status: cases.status,
-      category: cases.category,
-      currentAgentId: cases.currentAgentId,
-      priority: cases.priority,
-      // The order the case is about, from the SAME single source of truth the
-      // case page + refund use — `context` — not the legacy `shopify_order_id`
+      id: tickets.id,
+      subject: tickets.subject,
+      status: tickets.status,
+      category: tickets.category,
+      currentAgentId: tickets.currentAgentId,
+      priority: tickets.priority,
+      // The order the ticket is about, from the SAME single source of truth the
+      // ticket page + refund use — `context` — not the legacy `shopify_order_id`
       // column (which the runtime stopped maintaining once `identifiedOrderId`
       // became canonical, and which a manual "assign order" edit doesn't touch).
       // Prefer the human-friendly ref the customer/merchant wrote
@@ -407,23 +407,23 @@ export const casesList = async (
       // legacy column as a last-resort fallback for old rows. `formatOrderRef`
       // normalizes whichever wins.
       orderRef: sql<string | null>`coalesce(
-        ${cases.context}->>'quotedOrderRef',
-        ${cases.context}->>'identifiedOrderId',
-        ${cases.shopifyOrderId}
+        ${tickets.context}->>'quotedOrderRef',
+        ${tickets.context}->>'identifiedOrderId',
+        ${tickets.shopifyOrderId}
       )`,
-      preview: cases.summary,
+      preview: tickets.summary,
       // Requester email lives in the agent-stamped context JSONB (same row —
-      // no join). NULL when the case has no customer email yet.
+      // no join). NULL when the ticket has no customer email yet.
       customerEmail: sql<
         string | null
-      >`${cases.context}->>'customerEmail'`,
-      createdAt: cases.createdAt,
-      updatedAt: cases.updatedAt,
+      >`${tickets.context}->>'customerEmail'`,
+      createdAt: tickets.createdAt,
+      updatedAt: tickets.updatedAt,
       // Concurrent wait facts, row-derived via correlated EXISTS (no join,
-      // no N+1 — approvals_case_idx / cse_case_idx cover both). `exists()`
-      // qualifies the correlated columns (`"approvals"."case_id" =
-      // "cases"."id"`); a hand-rolled sql`EXISTS(...)` does NOT and silently
-      // compares the wrong columns. A case parked `waiting_for_approval` can
+      // no N+1 — approvals_ticket_idx / cse_ticket_idx cover both). `exists()`
+      // qualifies the correlated columns (`"approvals"."ticket_id" =
+      // "tickets"."id"`); a hand-rolled sql`EXISTS(...)` does NOT and silently
+      // compares the wrong columns. A ticket parked `waiting_for_approval` can
       // also carry an open escalation.
       waitingApproval: exists(
         db
@@ -431,8 +431,8 @@ export const casesList = async (
           .from(approvals)
           .where(
             and(
-              eq(approvals.caseId, cases.id),
-              eq(approvals.tenantId, cases.tenantId),
+              eq(approvals.ticketId, tickets.id),
+              eq(approvals.tenantId, tickets.tenantId),
               eq(approvals.status, "pending"),
             ),
           ),
@@ -440,19 +440,19 @@ export const casesList = async (
       waitingSupplier: exists(
         db
           .select({ one: sql`1` })
-          .from(caseSupplierEscalations)
+          .from(ticketSupplierEscalations)
           .where(
             and(
-              eq(caseSupplierEscalations.caseId, cases.id),
-              eq(caseSupplierEscalations.tenantId, cases.tenantId),
-              eq(caseSupplierEscalations.status, "open"),
+              eq(ticketSupplierEscalations.ticketId, tickets.id),
+              eq(ticketSupplierEscalations.tenantId, tickets.tenantId),
+              eq(ticketSupplierEscalations.status, "open"),
             ),
           ),
       ),
     })
-    .from(cases)
+    .from(tickets)
     .where(whereExpr)
-    .orderBy(desc(cases.updatedAt), desc(cases.id))
+    .orderBy(desc(tickets.updatedAt), desc(tickets.id))
     .limit(pageSize)
     .offset((page - 1) * pageSize);
   return {
@@ -481,7 +481,7 @@ export const casesList = async (
 
 const toApprovalDetail = (a: typeof approvals.$inferSelect): ApprovalDetail => ({
   id: a.id,
-  caseId: a.caseId,
+  ticketId: a.ticketId,
   agentId: a.agentId,
   tool: a.tool,
   proposedInput: a.proposedInput,
@@ -512,7 +512,7 @@ const replyBodyPreview = (proposedInput: unknown): string => {
 
 const toAuditEntry = (e: typeof auditLog.$inferSelect): AuditEntry => ({
   id: e.id.toString(),
-  caseId: e.caseId,
+  ticketId: e.ticketId,
   action: e.action,
   actorType: e.actorType,
   actorId: e.actorId,
@@ -521,51 +521,51 @@ const toAuditEntry = (e: typeof auditLog.$inferSelect): AuditEntry => ({
 });
 
 /**
- * Full case detail: the case row, its complete audit timeline (ascending),
- * and its approvals. Returns null when the case isn't in the tenant (the
+ * Full ticket detail: the ticket row, its complete audit timeline (ascending),
+ * and its approvals. Returns null when the ticket isn't in the tenant (the
  * endpoint maps that to 404 — disclosure-safe). Shopify customer/order
  * panels are fetched via separate connector endpoints, not here.
  */
-export const caseDetail = async (
+export const ticketDetail = async (
   db: DrizzleDb,
   tenantId: string,
-  caseId: string,
-): Promise<CaseDetail | null> => {
+  ticketId: string,
+): Promise<TicketDetail | null> => {
   const [row] = await db
     .select()
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)))
+    .from(tickets)
+    .where(and(eq(tickets.id, ticketId), eq(tickets.tenantId, tenantId)))
     .limit(1);
   if (!row) return null;
 
-  const [entries, caseApprovals, activeReplyDelivery] = await Promise.all([
+  const [entries, ticketApprovals, activeReplyDelivery] = await Promise.all([
     db
       .select()
       .from(auditLog)
-      .where(and(eq(auditLog.caseId, caseId), eq(auditLog.tenantId, tenantId)))
+      .where(and(eq(auditLog.ticketId, ticketId), eq(auditLog.tenantId, tenantId)))
       .orderBy(asc(auditLog.id)),
     db
       .select()
       .from(approvals)
-      .where(and(eq(approvals.caseId, caseId), eq(approvals.tenantId, tenantId)))
+      .where(and(eq(approvals.ticketId, ticketId), eq(approvals.tenantId, tenantId)))
       .orderBy(asc(approvals.createdAt)),
-    getActiveReplyDeliveryForCase(db, caseId),
+    getActiveReplyDeliveryForTicket(db, ticketId),
   ]);
 
   const auditEntries = entries.map(toAuditEntry);
-  const approvalDetails = caseApprovals.map(toApprovalDetail);
+  const approvalDetails = ticketApprovals.map(toApprovalDetail);
   const resurfaceable = resurfaceableApprovedReply(auditEntries, approvalDetails);
 
   // Concurrent wait facts: approval derived from the rows we already loaded;
-  // supplier is one indexed lookup (cse_case_idx). A case parked
+  // supplier is one indexed lookup (cse_ticket_idx). A ticket parked
   // `waiting_for_approval` can also carry an open escalation.
   const waitingOn = {
     approval: approvalDetails.some((a) => a.status === "pending"),
-    supplier: await hasOpenEscalationForCase(db, tenantId, caseId),
+    supplier: await hasOpenEscalationForTicket(db, tenantId, ticketId),
   };
 
   return {
-    case: {
+    ticket: {
       id: row.id,
       subject: row.subject,
       status: row.status,
@@ -577,12 +577,12 @@ export const caseDetail = async (
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
-      manualStatusTargets: allowedManualStatusTargets(row.status as CaseStatus),
+      manualStatusTargets: allowedManualStatusTargets(row.status as TicketStatus),
       waitingOn,
     },
     auditEntries,
     approvals: approvalDetails,
-    activeReplyDelivery: toCaseDetailReplyDelivery(activeReplyDelivery),
+    activeReplyDelivery: toTicketDetailReplyDelivery(activeReplyDelivery),
     approvedNotSent: resurfaceable
       ? {
           approvalId: resurfaceable.id,
@@ -594,21 +594,21 @@ export const caseDetail = async (
 };
 
 /**
- * Audit rows for a case with id > `sinceId`, ascending (poll replacement for
- * the old SSE route). Returns null when the case isn't in the tenant (404).
+ * Audit rows for a ticket with id > `sinceId`, ascending (poll replacement for
+ * the old SSE route). Returns null when the ticket isn't in the tenant (404).
  */
-export const caseEvents = async (
+export const ticketEvents = async (
   db: DrizzleDb,
   tenantId: string,
-  caseId: string,
+  ticketId: string,
   sinceId: bigint,
-): Promise<CaseEventsResult | null> => {
-  const [caseRow] = await db
-    .select({ id: cases.id })
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)))
+): Promise<TicketEventsResult | null> => {
+  const [ticketRow] = await db
+    .select({ id: tickets.id })
+    .from(tickets)
+    .where(and(eq(tickets.id, ticketId), eq(tickets.tenantId, tenantId)))
     .limit(1);
-  if (!caseRow) return null;
+  if (!ticketRow) return null;
 
   const rows = await db
     .select({
@@ -621,8 +621,8 @@ export const caseEvents = async (
     .from(auditLog)
     .where(
       and(
-        eq(auditLog.caseId, caseId),
-        // Redundant with the caseId pre-check above, but every sibling query
+        eq(auditLog.ticketId, ticketId),
+        // Redundant with the ticketId pre-check above, but every sibling query
         // double-scopes by tenant — keep the invariant uniform (audit D12).
         eq(auditLog.tenantId, tenantId),
         gt(auditLog.id, sinceId),
@@ -692,7 +692,7 @@ export const approvalsList = async (
   const rows = await db
     .select({
       id: approvals.id,
-      caseId: approvals.caseId,
+      ticketId: approvals.ticketId,
       agentId: approvals.agentId,
       tool: approvals.tool,
       status: approvals.status,
@@ -715,7 +715,7 @@ export const approvalsList = async (
     pageSize,
     rows: rows.map((r) => ({
       id: r.id,
-      caseId: r.caseId,
+      ticketId: r.ticketId,
       agentId: r.agentId,
       tool: r.tool,
       status: r.status,
@@ -777,12 +777,12 @@ export const auditList = async (
 };
 
 // ============================================================
-// Connector connections (integrations pages + case-detail shop domain)
+// Connector connections (integrations pages + ticket-detail shop domain)
 // ============================================================
 
 /**
  * All connector connections for a tenant (newest install first). Backs the
- * integrations overview + per-provider pages, and the case-detail Shopify
+ * integrations overview + per-provider pages, and the ticket-detail Shopify
  * shop-domain deep link (the dashboard picks the active shopify row from
  * this). `shopDomain` defaults to "" in the schema; normalize empty → null.
  */
@@ -819,19 +819,19 @@ export const connectionsList = async (
 };
 
 /**
- * The agent-stamped `context` for a case (tenant-scoped). Null when the case
- * isn't in the tenant. Backs the case-detail Shopify panels, which read
+ * The agent-stamped `context` for a ticket (tenant-scoped). Null when the ticket
+ * isn't in the tenant. Backs the ticket-detail Shopify panels, which read
  * `identifiedOrderId` / `shopifyCustomerId` / `customerEmail` from it.
  */
-export const caseContextForTenant = async (
+export const ticketContextForTenant = async (
   db: DrizzleDb,
   tenantId: string,
-  caseId: string,
+  ticketId: string,
 ): Promise<{ readonly context: unknown } | null> => {
   const [row] = await db
-    .select({ context: cases.context })
-    .from(cases)
-    .where(and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)))
+    .select({ context: tickets.context })
+    .from(tickets)
+    .where(and(eq(tickets.id, ticketId), eq(tickets.tenantId, tenantId)))
     .limit(1);
   return row ? { context: row.context } : null;
 };

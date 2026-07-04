@@ -34,7 +34,7 @@ const mapHttpError = (
     }
     // Auth + 4xx invalid + network all collapse to a single
     // "unavailable" branch from the tool's perspective — they're
-    // platform-side problems the operator can't fix at the case level.
+    // platform-side problems the operator can't fix at the ticket level.
     return new TrackingProviderUnavailable({
       trackingNumber: ctx.trackingNumber,
       message: err.message,

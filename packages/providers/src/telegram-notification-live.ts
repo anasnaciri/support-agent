@@ -90,7 +90,7 @@ export const TelegramMerchantNotificationLive = Layer.effect(
       notify: (tenantId, notification) =>
         Effect.gen(function* () {
           // Resolve the tenant's chat binding. Missing or revoked binding
-          // is the "not connected" case, not a failure — callers are
+          // is the "not connected" ticket, not a failure — callers are
           // best-effort emitters and the merchant.notify tool wants to
           // report non-delivery to the agent, not crash the tick.
           const binding = yield* store.get(tenantId, "telegram").pipe(
@@ -193,7 +193,7 @@ export const MerchantNotificationLive = Layer.effect(
               tenantId,
               title: notification.title,
               body: notification.body,
-              ...(notification.caseId ? { caseId: notification.caseId } : {}),
+              ...(notification.ticketId ? { ticketId: notification.ticketId } : {}),
             })
             .pipe(
               Effect.map(() => true),

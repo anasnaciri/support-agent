@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { TenantId, CaseId } from "@support-agent/agent-core";
+import { TenantId, TicketId } from "@support-agent/agent-core";
 import {
   ConnectorCredentialStoreTest,
   MerchantNotificationSendFailed,
@@ -60,7 +60,7 @@ const note: MerchantNotification = {
   kind: "agent_note",
   title: "Agent needs a sanity check",
   body: "Customer cites promo code SAVE50 which is not in the knowledge base.",
-  caseId: CaseId("caaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+  ticketId: TicketId("caaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
 };
 
 const layerWith = (

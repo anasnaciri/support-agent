@@ -24,8 +24,8 @@ import {
 import { IconRail } from "./IconRail";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { SettingsNav } from "./settings/_components/settings-nav";
-import { CasesSidebar } from "./cases/_components/CasesSidebar";
-import { caseIdFromPathname } from "./cases/_components/cases-sidebar-data";
+import { TicketsSidebar } from "./tickets/_components/TicketsSidebar";
+import { ticketIdFromPathname } from "./tickets/_components/tickets-sidebar-data";
 import { signOutAction } from "./sign-out-action";
 
 const SIDEBAR_COOKIE = "sidebar:state";
@@ -69,13 +69,13 @@ export function AppShell({
   const dragOriginRef = useRef<{ x: number; width: number } | null>(null);
 
   // Section-aware secondary sidebar. Settings was the first section to get
-  // one; case-detail pages get a searchable case switcher. Add more entries
+  // one; ticket-detail pages get a searchable ticket switcher. Add more entries
   // here as other sections grow sub-navigation.
-  const onCaseDetail = Boolean(caseIdFromPathname(pathname));
+  const onTicketDetail = Boolean(ticketIdFromPathname(pathname));
   const secondary: SecondarySection | null = pathname.startsWith("/settings")
     ? { title: "Settings", node: <SettingsNav permissions={permissions} /> }
-    : onCaseDetail
-      ? { title: "Cases", node: <CasesSidebar /> }
+    : onTicketDetail
+      ? { title: "Tickets", node: <TicketsSidebar /> }
       : null;
 
   const setOpenPersisted = (next: boolean) => {
@@ -255,11 +255,11 @@ export function AppShell({
           <main
             className={cn(
               "relative min-w-0 flex-1",
-              // The case-detail view is a full-height inbox (chat + details
+              // The ticket-detail view is a full-height inbox (chat + details
               // columns that own their own scroll), so it runs edge-to-edge
               // with no page padding or max-width. Every other route keeps the
               // centered, scrollable document layout.
-              onCaseDetail
+              onTicketDetail
                 ? "overflow-hidden"
                 : "overflow-y-auto px-8 py-8",
               // Content reads as a raised plane casting a soft shadow toward
@@ -284,12 +284,12 @@ export function AppShell({
                 <PanelLeftOpen className="size-4" aria-hidden />
               </button>
             ) : null}
-            {onCaseDetail ? (
-              // `group/case` + the sidebar state lets the case header pad its
+            {onTicketDetail ? (
+              // `group/ticket` + the sidebar state lets the ticket header pad its
               // left only while the floating expand button is showing (sidebar
               // collapsed), with no gap when the sidebar is open.
               <div
-                className="group/case h-full"
+                className="group/ticket h-full"
                 data-sidebar-state={open ? "open" : "collapsed"}
               >
                 {children}

@@ -65,7 +65,7 @@ export function NewWorkspacePage() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             A workspace runs one store end to end: its own Shopify connection,
-            support mailbox, AI provider, cases, knowledge base, and policies.
+            support mailbox, AI provider, tickets, knowledge base, and policies.
             Everyone in your team can switch between workspaces from the
             sidebar.
           </p>

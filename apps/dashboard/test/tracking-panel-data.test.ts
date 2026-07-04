@@ -6,7 +6,7 @@ import {
   publicTrackingUrl,
   trackingStatusVariant,
   trackingUrlFor,
-} from "../app/cases/[id]/tracking-panel-data";
+} from "../app/tickets/[id]/tracking-panel-data";
 
 describe("parseLiveTracking", () => {
   it("returns null for absent / non-tracking / malformed values", () => {

@@ -2,7 +2,7 @@ import { Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   CustomerId,
   DiscountFailed,
   OrderId,
@@ -23,7 +23,7 @@ import { shopifyDiscountCreate } from "../src/index.js";
 const tenantId = TenantId("t1");
 const ctx: ToolContext = {
   tenantId,
-  caseId: CaseId("c-1"),
+  ticketId: TicketId("c-1"),
   agentId: AgentId("refund-review-agent"),
   callId: "call_disc_1",
   attemptNumber: 1,

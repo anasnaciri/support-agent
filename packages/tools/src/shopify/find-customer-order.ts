@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import { CustomerId, defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
-import { CaseRepository, ShopifyService } from "@support-agent/services";
+import { TicketRepository, ShopifyService } from "@support-agent/services";
 import { ShopifyOrderOutput, projectShopifyOrder } from "./get-order.js";
 
 const Input = Schema.Struct({
@@ -23,7 +23,7 @@ const LOOKUP_LIMIT = 10;
 export const shopifyFindCustomerOrder = defineTool({
   name: "shopify.find_customer_order",
   description:
-    "Look up the writer's orders. When the case has already resolved the customer (matched by their email, phone, or name), this lists THAT customer's orders — so it finds them even if an order was placed under a different email. Otherwise it falls back to the email you pass (the `from=` value in the `[Thread context: ...]` header). Use this ONLY when the case has no identified order id and the customer did not give an order number. Returns `status`: `single` when there is exactly one order (then `order` holds it — treat it as the order they're asking about; do NOT ask them for an order number), `none` when no orders match, or `multiple` when there is more than one (then ask which order). A returned order is already known to belong to the resolved customer.",
+    "Look up the writer's orders. When the ticket has already resolved the customer (matched by their email, phone, or name), this lists THAT customer's orders — so it finds them even if an order was placed under a different email. Otherwise it falls back to the email you pass (the `from=` value in the `[Thread context: ...]` header). Use this ONLY when the ticket has no identified order id and the customer did not give an order number. Returns `status`: `single` when there is exactly one order (then `order` holds it — treat it as the order they're asking about; do NOT ask them for an order number), `none` when no orders match, or `multiple` when there is more than one (then ask which order). A returned order is already known to belong to the resolved customer.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
@@ -46,14 +46,14 @@ export const shopifyFindCustomerOrder = defineTool({
       }
 
       const shopify = yield* ShopifyService;
-      const repo = yield* CaseRepository;
+      const repo = yield* TicketRepository;
 
-      // Prefer the case's RESOLVED customer (resolved by email/phone/name →
+      // Prefer the ticket's RESOLVED customer (resolved by email/phone/name →
       // `shopifyCustomerId`): list that account's orders so we find them even
       // when placed under a different email. Fall back to the by-email lookup
-      // when no customer resolved (guest, or Shopify connected after the case
+      // when no customer resolved (guest, or Shopify connected after the ticket
       // was created). Best-effort read — a repo miss just uses the email path.
-      const resolvedCustomerId = yield* repo.getById(ctx.caseId).pipe(
+      const resolvedCustomerId = yield* repo.getById(ctx.ticketId).pipe(
         Effect.map((c) => {
           const id = (c.context as Record<string, unknown>)["shopifyCustomerId"];
           return typeof id === "string" && id.length > 0 ? id : null;

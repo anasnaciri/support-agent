@@ -78,12 +78,12 @@ export function ApprovalDetailPage() {
           </span>
           <span>·</span>
           <span>
-            case:{" "}
+            ticket:{" "}
             <Link
-              href={`/cases/${row.caseId}`}
+              href={`/tickets/${row.ticketId}`}
               className="font-mono text-primary hover:underline"
             >
-              {row.caseId.slice(0, 8)}…
+              {row.ticketId.slice(0, 8)}…
             </Link>
           </span>
         </div>

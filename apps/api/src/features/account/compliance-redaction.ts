@@ -7,7 +7,7 @@ import {
   DbClient,
   approvals,
   auditLog,
-  cases,
+  tickets,
   connectorConnections,
   tenants,
 } from "@support-agent/db";
@@ -22,16 +22,16 @@ import {
 //
 // Order matters because of FK constraints:
 //   tenants ← connector_connections (ON DELETE CASCADE)
-//   tenants ← cases (NO CASCADE) ← state_transitions (CASCADE), approvals
+//   tenants ← tickets (NO CASCADE) ← state_transitions (CASCADE), approvals
 //   audit_log has tenant_id but NO FK — we delete explicitly
 //
-// So for shop-wide redact: approvals → cases → audit_log → (connector
+// So for shop-wide redact: approvals → tickets → audit_log → (connector
 // rows cascade when we drop the tenant). For per-customer redact we
-// scope by case id since the customer matches at the case-context layer.
+// scope by ticket id since the customer matches at the ticket-context layer.
 
 export interface RedactCustomerResult {
   readonly tenantId: string;
-  readonly matchedCaseIds: ReadonlyArray<string>;
+  readonly matchedTicketIds: ReadonlyArray<string>;
 }
 
 export interface RedactCustomerInput {
@@ -42,13 +42,13 @@ export interface RedactCustomerInput {
 }
 
 /**
- * Delete every case (and its transitions, approvals, audit rows) for a
+ * Delete every ticket (and its transitions, approvals, audit rows) for a
  * given tenant that matches the customer identified in the redact
  * webhook. Match strategy: either `context.customerEmail` (stamped at
- * case-create time by the runtime) or `context.shopifyCustomerId`
- * (stamped when Shopify's searchByEmail succeeded). A case missing
+ * ticket-create time by the runtime) or `context.shopifyCustomerId`
+ * (stamped when Shopify's searchByEmail succeeded). A ticket missing
  * both — e.g. created before the customer-ID slice landed — won't be
- * caught and would need a manual sweep; surface that via `matchedCaseIds`
+ * caught and would need a manual sweep; surface that via `matchedTicketIds`
  * so the caller can log it.
  */
 export const redactCustomer = (
@@ -59,7 +59,7 @@ export const redactCustomer = (
     const email = input.email;
     const shopifyId = input.shopifyCustomerNumericId;
     if (!email && shopifyId === null) {
-      return { tenantId: input.tenantId, matchedCaseIds: [] };
+      return { tenantId: input.tenantId, matchedTicketIds: [] };
     }
 
     const matched = yield* Effect.tryPromise({
@@ -69,7 +69,7 @@ export const redactCustomer = (
           const conditions = [];
           if (email) {
             conditions.push(
-              sql`${cases.context}->>'customerEmail' = ${email}`,
+              sql`${tickets.context}->>'customerEmail' = ${email}`,
             );
           }
           if (shopifyId !== null) {
@@ -78,10 +78,10 @@ export const redactCustomer = (
             // the raw number-as-string.
             const gid = `gid://shopify/Customer/${shopifyId}`;
             conditions.push(
-              sql`${cases.context}->>'shopifyCustomerId' = ${gid}`,
+              sql`${tickets.context}->>'shopifyCustomerId' = ${gid}`,
             );
             conditions.push(
-              sql`${cases.context}->>'shopifyCustomerId' = ${String(shopifyId)}`,
+              sql`${tickets.context}->>'shopifyCustomerId' = ${String(shopifyId)}`,
             );
           }
           const matchClause = conditions.reduce<
@@ -91,24 +91,24 @@ export const redactCustomer = (
           if (!matchClause) return [] as string[];
 
           const found = await tx
-            .select({ id: cases.id })
-            .from(cases)
-            .where(and(eq(cases.tenantId, input.tenantId), matchClause));
+            .select({ id: tickets.id })
+            .from(tickets)
+            .where(and(eq(tickets.tenantId, input.tenantId), matchClause));
           const ids = found.map((r) => r.id);
           if (ids.length === 0) return ids;
 
-          // Order: approvals (FK to cases) → audit_log (no FK cascade) →
-          // cases (CASCADE drops state_transitions).
-          await tx.delete(approvals).where(inArray(approvals.caseId, ids));
-          await tx.delete(auditLog).where(inArray(auditLog.caseId, ids));
-          await tx.delete(cases).where(inArray(cases.id, ids));
+          // Order: approvals (FK to tickets) → audit_log (no FK cascade) →
+          // tickets (CASCADE drops state_transitions).
+          await tx.delete(approvals).where(inArray(approvals.ticketId, ids));
+          await tx.delete(auditLog).where(inArray(auditLog.ticketId, ids));
+          await tx.delete(tickets).where(inArray(tickets.id, ids));
           return ids;
         }),
       catch: (cause) =>
         new Error(`redactCustomer failed: ${String(cause)}`),
     });
 
-    return { tenantId: input.tenantId, matchedCaseIds: matched };
+    return { tenantId: input.tenantId, matchedTicketIds: matched };
   });
 
 // ============================================================
@@ -140,7 +140,7 @@ export const recordDataRequest = (
       try: async () => {
         await db.insert(auditLog).values({
           tenantId: input.tenantId,
-          caseId: null,
+          ticketId: null,
           actorType: "system",
           actorId: "shopify-compliance",
           action: "compliance.data_request",
@@ -184,7 +184,7 @@ export interface QueueRedactionResult {
 
 const SAFE_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 
-/** Postgres "relation/schema doesn't exist" — the dev case to tolerate. */
+/** Postgres "relation/schema doesn't exist" — the dev ticket to tolerate. */
 const isMissingRelation = (cause: unknown): boolean => {
   let current: unknown = cause;
   for (let depth = 0; depth < 5 && current; depth += 1) {
@@ -237,7 +237,7 @@ export const redactTenantQueueJobs = (
 
 export interface RedactShopResult {
   readonly tenantId: string;
-  readonly deletedCases: number;
+  readonly deletedTickets: number;
   readonly deletedAuditRows: number;
   readonly deletedConnectorRows: number;
   /** `true` if the tenant row itself was deleted. */
@@ -267,7 +267,7 @@ export interface RedactShopAdminAudit {
  *
  * We delete the tenant row last so the FK cascades fire cleanly on
  * `connector_connections` (defined ON DELETE CASCADE). Other tables
- * (cases, approvals, audit_log) reference `tenant_id` without cascade,
+ * (tickets, approvals, audit_log) reference `tenant_id` without cascade,
  * so they go first.
  *
  * When `adminAudit` is provided, a surviving `admin_audit_log` row is written
@@ -299,13 +299,13 @@ export const redactShop = (
                 )[0]?.count ?? 0,
               )
             : 0;
-          // 1. approvals (FK to cases AND tenants; nuke by tenant)
+          // 1. approvals (FK to tickets AND tenants; nuke by tenant)
           await tx.delete(approvals).where(eq(approvals.tenantId, tenantId));
-          // 2. cases (cascades to case_state_transitions)
-          const deletedCases = await tx
-            .delete(cases)
-            .where(eq(cases.tenantId, tenantId))
-            .returning({ id: cases.id });
+          // 2. tickets (cascades to ticket_state_transitions)
+          const deletedTickets = await tx
+            .delete(tickets)
+            .where(eq(tickets.tenantId, tenantId))
+            .returning({ id: tickets.id });
           // 3. audit_log — no FK, delete by tenant_id
           const deletedAudit = await tx
             .delete(auditLog)
@@ -340,7 +340,7 @@ export const redactShop = (
               actor: adminAudit.actor,
               details: {
                 ...(adminAudit.details ?? {}),
-                deletedCases: deletedCases.length,
+                deletedTickets: deletedTickets.length,
                 deletedAuditRows: deletedAudit.length,
                 deletedConnectorRows: deletedConnectors.length,
                 tenantDeleted: deletedTenant.length > 0,
@@ -351,7 +351,7 @@ export const redactShop = (
           }
           return {
             tenantId,
-            deletedCases: deletedCases.length,
+            deletedTickets: deletedTickets.length,
             deletedAuditRows: deletedAudit.length,
             deletedConnectorRows: deletedConnectors.length,
             tenantDeleted: deletedTenant.length > 0,

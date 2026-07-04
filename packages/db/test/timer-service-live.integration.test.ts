@@ -2,10 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import { TimerService } from "@support-agent/services";
 import {
-  cases,
+  tickets,
   DbClientLive,
   makeDbClient,
   tenants,
@@ -30,10 +30,10 @@ describeIfDb("TimerServiceLive", () => {
 
   it("schedules, fires, and cancels timers", async () => {
     const tenantId = randomUUID();
-    const caseId = randomUUID();
+    const ticketId = randomUUID();
     await db.insert(tenants).values({ id: tenantId, name: "Timer Test" });
-    await db.insert(cases).values({
-      id: caseId,
+    await db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "waiting_for_customer",
@@ -46,12 +46,12 @@ describeIfDb("TimerServiceLive", () => {
           Effect.gen(function* () {
             const svc = yield* TimerService;
             const followUp = yield* svc.schedule({
-              caseId: CaseId(caseId),
+              ticketId: TicketId(ticketId),
               fireAt: new Date("2026-05-26T12:00:00.000Z"),
               reason: "follow_up",
             });
             yield* svc.schedule({
-              caseId: CaseId(caseId),
+              ticketId: TicketId(ticketId),
               fireAt: new Date("2026-05-26T13:00:00.000Z"),
               reason: "sla",
             });
@@ -69,7 +69,7 @@ describeIfDb("TimerServiceLive", () => {
             const afterMark = yield* svc.listDue(
               new Date("2026-05-26T12:01:00.000Z"),
             );
-            const cancelled = yield* svc.cancelOpenForCase(CaseId(caseId));
+            const cancelled = yield* svc.cancelOpenForTicket(TicketId(ticketId));
             return { followUp, due, stillDue, afterMark, cancelled };
           }),
           layer,
@@ -81,8 +81,8 @@ describeIfDb("TimerServiceLive", () => {
       expect(out.afterMark).toEqual([]);
       expect(out.cancelled).toBe(1);
     } finally {
-      await db.delete(timers).where(eq(timers.caseId, caseId));
-      await db.delete(cases).where(eq(cases.id, caseId));
+      await db.delete(timers).where(eq(timers.ticketId, ticketId));
+      await db.delete(tickets).where(eq(tickets.id, ticketId));
       await db.delete(tenants).where(eq(tenants.id, tenantId));
     }
   });

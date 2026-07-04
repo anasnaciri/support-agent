@@ -31,7 +31,7 @@ flowchart TD
     L0 -->|"loop exhausted"| MTE["max_turns_exceeded, human_takeover"]
 
     E1["E1: keyless side-effect tools (update_status, update_context, merchant.notify) NOT deduped on replay"]:::hi
-    E2["E2: NO check that a reply was actually sent, case can resolve in silence"]:::hi
+    E2["E2: NO check that a reply was actually sent, ticket can resolve in silence"]:::hi
     E4["E4: hung provider pins tick + advisory lock"]:::med
     E7["E7: unclassified deterministic 400 burns 5 retries"]:::med
     E13["E13: this decision dead-ends, but the supplier.escalate TOOL works"]:::lo

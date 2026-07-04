@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { cases, makeDbClient, tenants } from "@support-agent/db";
+import { tickets, makeDbClient, tenants } from "@support-agent/db";
 import { startServer, type ServerHandle } from "../../../server.js";
 import {
   TEST_DASHBOARD_VERIFIER,
@@ -68,14 +68,14 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
         createdAt: new Date("2026-01-01T00:00:00Z"),
       },
     ]);
-    await raw.db.insert(cases).values([
+    await raw.db.insert(tickets).values([
       {
         id: randomUUID(),
         tenantId: defaultWs,
         channel: "email",
         status: "in_progress",
         currentAgentId: "support-triage",
-        subject: "default-ws-case",
+        subject: "default-ws-ticket",
       },
       {
         id: randomUUID(),
@@ -83,7 +83,7 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
         channel: "email",
         status: "in_progress",
         currentAgentId: "support-triage",
-        subject: "second-ws-case",
+        subject: "second-ws-ticket",
       },
     ]);
     handle = await startServer(cfg, {
@@ -96,14 +96,14 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
     if (!raw) return;
     if (handle) await handle.close();
     for (const id of [defaultWs, secondWs, foreignWs]) {
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
   });
 
-  const listCases = async (headers: Record<string, string>) => {
-    const res = await fetch(`${baseUrl}/dashboard/cases`, {
+  const listTickets = async (headers: Record<string, string>) => {
+    const res = await fetch(`${baseUrl}/dashboard/tickets`, {
       headers: dashboardAuthHeaders(orgId, headers),
     });
     return res;
@@ -111,27 +111,27 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
 
   it("scopes reads to the workspace named by x-workspace-id", async () => {
     if (!raw) return;
-    const res = await listCases({ "x-workspace-id": secondWs });
+    const res = await listTickets({ "x-workspace-id": secondWs });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       rows: ReadonlyArray<{ subject: string | null }>;
     };
-    expect(body.rows.map((c) => c.subject)).toEqual(["second-ws-case"]);
+    expect(body.rows.map((c) => c.subject)).toEqual(["second-ws-ticket"]);
   });
 
   it("falls back to the DEFAULT (oldest) workspace without the header", async () => {
     if (!raw) return;
-    const res = await listCases({});
+    const res = await listTickets({});
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       rows: ReadonlyArray<{ subject: string | null }>;
     };
-    expect(body.rows.map((c) => c.subject)).toEqual(["default-ws-case"]);
+    expect(body.rows.map((c) => c.subject)).toEqual(["default-ws-ticket"]);
   });
 
   it("404s a workspace owned by ANOTHER org (no existence leak, no onboarding bounce)", async () => {
     if (!raw) return;
-    const res = await listCases({ "x-workspace-id": foreignWs });
+    const res = await listTickets({ "x-workspace-id": foreignWs });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("workspace_not_found");
@@ -139,13 +139,13 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
 
   it("404s an unknown (well-formed) workspace id", async () => {
     if (!raw) return;
-    const res = await listCases({ "x-workspace-id": randomUUID() });
+    const res = await listTickets({ "x-workspace-id": randomUUID() });
     expect(res.status).toBe(404);
   });
 
   it("400s a malformed workspace id instead of a Postgres cast 500", async () => {
     if (!raw) return;
-    const res = await listCases({ "x-workspace-id": "not-a-uuid" });
+    const res = await listTickets({ "x-workspace-id": "not-a-uuid" });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("invalid_workspace_id");
@@ -153,7 +153,7 @@ describeIfDb("apps/api — x-workspace-id resolution (integration)", () => {
 
   it("keeps the 403 onboarding signal for an org with zero workspaces", async () => {
     if (!raw) return;
-    const res = await fetch(`${baseUrl}/dashboard/cases`, {
+    const res = await fetch(`${baseUrl}/dashboard/tickets`, {
       headers: dashboardAuthHeaders("org_with_no_workspaces"),
     });
     expect(res.status).toBe(403);

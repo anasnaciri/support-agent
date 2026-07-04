@@ -5,35 +5,35 @@ import { handleDashboardAccountDelete } from "../admin/account-handlers.js";
 import {
   handleDashboardAgentOverrides,
   handleDashboardApprovalAction,
-  handleDashboardCaseApprovalsBundle,
+  handleDashboardTicketApprovalsBundle,
   handleDashboardApprovalDetail,
   handleDashboardApprovals,
   handleDashboardAudit,
-  handleDashboardCaseConversationThread,
-  handleDashboardCaseDetail,
-  handleDashboardCaseEvents,
-  handleDashboardCaseReply,
-  handleDashboardEditCaseDetails,
+  handleDashboardTicketConversationThread,
+  handleDashboardTicketDetail,
+  handleDashboardTicketEvents,
+  handleDashboardTicketReply,
+  handleDashboardEditTicketDetails,
   handleDashboardEditShippingAddress,
   handleDashboardEscalateSupplier,
   handleDashboardIssueRefund,
   handleDashboardRefundContext,
   handleDashboardRephrase,
-  handleDashboardCaseShopify,
-  handleDashboardCases,
-  handleDashboardCaseTracking,
+  handleDashboardTicketShopify,
+  handleDashboardTickets,
+  handleDashboardTicketTracking,
   handleDashboardConnections,
   handleDashboardResendApproval,
-  handleDashboardResolveCase,
+  handleDashboardResolveTicket,
   handleDashboardResume,
   handleDashboardRetry,
   handleDashboardRetrySend,
-  handleDashboardSetCaseStatus,
+  handleDashboardSetTicketStatus,
   handleDashboardShopifyApp,
   handleDashboardTakeover,
   handleDashboardToday,
   handleDashboardUsage,
-} from "./case-handlers.js";
+} from "./ticket-handlers.js";
 import {
   handleDashboardAgentModelClear,
   handleDashboardAgentModelSet,
@@ -94,37 +94,42 @@ export const registerDashboardRoutes = (
   const { dashboardGet, dashboardPost } = makeDashboardRoutes(app, ctx);
 
   // ---- Dashboard read API ----
-  dashboardGet("/dashboard/today", "Today-view rollup", handleDashboardToday, "cases.view");
-  dashboardGet("/dashboard/cases", "Paginated cases list", handleDashboardCases, "cases.view");
+  dashboardGet("/dashboard/today", "Today-view rollup", handleDashboardToday, "tickets.view");
   dashboardGet(
-    "/dashboard/cases/:id",
-    "Case detail with timeline + approvals",
-    handleDashboardCaseDetail,
-    "cases.view",
+    "/dashboard/tickets",
+    "Paginated tickets list",
+    handleDashboardTickets,
+    "tickets.view",
   );
   dashboardGet(
-    "/dashboard/cases/:id/conversation-thread",
-    "Live customer email thread for a case",
-    handleDashboardCaseConversationThread,
-    "cases.view",
+    "/dashboard/tickets/:id",
+    "Ticket detail with timeline + approvals",
+    handleDashboardTicketDetail,
+    "tickets.view",
   );
   dashboardGet(
-    "/dashboard/cases/:id/events",
-    "New audit events for a case since ?since=",
-    handleDashboardCaseEvents,
-    "cases.view",
+    "/dashboard/tickets/:id/conversation-thread",
+    "Live customer email thread for a ticket",
+    handleDashboardTicketConversationThread,
+    "tickets.view",
   );
   dashboardGet(
-    "/dashboard/cases/:id/shopify",
-    "Case-detail Shopify customer/order panels",
-    handleDashboardCaseShopify,
-    "cases.view",
+    "/dashboard/tickets/:id/events",
+    "New audit events for a ticket since ?since=",
+    handleDashboardTicketEvents,
+    "tickets.view",
   );
   dashboardGet(
-    "/dashboard/cases/:id/tracking",
-    "Live carrier tracking for the case's shipment",
-    handleDashboardCaseTracking,
-    "cases.view",
+    "/dashboard/tickets/:id/shopify",
+    "Ticket-detail Shopify customer/order panels",
+    handleDashboardTicketShopify,
+    "tickets.view",
+  );
+  dashboardGet(
+    "/dashboard/tickets/:id/tracking",
+    "Live carrier tracking for the ticket's shipment",
+    handleDashboardTicketTracking,
+    "tickets.view",
   );
   dashboardGet(
     "/dashboard/approvals",
@@ -138,7 +143,7 @@ export const registerDashboardRoutes = (
     handleDashboardApprovalDetail,
     "approvals.view",
   );
-  dashboardGet("/dashboard/audit", "Cross-case audit log", handleDashboardAudit, "audit.view");
+  dashboardGet("/dashboard/audit", "Cross-ticket audit log", handleDashboardAudit, "audit.view");
   dashboardGet(
     "/dashboard/shopify-app",
     "Shopify connect gate (pilot provisioning status)",
@@ -245,94 +250,94 @@ export const registerDashboardRoutes = (
     "approvals.decide",
   );
   dashboardPost(
-    "/dashboard/cases/:id/approvals/approve",
-    "Approve the whole pending bundle for a case (manager)",
-    handleDashboardCaseApprovalsBundle("approve"),
+    "/dashboard/tickets/:id/approvals/approve",
+    "Approve the whole pending bundle for a ticket (manager)",
+    handleDashboardTicketApprovalsBundle("approve"),
     "approvals.decide",
   );
   dashboardPost(
-    "/dashboard/cases/:id/approvals/reject",
-    "Reject the whole pending bundle for a case (manager)",
-    handleDashboardCaseApprovalsBundle("reject"),
+    "/dashboard/tickets/:id/approvals/reject",
+    "Reject the whole pending bundle for a ticket (manager)",
+    handleDashboardTicketApprovalsBundle("reject"),
     "approvals.decide",
   );
   dashboardPost(
-    "/dashboard/cases/:id/takeover",
-    "Take over a case (manager)",
+    "/dashboard/tickets/:id/takeover",
+    "Take over a ticket (manager)",
     handleDashboardTakeover,
-    "cases.takeover",
+    "tickets.takeover",
   );
   dashboardPost(
-    "/dashboard/cases/:id/resume",
-    "Hand a taken-over case back to the agent (manager)",
+    "/dashboard/tickets/:id/resume",
+    "Hand a taken-over ticket back to the agent (manager)",
     handleDashboardResume,
-    "cases.resume",
+    "tickets.resume",
   );
   dashboardPost(
-    "/dashboard/cases/:id/status",
-    "Manually set a case's status (manager)",
-    handleDashboardSetCaseStatus,
-    "cases.set_status",
+    "/dashboard/tickets/:id/status",
+    "Manually set a ticket's status (manager)",
+    handleDashboardSetTicketStatus,
+    "tickets.set_status",
   );
   dashboardPost(
-    "/dashboard/cases/:id/resolve",
-    "Resolve a case by hand, including one under takeover (manager)",
-    handleDashboardResolveCase,
-    "cases.set_status",
+    "/dashboard/tickets/:id/resolve",
+    "Resolve a ticket by hand, including one under takeover (manager)",
+    handleDashboardResolveTicket,
+    "tickets.set_status",
   );
   dashboardPost(
-    "/dashboard/cases/:id/details",
-    "Hand-correct a case's customer / order the agent couldn't extract (manager)",
-    handleDashboardEditCaseDetails,
-    "cases.set_status",
+    "/dashboard/tickets/:id/details",
+    "Hand-correct a ticket's customer / order the agent couldn't extract (manager)",
+    handleDashboardEditTicketDetails,
+    "tickets.set_status",
   );
   dashboardPost(
-    "/dashboard/cases/:id/shipping-address",
+    "/dashboard/tickets/:id/shipping-address",
     "Fix the order's shipping address before fulfillment (manager)",
     handleDashboardEditShippingAddress,
-    // A store write, not a case-state correction — its own grant, like
+    // A store write, not a ticket-state correction — its own grant, like
     // refunds.issue.
     "orders.edit",
   );
   dashboardPost(
-    "/dashboard/cases/:id/escalate-supplier",
-    "Escalate a case to the workspace's supplier by hand (manager)",
+    "/dashboard/tickets/:id/escalate-supplier",
+    "Escalate a ticket to the workspace's supplier by hand (manager)",
     handleDashboardEscalateSupplier,
-    "cases.set_status",
+    "tickets.set_status",
   );
   dashboardPost(
-    "/dashboard/cases/:id/retry",
-    "Hand a taken-over case back and have the agent retry now (manager)",
+    "/dashboard/tickets/:id/retry",
+    "Hand a taken-over ticket back and have the agent retry now (manager)",
     handleDashboardRetry,
-    "cases.retry",
+    "tickets.retry",
   );
   dashboardPost(
-    "/dashboard/cases/:id/retry-send",
+    "/dashboard/tickets/:id/retry-send",
     "Re-send the drafted customer reply whose delivery failed (manager)",
     handleDashboardRetrySend,
-    "cases.retry",
+    "tickets.retry",
   );
   dashboardPost(
-    "/dashboard/cases/:id/resend-approval",
+    "/dashboard/tickets/:id/resend-approval",
     "Resend an approved reply that was never sent (skipped on takeover)",
     handleDashboardResendApproval,
-    "cases.retry",
+    "tickets.retry",
   );
   dashboardPost(
-    "/dashboard/cases/:id/reply",
-    "Send a human-drafted customer reply while driving a taken-over case",
-    handleDashboardCaseReply,
-    "cases.reply",
+    "/dashboard/tickets/:id/reply",
+    "Send a human-drafted customer reply while driving a taken-over ticket",
+    handleDashboardTicketReply,
+    "tickets.reply",
   );
   dashboardGet(
-    "/dashboard/cases/:id/refund-context",
-    "Refundable line items + pricing for the case's order (refund modal)",
+    "/dashboard/tickets/:id/refund-context",
+    "Refundable line items + pricing for the ticket's order (refund modal)",
     handleDashboardRefundContext,
     "refunds.issue",
   );
   dashboardPost(
-    "/dashboard/cases/:id/refund",
-    "Issue a refund on a case's order (manager)",
+    "/dashboard/tickets/:id/refund",
+    "Issue a refund on a ticket's order (manager)",
     handleDashboardIssueRefund,
     "refunds.issue",
   );
@@ -340,7 +345,7 @@ export const registerDashboardRoutes = (
     "/dashboard/rephrase",
     "AI-polish a reply draft (one-shot, spent against the tenant's LLM key)",
     handleDashboardRephrase,
-    "cases.reply",
+    "tickets.reply",
   );
   // Org-scoped (no resolved workspace) — these use authenticateDashboardOrg and
   // remain reachable by any org member; workspace/account management is an
@@ -493,7 +498,7 @@ export const registerDashboardRoutes = (
   );
   dashboardPost(
     "/dashboard/resolution-agent",
-    "Toggle the resolution agent for new cases",
+    "Toggle the resolution agent for new tickets",
     handleDashboardSetResolutionAgentEnabled,
     "settings.agents",
   );

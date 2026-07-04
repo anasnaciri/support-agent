@@ -361,7 +361,7 @@ export const registerDashboardAuthRoutes = (
       // Already org-scoped (a retry after tenant-create failed) → reuse, no re-mint.
       organizationId = verified.claims.organizationId;
     } else if (verified.reason === "missing_claims") {
-      // Validly-signed token that carries no org → the genuine provision case.
+      // Validly-signed token that carries no org → the genuine provision ticket.
       // Any OTHER failure (invalid / expired / dead) is NOT a signal to create an
       // org — 401 so the SPA re-syncs the session (which refreshes) and retries.
       const admin = getWorkosOrgAdminDirectory(req);

@@ -11,13 +11,13 @@ import {
 } from "../src/workflow-consumer.js";
 
 // The event body is irrelevant here — the test AgentRuntime ignores it — but
-// approval.approved is the event that stranded cases in the prod incident this
+// approval.approved is the event that stranded tickets in the prod incident this
 // module fixes (a serial consumer starved these behind slow message.received
 // runs), so it is the fitting sample.
 const approvalEvent: DomainEvent = {
   type: "approval.approved",
   approvalId: "appr-1" as never,
-  caseId: "case-1" as never,
+  ticketId: "ticket-1" as never,
   managerId: "mgr-1" as never,
 };
 
@@ -116,7 +116,7 @@ describe("processWorkflowEvent", () => {
 });
 
 describe("registerWorkflowConsumer", () => {
-  it("registers ONE work() with localConcurrency so distinct cases run in parallel", async () => {
+  it("registers ONE work() with localConcurrency so distinct tickets run in parallel", async () => {
     const calls: Array<{ name: string; options: unknown }> = [];
     const fakeBoss = {
       work: async (name: string, options: unknown) => {

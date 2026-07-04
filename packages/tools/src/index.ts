@@ -1,6 +1,6 @@
 import type { AnyTool } from "@support-agent/agent-core";
-import { caseUpdateStatus } from "./case/update-status.js";
-import { caseUpdateContext } from "./case/update-context.js";
+import { ticketUpdateStatus } from "./ticket/update-status.js";
+import { ticketUpdateContext } from "./ticket/update-context.js";
 import { shopifyGetOrder } from "./shopify/get-order.js";
 import { shopifyFindCustomerOrder } from "./shopify/find-customer-order.js";
 import { shopifyGetCustomer } from "./shopify/get-customer.js";
@@ -23,8 +23,8 @@ import { trackingLookup } from "./tracking/lookup.js";
 import { knowledgeSearch } from "./knowledge/search.js";
 import { merchantNotify } from "./merchant/notify.js";
 
-export * from "./case/update-status.js";
-export * from "./case/update-context.js";
+export * from "./ticket/update-status.js";
+export * from "./ticket/update-context.js";
 export * from "./shopify/get-order.js";
 export * from "./shopify/find-customer-order.js";
 export * from "./shopify/get-customer.js";
@@ -54,7 +54,7 @@ export * from "./merchant/notify.js";
  * surface stay in sync. Adding a new tool means adding it here exactly
  * once.
  *
- * Order groups tools by domain for readable rendering: case → agent
+ * Order groups tools by domain for readable rendering: ticket → agent
  * (runtime-control) → conversation → shopify.
  *
  * The per-element `as AnyTool` cast widens `Tool<I, O>` to
@@ -64,8 +64,8 @@ export * from "./merchant/notify.js";
  * the list moved here.
  */
 export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
-  caseUpdateContext as AnyTool,
-  caseUpdateStatus as AnyTool,
+  ticketUpdateContext as AnyTool,
+  ticketUpdateStatus as AnyTool,
   agentHandoff as AnyTool,
   conversationFetchThread as AnyTool,
   conversationReply as AnyTool,
@@ -94,7 +94,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
  * plumbing, not capabilities a merchant picks:
  *   - `agent.handoff` is implicit (the runtime grants it when the agent has
  *     handoff targets), never chosen directly.
- *   - `case.update_context` / `case.update_status` are case-bookkeeping the
+ *   - `ticket.update_context` / `ticket.update_status` are ticket-bookkeeping the
  *     triage flow + runtime own; a custom specialist records nothing through
  *     them in v1.
  * Everything else (read tools, customer messaging, refunds) is assignable and
@@ -103,8 +103,8 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
  */
 export const INTERNAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "agent.handoff",
-  "case.update_context",
-  "case.update_status",
+  "ticket.update_context",
+  "ticket.update_status",
 ]);
 
 /** Tools a merchant may assign to a custom agent (ALL_TOOLS minus internal). */

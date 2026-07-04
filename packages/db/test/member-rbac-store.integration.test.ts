@@ -96,9 +96,9 @@ describeIfDb("member-rbac-store", () => {
     });
 
     const setRes = await setRolePermissions(db, tenantId, roleId, [
-      "cases.view",
-      "cases.reply",
-      "cases.reply", // dup collapses
+      "tickets.view",
+      "tickets.reply",
+      "tickets.reply", // dup collapses
     ]);
     expect(setRes.ok).toBe(true);
 
@@ -113,7 +113,7 @@ describeIfDb("member-rbac-store", () => {
 
     const access = await getMemberAccess(db, tenantId, member);
     expect(access.isOwner).toBe(false);
-    expect([...access.grantedIds].sort()).toEqual(["cases.reply", "cases.view"]);
+    expect([...access.grantedIds].sort()).toEqual(["tickets.reply", "tickets.view"]);
 
     // Reassign to a different role.
     const other = await createRole(db, tenantId, "Viewer");

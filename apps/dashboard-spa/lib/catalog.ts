@@ -36,7 +36,7 @@ export const effectivePermission = (
  * Every catalog tool a merchant can configure (those carrying a
  * `tenantControl`), in catalog order. The agent-agnostic counterpart of
  * `tenantConfigurableActions` — the permissions matrix builds its rows from
- * this, so internal plumbing tools (handoff, lookups, case bookkeeping)
+ * this, so internal plumbing tools (handoff, lookups, ticket bookkeeping)
  * never reach that page either.
  */
 export const merchantConfigurableTools = (
@@ -57,7 +57,7 @@ export interface ConfigurableAction {
 /**
  * The agent's tools that a tenant may configure (those carrying a
  * `tenantControl`), in binding order. Internal plumbing tools — lookups,
- * handoff, case bookkeeping — are filtered out, so they never reach the UI.
+ * handoff, ticket bookkeeping — are filtered out, so they never reach the UI.
  */
 export const tenantConfigurableActions = (
   agent: AgentDto,
@@ -131,8 +131,8 @@ const humanizeToolName = (name: string): string => {
 // only shapes the custom-agent picker, so a drift here is cosmetic, not a hole.
 const INTERNAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "agent.handoff",
-  "case.update_context",
-  "case.update_status",
+  "ticket.update_context",
+  "ticket.update_status",
 ]);
 
 /** Tools a merchant may assign to a custom agent (catalog minus internal). */

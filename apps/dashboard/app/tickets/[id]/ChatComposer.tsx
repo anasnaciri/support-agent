@@ -1,0 +1,278 @@
+"use client";
+
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
+import type { ModelsResponse } from "@support-agent/dashboard-contracts";
+
+import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+
+import { approveAction, rejectAction } from "../../approvals/[id]/actions";
+import {
+  rephraseAction,
+  sendReplyAction,
+  setRephraseModelAction,
+} from "./actions";
+import {
+  activeApprovalId,
+  resyncDraft,
+  type ComposerMode,
+} from "./composer-draft-sync";
+
+export type { ComposerMode };
+
+interface ChatComposerProps {
+  readonly ticketId: string;
+  readonly customerEmail: string | null;
+  /** Tenant model catalog + current rephrase model; null hides the picker. */
+  readonly models: ModelsResponse | null;
+  readonly mode: ComposerMode;
+}
+
+// The composer input grows with its content (so a long email draft is readable
+// at a glance) but is capped — past the cap it scrolls instead of pushing the
+// send controls off-screen.
+const COMPOSER_MIN_HEIGHT = 64;
+const COMPOSER_MAX_HEIGHT = 260;
+
+const rephraseErrorText = (kind: string): string => {
+  if (kind === "no_llm") return "Connect an AI provider in settings to rephrase.";
+  if (kind === "empty_input") return "Write a draft first, then rephrase it.";
+  return "Couldn't rephrase the draft. Please try again.";
+};
+
+function RephraseModelPicker({
+  entries,
+  value,
+  onSelect,
+  disabled,
+}: {
+  readonly entries: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly value: string | null;
+  readonly onSelect: (id: string) => void;
+  readonly disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = value ? entries.find((e) => e.id === value) : undefined;
+  const label = current?.name ?? value ?? "Default model";
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+        title="Model used by Rephrase with AI"
+      >
+        <span className="max-w-[12rem] truncate">{label}</span>
+        <ChevronDown className="size-3.5 shrink-0" />
+      </button>
+      {open ? (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div className="absolute bottom-full left-0 z-20 mb-1 max-h-64 w-64 overflow-auto rounded-md border border-border bg-card p-1 shadow-md">
+            {entries.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => {
+                  onSelect(e.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted",
+                  e.id === value ? "font-medium" : undefined,
+                )}
+              >
+                <span className="truncate">{e.name}</span>
+                {e.id === value ? (
+                  <Check className="size-3.5 shrink-0 text-primary" />
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The bottom-of-chat composer. One control that adapts to who owns the ticket:
+ * it carries the drafted reply for an approval (Approve/Reject), a blank reply
+ * for a taken-over ticket (Send), or a read-only hint while the agent is working.
+ * The send/approve/reject controls are icon-only. "Rephrase with AI" rewrites
+ * the current text in place against the tenant's own LLM credential.
+ */
+export function ChatComposer({
+  ticketId,
+  customerEmail,
+  models,
+  mode,
+}: ChatComposerProps) {
+  const [text, setText] = useState(
+    mode.kind === "approval" ? mode.draftBody : "",
+  );
+  // Which approval draft the editor currently holds. The composer stays mounted
+  // across live refreshes (TicketLiveBoundary's router.refresh), so `useState`
+  // won't re-init when a draft arrives — we reload it here instead, keyed on
+  // the approval id so a NEW draft repopulates the box but edits to the one
+  // under review are never clobbered. Adjusting state during render (rather than
+  // in an effect) avoids a flash of the empty/stale text.
+  const [loadedApprovalId, setLoadedApprovalId] = useState<string | null>(
+    activeApprovalId(mode),
+  );
+  const resync = resyncDraft(mode, loadedApprovalId);
+  if (resync) {
+    setText(resync.text);
+    setLoadedApprovalId(resync.loadedApprovalId);
+  }
+  const [error, setError] = useState<string | null>(null);
+  const [rephrasing, startRephrase] = useTransition();
+  const [, startSaveModel] = useTransition();
+  const [selectedModel, setSelectedModel] = useState<string | null>(
+    models?.rephraseModel ?? null,
+  );
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Resize to fit the content, clamped to [MIN, MAX]; scroll past the cap. Runs
+  // on every text change — typing, "Rephrase", and the initial approval draft.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(
+      Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT),
+      COMPOSER_MAX_HEIGHT,
+    );
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
+  }, [text]);
+
+  const empty = text.trim().length === 0;
+  const showPicker = Boolean(models?.connected && models.entries.length > 0);
+
+  const onRephrase = () => {
+    setError(null);
+    startRephrase(async () => {
+      const res = await rephraseAction(text);
+      if (res.kind === "rephrased" && typeof res.text === "string") {
+        setText(res.text);
+      } else {
+        setError(rephraseErrorText(res.kind));
+      }
+    });
+  };
+
+  const onPickModel = (id: string) => {
+    setSelectedModel(id);
+    startSaveModel(async () => {
+      await setRephraseModelAction(id);
+    });
+  };
+
+  if (mode.kind === "locked") {
+    return (
+      <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        {mode.message}
+      </div>
+    );
+  }
+
+  const placeholder =
+    mode.kind === "approval"
+      ? "Edit the drafted reply before approving…"
+      : customerEmail
+        ? `Write a reply to ${customerEmail}…`
+        : "Write a reply to the customer…";
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
+        <Textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={placeholder}
+          className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+        />
+        <div className="flex items-center justify-between gap-2 px-2 pb-2">
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onRephrase}
+              disabled={empty || rephrasing}
+              title="Rewrite your draft to be clearer and more professional"
+            >
+              <Sparkles aria-hidden />
+              {rephrasing ? "Rephrasing…" : "Rephrase"}
+            </Button>
+            {showPicker ? (
+              <RephraseModelPicker
+                entries={models!.entries}
+                value={selectedModel}
+                onSelect={onPickModel}
+                disabled={rephrasing}
+              />
+            ) : null}
+          </div>
+
+          {mode.kind === "approval" ? (
+            <div className="flex items-center gap-2">
+              <form action={rejectAction}>
+                <input type="hidden" name="approvalId" value={mode.approvalId} />
+                <input type="hidden" name="returnTo" value={mode.returnTo} />
+                <ConfirmSubmitButton
+                  size="icon"
+                  variant="secondary"
+                  className="rounded-full"
+                  aria-label="Reject this draft and take over"
+                  title="Reject this approval?"
+                  confirmLabel="Reject & take over"
+                  description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
+                >
+                  <X aria-hidden />
+                </ConfirmSubmitButton>
+              </form>
+              <form action={approveAction}>
+                <input type="hidden" name="approvalId" value={mode.approvalId} />
+                <input type="hidden" name="returnTo" value={mode.returnTo} />
+                <input type="hidden" name="bodyText" value={text} />
+                <SubmitButton
+                  size="icon"
+                  aria-label="Approve and send"
+                  title="Approve and send this reply to the customer"
+                >
+                  <SendHorizontal aria-hidden />
+                </SubmitButton>
+              </form>
+            </div>
+          ) : (
+            <form action={sendReplyAction}>
+              <input type="hidden" name="ticketId" value={ticketId} />
+              <input type="hidden" name="bodyText" value={text} />
+              <SubmitButton
+                size="icon"
+                disabled={empty}
+                aria-label="Send reply"
+                title="Send this reply to the customer on the existing email thread"
+              >
+                <SendHorizontal aria-hidden />
+              </SubmitButton>
+            </form>
+          )}
+        </div>
+      </div>
+      {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}
+    </div>
+  );
+}

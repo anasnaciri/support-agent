@@ -59,14 +59,14 @@ describe("resolveDashboardRedirect", () => {
 // legal-gated /sign-up; only the query is added.
 describe("buildSignUpRedirect", () => {
   it("appends an encoded returnTo for a real page", () => {
-    expect(buildSignUpRedirect("/cases/abc")).toBe(
-      `${SIGN_UP_PATH}?returnTo=%2Fcases%2Fabc`,
+    expect(buildSignUpRedirect("/tickets/abc")).toBe(
+      `${SIGN_UP_PATH}?returnTo=%2Ftickets%2Fabc`,
     );
   });
 
   it("encodes a path that carries its own query string", () => {
-    expect(buildSignUpRedirect("/cases?status=open")).toBe(
-      `${SIGN_UP_PATH}?returnTo=%2Fcases%3Fstatus%3Dopen`,
+    expect(buildSignUpRedirect("/tickets?status=open")).toBe(
+      `${SIGN_UP_PATH}?returnTo=%2Ftickets%3Fstatus%3Dopen`,
     );
   });
 
@@ -90,8 +90,8 @@ describe("buildSignUpRedirect", () => {
 // they were on so they land back there.
 describe("buildSignInRedirect", () => {
   it("appends an encoded returnTo for a real page", () => {
-    expect(buildSignInRedirect("/cases/abc")).toBe(
-      `${SIGN_IN_PATH}?returnTo=%2Fcases%2Fabc`,
+    expect(buildSignInRedirect("/tickets/abc")).toBe(
+      `${SIGN_IN_PATH}?returnTo=%2Ftickets%2Fabc`,
     );
   });
 

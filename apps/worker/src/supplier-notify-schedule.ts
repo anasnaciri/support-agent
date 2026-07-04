@@ -6,11 +6,11 @@
 // supplier email hasn't been sent. This cron relays unsent rows through
 // PlatformMailService and stamps notified_at on success, or bumps the attempt
 // counter on failure (so a transient outage is retried next pass and a hard
-// bounce eventually trips the cap). The case is durable before any email is
+// bounce eventually trips the cap). The ticket is durable before any email is
 // attempted, so delivery survives a process crash entirely.
 
 import { Effect } from "effect";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import {
   DbClient,
   listUnsentSupplierEscalations,
@@ -19,7 +19,7 @@ import {
   type UnsentSupplierEscalation,
 } from "@support-agent/db";
 import {
-  CaseLifecycleWriter,
+  TicketLifecycleWriter,
   PlatformMailService,
   type SendSupplierEscalationInput,
 } from "@support-agent/services";
@@ -42,9 +42,9 @@ export const escalateSupplierNotifyFailure = (input: {
   readonly error: string;
 }) =>
   Effect.gen(function* () {
-    const lifecycle = yield* CaseLifecycleWriter;
+    const lifecycle = yield* TicketLifecycleWriter;
     return yield* lifecycle.escalateToHuman({
-      caseId: CaseId(input.escalation.caseId),
+      ticketId: TicketId(input.escalation.ticketId),
       tenantId: TenantId(input.escalation.tenantId),
       actor: { type: "system", id: "supplier-notify" },
       reason: SUPPLIER_UNREACHABLE_FLAG,
@@ -96,7 +96,7 @@ export const fireSupplierNotificationsOnce = async (
       // ?w pins the workspace so a supplier serving several merchants lands on
       // the right one (their active workspace may be a different merchant).
       portalUrl: deps.portalBaseUrl
-        ? `${deps.portalBaseUrl}/supplier/cases/${esc.id}?w=${esc.tenantId}`
+        ? `${deps.portalBaseUrl}/supplier/tickets/${esc.id}?w=${esc.tenantId}`
         : null,
       problem: esc.problem,
       orderRef: esc.orderRef,
@@ -183,7 +183,7 @@ export const registerSupplierNotifySweep = async (
                     try {
                       await recordSupplierNotifyFailure(db, escalation.id, err);
                     } catch (cause) {
-                      // The case is already merchant-visible. Keep the pass alive;
+                      // The ticket is already merchant-visible. Keep the pass alive;
                       // the waiting_for_supplier filter prevents another send.
                       // eslint-disable-next-line no-console
                       console.error(

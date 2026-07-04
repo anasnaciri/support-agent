@@ -2,7 +2,7 @@
  * Perceptual image hashing utilities — pure, deterministic, dependency-free.
  *
  * Used by the damaged-product fraud guard: a difference-hash (dHash) of a
- * customer's photo is compared against hashes seen on other cases for the
+ * customer's photo is compared against hashes seen on other tickets for the
  * same tenant. Two encodings of the SAME photo produce near-identical
  * hashes (small Hamming distance), so a re-used "broken item" image across
  * multiple orders is detectable without storing the image itself.

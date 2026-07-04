@@ -66,11 +66,11 @@ export const workflowEventKey = (
     case "supplier.updated":
     case "timer.expired":
     case "manual.takeover":
-    case "case.resumed":
-      return `case:${event.caseId}`;
+    case "ticket.resumed":
+      return `ticket:${event.ticketId}`;
     case "approval.approved":
     case "approval.rejected":
-      return `case:${event.caseId}`;
+      return `ticket:${event.ticketId}`;
     case "tracking.changed":
       return `order:${event.orderId}`;
     case "ticket.created":

@@ -3,7 +3,7 @@ import {
   ApprovalId as makeApprovalId,
   type Approval,
   type ApprovalId,
-  type CaseId,
+  type TicketId,
   type DomainEvent,
   type TenantId,
   type UserId,
@@ -134,42 +134,42 @@ export const decisionToEvent = (
     ? {
         type: "approval.approved",
         approvalId: result.approval.id,
-        caseId: result.approval.caseId,
+        ticketId: result.approval.ticketId,
         managerId,
       }
     : {
         type: "approval.rejected",
         approvalId: result.approval.id,
-        caseId: result.approval.caseId,
+        ticketId: result.approval.ticketId,
         managerId,
       };
 };
 
 // ============================================================
-// Decide a whole case's pending approval bundle
+// Decide a whole ticket's pending approval bundle
 // ============================================================
 //
-// The autonomous resolution agent queues several gated actions on one case
-// (slice 4b). This decides EVERY pending row for the case, then returns ONE
+// The autonomous resolution agent queues several gated actions on one ticket
+// (slice 4b). This decides EVERY pending row for the ticket, then returns ONE
 // event to publish. That ordering is the contract the runtime's bundle resume
 // relies on (slice 4d): all rows must be `approved` BEFORE the event fires, or a
-// per-row event could resolve the case while siblings are still pending.
+// per-row event could resolve the ticket while siblings are still pending.
 //
 // Transport-agnostic (the caller does auth/authz + publishes the returned
 // event). `edits` carries manager-edited inputs keyed by approval id, honored
 // only on `approve` (e.g. an edited reply draft). The event anchors on the first
-// row actually decided; the runtime re-gathers the full bundle from the case.
+// row actually decided; the runtime re-gathers the full bundle from the ticket.
 
 export interface DecideApprovalBundleInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly action: "approve" | "reject";
   readonly managerId: UserId;
   readonly edits?: Readonly<Record<string, unknown>>;
 }
 
 export interface DecideApprovalBundleResult {
-  /** Pending rows found for the case at decision time. */
+  /** Pending rows found for the ticket at decision time. */
   readonly pendingCount: number;
   /** Rows that transitioned pending → approved/rejected on this call. */
   readonly decidedCount: number;
@@ -183,7 +183,7 @@ export const decideApprovalBundle = (
   Effect.gen(function* () {
     const svc = yield* ApprovalService;
     const all = yield* svc
-      .listForCase(input.tenantId, input.caseId)
+      .listForTicket(input.tenantId, input.ticketId)
       .pipe(Effect.catchAll(() => Effect.succeed([] as ReadonlyArray<Approval>)));
     const pending = all.filter((a) => a.status === "pending");
 

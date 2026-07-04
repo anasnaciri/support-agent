@@ -2,7 +2,7 @@ import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   ToolOutputInvalid,
   type ToolContext,
@@ -14,16 +14,16 @@ import {
 import { supplierEscalate } from "../src/index.js";
 
 const tenantId = TenantId("t1");
-const baseCtx = (caseId: string): ToolContext => ({
+const baseCtx = (ticketId: string): ToolContext => ({
   tenantId,
-  caseId: CaseId(caseId),
+  ticketId: TicketId(ticketId),
   agentId: AgentId("missing-package-agent"),
   callId: "call_1",
   attemptNumber: 1,
 });
 
 describe("supplier.escalate tool", () => {
-  it("forwards the privacy projection (+ tenant/case from ctx) and returns the escalation id", async () => {
+  it("forwards the privacy projection (+ tenant/ticket from ctx) and returns the escalation id", async () => {
     let captured: EscalateInput | undefined;
     const env = SupplierEscalationServiceTest({
       escalate: (input) => {
@@ -59,7 +59,7 @@ describe("supplier.escalate tool", () => {
     expect(result["supplierId"]).toBe("sup-9");
     expect(captured).toMatchObject({
       tenantId: "t1",
-      caseId: "c-1",
+      ticketId: "c-1",
       problem: "Order stuck 12 days past the delivery window",
       orderRef: "#1001",
       shipCity: "Berlin",

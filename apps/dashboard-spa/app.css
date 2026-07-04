@@ -117,7 +117,7 @@
   --info-foreground: #ffffff;
 
   /* Vivid hue ramp — brighter, more saturated cousins of the status colors.
-     Reserved for the bright status tags on cases / audit / approvals so the
+     Reserved for the bright status tags on tickets / audit / approvals so the
      colors read with more punch and contrast than the calmer base tints. */
   --success-vivid: #07a651;
   --warning-vivid: #eab308;
@@ -317,7 +317,7 @@
   border-left-color: #e4e4e4;
 }
 
-/* Thin, tone-matched scrollbars for the case view's scroll panes — the chat
+/* Thin, tone-matched scrollbars for the ticket view's scroll panes — the chat
    transcript, the composer overflow, and the details column. Scoped to an
    opt-in class so the app's default scrollbars are untouched. */
 .thin-scrollbar {

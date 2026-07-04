@@ -32,7 +32,7 @@ import {
 //
 // Anthropic's API enforces a tool-name regex `^[a-zA-Z0-9_-]{1,128}$` —
 // dots are rejected. Our tool names use dotted namespacing
-// (`case.update_context`, `shopify.get_order`, etc.) which works on every
+// (`ticket.update_context`, `shopify.get_order`, etc.) which works on every
 // other provider. To support Anthropic without renaming every tool
 // globally, we sanitize dots → underscores at the LLM provider boundary
 // (on tool schemas going out + tool-call references in conversation

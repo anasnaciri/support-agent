@@ -4,7 +4,7 @@ import {
   PAUSE_AFTER_FAILURES,
   isPaused,
   nextFailureCount,
-} from "../app/cases/[id]/live-status";
+} from "../app/tickets/[id]/live-status";
 
 // U11: a single blip keeps the quiet amber dot, but after N consecutive
 // failures the boundary shows visible "Updates paused" text. A success

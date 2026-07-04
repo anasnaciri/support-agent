@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   approvals,
   auditLog,
-  cases,
+  tickets,
   makeDbClient,
   tenants,
 } from "../src/index.js";
@@ -15,8 +15,8 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 
 // Regression test for the vitest global-teardown FK bug: the backstop deleted
 // leaked tenants with a single `DELETE FROM tenants`, which is blocked because
-// `cases.tenant_id` and `approvals.{tenant_id,case_id}` are ON DELETE NO ACTION.
-// A test tenant that created a case (or approval) therefore blocked its own
+// `tickets.tenant_id` and `approvals.{tenant_id,ticket_id}` are ON DELETE NO ACTION.
+// A test tenant that created a ticket (or approval) therefore blocked its own
 // teardown delete (swallowed FK violation) and accumulated, polluting the
 // shared dev DB. purgeLeakedTenants must delete in dependency order.
 describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
@@ -26,7 +26,7 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
   // before the suite ran) and a "leaked" tenant with a full child graph.
   const keepTenantId = randomUUID();
   const leakedTenantId = randomUUID();
-  const leakedCaseId = randomUUID();
+  const leakedTicketId = randomUUID();
 
   beforeAll(async () => {
     if (!raw) return;
@@ -34,8 +34,8 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
       await raw.db.insert(tenants).values({ id, name: `purge-test-${id}` });
     }
     // The leaked tenant owns the exact rows whose NO ACTION FKs broke teardown.
-    await raw.db.insert(cases).values({
-      id: leakedCaseId,
+    await raw.db.insert(tickets).values({
+      id: leakedTicketId,
       tenantId: leakedTenantId,
       channel: "email",
       status: "new",
@@ -44,7 +44,7 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
     await raw.db.insert(approvals).values({
       id: randomUUID(),
       tenantId: leakedTenantId,
-      caseId: leakedCaseId,
+      ticketId: leakedTicketId,
       agentId: "support-triage",
       tool: "refund.create",
       proposedInput: { amountCents: 2000 },
@@ -54,9 +54,9 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
     });
     await raw.db.insert(auditLog).values({
       tenantId: leakedTenantId,
-      caseId: leakedCaseId,
+      ticketId: leakedTicketId,
       actorType: "system",
-      action: "case.created",
+      action: "ticket.created",
       details: {},
     });
   });
@@ -67,14 +67,14 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
     // order, so it works regardless of whether purge ran).
     for (const id of [keepTenantId, leakedTenantId]) {
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(auditLog).where(sql`${auditLog.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
   });
 
-  it("deletes a leaked tenant that owns cases + approvals, keeping the snapshot", async () => {
+  it("deletes a leaked tenant that owns tickets + approvals, keeping the snapshot", async () => {
     if (!raw) return;
 
     // Snapshot = "every tenant that existed before, EXCEPT the leaked one".
@@ -96,11 +96,11 @@ describeIfDb("purgeLeakedTenants (teardown backstop, integration)", () => {
       .where(sql`${tenants.id} = ${leakedTenantId}`);
     expect(tenantRows).toHaveLength(0);
 
-    const caseRows = await raw.db
-      .select({ id: cases.id })
-      .from(cases)
-      .where(sql`${cases.tenantId} = ${leakedTenantId}`);
-    expect(caseRows).toHaveLength(0);
+    const ticketRows = await raw.db
+      .select({ id: tickets.id })
+      .from(tickets)
+      .where(sql`${tickets.tenantId} = ${leakedTenantId}`);
+    expect(ticketRows).toHaveLength(0);
 
     const approvalRows = await raw.db
       .select({ id: approvals.id })

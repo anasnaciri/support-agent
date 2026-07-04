@@ -226,7 +226,7 @@ export const TenantRepositoryLive = Layer.effect(
           const refundPolicy = decodeRefundPolicy(settings?.refundPolicy);
           const discountPolicy = decodeDiscountPolicy(settings?.discountPolicy);
           // Defensive decode: must be a positive integer. Reject zero
-          // (would delete every resolved case instantly) and negative
+          // (would delete every resolved ticket instantly) and negative
           // values (nonsensical).
           const rawDays = settings?.retentionDays;
           const retentionDays =

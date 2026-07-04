@@ -19,7 +19,7 @@ describe("order-status-agent config", () => {
       "shopify.get_order",
       "shopify.find_customer_order",
       "tracking.lookup",
-      "case.update_context",
+      "ticket.update_context",
       "conversation.reply",
       "conversation.ask_customer",
       "knowledge.search",

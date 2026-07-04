@@ -6,9 +6,9 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseLifecycleWriterLive,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketLifecycleWriterLive,
+  TicketRepository,
+  TicketRepositoryTest,
   TransactionRunnerPassthrough,
   type SendSupplierEscalationInput,
 } from "@support-agent/services";
@@ -25,7 +25,7 @@ const esc = (
   over: Partial<UnsentSupplierEscalation> = {},
 ): UnsentSupplierEscalation => ({
   id,
-  caseId: "case-1",
+  ticketId: "ticket-1",
   tenantId: "t1",
   supplierEmail: "wh@x.com",
   problem: "P",
@@ -65,7 +65,7 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
     // ?w pins the workspace so a supplier serving several merchants lands on the
     // right one (their active workspace may be a different merchant).
     expect(sentInputs[0]!.portalUrl).toBe(
-      "https://app.example.com/supplier/cases/e1?w=t1",
+      "https://app.example.com/supplier/tickets/e1?w=t1",
     );
     expect(sentInputs[0]).toMatchObject({
       tenantId: "t1",
@@ -127,19 +127,19 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
     expect(abandoned).toEqual([["e-cap", "hard bounce"]]);
   });
 
-  it("parks and flags the merchant case when supplier notification is abandoned", async () => {
+  it("parks and flags the merchant ticket when supplier notification is abandoned", async () => {
     const deps = Layer.mergeAll(
       ApprovalServiceTest,
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
     );
-    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+    const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
 
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const row = yield* repo.create({
             tenantId: TenantId("t1"),
@@ -149,11 +149,11 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
             subject: "Missing order",
           });
           yield* escalateSupplierNotifyFailure({
-            escalation: esc("e-cap", { caseId: row.id }),
+            escalation: esc("e-cap", { ticketId: row.id }),
             error: "hard bounce",
           });
           const fetched = yield* repo.getById(row.id);
-          const entries = yield* audit.forCase(row.id);
+          const entries = yield* audit.forTicket(row.id);
           return { fetched, entries };
         }),
         layer,
@@ -165,7 +165,7 @@ describe("fireSupplierNotificationsOnce — durable outbox sweep", () => {
       SUPPLIER_UNREACHABLE_FLAG,
     );
     const escalation = out.entries.find(
-      (entry) => entry.action === "case.escalated_to_human",
+      (entry) => entry.action === "ticket.escalated_to_human",
     );
     expect(escalation?.details["reason"]).toBe(SUPPLIER_UNREACHABLE_FLAG);
     expect(escalation?.details["escalationId"]).toBe("e-cap");

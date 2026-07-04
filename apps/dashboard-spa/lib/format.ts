@@ -2,7 +2,7 @@
 //
 // `formatRelativeTime` returns a coarse "Xh ago" / "Xd ago" — the
 // dashboard's Today view + lists need recognisable age at a glance,
-// not exact precision. For exact timestamps the case detail page
+// not exact precision. For exact timestamps the ticket detail page
 // shows the ISO string. We keep precision coarse on purpose: an SSE
 // refresh can re-render a list with a string like "just now" → "2m ago"
 // in 2 minutes, and we don't want the page to feel unstable.

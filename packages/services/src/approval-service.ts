@@ -7,7 +7,7 @@ import {
   type ApprovalId,
   type ApprovalRiskLevel,
   type ApprovalStatus,
-  type CaseId,
+  type TicketId,
   type TenantId,
   type UserId,
 } from "@support-agent/agent-core";
@@ -46,7 +46,7 @@ export type ApprovalServiceError =
 
 export interface CreateApprovalInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly agentId: AgentId;
   readonly tool: string;
   readonly proposedInput: unknown;
@@ -54,8 +54,8 @@ export interface CreateApprovalInput {
   readonly riskLevel: ApprovalRiskLevel;
   readonly expiresAt: Date;
   /**
-   * The case round (`Case.epoch`) this approval belongs to. Defaults to 0.
-   * A later round bumps the case epoch; approvals stamped with an older epoch
+   * The ticket round (`Ticket.epoch`) this approval belongs to. Defaults to 0.
+   * A later round bumps the ticket epoch; approvals stamped with an older epoch
    * are stale and are fenced out of bundle execution + the maintenance sweep.
    */
   readonly epoch?: number;
@@ -82,22 +82,22 @@ export interface RejectInput {
   readonly tenantId?: TenantId;
 }
 
-export interface CancelPendingForCaseInput {
+export interface CancelPendingForTicketInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly decidedBy: UserId;
   readonly decisionReason: string;
 }
 
-export interface SupersedePendingForCaseInput {
+export interface SupersedePendingForTicketInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   /** Recorded as the cancelled rows' decisionReason (audit trail). */
   readonly reason: string;
   /**
    * When set, only pending rows whose `tool` is in this set are superseded
    * (e.g. `["conversation.reply"]` to cancel just stale email drafts). Omit to
-   * supersede every pending row for the case.
+   * supersede every pending row for the ticket.
    */
   readonly tools?: ReadonlyArray<string>;
 }
@@ -149,38 +149,38 @@ export class ApprovalService extends Context.Tag("ApprovalService")<
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
 
     /**
-     * Every approval row for a case, in creation order (oldest first). Used by
+     * Every approval row for a ticket, in creation order (oldest first). Used by
      * the autonomous-loop bundle resume (slice 4d): one approve event executes
-     * the whole queued bundle, so the runtime needs all of a case's rows — not
+     * the whole queued bundle, so the runtime needs all of a ticket's rows — not
      * just the pending ones — to run the `approved` ones in proposal order.
      */
-    readonly listForCase: (
+    readonly listForTicket: (
       tenantId: TenantId,
-      caseId: CaseId,
+      ticketId: TicketId,
     ) => Effect.Effect<ReadonlyArray<Approval>, ApprovalServiceError>;
 
     /**
-     * Cancel every pending approval for a case after an authoritative manual
+     * Cancel every pending approval for a ticket after an authoritative manual
      * lifecycle write. Returns the number of rows changed.
      */
-    readonly cancelPendingForCase: (
-      input: CancelPendingForCaseInput,
+    readonly cancelPendingForTicket: (
+      input: CancelPendingForTicketInput,
     ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
-     * Supersede every pending approval for a case: a SYSTEM-initiated cancel
+     * Supersede every pending approval for a ticket: a SYSTEM-initiated cancel
      * (status → `cancelled`, `decidedBy` null) used when the agent re-engages a
-     * case and re-decides — the prior run's still-pending proposals (e.g. a draft
+     * ticket and re-decides — the prior run's still-pending proposals (e.g. a draft
      * reply queued before a supplier replied) are stale and the new run replaces
-     * them. Distinct from `cancelPendingForCase` (a human/manual reject that
+     * them. Distinct from `cancelPendingForTicket` (a human/manual reject that
      * needs a `decidedBy`). Returns the number of rows changed.
      */
-    readonly supersedePendingForCase: (
-      input: SupersedePendingForCaseInput,
+    readonly supersedePendingForTicket: (
+      input: SupersedePendingForTicketInput,
     ) => Effect.Effect<number, ApprovalServiceError>;
 
     /**
-     * APPROVED, not-yet-resumed approvals older than `decidedBefore` whose case
+     * APPROVED, not-yet-resumed approvals older than `decidedBefore` whose ticket
      * is STILL parked in `waiting_for_approval` (audit L3b): the decision
      * committed but its workflow event was never published (or was lost), so the
      * runtime never resumed. The maintenance sweep re-publishes their events;
@@ -276,7 +276,7 @@ export const ApprovalServiceTest = Layer.effect(
           const approval: Approval = {
             id,
             tenantId: input.tenantId,
-            caseId: input.caseId,
+            ticketId: input.ticketId,
             agentId: input.agentId,
             tool: input.tool,
             proposedInput: input.proposedInput,
@@ -338,9 +338,9 @@ export const ApprovalServiceTest = Layer.effect(
           if (a && !a.resumedAt) store.set(id, { ...a, resumedAt: new Date() });
         }),
 
-      // In-memory approximation: no case table to join, so this returns
+      // In-memory approximation: no ticket table to join, so this returns
       // APPROVED, unresumed rows older than the cutoff; the maintenance sweep
-      // re-checks the case status + epoch itself before republishing. Rejected
+      // re-checks the ticket status + epoch itself before republishing. Rejected
       // rows are excluded (nothing to re-run) as is anything already resumed.
       listDecidedUnresumed: ({ decidedBefore, limit = 100 }) =>
         Effect.sync(() => {
@@ -395,23 +395,23 @@ export const ApprovalServiceTest = Layer.effect(
 
       // Map iteration is insertion order, which mirrors the Live impl's
       // `ORDER BY created_at ASC` for rows created in sequence.
-      listForCase: (tenantId, caseId) =>
+      listForTicket: (tenantId, ticketId) =>
         Effect.sync(() => {
           const out: Approval[] = [];
           for (const a of store.values()) {
-            if (a.tenantId === tenantId && a.caseId === caseId) {
+            if (a.tenantId === tenantId && a.ticketId === ticketId) {
               out.push(a);
             }
           }
           return out;
         }),
 
-      cancelPendingForCase: (input) =>
+      cancelPendingForTicket: (input) =>
         Effect.sync(() => {
           let canceled = 0;
           for (const [id, approval] of store.entries()) {
             if (approval.tenantId !== input.tenantId) continue;
-            if (approval.caseId !== input.caseId) continue;
+            if (approval.ticketId !== input.ticketId) continue;
             if (approval.status !== "pending") continue;
             store.set(id, {
               ...approval,
@@ -425,13 +425,13 @@ export const ApprovalServiceTest = Layer.effect(
           return canceled;
         }),
 
-      supersedePendingForCase: (input) =>
+      supersedePendingForTicket: (input) =>
         Effect.sync(() => {
           const toolFilter = input.tools ? new Set(input.tools) : null;
           let superseded = 0;
           for (const [id, approval] of store.entries()) {
             if (approval.tenantId !== input.tenantId) continue;
-            if (approval.caseId !== input.caseId) continue;
+            if (approval.ticketId !== input.ticketId) continue;
             if (approval.status !== "pending") continue;
             if (toolFilter && !toolFilter.has(approval.tool)) continue;
             store.set(id, {

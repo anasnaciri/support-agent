@@ -12,12 +12,12 @@
 // humans. Do not conflate them.
 
 export type RbacPermissionId =
-  | "cases.view"
-  | "cases.reply"
-  | "cases.takeover"
-  | "cases.resume"
-  | "cases.retry"
-  | "cases.set_status"
+  | "tickets.view"
+  | "tickets.reply"
+  | "tickets.takeover"
+  | "tickets.resume"
+  | "tickets.retry"
+  | "tickets.set_status"
   | "orders.edit"
   | "approvals.view"
   | "approvals.decide"
@@ -33,14 +33,14 @@ export type RbacPermissionId =
   | "members.manage"
   | "account.manage"
   // Supplier portal — the heavily-constrained external role. A supplier sees
-  // ONLY cases escalated to them and can ONLY post a supplier update. Kept
-  // separate from every merchant `cases.*` permission so a Supplier role grants
+  // ONLY tickets escalated to them and can ONLY post a supplier update. Kept
+  // separate from every merchant `tickets.*` permission so a Supplier role grants
   // no merchant surface (and the api gates supplier endpoints on these alone).
-  | "supplier.cases.view"
-  | "supplier.cases.respond";
+  | "supplier.tickets.view"
+  | "supplier.tickets.respond";
 
 export type RbacPermissionCategory =
-  | "Cases"
+  | "Tickets"
   | "Approvals"
   | "Knowledge"
   | "Settings"
@@ -55,8 +55,8 @@ export interface RbacPermissionDef {
   readonly description: string;
   readonly category: RbacPermissionCategory;
   /**
-   * Permissions this one also grants. Granting `cases.reply` should also let
-   * the member SEE cases, so `cases.reply.implies = ["cases.view"]`. The
+   * Permissions this one also grants. Granting `tickets.reply` should also let
+   * the member SEE tickets, so `tickets.reply.implies = ["tickets.view"]`. The
    * resolver walks this transitively. Kept minimal and explicit — money/
    * decision permissions (`refunds.issue`) deliberately do NOT imply the
    * broader decision permission, so a role must grant both.
@@ -65,56 +65,56 @@ export interface RbacPermissionDef {
 }
 
 export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
-  // ---- Cases ----
+  // ---- Tickets ----
   {
-    id: "cases.view",
-    label: "View cases",
-    description: "See the case list, case details, and conversation threads.",
-    category: "Cases",
+    id: "tickets.view",
+    label: "View tickets",
+    description: "See the ticket list, ticket details, and conversation threads.",
+    category: "Tickets",
   },
   {
-    id: "cases.reply",
-    label: "Reply to cases",
-    description: "Send replies and work a case's conversation.",
-    category: "Cases",
-    implies: ["cases.view"],
+    id: "tickets.reply",
+    label: "Reply to tickets",
+    description: "Send replies and work a ticket's conversation.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   {
-    id: "cases.takeover",
-    label: "Take over cases",
-    description: "Pause the agent and take manual control of a case.",
-    category: "Cases",
-    implies: ["cases.view"],
+    id: "tickets.takeover",
+    label: "Take over tickets",
+    description: "Pause the agent and take manual control of a ticket.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   {
-    id: "cases.resume",
-    label: "Hand cases back to the agent",
-    description: "Release a case you took over back to the agent.",
-    category: "Cases",
-    implies: ["cases.view"],
+    id: "tickets.resume",
+    label: "Hand tickets back to the agent",
+    description: "Release a ticket you took over back to the agent.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   {
-    id: "cases.retry",
+    id: "tickets.retry",
     label: "Retry the agent now",
-    description: "Resume a case and have the agent re-try immediately.",
-    category: "Cases",
-    implies: ["cases.view"],
+    description: "Resume a ticket and have the agent re-try immediately.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   {
-    id: "cases.set_status",
-    label: "Change case status",
+    id: "tickets.set_status",
+    label: "Change ticket status",
     description:
-      "Manually set a case's status — e.g. mark it resolved, reopen it, or park it waiting on the customer.",
-    category: "Cases",
-    implies: ["cases.view"],
+      "Manually set a ticket's status — e.g. mark it resolved, reopen it, or park it waiting on the customer.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   {
     id: "orders.edit",
     label: "Edit order details",
     description:
-      "Change an order's details in your store from a case — currently the shipping address.",
-    category: "Cases",
-    implies: ["cases.view"],
+      "Change an order's details in your store from a ticket — currently the shipping address.",
+    category: "Tickets",
+    implies: ["tickets.view"],
   },
   // ---- Approvals ----
   {
@@ -134,7 +134,7 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     id: "refunds.issue",
     label: "Issue refunds",
     description:
-      "Issue refunds — both approving a refund the agent proposed (required in addition to “Approve or reject”) and issuing a refund the agent only recommended, directly from the case.",
+      "Issue refunds — both approving a refund the agent proposed (required in addition to “Approve or reject”) and issuing a refund the agent only recommended, directly from the ticket.",
     category: "Approvals",
   },
   // ---- Knowledge ----
@@ -205,18 +205,18 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
   },
   // ---- Supplier ----
   {
-    id: "supplier.cases.view",
-    label: "View escalated cases",
-    description: "See the cases a merchant has escalated to this supplier.",
+    id: "supplier.tickets.view",
+    label: "View escalated tickets",
+    description: "See the tickets a merchant has escalated to this supplier.",
     category: "Supplier",
   },
   {
-    id: "supplier.cases.respond",
-    label: "Respond to escalated cases",
+    id: "supplier.tickets.respond",
+    label: "Respond to escalated tickets",
     description:
-      "Post an update or resolution on a case escalated to this supplier.",
+      "Post an update or resolution on a ticket escalated to this supplier.",
     category: "Supplier",
-    implies: ["supplier.cases.view"],
+    implies: ["supplier.tickets.view"],
   },
 ];
 

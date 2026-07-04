@@ -108,15 +108,15 @@ Every AI decision with monetary, account-modification, or external-communication
 - `Permission` enum (`allow` / `ask` / `deny`) on every tool — `packages/agent-core/src/agent.ts`
 - `PermissionService` consulted before every tool call — `packages/agent-core/src/permission-service.ts`
 - `ApprovalService` writes a pending approval row to the database; the merchant decides via the dashboard before execution — `packages/services/src/approval-service.ts`, `packages/db/src/approval-service-live.ts`
-- A case in `waiting_for_approval` state cannot advance without a human decision
+- A ticket in `waiting_for_approval` state cannot advance without a human decision
 
-Customers can request human-only handling at any time, transitioning their case to `human_takeover` (state transition enforced by `CaseRepository.transitionStatus`).
+Customers can request human-only handling at any time, transitioning their ticket to `human_takeover` (state transition enforced by `TicketRepository.transitionStatus`).
 
 ### 7. Retention periods that ensure personal data isn't kept longer than needed?
 
 **Answer:** Yes (target).
 
-Resolved cases are archived after 30 days. Archived cases are retained for 12 months, then deleted by a daily sweep cron together with their `case_state_transitions` rows, approval rows, and `audit_log` entries.
+Resolved tickets are archived after 30 days. Archived tickets are retained for 12 months, then deleted by a daily sweep cron together with their `ticket_state_transitions` rows, approval rows, and `audit_log` entries.
 
 **Status:** Implemented 2026-05-25 via the worker retention sweep cron.
 
@@ -154,7 +154,7 @@ Test and production environments use distinct databases, distinct API credential
 
 **Answer:** Yes.
 
-Production database access is limited to named operators authenticated via password + MFA. Application-level case access through the merchant dashboard (Phase 3) will be scoped to the merchant's own cases. All access (machine and human) is recorded in `audit_log`.
+Production database access is limited to named operators authenticated via password + MFA. Application-level ticket access through the merchant dashboard (Phase 3) will be scoped to the merchant's own tickets. All access (machine and human) is recorded in `audit_log`.
 
 ### 13. Strong password requirements for staff?
 
@@ -166,7 +166,7 @@ Staff accounts require strong passwords (NIST 800-63B aligned: minimum 12 charac
 
 **Answer:** Yes.
 
-Every runtime access to customer data is recorded in the `audit_log` table with actor type (`agent` / `user` / `system` / `customer`), actor id, action, case, and timestamp. Schema: `packages/db/src/schema.ts` (`auditLog`); writes share a transaction with the originating case state change (Effect FiberRef + `TransactionRunner`, see `packages/db/src/db-client.ts`). Once the merchant dashboard ships (Phase 3), all human reads of customer data will also be audit-logged.
+Every runtime access to customer data is recorded in the `audit_log` table with actor type (`agent` / `user` / `system` / `customer`), actor id, action, ticket, and timestamp. Schema: `packages/db/src/schema.ts` (`auditLog`); writes share a transaction with the originating ticket state change (Effect FiberRef + `TransactionRunner`, see `packages/db/src/db-client.ts`). Once the merchant dashboard ships (Phase 3), all human reads of customer data will also be audit-logged.
 
 ### 15. Security incident response policy?
 
@@ -189,7 +189,7 @@ The original three code gaps from this record are now closed:
 
 1. **Privacy / data processing notice** — implemented at `/legal/data-processing` and linked from onboarding / Settings -> Legal.
 2. **Data Processing Agreement (DPA) template + acceptance** — implemented in the same public legal document; acceptance is stored in `tenants.settings.legalAcceptance` and connector writes are blocked until current versions are accepted.
-3. **Retention sweep cron** — implemented in the worker and runs daily: resolved cases archive after 30 days, and archived cases delete after 12 months.
+3. **Retention sweep cron** — implemented in the worker and runs daily: resolved tickets archive after 30 days, and archived tickets delete after 12 months.
 
 Operational production readiness still depends on deployment evidence (TLS, encrypted backups, access control, incident response, and real provider configuration), which is tracked separately in `todo.md`.
 

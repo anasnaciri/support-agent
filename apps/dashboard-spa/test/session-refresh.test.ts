@@ -48,14 +48,14 @@ describe("sessionDisposition", () => {
 
 describe("buildRefreshRedirect", () => {
   it("carries the current page as an encoded returnTo", () => {
-    expect(buildRefreshRedirect("/cases/abc")).toBe(
-      `${REFRESH_PATH}?returnTo=%2Fcases%2Fabc`,
+    expect(buildRefreshRedirect("/tickets/abc")).toBe(
+      `${REFRESH_PATH}?returnTo=%2Ftickets%2Fabc`,
     );
   });
 
   it("encodes a path with its own query string", () => {
-    expect(buildRefreshRedirect("/cases?status=open")).toBe(
-      `${REFRESH_PATH}?returnTo=%2Fcases%3Fstatus%3Dopen`,
+    expect(buildRefreshRedirect("/tickets?status=open")).toBe(
+      `${REFRESH_PATH}?returnTo=%2Ftickets%3Fstatus%3Dopen`,
     );
   });
 

@@ -607,9 +607,9 @@ describe("PermissionServiceLive", () => {
   });
 
   // Audit L9 — N small refunds must not bypass the cap: the policy
-  // compares the CASE-CUMULATIVE refunded amount, not each call alone.
+  // compares the TICKET-CUMULATIVE refunded amount, not each call alone.
   describe("cumulative refund aggregation (audit L9)", () => {
-    const caseId = "cccccccc-cccc-cccc-cccc-cccccccccccc" as never;
+    const ticketId = "cccccccc-cccc-cccc-cccc-cccccccccccc" as never;
 
     const runCheckWithHistory = async (
       payload: unknown,
@@ -645,7 +645,7 @@ describe("PermissionServiceLive", () => {
             for (const minor of priorAmountsMinor) {
               yield* audit.record({
                 tenantId,
-                caseId,
+                ticketId,
                 actor: { type: "agent", id: AgentId("refund-review-agent") },
                 action: "tool.invoked",
                 details: {
@@ -663,7 +663,7 @@ describe("PermissionServiceLive", () => {
               agent,
               tool: refundTool,
               payload,
-              caseId,
+              ticketId,
             });
           }),
           Layer.merge(layer, AuditLogServiceTest),

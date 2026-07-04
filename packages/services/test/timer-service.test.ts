@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { CaseId } from "@support-agent/agent-core";
+import { TicketId } from "@support-agent/agent-core";
 import {
   TimerService,
   TimerServiceTest,
@@ -15,7 +15,7 @@ describe("TimerService (Test layer)", () => {
       Effect.gen(function* () {
         const timers = yield* TimerService;
         const timer = yield* timers.schedule({
-          caseId: CaseId("case-1"),
+          ticketId: TicketId("ticket-1"),
           fireAt: new Date("2026-05-26T12:00:00.000Z"),
           reason: "follow_up",
         });
@@ -44,21 +44,21 @@ describe("TimerService (Test layer)", () => {
     expect(result.afterMark).toEqual([]);
   });
 
-  it("cancels open timers for a case", async () => {
+  it("cancels open timers for a ticket", async () => {
     const cancelled = await run(
       Effect.gen(function* () {
         const timers = yield* TimerService;
         yield* timers.schedule({
-          caseId: CaseId("case-1"),
+          ticketId: TicketId("ticket-1"),
           fireAt: new Date("2026-05-26T12:00:00.000Z"),
           reason: "follow_up",
         });
         yield* timers.schedule({
-          caseId: CaseId("case-1"),
+          ticketId: TicketId("ticket-1"),
           fireAt: new Date("2026-05-26T13:00:00.000Z"),
           reason: "sla",
         });
-        return yield* timers.cancelOpenForCase(CaseId("case-1"), {
+        return yield* timers.cancelOpenForTicket(TicketId("ticket-1"), {
           reason: "follow_up",
           now: new Date("2026-05-26T11:00:00.000Z"),
         });

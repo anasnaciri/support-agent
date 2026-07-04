@@ -3,9 +3,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import {
   approvals,
-  caseDetail,
-  cases,
-  casesList,
+  ticketDetail,
+  tickets,
+  ticketsList,
   createSupplier,
   insertEscalation,
   makeDbClient,
@@ -50,7 +50,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
-  const mkCase = (
+  const mkTicket = (
     id: string,
     owner: string,
     status: string,
@@ -76,23 +76,23 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
     ]);
 
     const now = new Date();
-    const approvalCaseId = randomUUID();
-    await raw.db.insert(cases).values([
-      mkCase(randomUUID(), tenantId, "resolved", { resolvedAt: now }),
-      mkCase(randomUUID(), tenantId, "human_takeover", {
+    const approvalTicketId = randomUUID();
+    await raw.db.insert(tickets).values([
+      mkTicket(randomUUID(), tenantId, "resolved", { resolvedAt: now }),
+      mkTicket(randomUUID(), tenantId, "human_takeover", {
         subject: "Where is my order?",
         category: "where_is_order",
       }),
-      mkCase(approvalCaseId, tenantId, "waiting_for_approval"),
-      mkCase(randomUUID(), tenantId, "in_progress"),
+      mkTicket(approvalTicketId, tenantId, "waiting_for_approval"),
+      mkTicket(randomUUID(), tenantId, "in_progress"),
       // Different tenant — must NOT leak into tenant1's counts.
-      mkCase(randomUUID(), otherTenantId, "resolved", { resolvedAt: now }),
+      mkTicket(randomUUID(), otherTenantId, "resolved", { resolvedAt: now }),
     ]);
 
     await raw.db.insert(approvals).values({
       id: randomUUID(),
       tenantId,
-      caseId: approvalCaseId,
+      ticketId: approvalTicketId,
       agentId: "refund-review-agent",
       tool: "refund.create",
       proposedInput: { amount: 1000 },
@@ -112,7 +112,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
     if (handle) await handle.close();
     for (const id of [tenantId, otherTenantId]) {
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
@@ -129,7 +129,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
       statusCounts: Record<string, number>;
       resolvedTodayCount: number;
       pendingApprovals: ReadonlyArray<{ tool: string; riskLevel: string }>;
-      takeoverCases: ReadonlyArray<{ subject: string | null }>;
+      takeoverTickets: ReadonlyArray<{ subject: string | null }>;
     };
 
     expect(body.statusCounts["resolved"]).toBe(1); // not 2 — other tenant excluded
@@ -139,8 +139,8 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
     expect(body.resolvedTodayCount).toBe(1);
     expect(body.pendingApprovals).toHaveLength(1);
     expect(body.pendingApprovals[0]?.tool).toBe("refund.create");
-    expect(body.takeoverCases).toHaveLength(1);
-    expect(body.takeoverCases[0]?.subject).toBe("Where is my order?");
+    expect(body.takeoverTickets).toHaveLength(1);
+    expect(body.takeoverTickets[0]?.subject).toBe("Where is my order?");
   });
 
   it("rejects a missing/invalid token with 401", async () => {
@@ -156,8 +156,8 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
   });
 });
 
-// Concurrent wait states: a case parked `waiting_for_approval` can ALSO carry
-// an open supplier escalation. casesList + caseDetail derive BOTH facts from
+// Concurrent wait states: a ticket parked `waiting_for_approval` can ALSO carry
+// an open supplier escalation. ticketsList + ticketDetail derive BOTH facts from
 // rows (pending approvals / open escalations) into `waitingOn` so the dashboard
 // can render a second "waiting on supplier" chip.
 describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
@@ -165,12 +165,12 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
   const orgId = `org_${randomUUID().slice(0, 8)}`;
   const tenantId = randomUUID();
 
-  // A case with BOTH a pending approval and an open escalation.
-  const bothCaseId = randomUUID();
-  // A case with only a pending approval (no escalation).
-  const approvalOnlyCaseId = randomUUID();
-  // A plain in_progress case with neither.
-  const plainCaseId = randomUUID();
+  // A ticket with BOTH a pending approval and an open escalation.
+  const bothTicketId = randomUUID();
+  // A ticket with only a pending approval (no escalation).
+  const approvalOnlyTicketId = randomUUID();
+  // A plain in_progress ticket with neither.
+  const plainTicketId = randomUUID();
 
   beforeAll(async () => {
     if (!raw) return;
@@ -183,34 +183,34 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
       name: "WH",
       email: "wh@waiting.test",
     });
-    await raw.db.insert(cases).values([
+    await raw.db.insert(tickets).values([
       {
-        id: bothCaseId,
+        id: bothTicketId,
         tenantId,
         channel: "email",
         status: "waiting_for_approval",
         currentAgentId: "missing-package-agent",
       },
       {
-        id: approvalOnlyCaseId,
+        id: approvalOnlyTicketId,
         tenantId,
         channel: "email",
         status: "waiting_for_approval",
         currentAgentId: "support-triage",
       },
       {
-        id: plainCaseId,
+        id: plainTicketId,
         tenantId,
         channel: "email",
         status: "in_progress",
         currentAgentId: "support-triage",
       },
     ]);
-    for (const caseId of [bothCaseId, approvalOnlyCaseId]) {
+    for (const ticketId of [bothTicketId, approvalOnlyTicketId]) {
       await raw.db.insert(approvals).values({
         id: randomUUID(),
         tenantId,
-        caseId,
+        ticketId,
         agentId: "support-triage",
         tool: "conversation.reply",
         proposedInput: { draftId: randomUUID(), bodyText: "draft" },
@@ -221,7 +221,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
     }
     await insertEscalation(raw.db, {
       tenantId,
-      caseId: bothCaseId,
+      ticketId: bothTicketId,
       supplierId: supplier.id,
       problem: "P",
       orderRef: null,
@@ -233,35 +233,35 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
 
   afterAll(async () => {
     if (!raw) return;
-    // approvals is NO ACTION → before cases; cases cascades escalations; tenant
+    // approvals is NO ACTION → before tickets; tickets cascades escalations; tenant
     // cascades the supplier.
     await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${tenantId}`);
-    await raw.db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+    await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     await raw.close();
   });
 
-  it("casesList derives waitingOn per case (approval + supplier)", async () => {
+  it("ticketsList derives waitingOn per ticket (approval + supplier)", async () => {
     if (!raw) return;
-    const page = await casesList(raw.db, tenantId, {}, 1, 50);
+    const page = await ticketsList(raw.db, tenantId, {}, 1, 50);
     const byId = new Map(page.rows.map((r) => [r.id, r]));
-    expect(byId.get(bothCaseId)?.waitingOn).toEqual({
+    expect(byId.get(bothTicketId)?.waitingOn).toEqual({
       approval: true,
       supplier: true,
     });
-    expect(byId.get(approvalOnlyCaseId)?.waitingOn).toEqual({
+    expect(byId.get(approvalOnlyTicketId)?.waitingOn).toEqual({
       approval: true,
       supplier: false,
     });
-    expect(byId.get(plainCaseId)?.waitingOn).toEqual({
+    expect(byId.get(plainTicketId)?.waitingOn).toEqual({
       approval: false,
       supplier: false,
     });
   });
 
-  it("caseDetail derives waitingOn (both waits held at once)", async () => {
+  it("ticketDetail derives waitingOn (both waits held at once)", async () => {
     if (!raw) return;
-    const detail = await caseDetail(raw.db, tenantId, bothCaseId);
-    expect(detail?.case.waitingOn).toEqual({ approval: true, supplier: true });
+    const detail = await ticketDetail(raw.db, tenantId, bothTicketId);
+    expect(detail?.ticket.waitingOn).toEqual({ approval: true, supplier: true });
   });
 });

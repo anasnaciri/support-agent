@@ -22,7 +22,7 @@ const ALL_IDS: ReadonlyArray<RbacPermissionId> = RBAC_PERMISSIONS.map(
  *   of any granted ids.
  * - Otherwise the granted ids are validated against the catalog (unknown ids
  *   are dropped) and expanded through the `implies` closure, so granting
- *   `cases.reply` also yields `cases.view`.
+ *   `tickets.reply` also yields `tickets.view`.
  */
 export const effectivePermissions = (input: {
   readonly isOwner: boolean;

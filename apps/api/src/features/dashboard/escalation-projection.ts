@@ -9,7 +9,7 @@ import { isNonEmptyString, looksLikeGid } from "./shopify-panels.js";
 
 // The order projection a MANUAL supplier escalation carries — the same
 // customer-PII-free slice the agent's supplier.escalate tool sends (order ref,
-// ship city/country, tracking number), derived server-side from the case's
+// ship city/country, tracking number), derived server-side from the ticket's
 // bound order so the merchant doesn't have to retype it.
 
 export interface SupplierOrderProjection {
@@ -54,7 +54,7 @@ export const supplierOrderProjection = (
 };
 
 /**
- * The case's bound order for SUPPLIER-facing data: canonical
+ * The ticket's bound order for SUPPLIER-facing data: canonical
  * `identifiedOrderId` GID or nothing. Unlike the panels'
  * `resolveOrderForContext`, this never falls back to the customer's
  * `quotedOrderRef` or fuzzy name/confirmation lookups — an untrusted hint

@@ -7,14 +7,14 @@ import {
 } from "../src/retention-sweep.js";
 
 describe("retention cutoffs", () => {
-  it("archives resolved cases after 30 days", () => {
+  it("archives resolved tickets after 30 days", () => {
     const now = new Date("2026-05-24T12:00:00.000Z");
     expect(RESOLVED_CASE_ARCHIVE_AFTER_DAYS).toBe(30);
     const cutoff = computeResolvedArchiveCutoff(now);
     expect(cutoff.toISOString()).toBe("2026-04-24T12:00:00.000Z");
   });
 
-  it("deletes archived cases after 12 calendar months", () => {
+  it("deletes archived tickets after 12 calendar months", () => {
     const now = new Date("2026-05-24T00:00:00.000Z");
     expect(ARCHIVED_CASE_DELETE_AFTER_MONTHS).toBe(12);
     const cutoff = computeArchivedDeleteCutoff(now);

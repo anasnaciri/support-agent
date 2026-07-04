@@ -22,7 +22,7 @@ describe("SheetsServiceTest", () => {
           s.appendRow(tenantId, {
             spreadsheetId: "sheet-1",
             range: "Escalations!A:E",
-            values: ["case-42", "missing package", "urgent", "warehouse", null],
+            values: ["ticket-42", "missing package", "urgent", "warehouse", null],
           }),
         ),
         layer,
@@ -78,7 +78,7 @@ describe("SheetsServiceTest", () => {
 
   it("readHeader returns the fixture header row for a known spreadsheet", async () => {
     const layer = SheetsServiceTest({
-      headers: { "sheet-1": ["Case", "Email", "Order"] },
+      headers: { "sheet-1": ["Ticket", "Email", "Order"] },
     });
     const result = await Effect.runPromise(
       Effect.provide(
@@ -91,7 +91,7 @@ describe("SheetsServiceTest", () => {
         layer,
       ),
     );
-    expect(result).toEqual(["Case", "Email", "Order"]);
+    expect(result).toEqual(["Ticket", "Email", "Order"]);
   });
 
   it("readHeader returns [] when the spreadsheet has no fixture header", async () => {

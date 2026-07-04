@@ -3,9 +3,9 @@
 // ============================================================
 //
 // REPUBLISH (L3b): an approval can be decided (row committed) while the
-// matching workflow event publish fails — the case then stays parked
+// matching workflow event publish fails — the ticket then stays parked
 // even though the manager already said yes/no. Re-publish the event for
-// decided approvals whose case is still parked after a grace window; the
+// decided approvals whose ticket is still parked after a grace window; the
 // runtime's resume guards make re-delivery idempotent.
 //
 // REMIND: a pending approval's FIRST notification (approval email + merchant
@@ -17,7 +17,7 @@
 // window after which it stops nagging (the dashboard stays the durable surface).
 //
 // NOTE: this cron used to ALSO time-expire overdue pending approvals and
-// escalate their case to a human (audit L7). That was removed — approval
+// escalate their ticket to a human (audit L7). That was removed — approval
 // drafts no longer expire by age for any tool; a parked approval waits
 // for a human decision instead of being force-escalated. (The expiry
 // sweep was also silently broken in prod: it interpolated a raw JS Date
@@ -33,7 +33,7 @@ import {
 import {
   ApprovalLinkConfig,
   ApprovalService,
-  CaseRepository,
+  TicketRepository,
   MerchantNotificationService,
   PlatformMailService,
   buildApprovalNotification,
@@ -47,7 +47,7 @@ export const APPROVAL_MAINTENANCE_QUEUE = "approval.maintenance";
 /** Every 2 minutes — approvals are human-latency objects. */
 const APPROVAL_MAINTENANCE_CRON = "*/2 * * * *";
 const DEFAULT_LIMIT = 100;
-/** Grace before treating a decided-but-parked case as a lost publish. */
+/** Grace before treating a decided-but-parked ticket as a lost publish. */
 const REPUBLISH_GRACE_MS = 2 * 60_000;
 
 /**
@@ -92,15 +92,15 @@ export const runApprovalMaintenanceOnce = (
 ): Effect.Effect<
   ApprovalMaintenanceResult,
   never,
-  ApprovalService | CaseRepository
+  ApprovalService | TicketRepository
 > =>
   Effect.gen(function* () {
     const approvals = yield* ApprovalService;
-    const cases = yield* CaseRepository;
+    const tickets = yield* TicketRepository;
     const now = opts.now ?? new Date();
     const limit = opts.limit ?? DEFAULT_LIMIT;
 
-    // Republish (L3b). Decided rows whose case never resumed because the
+    // Republish (L3b). Decided rows whose ticket never resumed because the
     // workflow event was lost between decision-commit and publish.
     const decidedUnresumed = yield* approvals
       .listDecidedUnresumed({
@@ -118,14 +118,14 @@ export const runApprovalMaintenanceOnce = (
       );
     let republished = 0;
     for (const approval of decidedUnresumed) {
-      // Re-check the case status — the in-memory Test layer over-returns,
-      // and even the SQL join can race a just-resumed case.
-      const row = yield* cases
-        .getById(approval.caseId, approval.tenantId)
+      // Re-check the ticket status — the in-memory Test layer over-returns,
+      // and even the SQL join can race a just-resumed ticket.
+      const row = yield* tickets
+        .getById(approval.ticketId, approval.tenantId)
         .pipe(Effect.catchAll(() => Effect.succeed(null)));
       if (!row || row.status !== "waiting_for_approval") continue;
       // Recovery hardening: only ever republish an APPROVED, not-yet-resumed
-      // decision from the case's CURRENT round. A rejection has nothing to
+      // decision from the ticket's CURRENT round. A rejection has nothing to
       // re-run (republishing one only re-forced human_takeover — the stale-
       // reject storm), a resumed row was already acted on, and a decision from
       // a prior attempt (lower epoch) must never drive the new one.
@@ -135,7 +135,7 @@ export const runApprovalMaintenanceOnce = (
       const event: DomainEvent = {
         type: "approval.approved",
         approvalId: approval.id,
-        caseId: approval.caseId,
+        ticketId: approval.ticketId,
         managerId: approval.decidedBy ?? SYSTEM_MANAGER_ID,
       };
       const sent = yield* Effect.tryPromise({
@@ -151,7 +151,7 @@ export const runApprovalMaintenanceOnce = (
       republished += 1;
       // eslint-disable-next-line no-console
       console.warn(
-        `[approval-maintenance] republished ${event.type} for approval=${approval.id} case=${approval.caseId} (decision event was lost)`,
+        `[approval-maintenance] republished ${event.type} for approval=${approval.id} ticket=${approval.ticketId} (decision event was lost)`,
       );
     }
 
@@ -174,10 +174,10 @@ export const runApprovalMaintenanceOnce = (
           ),
         );
       for (const approval of dueForReminder) {
-        // Re-check the case is still parked on this approval — a race with a
-        // just-decided case, or the in-memory Test layer, can over-return.
-        const row = yield* cases
-          .getById(approval.caseId, approval.tenantId)
+        // Re-check the ticket is still parked on this approval — a race with a
+        // just-decided ticket, or the in-memory Test layer, can over-return.
+        const row = yield* tickets
+          .getById(approval.ticketId, approval.tenantId)
           .pipe(Effect.catchAll(() => Effect.succeed(null)));
         if (!row || row.status !== "waiting_for_approval") continue;
         const sent = yield* Effect.tryPromise({
@@ -262,7 +262,7 @@ const makeReminderNotifier =
           const notification = buildApprovalNotification({
             approvalId: approval.id,
             tenantId: approval.tenantId,
-            caseId: approval.caseId,
+            ticketId: approval.ticketId,
             tool: approval.tool,
             proposedInput: approval.proposedInput,
             linkConfig,

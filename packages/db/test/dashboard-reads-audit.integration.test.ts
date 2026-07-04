@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import {
-  cases as casesTable,
+  tickets as ticketsTable,
   makeDbClient,
   tenants,
   todaySummary,
@@ -24,8 +24,8 @@ describeIfDb("todaySummary day boundary (integration)", () => {
   afterAll(async () => {
     if (seededTenants.length > 0) {
       await db
-        .delete(casesTable)
-        .where(inArray(casesTable.tenantId, seededTenants));
+        .delete(ticketsTable)
+        .where(inArray(ticketsTable.tenantId, seededTenants));
       await db.delete(tenants).where(inArray(tenants.id, seededTenants));
     }
     await client.close();
@@ -39,7 +39,7 @@ describeIfDb("todaySummary day boundary (integration)", () => {
     // "now" = 05:00Z. UTC midnight = 2026-06-10T00:00Z; Honolulu-local
     // midnight of the same instant = 2026-06-09T10:00Z.
     const now = new Date("2026-06-10T05:00:00Z");
-    const resolvedCase = (resolvedAt: Date) => ({
+    const resolvedTicket = (resolvedAt: Date) => ({
       id: randomUUID(),
       tenantId,
       channel: "email" as const,
@@ -47,12 +47,12 @@ describeIfDb("todaySummary day boundary (integration)", () => {
       currentAgentId: "support-triage",
       resolvedAt,
     });
-    await db.insert(casesTable).values([
+    await db.insert(ticketsTable).values([
       // Yesterday in UTC terms (23:00Z on the 9th) — must NOT count, even
       // though it is after Honolulu-local midnight.
-      resolvedCase(new Date("2026-06-09T23:00:00Z")),
+      resolvedTicket(new Date("2026-06-09T23:00:00Z")),
       // Today in UTC terms — must count.
-      resolvedCase(new Date("2026-06-10T01:00:00Z")),
+      resolvedTicket(new Date("2026-06-10T01:00:00Z")),
     ]);
 
     const summary = await todaySummary(db, tenantId, now);

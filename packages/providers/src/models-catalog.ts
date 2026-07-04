@@ -376,7 +376,7 @@ export const fetchModelCatalog = async (input: {
   }
 };
 
-// Exposed for tests so they can wipe the in-process cache between cases.
+// Exposed for tests so they can wipe the in-process cache between tickets.
 export const __clearModelCatalogCacheForTests = (): void => {
   cache.clear();
 };

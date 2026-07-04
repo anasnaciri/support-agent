@@ -18,8 +18,8 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   ConversationServiceTest,
   LLMServiceScripted,
   PlatformMailServiceTest,
@@ -65,7 +65,7 @@ const baseEnv = (
   llm: ReturnType<typeof LLMServiceScripted>,
 ) =>
   Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     resolver,
@@ -127,7 +127,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const approvalsSvc = yield* ApprovalService;
 
           const created = yield* repo.create({
@@ -142,7 +142,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
 
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-x" as never,
               messageId: "msg-1",
@@ -166,7 +166,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
 
     expect(out.result.type).toBe("PausedWaitingForApproval");
     expect(out.fetched.status).toBe("waiting_for_approval");
-    // The case stayed on the custom agent.
+    // The ticket stayed on the custom agent.
     expect(out.fetched.currentAgentId).toBe(customReturns.id);
     expect(out.pending).toHaveLength(1);
     expect(out.pending[0]!.tool).toBe("conversation.reply");
@@ -190,7 +190,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
     };
     const customSpecialist: AgentConfig = {
       ...customReturns,
-      tools: ["case.update_context"],
+      tools: ["ticket.update_context"],
       permissionOverrides: {},
     };
     // turn0 (router): handoff → custom:returns; turn1 (custom, SAME tick):
@@ -207,7 +207,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       {
         type: "tool_call",
         callId: "u0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: "handled by custom returns specialist" },
       },
       { type: "final_message", text: "All set." },
@@ -221,7 +221,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
@@ -235,7 +235,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-y" as never,
               messageId: "msg-2",
@@ -249,7 +249,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const actions = (yield* audit.forCase(created.id)).map((e) => e.action);
+          const actions = (yield* audit.forTicket(created.id)).map((e) => e.action);
           return { result, fetched, actions };
         }),
         withRuntime(env),
@@ -257,7 +257,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
     );
 
     expect(out.result.type).toBe("Completed");
-    // The handoff persisted the custom agent onto the case row.
+    // The handoff persisted the custom agent onto the ticket row.
     expect(out.fetched.currentAgentId).toBe(AgentId("custom:returns"));
     // The custom agent actually ran a tool after the handoff.
     expect(out.fetched.context["notes"]).toBe(
@@ -266,7 +266,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
     expect(out.actions).toContain("tool.invoked");
   });
 
-  it("fails SAFE to human_takeover when the case's agent no longer resolves", async () => {
+  it("fails SAFE to human_takeover when the ticket's agent no longer resolves", async () => {
     // No built-ins, no customs → the seeded `custom:gone` id resolves to null.
     const env = baseEnv(AgentResolverTest([], []), LLMServiceScripted([]));
 
@@ -274,27 +274,27 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
 
           const created = yield* repo.create({
             tenantId: TENANT,
             channel: "email",
             currentAgentId: AgentId("custom:gone"),
-            subject: "Orphaned case",
+            subject: "Orphaned ticket",
             threadId: "thread-z" as never,
             provider: "gmail",
             mailbox: "support@merchant.com",
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-z" as never,
               messageId: "msg-3",
               from: { name: null, email: "cust@example.com" },
               to: [],
-              subject: "Re: Orphaned case",
+              subject: "Re: Orphaned ticket",
               bodyText: "Hello?",
               bodyHtml: null,
               receivedAt: new Date(),
@@ -302,7 +302,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const actions = (yield* audit.forCase(created.id)).map((e) => e.action);
+          const actions = (yield* audit.forTicket(created.id)).map((e) => e.action);
           return { result, fetched, actions };
         }),
         withRuntime(env),
@@ -314,7 +314,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       expect(out.result.reason).toBe("agent_unresolvable");
     }
     expect(out.fetched.status).toBe("human_takeover");
-    expect(out.actions).toContain("case.escalated_to_human");
+    expect(out.actions).toContain("ticket.escalated_to_human");
   });
 
   // ---- Phase C: inbound routing via callableFrom (NOT static handoffs) ----
@@ -334,7 +334,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
   };
   const inboundSpecialist: AgentConfig = {
     ...customReturns,
-    tools: ["case.update_context"],
+    tools: ["ticket.update_context"],
     permissionOverrides: {},
   };
 
@@ -349,7 +349,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       {
         type: "tool_call",
         callId: "u0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { notes: "handled by inbound custom specialist" },
       },
       { type: "final_message", text: "done" },
@@ -369,7 +369,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TENANT,
@@ -382,7 +382,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
           });
           const result = yield* runtime.handleEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-c" as never,
               messageId: "msg-c",
@@ -396,7 +396,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
             },
           });
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { result, fetched, entries };
         }),
         withRuntime(env),
@@ -415,7 +415,7 @@ describe("AgentRuntime — custom agents (Phase A)", () => {
 
   it("blocks a handoff to a custom agent that did NOT opt in", async () => {
     const out = await runRouter([]);
-    // Handoff rejected → case stays on the router; the block is audited.
+    // Handoff rejected → ticket stays on the router; the block is audited.
     expect(out.fetched.currentAgentId).toBe(AgentId("router-agent"));
     const handoffErrors = out.entries.filter(
       (e) =>

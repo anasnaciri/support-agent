@@ -452,7 +452,7 @@ export default async function TenantDetailPage({
         <section className="space-y-3 rounded-lg border border-red-500/30 p-5">
           <h2 className="text-lg font-medium text-red-300">Danger zone</h2>
           <p className="text-sm text-zinc-400">
-            Permanently delete this tenant and all its data (cases, approvals,
+            Permanently delete this tenant and all its data (tickets, approvals,
             audit, connectors). This cannot be undone. Type{" "}
             <span className="font-mono text-zinc-200">{tenant.name}</span> to
             confirm.

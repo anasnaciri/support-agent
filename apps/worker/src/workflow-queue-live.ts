@@ -21,10 +21,10 @@ export const DEFAULT_WORKFLOW_DEAD_LETTER_QUEUE = "workflow.events.dead";
 
 // With `key_strict_fifo`, a job in `failed` state holds the partial unique
 // index slot (pg-boss job_i8 covers active|retry|failed), blocking every
-// subsequent event for that case/thread key until the row is deleted.
+// subsequent event for that ticket/thread key until the row is deleted.
 // The pg-boss default retention is 7 days — far too long for a poison
 // message to block a customer conversation (audit L11). One hour keeps the
-// blockage bounded; the dead-letter consumer escalates the case to a human
+// blockage bounded; the dead-letter consumer escalates the ticket to a human
 // immediately on exhaustion regardless.
 const DEFAULT_DELETE_AFTER_SECONDS = 3600;
 
@@ -126,7 +126,7 @@ export const reviveDomainEvent = (event: DomainEvent): DomainEvent => {
     case "supplier.updated":
     case "timer.expired":
     case "manual.takeover":
-    case "case.resumed":
+    case "ticket.resumed":
       return event;
   }
 };

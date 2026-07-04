@@ -40,7 +40,7 @@ export const enforceSupplierPermission = async (
 /**
  * Build `supplierGet` / `supplierPost` bound to one app + context. Unlike the
  * dashboard factory, the permission is REQUIRED — every supplier endpoint is
- * gated on a `supplier.cases.*` permission so the constrained external role can
+ * gated on a `supplier.tickets.*` permission so the constrained external role can
  * reach these and nothing else (and merchants can't reach them unless granted).
  */
 export const makeSupplierRoutes = (app: FastifyInstance, ctx: RouteContext) => {

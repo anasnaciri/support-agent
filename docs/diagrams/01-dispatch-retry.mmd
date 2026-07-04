@@ -8,7 +8,7 @@ flowchart TD
     C3 -->|no| LOCK
     TICK -->|"customer.replied / approval / timer (no top-level dedup)"| LOCK
 
-    LOCK["pg_advisory_lock(case or thread) — BLOCKING, no timeout"]:::warn --> BODY["tickBody(event), wrapped in catchAllCause"]
+    LOCK["pg_advisory_lock(ticket or thread) — BLOCKING, no timeout"]:::warn --> BODY["tickBody(event), wrapped in catchAllCause"]
     BODY --> RES{"WorkflowResult"}
 
     RES -->|"Failed retryable:true"| THROW["worker throws"]
@@ -18,12 +18,12 @@ flowchart TD
     PGB -->|retry| REPLAY["replay WHOLE tick from turn 0 (LLM re-samples, new callId)"]:::warn
     REPLAY --> TICK
     PGB -->|exhausted| DL["workflow.events.dead"]
-    DL --> DLC["dead-letter consumer: park case to human_takeover"]
+    DL --> DLC["dead-letter consumer: park ticket to human_takeover"]
 
     DONE -.->|"C3 claim written AFTER tick, only if NOT retryable-Failed"| C3CLAIM["ProcessedMessageStore.claim"]
 
     E1["E1: side-effect tools without idempotencyKey re-run (key falls back to volatile callId)"]:::hi
-    E12["E12: dead-letter msg.received lookup uses provider=undefined, may miss the case"]:::lo
+    E12["E12: dead-letter msg.received lookup uses provider=undefined, may miss the ticket"]:::lo
     REPLAY -.-> E1
     DLC -.-> E12
 

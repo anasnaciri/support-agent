@@ -9,12 +9,12 @@ import { purgeLeakedTenants } from "./packages/db/src/test-teardown-purge.js";
 // rows, and a test that crashes before its afterAll runs.
 //
 // How it works: snapshot the tenant ids that exist BEFORE the suite, then after
-// the whole suite delete any tenant that wasn't in that snapshot. `cases` and
+// the whole suite delete any tenant that wasn't in that snapshot. `tickets` and
 // `approvals` are ON DELETE NO ACTION (intentional safety), so a leaked tenant
 // that owns either would block its own `DELETE FROM tenants` — purgeLeakedTenants
-// deletes in dependency order (approvals → cases → audit_log → tenants), the same
+// deletes in dependency order (approvals → tickets → audit_log → tenants), the same
 // way redactShop does in production, and the tenant delete cascades the rest
-// (tenant_knowledge_documents, tenant_agent_overrides, cases → transitions,
+// (tenant_knowledge_documents, tenant_agent_overrides, tickets → transitions,
 // connector_connections, …). Pre-existing rows (real dev data like "Anas's
 // Support Team") are in the snapshot and never touched.
 //

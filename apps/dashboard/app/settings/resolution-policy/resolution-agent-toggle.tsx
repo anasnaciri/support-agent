@@ -3,7 +3,7 @@
 import { toggleResolutionAgentAction } from "./actions";
 
 /**
- * On/off switch for routing new cases to the resolution agent. Submits the
+ * On/off switch for routing new tickets to the resolution agent. Submits the
  * server action on change (no Save button) and the page revalidates in place.
  */
 export function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }) {
@@ -18,7 +18,7 @@ export function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }
           className="size-4 rounded border-input accent-primary"
         />
         <span className="text-sm font-medium">
-          Route new cases to the resolution agent
+          Route new tickets to the resolution agent
         </span>
       </label>
     </form>

@@ -76,7 +76,7 @@ export default async function AccountSettingsPage({ searchParams }: PageProps) {
                 <span className="font-medium text-foreground">
                   {ctx.tenantName}
                 </span>{" "}
-                workspace: its cases, conversations, approvals, audit records,
+                workspace: its tickets, conversations, approvals, audit records,
                 and connected integrations. Your other{" "}
                 {ctx.workspaces.length - 1 === 1
                   ? "workspace"
@@ -118,7 +118,7 @@ export default async function AccountSettingsPage({ searchParams }: PageProps) {
               )}
             </p>
             <ul className="list-disc space-y-1 pl-5">
-              <li>every case, conversation, approval, and audit record;</li>
+              <li>every ticket, conversation, approval, and audit record;</li>
               <li>all connected integrations (Shopify, Gmail, Sheets, AI keys);</li>
               <li>
                 your organization and every manager&apos;s access to this

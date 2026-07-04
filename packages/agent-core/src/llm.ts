@@ -69,7 +69,7 @@ export interface ToolCallingRequest {
  * the AI SDK's `result.usage`. Test layers (Scripted, FromFn) leave it
  * undefined — token bookkeeping doesn't need to be exercised in unit
  * tests. The runtime stamps it into the `llm.decision` audit row's
- * `details` so the case detail page can roll up totals on read.
+ * `details` so the ticket detail page can roll up totals on read.
  *
  * Cost in dollars is deferred (Phase 6 cost dashboard work): translating
  * tokens to USD needs a per-model pricing table that varies by provider.

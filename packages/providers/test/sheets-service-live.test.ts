@@ -119,7 +119,7 @@ describe("SheetsServiceLive", () => {
           s.appendRow(tenantId, {
             spreadsheetId: "sheet-1",
             range: "Escalations!A:E",
-            values: ["case-42", "missing package", "urgent", "warehouse", null],
+            values: ["ticket-42", "missing package", "urgent", "warehouse", null],
           }),
         ),
         layer,
@@ -303,7 +303,7 @@ describe("SheetsServiceLive", () => {
       return okJson({
         range: "Escalations!1:1",
         majorDimension: "ROWS",
-        values: [["Case ID", " Email ", "Order", 5]],
+        values: [["Ticket ID", " Email ", "Order", 5]],
       });
     });
     const layer = SheetsServiceLive({
@@ -323,7 +323,7 @@ describe("SheetsServiceLive", () => {
         layer,
       ),
     );
-    expect(result).toEqual(["Case ID", "Email", "Order", "5"]);
+    expect(result).toEqual(["Ticket ID", "Email", "Order", "5"]);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 

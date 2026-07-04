@@ -202,7 +202,7 @@ export function ApprovalsPage() {
               <TableHead>Status</TableHead>
               <TableHead>Risk</TableHead>
               <TableHead>Agent</TableHead>
-              <TableHead>Case</TableHead>
+              <TableHead>Ticket</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Decided</TableHead>
             </TableRow>
@@ -261,10 +261,10 @@ export function ApprovalsPage() {
                   </TableCell>
                   <TableCell>
                     <Link
-                      href={`/cases/${r.caseId}`}
+                      href={`/tickets/${r.ticketId}`}
                       className="font-mono text-xs text-primary hover:underline"
                     >
-                      {r.caseId.slice(0, 8)}…
+                      {r.ticketId.slice(0, 8)}…
                     </Link>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

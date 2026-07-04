@@ -5,7 +5,7 @@ import {
   AuditLogService,
   BlobStorage,
   BlobStorageTest,
-  CaseRepository,
+  TicketRepository,
   ConnectorCredentialStore,
   ConversationService,
   KnowledgeBaseService,
@@ -26,7 +26,7 @@ import {
   AccountOpenRouterCredentialStoreLive,
   ApprovalServiceLive,
   AuditLogServiceLive,
-  CaseRepositoryLive,
+  TicketRepositoryLive,
   ConnectorCredentialStoreLive,
   CustomAgentServiceLive,
   DbClient,
@@ -42,7 +42,7 @@ import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
   ConversationRouterLive,
-  makeCaseProviderResolver,
+  makeTicketProviderResolver,
   LLMServiceLive,
   makeGmailConversation,
   makeGraphConversation,
@@ -541,7 +541,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const appProvisioning = ShopifyAppProvisioningStoreLive(
     encryptionKeys,
   ).pipe(Layer.provide(dbLayer));
-  const caseRepo = CaseRepositoryLive.pipe(Layer.provide(dbLayer));
+  const ticketRepo = TicketRepositoryLive.pipe(Layer.provide(dbLayer));
   const connectorBuilders = [
     ...(cfg.google
       ? ([
@@ -570,14 +570,14 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   ];
   const conversation = ConversationRouterLive(
     connectorBuilders,
-    makeCaseProviderResolver,
-  ).pipe(Layer.provide(Layer.mergeAll(store, caseRepo)));
+    makeTicketProviderResolver,
+  ).pipe(Layer.provide(Layer.mergeAll(store, ticketRepo)));
   // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
   const tx = TransactionRunnerLive.pipe(Layer.provide(dbLayer));
-  // AuditLogService for the manual-reply handler (records `case.replied` so a
-  // human-sent reply shows in the case timeline). Non-redacted default —
+  // AuditLogService for the manual-reply handler (records `ticket.replied` so a
+  // human-sent reply shows in the ticket timeline). Non-redacted default —
   // matches the existing dashboard read/write paths.
   const audit = AuditLogServiceLive.pipe(Layer.provide(dbLayer));
   // BlobStorage: Live over R2 when R2_* env is set (Gmail webhook
@@ -599,7 +599,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   const llm = LLMServiceLive.pipe(
     Layer.provide(Layer.mergeAll(llmResolver, blob)),
   );
-  // ShopifyService for the dashboard's case-detail customer/order panels.
+  // ShopifyService for the dashboard's ticket-detail customer/order panels.
   // Credentials resolve per-tenant from the DB-backed connector store (the
   // managed-install path); the layer itself builds without any Shopify env.
   const shopify = ShopifyServiceLive.pipe(
@@ -624,7 +624,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // (SSRF-guarded) backs the "add from URL" / resync paths; it has no deps.
   const knowledge = KnowledgeBaseServiceLive.pipe(Layer.provide(dbLayer));
   const urlFetch = UrlFetchServiceLive;
-  // 17track for the case-detail live tracking card. Platform-managed key
+  // 17track for the ticket-detail live tracking card. Platform-managed key
   // (`SEVENTEENTRACK_API_KEY`, shared across the api + worker process groups);
   // when unset the api boots with the NoProvider fallback so the endpoint still
   // answers (every lookup → `no_provider` with a public tracking URL).
@@ -638,7 +638,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     store,
     accountOpenrouterStore,
     appProvisioning,
-    caseRepo,
+    ticketRepo,
     conversation,
     approvals,
     tx,
@@ -660,7 +660,7 @@ export type ApiLayer = Layer.Layer<
   | ConnectorCredentialStore
   | AccountOpenRouterCredentialStore
   | ConversationService
-  | CaseRepository
+  | TicketRepository
   | ShopifyAppProvisioningStore
   | ApprovalService
   | AuditLogService

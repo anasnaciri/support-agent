@@ -4,7 +4,7 @@
 //
 // The `audit_log.details` JSONB column can capture free-form context
 // from the runtime — most fields are structural (tool name, ok flag,
-// case id, turn number) but a few carry customer PII:
+// ticket id, turn number) but a few carry customer PII:
 //
 //   - `finalMessage` (agent's customer-facing reply text)
 //   - `bodyText` / `bodyHtml` (when a tool input gets logged)

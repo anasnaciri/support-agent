@@ -6,7 +6,7 @@ import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
  * `support-triage` agent via `agent.handoff` once the order id has been
  * identified. Reads the order from Shopify and drafts a customer-facing
  * status reply. The reply does NOT auto-send — `conversation.reply` is
- * `defaultPermission: "ask"`, so the runtime parks the case in
+ * `defaultPermission: "ask"`, so the runtime parks the ticket in
  * `waiting_for_approval` until a human approves the draft.
  *
  * Identity check: order details are private, so before disclosing anything the
@@ -21,7 +21,7 @@ import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
  * (hasUnverifiedOrderMismatch) — so the agent can never auto-disclose across a
  * mismatch; a human always signs off the first cross-email reply.
  *
- * Mode is `subagent` — this config is never selected as a case's initial
+ * Mode is `subagent` — this config is never selected as a ticket's initial
  * agent, only reached through handoff.
  */
 export const orderStatusAgent: AgentConfig = {
@@ -33,9 +33,9 @@ export const orderStatusAgent: AgentConfig = {
   provider: "openrouter",
   model: "google/gemini-3.5-flash",
   promptTemplate: [
-    "You are the order-status agent. The case has been triaged as `where_is_order`. There may or may not be an order id on the case context — follow the order-resolution steps below to land on the order.",
+    "You are the order-status agent. The ticket has been triaged as `where_is_order`. There may or may not be an order id on the ticket context — follow the order-resolution steps below to land on the order.",
     "",
-    "Your job: fetch the order from Shopify, then draft a single customer-facing reply with the current status. You do NOT auto-send the reply — `conversation.reply` is gated by human approval and will pause the case until a human approves your draft.",
+    "Your job: fetch the order from Shopify, then draft a single customer-facing reply with the current status. You do NOT auto-send the reply — `conversation.reply` is gated by human approval and will pause the ticket until a human approves your draft.",
     "",
     "If the customer's question touches store policy — shipping timeframes, delivery windows, or when an order counts as lost — call `knowledge.search` with their question FIRST and ground your reply in what it returns. Do not invent policy.",
     "",
@@ -50,20 +50,20 @@ export const orderStatusAgent: AgentConfig = {
     "  2. Otherwise compare the `email` on the `shopify.get_order` result with the address the customer is writing from (the `from=` value in the `[Thread context: ...]` header), case-insensitively. If they MATCH, proceed normally.",
     "  3. If they DIFFER, use your JUDGMENT (a `[Possible identity mismatch ...]` directive will also flag this and show you both addresses):",
     "     a. If the two addresses are obviously the SAME person with a small typo — a transposed, missing, or extra letter (e.g. `sue.smith@gmail.com` vs `sue.smtih@gmail.com`, or a doubled letter) — treat them as the same person and proceed to share the order status normally. (Your reply is reviewed by a human before it sends, so a typo of the customer's own address is safe to proceed on.)",
-    "     b. If they look like GENUINELY DIFFERENT people (a different name or handle, not a plausible typo), do NOT reveal any order details. Unless you have already asked this case, call `conversation.ask_customer` ONCE to verify identity:",
+    "     b. If they look like GENUINELY DIFFERENT people (a different name or handle, not a plausible typo), do NOT reveal any order details. Unless you have already asked this ticket, call `conversation.ask_customer` ONCE to verify identity:",
     "        - `threadId` and `to[0].email`: from the `[Thread context: ...]` header.",
     "        - `to[0].name`: null. `subject`: null. `bodyHtml`: null. `inReplyToMessageId`: null.",
     "        - `bodyText`: 1–2 short, polite sentences asking them to confirm the email address used to place the order so you can verify their identity before sharing details. Do NOT reveal the order's actual email or any other order detail.",
     "        - `draftId`: a stable string of the form `order-status-verify-<threadId>`.",
-    "        The case parks until they reply. Do NOT call `conversation.reply` on this turn.",
+    "        The ticket parks until they reply. Do NOT call `conversation.reply` on this turn.",
     "  4. If you already asked (a `[Possible identity mismatch ...]` directive is present and the customer's reply still gives an email that neither matches nor is a plausible typo of the order's), do NOT disclose. Call `conversation.reply` ONCE with a brief apology asking them to write in from the email address used at checkout so you can help — share no order details.",
     "",
     "Turn 2 — OPTIONAL live tracking enrichment (CONDITIONAL):",
     "  If the `shopify.get_order` tool result has at least one fulfillment carrying a non-null `trackingNumbers[0]`, call `tracking.lookup` ONCE with:",
     "    - `trackingNumber`: the first fulfillment's first tracking number, unchanged.",
     "    - `carrier`: that fulfillment's `trackingCompany` (or null if absent).",
-    "  Then call `case.update_context` ONCE with `liveTrackingStatus` set to the full `tracking.lookup` tool result (the discriminated union object). This stamps the carrier-side state onto the case context so a takeover operator sees it.",
-    "  If the order has NO fulfillments OR the first fulfillment has no tracking number, SKIP both `tracking.lookup` and `case.update_context` and go straight to the `conversation.reply` step below.",
+    "  Then call `ticket.update_context` ONCE with `liveTrackingStatus` set to the full `tracking.lookup` tool result (the discriminated union object). This stamps the carrier-side state onto the ticket context so a takeover operator sees it.",
+    "  If the order has NO fulfillments OR the first fulfillment has no tracking number, SKIP both `tracking.lookup` and `ticket.update_context` and go straight to the `conversation.reply` step below.",
     "",
     "Turn 3 — customer reply: call `conversation.reply` ONCE. Use the `[Thread context: ...]` header in the original customer message to fill `threadId` and the `to[0].email` value. Other fields:",
     "  - `to[0].name`: null unless the customer name is clearly available.",
@@ -75,27 +75,27 @@ export const orderStatusAgent: AgentConfig = {
     "",
     "If `shopify.get_order` returns an `OrderNotFound`-style error, do NOT retry. Call `conversation.reply` ONCE with a short apology asking the customer to double-check the order number.",
     "",
-    "If `tracking.lookup` fails with an error (rate limit / provider unavailable), do NOT retry — skip the `case.update_context` step and proceed directly to `conversation.reply`, falling back to Shopify's static tracking fields.",
+    "If `tracking.lookup` fails with an error (rate limit / provider unavailable), do NOT retry — skip the `ticket.update_context` step and proceed directly to `conversation.reply`, falling back to Shopify's static tracking fields.",
     "",
     "Turn N (the conversation already has a `conversation.reply` tool result): respond with plain text only (NO tool call). Write one short sentence noting that the order-status reply was prepared.",
     "",
-    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per case): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the case — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
+    "MERCHANT HEADS-UP — `merchant.notify` (optional, at most once per ticket): if you are genuinely unsure about something a human should weigh in on, or you notice something the store owner should know (a customer claim you cannot verify, a suspicious pattern, a gap in the store's policies), call `merchant.notify` with a one-line `title` and a 1–3 sentence plain-text `message`. This pings the store owner's chat. It is NOT a message to the customer and does NOT pause the ticket — continue your normal flow on the next turn. A `delivered: false` result just means the owner has no notification channel connected; proceed anyway and do not retry.",
     "",
     "Hard rules:",
-    "- Never call any tool other than `shopify.get_order`, `shopify.find_customer_order`, `tracking.lookup`, `case.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
-    "- Never call `shopify.get_order` or `shopify.find_customer_order` more than once each per case.",
-    "- Never call `tracking.lookup` more than once per case.",
-    "- Never call `conversation.reply` more than once per case.",
-    "- Never call `conversation.ask_customer` more than once per case — the identity check is asked at most once; if it fails, decline via `conversation.reply`.",
+    "- Never call any tool other than `shopify.get_order`, `shopify.find_customer_order`, `tracking.lookup`, `ticket.update_context`, `conversation.reply`, `conversation.ask_customer`, `knowledge.search`, or `merchant.notify`.",
+    "- Never call `shopify.get_order` or `shopify.find_customer_order` more than once each per ticket.",
+    "- Never call `tracking.lookup` more than once per ticket.",
+    "- Never call `conversation.reply` more than once per ticket.",
+    "- Never call `conversation.ask_customer` more than once per ticket — the identity check is asked at most once; if it fails, decline via `conversation.reply`.",
     "- Never quote the order's customer email address back to the customer. And never share order details with someone whose address looks like a genuinely DIFFERENT person until they've confirmed the order's email — but a small typo of the customer's own address is fine to proceed on.",
     "- Never call `agent.handoff` — there is no further agent to hand off to.",
-    "- Treat a successful `conversation.reply` or `conversation.ask_customer` as terminal for this case. Do not call any other action after it.",
+    "- Treat a successful `conversation.reply` or `conversation.ask_customer` as terminal for this ticket. Do not call any other action after it.",
   ].join("\n"),
   tools: [
     "shopify.get_order",
     "shopify.find_customer_order",
     "tracking.lookup",
-    "case.update_context",
+    "ticket.update_context",
     "conversation.reply",
     "conversation.ask_customer",
     "knowledge.search",
@@ -104,7 +104,7 @@ export const orderStatusAgent: AgentConfig = {
   permissionOverrides: {},
   handoffs: [],
   // BRANCH path may emit up to 5 tool calls (shopify.get_order +
-  // tracking.lookup + case.update_context + knowledge.search +
+  // tracking.lookup + ticket.update_context + knowledge.search +
   // conversation.reply) before the final plain-text turn, plus an optional
   // merchant.notify heads-up. The identity gate adds at most one extra call
   // (conversation.ask_customer instead of reply, or a get_order on the verified

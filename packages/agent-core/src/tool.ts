@@ -1,5 +1,5 @@
 import type { Duration, Effect, Schedule, Schema } from "effect";
-import type { AgentId, CaseId, TenantId } from "./ids.js";
+import type { AgentId, TicketId, TenantId } from "./ids.js";
 import type { Permission } from "./agent.js";
 import type { ToolError } from "./errors.js";
 
@@ -13,8 +13,8 @@ export type ToolSideEffectClass =
 
 export interface ToolContext {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
-  /** Exact conversation mailbox for tools acting on a case thread. */
+  readonly ticketId: TicketId;
+  /** Exact conversation mailbox for tools acting on a ticket thread. */
   readonly mailbox?: string;
   readonly agentId: AgentId;
   readonly callId: string;
@@ -45,7 +45,7 @@ export interface ToolConnectorScopeRequirement {
 
 /**
  * How a tenant gets to configure this tool from the dashboard. Tools WITHOUT
- * a `tenantControl` are internal plumbing (lookups, handoff, case bookkeeping)
+ * a `tenantControl` are internal plumbing (lookups, handoff, ticket bookkeeping)
  * and never surface on the tenant-facing agent page. The value picks the
  * control:
  *   - `permission-toggle` — a simple "ask first" vs "auto" switch backed by a

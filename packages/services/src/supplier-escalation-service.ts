@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 
 // ============================================================
 // Errors
@@ -24,7 +24,7 @@ export type SupplierEscalationError = SupplierEscalationWriteFailed;
 
 export interface EscalateInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   /** The agent's rewritten, customer-PII-free problem statement. */
   readonly problem: string;
   readonly orderRef: string | null;
@@ -37,7 +37,7 @@ export interface EscalateInput {
  * Outcome of an escalate attempt.
  *
  * - `escalated` — a supplier was found and the escalation row was written; the
- *   runtime parks the case in `waiting_for_supplier`.
+ *   runtime parks the ticket in `waiting_for_supplier`.
  * - `no_supplier` — the workspace has NO supplier configured. This is a normal
  *   result, NOT an error: the agent must not retry it and should fall back to a
  *   direct customer reply (and the supplier sheet, if connected). Only a genuine
@@ -54,11 +54,11 @@ export type EscalateResult =
   | { readonly kind: "no_supplier" };
 
 /**
- * Records a supplier escalation for a case. The agent calls this via the
- * `supplier.escalate` tool; the runtime then parks the case in
+ * Records a supplier escalation for a ticket. The agent calls this via the
+ * `supplier.escalate` tool; the runtime then parks the ticket in
  * `waiting_for_supplier` ONLY when the result is `escalated`. The Live impl
  * resolves the workspace's default supplier and inserts the
- * `case_supplier_escalations` row (with the privacy projection).
+ * `ticket_supplier_escalations` row (with the privacy projection).
  *
  * Tag in `services`, Live in `db` (the dependency rule: agent-core/tools never
  * import db; the runtime's outer Layer provides the Live impl).
@@ -72,14 +72,14 @@ export class SupplierEscalationService extends Context.Tag(
       input: EscalateInput,
     ) => Effect.Effect<EscalateResult, SupplierEscalationError>;
     /**
-     * Whether the case still has an OPEN escalation — the row-derived source
+     * Whether the ticket still has an OPEN escalation — the row-derived source
      * of truth for "waiting on a supplier" under concurrent wait states (the
-     * case status may show the primary wait, e.g. `waiting_for_approval`).
+     * ticket status may show the primary wait, e.g. `waiting_for_approval`).
      * The runtime consults this before resolving on an approval resume.
      */
-    readonly hasOpenEscalationForCase: (
+    readonly hasOpenEscalationForTicket: (
       tenantId: TenantId,
-      caseId: CaseId,
+      ticketId: TicketId,
     ) => Effect.Effect<boolean, SupplierEscalationError>;
   }
 >() {}
@@ -100,10 +100,10 @@ export interface SupplierEscalationTestFixtures {
   /** Override the synthesized `escalated` result fields. */
   readonly result?: Partial<Extract<EscalateResult, { kind: "escalated" }>>;
   /**
-   * Case ids `hasOpenEscalationForCase` reports as still-open. Defaults to
-   * none (false for every case).
+   * Ticket ids `hasOpenEscalationForTicket` reports as still-open. Defaults to
+   * none (false for every ticket).
    */
-  readonly openEscalationCaseIds?: ReadonlyArray<string>;
+  readonly openEscalationTicketIds?: ReadonlyArray<string>;
 }
 
 export const SupplierEscalationServiceTest = (
@@ -129,9 +129,9 @@ export const SupplierEscalationServiceTest = (
           supplierEmail: fixtures.result?.supplierEmail ?? "supplier@example.com",
         });
       },
-      hasOpenEscalationForCase: (_tenantId, caseId) =>
+      hasOpenEscalationForTicket: (_tenantId, ticketId) =>
         Effect.succeed(
-          (fixtures.openEscalationCaseIds ?? []).includes(caseId as string),
+          (fixtures.openEscalationTicketIds ?? []).includes(ticketId as string),
         ),
     }),
   );

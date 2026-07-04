@@ -3,13 +3,13 @@
 // known values explicitly and humanizes unknown ones, so a newly-added
 // backend code still renders as words while it waits for a real label.
 
-/** "where_is_order" / "case.escalated_to_human" → "Where is order" / "Case escalated to human". */
+/** "where_is_order" / "ticket.escalated_to_human" → "Where is order" / "Ticket escalated to human". */
 export const humanizeSlug = (value: string): string => {
   const words = value.replace(/[._]/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
-const CASE_STATUS_LABELS: Readonly<Record<string, string>> = {
+const TICKET_STATUS_LABELS: Readonly<Record<string, string>> = {
   new: "New",
   triaging: "Reviewing",
   in_progress: "In progress",
@@ -23,29 +23,29 @@ const CASE_STATUS_LABELS: Readonly<Record<string, string>> = {
   human_takeover: "With you",
 };
 
-export const caseStatusLabel = (status: string): string =>
-  CASE_STATUS_LABELS[status] ?? humanizeSlug(status);
+export const ticketStatusLabel = (status: string): string =>
+  TICKET_STATUS_LABELS[status] ?? humanizeSlug(status);
 
 /**
- * True when a case actually carries a subject. A `??` fallback only caught
+ * True when a ticket actually carries a subject. A `??` fallback only caught
  * null/undefined — an empty or whitespace-only Subject header (which inbound
  * email can produce) slipped through and rendered as a blank, awkward row.
  */
 export const hasSubject = (subject: string | null | undefined): boolean =>
   (subject ?? "").trim().length > 0;
 
-/** A case's subject for display: trimmed, or "(No subject)" when there is none. */
-export const caseSubjectLabel = (subject: string | null | undefined): string => {
+/** A ticket's subject for display: trimmed, or "(No subject)" when there is none. */
+export const ticketSubjectLabel = (subject: string | null | undefined): string => {
   const trimmed = (subject ?? "").trim();
   return trimmed.length > 0 ? trimmed : "(No subject)";
 };
 
-/** The case statuses offered by the cases-list status filter, in display
+/** The ticket statuses offered by the tickets-list status filter, in display
  *  order — derived from the canonical label map so the picker never drifts. */
-export const caseStatusFilterOptions: ReadonlyArray<{
+export const ticketStatusFilterOptions: ReadonlyArray<{
   readonly label: string;
   readonly value: string;
-}> = Object.entries(CASE_STATUS_LABELS).map(([value, label]) => ({
+}> = Object.entries(TICKET_STATUS_LABELS).map(([value, label]) => ({
   value,
   label,
 }));
@@ -105,13 +105,13 @@ const AUDIT_ACTION_LABELS: Readonly<Record<string, string>> = {
   "event.received": "Message received",
   "tool.invoked": "Action taken",
   "llm.decision": "Agent decision",
-  "case.created": "Case opened",
-  "case.resolved": "Case resolved",
-  "case.escalated_to_human": "Escalated to you",
-  "case.taken_over": "You took over",
-  "case.handed_back": "Handed back to agent",
-  "case.status_changed": "Status updated",
-  "case.refund_issued": "Refund issued",
+  "ticket.created": "Ticket opened",
+  "ticket.resolved": "Ticket resolved",
+  "ticket.escalated_to_human": "Escalated to you",
+  "ticket.taken_over": "You took over",
+  "ticket.handed_back": "Handed back to agent",
+  "ticket.status_changed": "Status updated",
+  "ticket.refund_issued": "Refund issued",
   "approval.requested": "Approval requested",
   "approval.decided": "Approval decided",
 };

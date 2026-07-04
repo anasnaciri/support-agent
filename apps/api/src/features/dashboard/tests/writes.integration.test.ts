@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import {
   approvals,
-  cases,
-  caseSupplierEscalations,
+  tickets,
+  ticketSupplierEscalations,
   createSupplier,
   makeDbClient,
   suppliers,
@@ -33,18 +33,18 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   const workosUser = `user_${randomUUID()}`;
   const managerId = decisionUuidFor(workosUser);
 
-  const caseApprove = randomUUID();
-  const caseReject = randomUUID();
-  const caseTakeover = randomUUID();
-  const caseResume = randomUUID();
-  const caseRetry = randomUUID();
-  const caseSetStatus = randomUUID();
-  const caseHt = randomUUID();
-  const caseDetails = randomUUID();
-  const caseEscalate = randomUUID();
-  const caseEscalateApproval = randomUUID();
-  const caseEscalateFailed = randomUUID();
-  const caseEscalateOther = randomUUID();
+  const ticketApprove = randomUUID();
+  const ticketReject = randomUUID();
+  const ticketTakeover = randomUUID();
+  const ticketResume = randomUUID();
+  const ticketRetry = randomUUID();
+  const ticketSetStatus = randomUUID();
+  const ticketHt = randomUUID();
+  const ticketDetails = randomUUID();
+  const ticketEscalate = randomUUID();
+  const ticketEscalateApproval = randomUUID();
+  const ticketEscalateFailed = randomUUID();
+  const ticketEscalateOther = randomUUID();
   const pApprove = randomUUID();
   const pReject = randomUUID();
   const pCross = randomUUID();
@@ -88,17 +88,17 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       body: JSON.stringify(body),
     });
 
-  const mkCase = (id: string, owner: string, status: string) => ({
+  const mkTicket = (id: string, owner: string, status: string) => ({
     id,
     tenantId: owner,
     channel: "email",
     status,
     currentAgentId: "support-triage",
   });
-  const mkApproval = (id: string, caseId: string, owner: string) => ({
+  const mkApproval = (id: string, ticketId: string, owner: string) => ({
     id,
     tenantId: owner,
-    caseId,
+    ticketId,
     agentId: "refund-review-agent",
     tool: "conversation.reply",
     proposedInput: { bodyText: "original draft" },
@@ -114,18 +114,18 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       .where(eq(approvals.id, id))
       .limit(1)
       .then((r) => r[0]);
-  const caseStatus = (id: string) =>
+  const ticketStatus = (id: string) =>
     raw!.db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, id))
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, id))
       .limit(1)
       .then((r) => r[0]?.status);
-  const caseContext = (id: string) =>
+  const ticketContext = (id: string) =>
     raw!.db
-      .select({ context: cases.context })
-      .from(cases)
-      .where(eq(cases.id, id))
+      .select({ context: tickets.context })
+      .from(tickets)
+      .where(eq(tickets.id, id))
       .limit(1)
       .then((r) => r[0]?.context as Record<string, unknown> | undefined);
 
@@ -135,26 +135,26 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       { id: tenantId, name: "w", workosOrganizationId: orgId },
       { id: otherTenantId, name: "w-other", workosOrganizationId: otherOrgId },
     ]);
-    await raw.db.insert(cases).values([
-      mkCase(caseApprove, tenantId, "waiting_for_approval"),
-      mkCase(caseReject, tenantId, "waiting_for_approval"),
-      mkCase(caseTakeover, tenantId, "waiting_for_approval"),
-      mkCase(caseResume, tenantId, "human_takeover"),
-      mkCase(caseRetry, tenantId, "human_takeover"),
-      mkCase(caseSetStatus, tenantId, "waiting_for_approval"),
-      mkCase(caseHt, tenantId, "human_takeover"),
-      mkCase(caseDetails, tenantId, "human_takeover"),
+    await raw.db.insert(tickets).values([
+      mkTicket(ticketApprove, tenantId, "waiting_for_approval"),
+      mkTicket(ticketReject, tenantId, "waiting_for_approval"),
+      mkTicket(ticketTakeover, tenantId, "waiting_for_approval"),
+      mkTicket(ticketResume, tenantId, "human_takeover"),
+      mkTicket(ticketRetry, tenantId, "human_takeover"),
+      mkTicket(ticketSetStatus, tenantId, "waiting_for_approval"),
+      mkTicket(ticketHt, tenantId, "human_takeover"),
+      mkTicket(ticketDetails, tenantId, "human_takeover"),
       {
-        ...mkCase(caseEscalate, tenantId, "human_takeover"),
+        ...mkTicket(ticketEscalate, tenantId, "human_takeover"),
         // A canonically-bound order: the handler tries to auto-fill the
         // supplier's order projection from it. No Shopify creds exist in this
         // test env, so the lookup fails and the projection must degrade to
         // nulls WITHOUT blocking the escalation.
         context: { identifiedOrderId: "gid://shopify/Order/424242" },
       },
-      mkCase(caseEscalateApproval, tenantId, "waiting_for_approval"),
-      mkCase(caseEscalateFailed, tenantId, "failed"),
-      mkCase(caseEscalateOther, otherTenantId, "in_progress"),
+      mkTicket(ticketEscalateApproval, tenantId, "waiting_for_approval"),
+      mkTicket(ticketEscalateFailed, tenantId, "failed"),
+      mkTicket(ticketEscalateOther, otherTenantId, "in_progress"),
     ]);
     // The escalate tests' workspace has a supplier; the OTHER tenant has none
     // (its escalate attempt must surface no_supplier).
@@ -163,11 +163,11 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       email: `wh-${tenantId.slice(0, 8)}@example.com`,
     });
     await raw.db.insert(approvals).values([
-      mkApproval(pApprove, caseApprove, tenantId),
-      mkApproval(pReject, caseReject, tenantId),
-      mkApproval(pCross, caseApprove, tenantId),
-      mkApproval(pTakeover, caseTakeover, tenantId),
-      mkApproval(pSetStatus, caseSetStatus, tenantId),
+      mkApproval(pApprove, ticketApprove, tenantId),
+      mkApproval(pReject, ticketReject, tenantId),
+      mkApproval(pCross, ticketApprove, tenantId),
+      mkApproval(pTakeover, ticketTakeover, tenantId),
+      mkApproval(pSetStatus, ticketSetStatus, tenantId),
     ]);
     handle = await startServer(cfg, {
       dashboardTokenVerifier: TEST_DASHBOARD_VERIFIER,
@@ -180,13 +180,13 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     if (handle) await handle.close();
     for (const id of [tenantId, otherTenantId]) {
       await raw.db
-        .delete(caseSupplierEscalations)
-        .where(sql`${caseSupplierEscalations.tenantId} = ${id}`);
+        .delete(ticketSupplierEscalations)
+        .where(sql`${ticketSupplierEscalations.tenantId} = ${id}`);
       await raw.db
         .delete(suppliers)
         .where(sql`${suppliers.tenantId} = ${id}`);
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
@@ -223,9 +223,9 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect((await approvalRow(pReject))?.status).toBe("rejected");
   });
 
-  it("takeover transitions the case + cancels its pending approvals", async () => {
+  it("takeover transitions the ticket + cancels its pending approvals", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseTakeover}/takeover`, {
+    const res = await post(`/dashboard/tickets/${ticketTakeover}/takeover`, {
       reason: "manual handling",
     });
     expect(res.status).toBe(200);
@@ -235,55 +235,55 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     };
     expect(body.kind).toBe("taken_over");
     expect(body.canceledApprovals).toBe(1);
-    expect(await caseStatus(caseTakeover)).toBe("human_takeover");
+    expect(await ticketStatus(ticketTakeover)).toBe("human_takeover");
     expect((await approvalRow(pTakeover))?.status).toBe("rejected");
   });
 
-  it("resume hands a human_takeover case back to the agent (in_progress)", async () => {
+  it("resume hands a human_takeover ticket back to the agent (in_progress)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseResume}/resume`, {
+    const res = await post(`/dashboard/tickets/${ticketResume}/resume`, {
       reason: "handing back to the agent",
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kind: string; toStatus?: string };
     expect(body.kind).toBe("resumed");
     expect(body.toStatus).toBe("in_progress");
-    expect(await caseStatus(caseResume)).toBe("in_progress");
+    expect(await ticketStatus(ticketResume)).toBe("in_progress");
   });
 
-  it("resuming a case that isn't in human_takeover is a no-op", async () => {
+  it("resuming a ticket that isn't in human_takeover is a no-op", async () => {
     if (!raw) return;
-    // caseResume is now in_progress from the previous test.
-    const res = await post(`/dashboard/cases/${caseResume}/resume`);
+    // ticketResume is now in_progress from the previous test.
+    const res = await post(`/dashboard/tickets/${ticketResume}/resume`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kind: string; status?: string };
     expect(body.kind).toBe("not_in_takeover");
     expect(body.status).toBe("in_progress");
-    expect(await caseStatus(caseResume)).toBe("in_progress");
+    expect(await ticketStatus(ticketResume)).toBe("in_progress");
   });
 
-  it("retry hands the case back AND enqueues a case.resumed tick", async () => {
+  it("retry hands the ticket back AND enqueues a ticket.resumed tick", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseRetry}/retry`);
+    const res = await post(`/dashboard/tickets/${ticketRetry}/retry`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kind: string; toStatus?: string };
     expect(body.kind).toBe("retried");
     expect(body.toStatus).toBe("in_progress");
-    expect(await caseStatus(caseRetry)).toBe("in_progress");
+    expect(await ticketStatus(ticketRetry)).toBe("in_progress");
     // The worker-facing event actually landed on workflow.events.
     const jobs = await raw.db.execute(
       sql`select count(*)::int as n from pgboss.job
           where name = 'workflow.events'
-            and data->'event'->>'type' = 'case.resumed'
-            and data->'event'->>'caseId' = ${caseRetry}`,
+            and data->'event'->>'type' = 'ticket.resumed'
+            and data->'event'->>'ticketId' = ${ticketRetry}`,
     );
     expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(1);
   });
 
-  it("retrying a case that isn't in human_takeover is a no-op (no event)", async () => {
+  it("retrying a ticket that isn't in human_takeover is a no-op (no event)", async () => {
     if (!raw) return;
-    // caseRetry is now in_progress from the previous test.
-    const res = await post(`/dashboard/cases/${caseRetry}/retry`);
+    // ticketRetry is now in_progress from the previous test.
+    const res = await post(`/dashboard/tickets/${ticketRetry}/retry`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kind: string; status?: string };
     expect(body.kind).toBe("not_in_takeover");
@@ -291,15 +291,15 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     const jobs = await raw.db.execute(
       sql`select count(*)::int as n from pgboss.job
           where name = 'workflow.events'
-            and data->'event'->>'type' = 'case.resumed'
-            and data->'event'->>'caseId' = ${caseRetry}`,
+            and data->'event'->>'type' = 'ticket.resumed'
+            and data->'event'->>'ticketId' = ${ticketRetry}`,
     );
     expect((jobs as unknown as Array<{ n: number }>)[0]?.n).toBe(1);
   });
 
-  it("set-status manually resolves a case + cancels its pending approval", async () => {
+  it("set-status manually resolves a ticket + cancels its pending approval", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "resolved",
       reason: "handled offline",
     });
@@ -312,36 +312,36 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(body.kind).toBe("updated");
     expect(body.toStatus).toBe("resolved");
     expect(body.canceledApprovals).toBe(1);
-    expect(await caseStatus(caseSetStatus)).toBe("resolved");
+    expect(await ticketStatus(ticketSetStatus)).toBe("resolved");
     expect((await approvalRow(pSetStatus))?.status).toBe("rejected");
   });
 
-  it("set-status reopens a resolved case to in_progress", async () => {
+  it("set-status reopens a resolved ticket to in_progress", async () => {
     if (!raw) return;
-    // caseSetStatus is resolved from the previous test.
-    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    // ticketSetStatus is resolved from the previous test.
+    const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "in_progress",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("updated");
-    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
   });
 
   it("setting the same status is a no-op (unchanged, no mutation)", async () => {
     if (!raw) return;
-    // caseSetStatus is in_progress from the previous test.
-    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    // ticketSetStatus is in_progress from the previous test.
+    const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "in_progress",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("unchanged");
-    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
   });
 
-  it("archive-now archives a resolved case but refuses a live one", async () => {
+  it("archive-now archives a resolved ticket but refuses a live one", async () => {
     if (!raw) return;
-    // caseSetStatus is in_progress — archiving a live case is forbidden.
-    const early = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    // ticketSetStatus is in_progress — archiving a live ticket is forbidden.
+    const early = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "archived",
     });
     expect(early.status).toBe(409);
@@ -349,57 +349,57 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       "transition_not_allowed",
     );
 
-    await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "resolved",
     });
-    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "archived",
       reason: "archive now",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("updated");
     const row = await raw.db
-      .select({ status: cases.status, archivedAt: cases.archivedAt })
-      .from(cases)
-      .where(eq(cases.id, caseSetStatus))
+      .select({ status: tickets.status, archivedAt: tickets.archivedAt })
+      .from(tickets)
+      .where(eq(tickets.id, ticketSetStatus))
       .limit(1)
       .then((r) => r[0]);
     expect(row?.status).toBe("archived");
     expect(row?.archivedAt).not.toBeNull();
 
-    // Restore for the later tests that expect an in_progress case.
-    const reopen = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    // Restore for the later tests that expect an in_progress ticket.
+    const reopen = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "in_progress",
     });
     expect(reopen.status).toBe(200);
-    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
   });
 
   it("edit-details stamps a hand-corrected customer email + name into context", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+    const res = await post(`/dashboard/tickets/${ticketDetails}/details`, {
       customerEmail: "Jane@Shopper.com",
       customerName: "Jane Shopper",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("saved");
-    const ctx = await caseContext(caseDetails);
+    const ctx = await ticketContext(ticketDetails);
     expect(ctx?.["customerEmail"]).toBe("jane@shopper.com");
     expect(ctx?.["customerName"]).toBe("Jane Shopper");
-    // A details edit never changes the case status.
-    expect(await caseStatus(caseDetails)).toBe("human_takeover");
+    // A details edit never changes the ticket status.
+    expect(await ticketStatus(ticketDetails)).toBe("human_takeover");
   });
 
   it("edit-details records an unresolvable order ref as a hint (no Shopify creds)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+    const res = await post(`/dashboard/tickets/${ticketDetails}/details`, {
       orderRef: "#1001",
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kind: string; orderResolved?: boolean };
     expect(body.kind).toBe("saved");
     expect(body.orderResolved).toBe(false);
-    const ctx = await caseContext(caseDetails);
+    const ctx = await ticketContext(ticketDetails);
     expect(ctx?.["quotedOrderRef"]).toBe("#1001");
     // Unresolved → no canonical GID stamped.
     expect(ctx?.["identifiedOrderId"]).toBeUndefined();
@@ -407,7 +407,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
 
   it("edit-details rejects a malformed email (invalid_email, 400)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseDetails}/details`, {
+    const res = await post(`/dashboard/tickets/${ticketDetails}/details`, {
       customerEmail: "not-an-email",
     });
     expect(res.status).toBe(400);
@@ -416,17 +416,17 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
 
   it("edit-details with no fields is a no-op (nothing_to_update, 400)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseDetails}/details`, {});
+    const res = await post(`/dashboard/tickets/${ticketDetails}/details`, {});
     expect(res.status).toBe(400);
     expect(((await res.json()) as { kind: string }).kind).toBe(
       "nothing_to_update",
     );
   });
 
-  it("edit-details 404s for a case in another tenant (no mutation)", async () => {
+  it("edit-details 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseDetails}/details`,
+      `/dashboard/tickets/${ticketDetails}/details`,
       { customerEmail: "leak@x.com" },
       dashboardAuthHeaders(
         otherOrgId,
@@ -435,8 +435,8 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       ),
     );
     expect(res.status).toBe(404);
-    // The real tenant's case is untouched.
-    expect((await caseContext(caseDetails))?.["customerEmail"]).toBe(
+    // The real tenant's ticket is untouched.
+    expect((await ticketContext(ticketDetails))?.["customerEmail"]).toBe(
       "jane@shopper.com",
     );
   });
@@ -444,7 +444,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
   it("shipping-address with no fields is a no-op (nothing_to_update, 400)", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseDetails}/shipping-address`,
+      `/dashboard/tickets/${ticketDetails}/shipping-address`,
       {},
     );
     expect(res.status).toBe(400);
@@ -453,9 +453,9 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
   });
 
-  it("shipping-address 404s when the case's order can't be resolved (no Shopify creds)", async () => {
+  it("shipping-address 404s when the ticket's order can't be resolved (no Shopify creds)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseDetails}/shipping-address`, {
+    const res = await post(`/dashboard/tickets/${ticketDetails}/shipping-address`, {
       address1: "456 New St",
       zip: "11375",
     });
@@ -465,10 +465,10 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
   });
 
-  it("shipping-address 404s for a case in another tenant", async () => {
+  it("shipping-address 404s for a ticket in another tenant", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseDetails}/shipping-address`,
+      `/dashboard/tickets/${ticketDetails}/shipping-address`,
       { address1: "456 New St" },
       dashboardAuthHeaders(
         otherOrgId,
@@ -478,13 +478,13 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
     expect(res.status).toBe(404);
     expect(((await res.json()) as { kind: string }).kind).toBe(
-      "case_not_found",
+      "ticket_not_found",
     );
   });
 
   it("rejects a status the merchant may not set (invalid_status, 400)", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseSetStatus}/status`, {
+    const res = await post(`/dashboard/tickets/${ticketSetStatus}/status`, {
       status: "triaging",
     });
     expect(res.status).toBe(400);
@@ -492,63 +492,63 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       "invalid_status",
     );
     // unchanged — an agent-internal status can't be forced by hand.
-    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
   });
 
   it("refuses an illegal transition the state machine forbids (409)", async () => {
     if (!raw) return;
-    // §10: a human_takeover case can't be marked resolved directly.
-    const res = await post(`/dashboard/cases/${caseHt}/status`, {
+    // §10: a human_takeover ticket can't be marked resolved directly.
+    const res = await post(`/dashboard/tickets/${ticketHt}/status`, {
       status: "resolved",
     });
     expect(res.status).toBe(409);
     const body = (await res.json()) as { kind: string; toStatus?: string };
     expect(body.kind).toBe("transition_not_allowed");
-    expect(await caseStatus(caseHt)).toBe("human_takeover");
+    expect(await ticketStatus(ticketHt)).toBe("human_takeover");
   });
 
-  it("resolve 404s for a case in another tenant (no mutation)", async () => {
+  it("resolve 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(
       otherOrgId,
       { "content-type": "application/json" },
       workosUser,
     );
-    // caseHt is still human_takeover from the 409 test above.
+    // ticketHt is still human_takeover from the 409 test above.
     const r = await post(
-      `/dashboard/cases/${caseHt}/resolve`,
+      `/dashboard/tickets/${ticketHt}/resolve`,
       {},
       otherHeaders,
     );
     expect(r.status).toBe(404);
-    expect(await caseStatus(caseHt)).toBe("human_takeover");
+    expect(await ticketStatus(ticketHt)).toBe("human_takeover");
   });
 
-  it("resolve closes a TAKEN-OVER case the status endpoint refuses", async () => {
+  it("resolve closes a TAKEN-OVER ticket the status endpoint refuses", async () => {
     if (!raw) return;
     // The status endpoint 409s on human_takeover→resolved (test above), but the
     // dedicated resolve endpoint bridges the close legally for a human actor.
-    const res = await post(`/dashboard/cases/${caseHt}/resolve`, {
+    const res = await post(`/dashboard/tickets/${ticketHt}/resolve`, {
       reason: "manager handled it",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("resolved");
-    expect(await caseStatus(caseHt)).toBe("resolved");
+    expect(await ticketStatus(ticketHt)).toBe("resolved");
   });
 
-  it("escalate-supplier parks a taken-over case + writes the escalation row", async () => {
+  it("escalate-supplier parks a taken-over ticket + writes the escalation row", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseEscalate}/escalate-supplier`, {
+    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-supplier`, {
       problem: "Order #1001 lost in transit — please reship",
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
     // Bridged human_takeover → in_progress → waiting_for_supplier (§10).
-    expect(await caseStatus(caseEscalate)).toBe("waiting_for_supplier");
+    expect(await ticketStatus(ticketEscalate)).toBe("waiting_for_supplier");
     const rows = await raw.db
       .select()
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.caseId, caseEscalate));
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalate));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       status: "open",
@@ -565,7 +565,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
 
   it("escalate-supplier is a no-op while an escalation is already open", async () => {
     if (!raw) return;
-    const res = await post(`/dashboard/cases/${caseEscalate}/escalate-supplier`, {
+    const res = await post(`/dashboard/tickets/${ticketEscalate}/escalate-supplier`, {
       problem: "duplicate",
     });
     expect(res.status).toBe(200);
@@ -574,51 +574,51 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     );
     const rows = await raw.db
       .select()
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.caseId, caseEscalate));
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalate));
     expect(rows).toHaveLength(1);
   });
 
   it("escalate-supplier keeps waiting_for_approval as the primary status", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseEscalateApproval}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateApproval}/escalate-supplier`,
       { problem: "Confirm replacement stock for order #1002" },
     );
     expect(res.status).toBe(200);
     expect(((await res.json()) as { kind: string }).kind).toBe("escalated");
     // Approval wins the single primary status under concurrent waits; the open
     // escalation row carries the supplier wait on its own.
-    expect(await caseStatus(caseEscalateApproval)).toBe("waiting_for_approval");
+    expect(await ticketStatus(ticketEscalateApproval)).toBe("waiting_for_approval");
     const rows = await raw.db
       .select()
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.caseId, caseEscalateApproval));
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalateApproval));
     expect(rows).toHaveLength(1);
   });
 
   it("escalate-supplier refuses an illegal transition without writing", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseEscalateFailed}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateFailed}/escalate-supplier`,
       { problem: "should not land" },
     );
     expect(res.status).toBe(409);
     expect(((await res.json()) as { kind: string }).kind).toBe(
       "transition_not_allowed",
     );
-    expect(await caseStatus(caseEscalateFailed)).toBe("failed");
+    expect(await ticketStatus(ticketEscalateFailed)).toBe("failed");
     const rows = await raw.db
       .select()
-      .from(caseSupplierEscalations)
-      .where(eq(caseSupplierEscalations.caseId, caseEscalateFailed));
+      .from(ticketSupplierEscalations)
+      .where(eq(ticketSupplierEscalations.ticketId, ticketEscalateFailed));
     expect(rows).toHaveLength(0);
   });
 
   it("escalate-supplier 400s on a missing problem statement", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseEscalate}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalate}/escalate-supplier`,
       { problem: "   " },
     );
     expect(res.status).toBe(400);
@@ -632,28 +632,28 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       workosUser,
     );
     const res = await post(
-      `/dashboard/cases/${caseEscalateOther}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateOther}/escalate-supplier`,
       { problem: "no supplier configured here" },
       otherHeaders,
     );
     expect(res.status).toBe(409);
     expect(((await res.json()) as { kind: string }).kind).toBe("no_supplier");
-    expect(await caseStatus(caseEscalateOther)).toBe("in_progress");
+    expect(await ticketStatus(ticketEscalateOther)).toBe("in_progress");
   });
 
-  it("escalate-supplier 404s for a case in another tenant (no mutation)", async () => {
+  it("escalate-supplier 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const res = await post(
-      `/dashboard/cases/${caseEscalateOther}/escalate-supplier`,
+      `/dashboard/tickets/${ticketEscalateOther}/escalate-supplier`,
       { problem: "cross-tenant" },
     );
     expect(res.status).toBe(404);
     expect(((await res.json()) as { kind: string }).kind).toBe(
-      "case_not_found",
+      "ticket_not_found",
     );
   });
 
-  it("set-status 404s for a case in another tenant (no mutation)", async () => {
+  it("set-status 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(
       otherOrgId,
@@ -661,15 +661,15 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       workosUser,
     );
     const r = await post(
-      `/dashboard/cases/${caseSetStatus}/status`,
+      `/dashboard/tickets/${ticketSetStatus}/status`,
       { status: "resolved" },
       otherHeaders,
     );
     expect(r.status).toBe(404);
-    expect(await caseStatus(caseSetStatus)).toBe("in_progress");
+    expect(await ticketStatus(ticketSetStatus)).toBe("in_progress");
   });
 
-  it("resume 404s for a case in another tenant (no mutation)", async () => {
+  it("resume 404s for a ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(
       otherOrgId,
@@ -677,7 +677,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       workosUser,
     );
     const r = await post(
-      `/dashboard/cases/${caseResume}/resume`,
+      `/dashboard/tickets/${ticketResume}/resume`,
       {},
       otherHeaders,
     );
@@ -698,7 +698,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect((await approvalRow(pCross))?.status).toBe("pending");
   });
 
-  it("404 for an approval / case in another tenant (no mutation)", async () => {
+  it("404 for an approval / ticket in another tenant (no mutation)", async () => {
     if (!raw) return;
     const otherHeaders = dashboardAuthHeaders(
       otherOrgId,
@@ -709,7 +709,7 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     expect(a.status).toBe(404);
     expect((await approvalRow(pCross))?.status).toBe("pending");
 
-    const t = await post(`/dashboard/cases/${caseApprove}/takeover`, {}, otherHeaders);
+    const t = await post(`/dashboard/tickets/${ticketApprove}/takeover`, {}, otherHeaders);
     expect(t.status).toBe(404);
   });
 });

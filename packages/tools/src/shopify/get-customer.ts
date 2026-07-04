@@ -42,7 +42,7 @@ const Output = Schema.Struct({
 export const shopifyGetCustomer = defineTool({
   name: "shopify.get_customer",
   description:
-    "Look up a Shopify customer by id (preferred) or by email. Provide EXACTLY ONE of `customerId` or `email` — not both, not neither. Returns customer name, contact info, orders count, total spent, and default address. Use this when you need to identify or enrich a customer's profile beyond what's already on the case.",
+    "Look up a Shopify customer by id (preferred) or by email. Provide EXACTLY ONE of `customerId` or `email` — not both, not neither. Returns customer name, contact info, orders count, total spent, and default address. Use this when you need to identify or enrich a customer's profile beyond what's already on the ticket.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

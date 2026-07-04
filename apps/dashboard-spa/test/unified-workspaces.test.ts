@@ -39,7 +39,7 @@ describe("mergeWorkspaces", () => {
   });
 
   it("routes each kind to its own surface home", () => {
-    expect(surfaceHomeForKind("supplier")).toBe("/supplier/cases");
+    expect(surfaceHomeForKind("supplier")).toBe("/supplier/tickets");
     expect(surfaceHomeForKind("merchant")).toBe("/");
   });
 });

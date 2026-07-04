@@ -3,7 +3,7 @@
 // ============================================================
 //
 // A tenant on a prepaid OpenRouter key (BYOK) hits a silent cliff at
-// zero credits: every tick starts failing and cases pile up in
+// zero credits: every tick starts failing and tickets pile up in
 // human_takeover. This pass reads each active openrouter key's balance
 // from `GET /api/v1/credits` (USD-denominated by the API) and pings the
 // merchant ONCE per below-threshold crossing.

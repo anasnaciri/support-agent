@@ -254,7 +254,7 @@ export function LlmPage() {
         <h1 className="text-3xl font-semibold tracking-tight">AI provider</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Bring your own key. Your agents use it for every reply they write —
-          we never fall back to a key of our own. Without one, new cases pause
+          we never fall back to a key of our own. Without one, new tickets pause
           and wait for you from the first message.
         </p>
       </div>
@@ -336,7 +336,7 @@ export function LlmPage() {
                   Your provider is{" "}
                   <strong>{PROVIDER_LABEL[activeProvider]}</strong>, but the
                   following agents are set to AI models it can&apos;t serve.
-                  Those agents won&apos;t be able to respond — their cases will
+                  Those agents won&apos;t be able to respond — their tickets will
                   pause and wait for you.
                 </p>
                 <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">

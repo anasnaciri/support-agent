@@ -34,8 +34,8 @@ interface NavItem {
 }
 
 const PRIMARY_NAV: ReadonlyArray<NavItem> = [
-  { href: "/", label: "Today", icon: Home, requires: "cases.view" },
-  { href: "/cases", label: "Cases", icon: Inbox, requires: "cases.view" },
+  { href: "/", label: "Today", icon: Home, requires: "tickets.view" },
+  { href: "/tickets", label: "Tickets", icon: Inbox, requires: "tickets.view" },
   {
     href: "/approvals",
     label: "Approvals",

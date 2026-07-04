@@ -12,12 +12,12 @@ import type {
   ApprovalsListResult,
   AuditEntry,
   AuditFilter,
-  CaseConversationThreadResult,
-  CaseDetail,
-  CaseEventsResult,
-  CaseTrackingResult,
-  CaseListRow,
-  CasesFilter,
+  TicketConversationThreadResult,
+  TicketDetail,
+  TicketEventsResult,
+  TicketTrackingResult,
+  TicketListRow,
+  TicketsFilter,
   CatalogResponse,
   CustomAgentView,
   CustomAgentWriteBody,
@@ -236,7 +236,7 @@ export const getMeSession = async (
 export interface ApprovalDecisionResultView {
   readonly kind: string;
 }
-export interface CaseBundleDecisionResultView {
+export interface TicketBundleDecisionResultView {
   readonly kind: string;
   readonly action?: "approve" | "reject";
   readonly count?: number;
@@ -250,14 +250,14 @@ export interface ResumeOutcomeView {
   readonly toStatus?: string;
   readonly status?: string;
 }
-export interface SetCaseStatusOutcomeView {
+export interface SetTicketStatusOutcomeView {
   readonly kind: string;
   readonly fromStatus?: string;
   readonly toStatus?: string;
   readonly status?: string;
   readonly canceledApprovals?: number;
 }
-export interface ResolveCaseOutcomeView {
+export interface ResolveTicketOutcomeView {
   readonly kind: string;
 }
 export interface EscalateSupplierOutcomeView {
@@ -274,8 +274,8 @@ export interface IssueRefundOutcomeView {
   readonly requestedCurrency?: string;
   readonly error?: string;
 }
-export interface EditCaseDetailsOutcomeView {
-  // saved | invalid_email | nothing_to_update | case_not_found | error
+export interface EditTicketDetailsOutcomeView {
+  // saved | invalid_email | nothing_to_update | ticket_not_found | error
   readonly kind: string;
   /** When an order ref was submitted: whether it resolved to a real order. */
   readonly orderResolved?: boolean;
@@ -284,7 +284,7 @@ export interface EditCaseDetailsOutcomeView {
 }
 
 export interface EditShippingAddressOutcomeView {
-  // saved | nothing_to_update | order_not_found | case_not_found |
+  // saved | nothing_to_update | order_not_found | ticket_not_found |
   // update_failed | error
   readonly kind: string;
   /** Shopify's rejection detail on `update_failed` (log-grade, not UI copy). */
@@ -309,10 +309,10 @@ export type RefundContextOutcome =
   | { readonly kind: "ok"; readonly context: ShopifyOrderRefundContext }
   | { readonly kind: "order_not_found" }
   | { readonly kind: "context_unavailable" }
-  | { readonly kind: "case_not_found" }
+  | { readonly kind: "ticket_not_found" }
   | { readonly kind: "error" };
 
-export interface CaseShopifyPanels {
+export interface TicketShopifyPanels {
   readonly customer: ShopifyCustomer | null;
   readonly order: ShopifyOrder | null;
   readonly shopDomain: string | null;
@@ -323,7 +323,7 @@ export interface CaseShopifyPanels {
 // here because the dashboard (Path B) imports only agent-core + contracts.
 export interface SupplierEscalationListItemView {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly problem: string;
   readonly orderRef: string | null;
   readonly shipCity: string | null;
@@ -348,12 +348,12 @@ export const api = {
   today: (ctx: CallCtx): Promise<TodaySummary> =>
     okBody("/today", ctx) as Promise<TodaySummary>,
 
-  cases: (
+  tickets: (
     ctx: CallCtx,
-    filter: CasesFilter,
+    filter: TicketsFilter,
     page: number,
     limit: number,
-  ): Promise<Page<CaseListRow>> => {
+  ): Promise<Page<TicketListRow>> => {
     const qs = new URLSearchParams();
     const trimmed = filter.q?.trim();
     if (trimmed) qs.set("q", trimmed);
@@ -361,79 +361,79 @@ export const api = {
     for (const v of filter.excludeStatus ?? []) qs.append("excludeStatus", v);
     qs.set("page", String(page));
     qs.set("limit", String(limit));
-    return okBody(`/cases?${qs.toString()}`, ctx) as Promise<Page<CaseListRow>>;
+    return okBody(`/tickets?${qs.toString()}`, ctx) as Promise<Page<TicketListRow>>;
   },
 
-  caseDetail: async (ctx: CallCtx, id: string): Promise<CaseDetail | null> => {
-    const { status, body } = await call(`/cases/${encodeURIComponent(id)}`, { ctx });
+  ticketDetail: async (ctx: CallCtx, id: string): Promise<TicketDetail | null> => {
+    const { status, body } = await call(`/tickets/${encodeURIComponent(id)}`, { ctx });
     if (status === 404) return null;
-    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id`);
-    return body as CaseDetail;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /tickets/:id`);
+    return body as TicketDetail;
   },
 
-  caseConversationThread: async (
+  ticketConversationThread: async (
     ctx: CallCtx,
     id: string,
-  ): Promise<CaseConversationThreadResult | null> => {
+  ): Promise<TicketConversationThreadResult | null> => {
     const { status, body } = await call(
-      `/cases/${encodeURIComponent(id)}/conversation-thread`,
+      `/tickets/${encodeURIComponent(id)}/conversation-thread`,
       { ctx },
     );
     if (status === 404) return null;
     if (status !== 200) {
       throw new Error(
-        `dashboard api ${status} on /cases/:id/conversation-thread`,
+        `dashboard api ${status} on /tickets/:id/conversation-thread`,
       );
     }
-    return body as CaseConversationThreadResult;
+    return body as TicketConversationThreadResult;
   },
 
-  caseShopify: async (
+  ticketShopify: async (
     ctx: CallCtx,
     id: string,
-  ): Promise<CaseShopifyPanels | null> => {
+  ): Promise<TicketShopifyPanels | null> => {
     const { status, body } = await call(
-      `/cases/${encodeURIComponent(id)}/shopify`,
+      `/tickets/${encodeURIComponent(id)}/shopify`,
       { ctx },
     );
     if (status === 404) return null;
-    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id/shopify`);
-    return body as CaseShopifyPanels;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /tickets/:id/shopify`);
+    return body as TicketShopifyPanels;
   },
 
-  // Fresh carrier tracking for the case-detail Tracking card. Best-effort: a
-  // 17track / api hiccup must never break the case page, so any failure or
-  // non-200 resolves to `unavailable` (the page then falls back to the on-case
+  // Fresh carrier tracking for the ticket-detail Tracking card. Best-effort: a
+  // 17track / api hiccup must never break the ticket page, so any failure or
+  // non-200 resolves to `unavailable` (the page then falls back to the on-ticket
   // tracking stamp). Returns the discriminated outcome.
-  caseTracking: async (
+  ticketTracking: async (
     ctx: CallCtx,
     id: string,
-  ): Promise<CaseTrackingResult> => {
+  ): Promise<TicketTrackingResult> => {
     try {
       const { status, body } = await call(
-        `/cases/${encodeURIComponent(id)}/tracking`,
+        `/tickets/${encodeURIComponent(id)}/tracking`,
         { ctx },
       );
       if (status === 404) return { kind: "not_found" };
       if (status !== 200 || !body) return { kind: "unavailable" };
-      return body as CaseTrackingResult;
+      return body as TicketTrackingResult;
     } catch {
       return { kind: "unavailable" };
     }
   },
 
-  caseEvents: async (
+  ticketEvents: async (
     ctx: CallCtx,
     id: string,
     since: string,
-  ): Promise<CaseEventsResult | null> => {
+  ): Promise<TicketEventsResult | null> => {
     const { status, body } = await call(
-      `/cases/${encodeURIComponent(id)}/events?since=${encodeURIComponent(since)}`,
+      `/tickets/${encodeURIComponent(id)}/events?since=${encodeURIComponent(since)}`,
       { ctx },
     );
     if (status === 404) return null;
-    if (status !== 200) throw new Error(`dashboard api ${status} on /cases/:id/events`);
-    return body as CaseEventsResult;
+    if (status !== 200) throw new Error(`dashboard api ${status} on /tickets/:id/events`);
+    return body as TicketEventsResult;
   },
 
   approvals: (
@@ -519,7 +519,7 @@ export const api = {
 
   // Like `models`, but tolerant: returns null instead of redirecting/throwing
   // when the member can't read the catalog (403 — lacks settings.agents) or the
-  // call otherwise fails. The case-page reply composer renders the model picker
+  // call otherwise fails. The ticket-page reply composer renders the model picker
   // only when this resolves, so a reply-only member still gets the composer
   // (minus the picker) rather than being bounced to /onboarding.
   replyModels: async (ctx: CallCtx): Promise<ModelsResponse | null> => {
@@ -946,44 +946,44 @@ export const api = {
     return (body as ApprovalDecisionResultView | null) ?? { kind: "error" };
   },
 
-  // Decide a whole case's pending approval BUNDLE in one click (autonomous
+  // Decide a whole ticket's pending approval BUNDLE in one click (autonomous
   // loop). The api approves/rejects every pending row then publishes one event
   // so the runtime runs the bundle in order. `edits` carries manager-edited
   // tool inputs keyed by approval id (e.g. the edited reply), honored only on
   // approve.
-  approveCaseBundle: async (
+  approveTicketBundle: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     edits?: Record<string, unknown>,
-  ): Promise<CaseBundleDecisionResultView> => {
+  ): Promise<TicketBundleDecisionResultView> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/approvals/approve`,
+      `/tickets/${encodeURIComponent(ticketId)}/approvals/approve`,
       {
         method: "POST",
         body: edits !== undefined ? { edits } : {},
         ctx,
       },
     );
-    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
+    return (body as TicketBundleDecisionResultView | null) ?? { kind: "error" };
   },
 
-  rejectCaseBundle: async (
+  rejectTicketBundle: async (
     ctx: CallCtx,
-    caseId: string,
-  ): Promise<CaseBundleDecisionResultView> => {
+    ticketId: string,
+  ): Promise<TicketBundleDecisionResultView> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/approvals/reject`,
+      `/tickets/${encodeURIComponent(ticketId)}/approvals/reject`,
       { method: "POST", ctx },
     );
-    return (body as CaseBundleDecisionResultView | null) ?? { kind: "error" };
+    return (body as TicketBundleDecisionResultView | null) ?? { kind: "error" };
   },
 
   takeover: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     reason?: string,
   ): Promise<TakeOverOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/takeover`, {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/takeover`, {
       method: "POST",
       body: reason !== undefined ? { reason } : {},
       ctx,
@@ -993,10 +993,10 @@ export const api = {
 
   resume: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     reason?: string,
   ): Promise<ResumeOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resume`, {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/resume`, {
       method: "POST",
       body: reason !== undefined ? { reason } : {},
       ctx,
@@ -1004,66 +1004,66 @@ export const api = {
     return (body as ResumeOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Manually set a case's status (mark resolved, reopen, park waiting on the
-  // customer …). The api validates the move against the case state machine and
+  // Manually set a ticket's status (mark resolved, reopen, park waiting on the
+  // customer …). The api validates the move against the ticket state machine and
   // returns the discriminated outcome (updated | unchanged | invalid_status |
-  // transition_not_allowed | case_not_found).
+  // transition_not_allowed | ticket_not_found).
   setStatus: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     status: string,
     reason?: string,
-  ): Promise<SetCaseStatusOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/status`, {
+  ): Promise<SetTicketStatusOutcomeView> => {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/status`, {
       method: "POST",
       body: reason !== undefined ? { status, reason } : { status },
       ctx,
     });
-    return (body as SetCaseStatusOutcomeView | null) ?? { kind: "error" };
+    return (body as SetTicketStatusOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Resolve a case by hand — including one the manager has TAKEN OVER. Distinct
+  // Resolve a ticket by hand — including one the manager has TAKEN OVER. Distinct
   // from `setStatus("resolved")`, which the state machine forbids directly from
   // human_takeover: this endpoint bridges the close legally for a human actor.
-  // Returns the discriminated outcome (resolved | case_not_found).
-  resolveCase: async (
+  // Returns the discriminated outcome (resolved | ticket_not_found).
+  resolveTicket: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     reason?: string,
-  ): Promise<ResolveCaseOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/resolve`, {
+  ): Promise<ResolveTicketOutcomeView> => {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/resolve`, {
       method: "POST",
       body: reason !== undefined ? { reason } : {},
       ctx,
     });
-    return (body as ResolveCaseOutcomeView | null) ?? { kind: "error" };
+    return (body as ResolveTicketOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Escalate a case to the workspace's supplier by hand. The problem statement
-  // is what the supplier sees (portal + email); the case parks waiting on them.
+  // Escalate a ticket to the workspace's supplier by hand. The problem statement
+  // is what the supplier sees (portal + email); the ticket parks waiting on them.
   // Returns the discriminated outcome (escalated | already_escalated |
-  // no_supplier | transition_not_allowed | case_not_found).
+  // no_supplier | transition_not_allowed | ticket_not_found).
   escalateSupplier: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     problem: string,
   ): Promise<EscalateSupplierOutcomeView> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/escalate-supplier`,
+      `/tickets/${encodeURIComponent(ticketId)}/escalate-supplier`,
       { method: "POST", body: { problem }, ctx },
     );
     return (body as EscalateSupplierOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Issue an agent-recommended refund directly on a case. The agent only
+  // Issue an agent-recommended refund directly on a ticket. The agent only
   // *recommended* the refund (read-only), so there's no approval to approve;
   // this runs the equivalent of refund.create under the operator's authority
   // (gated on the refunds.issue permission). Returns the discriminated outcome
   // (issued | order_not_found | invalid_amount | already_refunded |
-  // currency_mismatch | refund_failed | case_not_found).
+  // currency_mismatch | refund_failed | ticket_not_found).
   issueRefund: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     amount: { readonly amount: string; readonly currencyCode: string },
     opts: {
       readonly reason?: string | null;
@@ -1074,7 +1074,7 @@ export const api = {
       } | null;
     } = {},
   ): Promise<IssueRefundOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/refund`, {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/refund`, {
       method: "POST",
       body: {
         amount,
@@ -1092,22 +1092,22 @@ export const api = {
   // Hand-correct the customer / order the agent couldn't identify (the pencil on
   // the Customer / Order panels). Only non-empty fields are sent; an order ref is
   // resolved server-side to a real Shopify order when possible.
-  editCaseDetails: async (
+  editTicketDetails: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     fields: {
       readonly customerEmail?: string;
       readonly customerName?: string;
       readonly customerPhone?: string;
       readonly orderRef?: string;
     },
-  ): Promise<EditCaseDetailsOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/details`, {
+  ): Promise<EditTicketDetailsOutcomeView> => {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/details`, {
       method: "POST",
       body: fields,
       ctx,
     });
-    return (body as EditCaseDetailsOutcomeView | null) ?? { kind: "error" };
+    return (body as EditTicketDetailsOutcomeView | null) ?? { kind: "error" };
   },
 
   // Fix the order's shipping address (the pencil on the Order card's Ship-to).
@@ -1115,7 +1115,7 @@ export const api = {
   // current address and writes the result to the real Shopify order.
   editShippingAddress: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     fields: {
       readonly name?: string;
       readonly address1?: string;
@@ -1128,37 +1128,37 @@ export const api = {
     },
   ): Promise<EditShippingAddressOutcomeView> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/shipping-address`,
+      `/tickets/${encodeURIComponent(ticketId)}/shipping-address`,
       { method: "POST", body: fields, ctx },
     );
     return (body as EditShippingAddressOutcomeView | null) ?? { kind: "error" };
   },
 
-  // Refundable line items + pricing for the case's order, powering the
+  // Refundable line items + pricing for the ticket's order, powering the
   // Shopify-style refund modal. Read-only (gated on `refunds.issue` like the
   // issue endpoint). Returns the discriminated outcome so the modal can explain
   // why it can't render (no order / Shopify wouldn't calculate).
   refundContext: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
   ): Promise<RefundContextOutcome> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/refund-context`,
+      `/tickets/${encodeURIComponent(ticketId)}/refund-context`,
       { ctx },
     );
     return (body as RefundContextOutcome | null) ?? { kind: "error" };
   },
 
-  // Resume + an immediate `case.resumed` tick — the agent retries now
+  // Resume + an immediate `ticket.resumed` tick — the agent retries now
   // instead of waiting for the customer's next reply. `fromTriage` does a FULL
-  // retry: it rebinds the case to triage so the tick re-classifies + re-routes
+  // retry: it rebinds the ticket to triage so the tick re-classifies + re-routes
   // (default re-runs the bound specialist's last step).
   retry: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     opts: { readonly fromTriage?: boolean } = {},
   ): Promise<ResumeOutcomeView> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/retry`, {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/retry`, {
       method: "POST",
       ctx,
       ...(opts.fromTriage ? { body: { fromTriage: true } } : {}),
@@ -1170,40 +1170,40 @@ export const api = {
   // agent): requeues the failed reply-delivery so the worker sweep sends it.
   retrySend: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
   ): Promise<{ readonly kind: string }> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/retry-send`,
+      `/tickets/${encodeURIComponent(ticketId)}/retry-send`,
       { method: "POST", ctx },
     );
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
 
-  // Resend an approved reply that was never sent (skipped when the case was
-  // taken over). Re-sends the EXACT approved draft; the case stays in
+  // Resend an approved reply that was never sent (skipped when the ticket was
+  // taken over). Re-sends the EXACT approved draft; the ticket stays in
   // human_takeover. Returns the discriminated outcome (resent | nothing_to_resend
   // | not_in_takeover | send_failed | …).
   resendApproval: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
   ): Promise<{ readonly kind: string }> => {
     const { body } = await call(
-      `/cases/${encodeURIComponent(caseId)}/resend-approval`,
+      `/tickets/${encodeURIComponent(ticketId)}/resend-approval`,
       { method: "POST", ctx },
     );
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
 
-  // Send a human-drafted customer reply while driving a taken-over case. Goes
-  // out on the same connector/thread the agent uses; the case stays in
+  // Send a human-drafted customer reply while driving a taken-over ticket. Goes
+  // out on the same connector/thread the agent uses; the ticket stays in
   // human_takeover. Returns the discriminated outcome (sent | not_in_takeover |
   // no_thread | send_failed | …).
   sendReply: async (
     ctx: CallCtx,
-    caseId: string,
+    ticketId: string,
     bodyText: string,
   ): Promise<{ readonly kind: string }> => {
-    const { body } = await call(`/cases/${encodeURIComponent(caseId)}/reply`, {
+    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/reply`, {
       method: "POST",
       body: { bodyText },
       ctx,
@@ -1317,26 +1317,26 @@ export const api = {
     }),
 
   // ---- Supplier portal ----
-  supplierCases: async (
+  supplierTickets: async (
     ctx: CallCtx,
   ): Promise<ReadonlyArray<SupplierEscalationListItemView>> =>
     (
-      (await okBody("/supplier/cases", ctx)) as {
-        cases: ReadonlyArray<SupplierEscalationListItemView>;
+      (await okBody("/supplier/tickets", ctx)) as {
+        tickets: ReadonlyArray<SupplierEscalationListItemView>;
       }
-    ).cases,
+    ).tickets,
 
-  supplierCase: async (
+  supplierTicket: async (
     ctx: CallCtx,
     id: string,
   ): Promise<SupplierEscalationDetailView | null> => {
     const { status, body } = await call(
-      `/supplier/cases/${encodeURIComponent(id)}`,
+      `/supplier/tickets/${encodeURIComponent(id)}`,
       { ctx },
     );
     if (status === 404) return null;
     if (status !== 200) {
-      throw new Error(`dashboard api ${status} on /supplier/cases/:id`);
+      throw new Error(`dashboard api ${status} on /supplier/tickets/:id`);
     }
     return body as SupplierEscalationDetailView;
   },
@@ -1349,7 +1349,7 @@ export const api = {
       readonly proposedResolution?: string | null;
     },
   ): Promise<CallResult> =>
-    call(`/supplier/cases/${encodeURIComponent(id)}/update`, {
+    call(`/supplier/tickets/${encodeURIComponent(id)}/update`, {
       method: "POST",
       body: input,
       ctx,
@@ -1364,7 +1364,7 @@ export const api = {
       readonly trackingCompany?: string | null;
     },
   ): Promise<CallResult> =>
-    call(`/supplier/cases/${encodeURIComponent(id)}/tracking`, {
+    call(`/supplier/tickets/${encodeURIComponent(id)}/tracking`, {
       method: "POST",
       body: input,
       ctx,

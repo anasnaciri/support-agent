@@ -12,7 +12,7 @@ import {
 } from "../src/index.js";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   UserId,
   type Approval,
@@ -27,7 +27,7 @@ const makeService = () => {
   const seed = (
     overrides: Partial<Approval> & {
       readonly tenantId: TenantId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly agentId: AgentId;
     },
   ): Approval => {
@@ -109,9 +109,9 @@ const makeService = () => {
         Effect.succeed(
           [...store.values()].filter((r) => r.status === "pending"),
         ),
-      listForCase: (_tenantId, caseId) =>
+      listForTicket: (_tenantId, ticketId) =>
         Effect.succeed(
-          [...store.values()].filter((r) => r.caseId === caseId),
+          [...store.values()].filter((r) => r.ticketId === ticketId),
         ),
     }),
   );
@@ -121,7 +121,7 @@ const makeService = () => {
 
 const tenantA = TenantId("11111111-1111-1111-1111-111111111111");
 const tenantB = TenantId("22222222-2222-2222-2222-222222222222");
-const caseA = CaseId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+const ticketA = TicketId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 const agentId = AgentId("refund-review-agent");
 const manager = UserId("manager-1");
 
@@ -130,7 +130,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
     });
     const result = await Effect.runPromise(
@@ -154,7 +154,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
       // Drafted well over a day ago. Approval drafts no longer expire by
       // age for ANY tool, so a late decision must still go through.
@@ -179,7 +179,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
       proposedInput: { bodyText: "draft from agent", subject: null },
     });
@@ -213,7 +213,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
     });
     const result = await Effect.runPromise(
@@ -238,7 +238,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
     });
     const result = await Effect.runPromise(
@@ -261,7 +261,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
     });
     // Same id, but caller claims a different tenant — the row exists
@@ -296,7 +296,7 @@ describe("applyApprovalDecision", () => {
     const row: Approval = {
       id: randomUUID() as never,
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
       status: "pending",
       tool: "conversation.reply",
@@ -351,7 +351,7 @@ describe("applyApprovalDecision", () => {
     const svc = makeService();
     const row = svc.seed({
       tenantId: tenantA,
-      caseId: caseA,
+      ticketId: ticketA,
       agentId,
     });
     // First decision succeeds.
@@ -403,7 +403,7 @@ describe("decisionToEvent", () => {
   it("maps a decided approve to approval.approved", () => {
     const approval = {
       id: "appr-1",
-      caseId: "case-1",
+      ticketId: "ticket-1",
     } as never;
     const event = decisionToEvent(
       { kind: "decided", approval },
@@ -416,7 +416,7 @@ describe("decisionToEvent", () => {
   it("maps a decided reject to approval.rejected", () => {
     const approval = {
       id: "appr-1",
-      caseId: "case-1",
+      ticketId: "ticket-1",
     } as never;
     const event = decisionToEvent(
       { kind: "decided", approval },
@@ -445,15 +445,15 @@ describe("decideApprovalBundle", () => {
   const AGENT = AgentId("scenario-resolution-agent");
   const MANAGER = UserId("mgr-1");
 
-  it("approves every pending row for the case and returns one approve event", async () => {
+  it("approves every pending row for the ticket and returns one approve event", async () => {
     const { layer, seed, store } = makeService();
-    const caseId = CaseId("case-A");
-    const a = seed({ tenantId: TENANT, caseId, agentId: AGENT, tool: "refund.create" });
-    const b = seed({ tenantId: TENANT, caseId, agentId: AGENT, tool: "conversation.reply" });
-    // A different case's pending row must be untouched (scope).
+    const ticketId = TicketId("ticket-A");
+    const a = seed({ tenantId: TENANT, ticketId, agentId: AGENT, tool: "refund.create" });
+    const b = seed({ tenantId: TENANT, ticketId, agentId: AGENT, tool: "conversation.reply" });
+    // A different ticket's pending row must be untouched (scope).
     const other = seed({
       tenantId: TENANT,
-      caseId: CaseId("case-B"),
+      ticketId: TicketId("ticket-B"),
       agentId: AGENT,
       tool: "conversation.reply",
     });
@@ -462,7 +462,7 @@ describe("decideApprovalBundle", () => {
       Effect.provide(
         decideApprovalBundle({
           tenantId: TENANT,
-          caseId,
+          ticketId,
           action: "approve",
           managerId: MANAGER,
         }),
@@ -481,15 +481,15 @@ describe("decideApprovalBundle", () => {
 
   it("rejects every pending row and returns one reject event", async () => {
     const { layer, seed, store } = makeService();
-    const caseId = CaseId("case-R");
-    const a = seed({ tenantId: TENANT, caseId, agentId: AGENT });
-    const b = seed({ tenantId: TENANT, caseId, agentId: AGENT });
+    const ticketId = TicketId("ticket-R");
+    const a = seed({ tenantId: TENANT, ticketId, agentId: AGENT });
+    const b = seed({ tenantId: TENANT, ticketId, agentId: AGENT });
 
     const out = await Effect.runPromise(
       Effect.provide(
         decideApprovalBundle({
           tenantId: TENANT,
-          caseId,
+          ticketId,
           action: "reject",
           managerId: MANAGER,
         }),
@@ -508,17 +508,17 @@ describe("decideApprovalBundle", () => {
     // Reject must only reject the REMAINING (pending) rows — never un-decide the
     // one already approved (and executed).
     const { layer, seed, store } = makeService();
-    const caseId = CaseId("case-mixed");
+    const ticketId = TicketId("ticket-mixed");
     const approved = seed({
       tenantId: TENANT,
-      caseId,
+      ticketId,
       agentId: AGENT,
       tool: "refund.create",
       status: "approved",
     });
     const pending = seed({
       tenantId: TENANT,
-      caseId,
+      ticketId,
       agentId: AGENT,
       tool: "conversation.reply",
     });
@@ -527,7 +527,7 @@ describe("decideApprovalBundle", () => {
       Effect.provide(
         decideApprovalBundle({
           tenantId: TENANT,
-          caseId,
+          ticketId,
           action: "reject",
           managerId: MANAGER,
         }),
@@ -543,10 +543,10 @@ describe("decideApprovalBundle", () => {
 
   it("applies a per-approval edited input on approve", async () => {
     const { layer, seed, store } = makeService();
-    const caseId = CaseId("case-E");
+    const ticketId = TicketId("ticket-E");
     const reply = seed({
       tenantId: TENANT,
-      caseId,
+      ticketId,
       agentId: AGENT,
       tool: "conversation.reply",
       proposedInput: { bodyText: "original" },
@@ -556,7 +556,7 @@ describe("decideApprovalBundle", () => {
       Effect.provide(
         decideApprovalBundle({
           tenantId: TENANT,
-          caseId,
+          ticketId,
           action: "approve",
           managerId: MANAGER,
           edits: { [reply.id]: { bodyText: "edited by manager" } },
@@ -570,13 +570,13 @@ describe("decideApprovalBundle", () => {
     });
   });
 
-  it("is a no-op (no event) when the case has no pending approvals", async () => {
+  it("is a no-op (no event) when the ticket has no pending approvals", async () => {
     const { layer } = makeService();
     const out = await Effect.runPromise(
       Effect.provide(
         decideApprovalBundle({
           tenantId: TENANT,
-          caseId: CaseId("empty"),
+          ticketId: TicketId("empty"),
           action: "approve",
           managerId: MANAGER,
         }),

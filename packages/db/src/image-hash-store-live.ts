@@ -11,7 +11,7 @@ import {
   type SimilarImageHit,
 } from "@support-agent/services";
 import {
-  CaseId as makeCaseId,
+  TicketId as makeTicketId,
   TenantId as makeTenantId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
@@ -45,7 +45,7 @@ export const ImageHashStoreLive = Layer.effect(
           db.insert(imageHashes).values({
             id: randomUUID(),
             tenantId: input.tenantId,
-            caseId: input.caseId,
+            ticketId: input.ticketId,
             phash: input.phash,
           }),
         );
@@ -74,14 +74,14 @@ export const ImageHashStoreLive = Layer.effect(
               and(
                 eq(imageHashes.tenantId, input.tenantId),
                 gte(imageHashes.createdAt, cutoff),
-                ne(imageHashes.caseId, input.caseId),
+                ne(imageHashes.ticketId, input.ticketId),
               ),
             ),
         );
         return matchSimilar(
           rows.map((r) => ({
             tenantId: makeTenantId(r.tenantId),
-            caseId: makeCaseId(r.caseId),
+            ticketId: makeTicketId(r.ticketId),
             phash: r.phash,
             createdAt: r.createdAt,
           })),

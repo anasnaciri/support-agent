@@ -206,10 +206,10 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     expect(created.status).toBe(200);
     const roleId = ((await created.json()) as { roleId: string }).roleId;
 
-    // Grant only cases.view + cases.reply.
+    // Grant only tickets.view + tickets.reply.
     const setPerms = await post(
       `/dashboard/roles/${roleId}/permissions`,
-      { permissionIds: ["cases.view", "cases.reply"] },
+      { permissionIds: ["tickets.view", "tickets.reply"] },
       orgScoped,
       adminUuid,
       "admin@acme.com",
@@ -280,9 +280,9 @@ describeIfDb("apps/api — member RBAC (integration)", () => {
     };
     expect(sam.assigned).toBe(true);
     expect(sam.isOwner).toBe(false);
-    expect([...sam.permissions].sort()).toEqual(["cases.reply", "cases.view"]);
+    expect([...sam.permissions].sort()).toEqual(["tickets.reply", "tickets.view"]);
 
-    // Sam can read cases…
+    // Sam can read tickets…
     expect(
       (await get("/dashboard/today", orgScoped, samUuid, "sam@acme.com")).status,
     ).toBe(200);

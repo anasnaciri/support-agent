@@ -43,7 +43,7 @@ export const ShopifyOrderOutput = Schema.Struct({
   email: Schema.NullOr(Schema.String),
   /**
    * The Shopify customer GID the order was placed under, or null for a guest
-   * order. Exposed so the runtime can match the order to the case's resolved
+   * order. Exposed so the runtime can match the order to the ticket's resolved
    * customer (order → customer, not order-email → thread-email) when deciding
    * the order/customer-mismatch flag. An opaque id — harmless to the model.
    */
@@ -159,7 +159,7 @@ export const shopifyGetOrder = defineTool({
 
       // Branch on input shape:
       //   - `gid://shopify/Order/<n>` → direct id lookup (the rare power-
-      //     user case where the caller already has a GID).
+      //     user ticket where the caller already has a GID).
       //   - any other string → resolve by *search*. Try the order name
       //     first (`findOrderByName`) because customers usually quote
       //     `#1001`; on a miss, fall back to a confirmation-number lookup

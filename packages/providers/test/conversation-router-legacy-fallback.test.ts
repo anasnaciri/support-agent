@@ -11,21 +11,21 @@ import {
   type SentMessage,
 } from "@support-agent/agent-core";
 import {
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   ConnectorCredentialStoreTest,
   type ConnectorConnection,
   type ConnectorProvider,
   type ConversationServiceShape,
 } from "@support-agent/services";
 import {
-  makeCaseProviderResolver,
+  makeTicketProviderResolver,
   makeConversationRouter,
   type LegacyThreadProviderResolver,
 } from "../src/conversation-router-live.js";
 
-// Audit D2: legacy cases hold UN-namespaced thread ids (created before
-// provider-namespacing). The router must route those by the case's stamped
+// Audit D2: legacy tickets hold UN-namespaced thread ids (created before
+// provider-namespacing). The router must route those by the ticket's stamped
 // provider — falling back to the tenant's active conversation connector for
 // unstamped rows — instead of failing ThreadNotFound (or, worse, guessing
 // "most recent connector" for EVERY thread).
@@ -118,7 +118,7 @@ describe("makeConversationRouter — legacy (un-namespaced) thread fallback", ()
     );
     expect(calls).toEqual(["19e9ad3a3f896575"]);
     expect(gmail.seen).toEqual(["19e9ad3a3f896575"]);
-    // Legacy ids stay un-namespaced on the way out — the stored case
+    // Legacy ids stay un-namespaced on the way out — the stored ticket
     // threadId must keep matching.
     expect(thread.id).toBe("19e9ad3a3f896575");
     expect(thread.messages[0]!.threadId).toBe("19e9ad3a3f896575");
@@ -167,7 +167,7 @@ describe("makeConversationRouter — legacy (un-namespaced) thread fallback", ()
   });
 });
 
-describe("makeCaseProviderResolver — case stamp first, tenant-level fallback", () => {
+describe("makeTicketProviderResolver — ticket stamp first, tenant-level fallback", () => {
   const connection = (
     provider: ConnectorProvider,
     installedAt: Date,
@@ -186,9 +186,9 @@ describe("makeCaseProviderResolver — case stamp first, tenant-level fallback",
     status,
   });
 
-  const seedCase = (threadId: string, provider?: "gmail" | "outlook" | "imap") =>
+  const seedTicket = (threadId: string, provider?: "gmail" | "outlook" | "imap") =>
     Effect.gen(function* () {
-      const repo = yield* CaseRepository;
+      const repo = yield* TicketRepository;
       yield* repo.create({
         tenantId: tenantA,
         channel: "email",
@@ -198,14 +198,14 @@ describe("makeCaseProviderResolver — case stamp first, tenant-level fallback",
       });
     });
 
-  it("uses the case's stamped provider when present", async () => {
+  it("uses the ticket's stamped provider when present", async () => {
     const program = Effect.gen(function* () {
-      yield* seedCase("legacy-1", "outlook");
-      const resolver = yield* makeCaseProviderResolver;
+      yield* seedTicket("legacy-1", "outlook");
+      const resolver = yield* makeTicketProviderResolver;
       return yield* resolver(tenantA, ThreadId("legacy-1"));
     }).pipe(
       Effect.provide(
-        Layer.merge(CaseRepositoryTest, ConnectorCredentialStoreTest([])),
+        Layer.merge(TicketRepositoryTest, ConnectorCredentialStoreTest([])),
       ),
     );
     expect(await Effect.runPromise(program)).toBe("outlook");
@@ -213,13 +213,13 @@ describe("makeCaseProviderResolver — case stamp first, tenant-level fallback",
 
   it("falls back to the tenant's single active conversation connector", async () => {
     const program = Effect.gen(function* () {
-      yield* seedCase("legacy-2"); // unstamped
-      const resolver = yield* makeCaseProviderResolver;
+      yield* seedTicket("legacy-2"); // unstamped
+      const resolver = yield* makeTicketProviderResolver;
       return yield* resolver(tenantA, ThreadId("legacy-2"));
     }).pipe(
       Effect.provide(
         Layer.merge(
-          CaseRepositoryTest,
+          TicketRepositoryTest,
           ConnectorCredentialStoreTest([
             connection("gmail", new Date("2026-01-01")),
             connection("shopify", new Date("2026-06-01")), // not a conversation connector
@@ -232,13 +232,13 @@ describe("makeCaseProviderResolver — case stamp first, tenant-level fallback",
 
   it("tenant-level fallback picks the most recently installed ACTIVE connector", async () => {
     const program = Effect.gen(function* () {
-      yield* seedCase("legacy-3"); // unstamped
-      const resolver = yield* makeCaseProviderResolver;
+      yield* seedTicket("legacy-3"); // unstamped
+      const resolver = yield* makeTicketProviderResolver;
       return yield* resolver(tenantA, ThreadId("legacy-3"));
     }).pipe(
       Effect.provide(
         Layer.merge(
-          CaseRepositoryTest,
+          TicketRepositoryTest,
           ConnectorCredentialStoreTest([
             connection("gmail", new Date("2026-01-01")),
             connection("outlook", new Date("2026-03-01")),
@@ -252,11 +252,11 @@ describe("makeCaseProviderResolver — case stamp first, tenant-level fallback",
 
   it("returns null when nothing matches", async () => {
     const program = Effect.gen(function* () {
-      const resolver = yield* makeCaseProviderResolver;
+      const resolver = yield* makeTicketProviderResolver;
       return yield* resolver(tenantA, ThreadId("never-seen"));
     }).pipe(
       Effect.provide(
-        Layer.merge(CaseRepositoryTest, ConnectorCredentialStoreTest([])),
+        Layer.merge(TicketRepositoryTest, ConnectorCredentialStoreTest([])),
       ),
     );
     expect(await Effect.runPromise(program)).toBeNull();

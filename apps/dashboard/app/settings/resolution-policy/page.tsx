@@ -34,8 +34,8 @@ export default async function ResolutionPolicyPage({ searchParams }: PageProps) 
           Resolution agent
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          A single agent that resolves cases end-to-end, steered by the
-          scenarios below. When it&apos;s on, triage routes a matching case to
+          A single agent that resolves tickets end-to-end, steered by the
+          scenarios below. When it&apos;s on, triage routes a matching ticket to
           it; it gathers what it needs, takes the actions you&apos;ve allowed,
           and drafts the customer reply — pausing for your approval on anything
           you marked <em>Ask me first</em>. Leave it off to keep today&apos;s
@@ -56,8 +56,8 @@ export default async function ResolutionPolicyPage({ searchParams }: PageProps) 
           <ResolutionAgentToggle enabled={policy.resolutionAgentEnabled} />
           <p className="mt-2 text-xs text-muted-foreground">
             {policy.resolutionAgentEnabled
-              ? "On — new matching cases go to the resolution agent."
-              : "Off — cases route to the built-in specialists as before."}
+              ? "On — new matching tickets go to the resolution agent."
+              : "Off — tickets route to the built-in specialists as before."}
           </p>
         </CardContent>
       </Card>
@@ -67,7 +67,7 @@ export default async function ResolutionPolicyPage({ searchParams }: PageProps) 
         <p className="mt-1 text-sm text-muted-foreground">
           For each situation, choose what the agent may do and whether it acts
           automatically or asks you first. The built-in scenarios cover the
-          common cases; add your own for anything specific to your store —
+          common tickets; add your own for anything specific to your store —
           describe when it applies and the agent will route matching messages to
           it.
         </p>

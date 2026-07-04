@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { approvedNotSentTimelineItem } from "../lib/case-timeline.js";
+import { approvedNotSentTimelineItem } from "../lib/ticket-timeline.js";
 
 // H9 — the "approved but not sent" card. Mirrors the failed-delivery card: it's
-// derived from the live CaseDetail.approvedNotSent (not an audit row) and shows
-// only while a human is driving the case, so the card and its resend button
+// derived from the live TicketDetail.approvedNotSent (not an audit row) and shows
+// only while a human is driving the ticket, so the card and its resend button
 // share one condition.
 
 const approvedNotSent = {
@@ -15,7 +15,7 @@ const approvedNotSent = {
 describe("approvedNotSentTimelineItem", () => {
   it("returns a card when human_takeover and an approved reply is unsent", () => {
     const item = approvedNotSentTimelineItem({
-      caseStatus: "human_takeover",
+      ticketStatus: "human_takeover",
       approvedNotSent,
     });
     expect(item).not.toBeNull();
@@ -29,16 +29,16 @@ describe("approvedNotSentTimelineItem", () => {
   it("returns null when there is nothing to resend", () => {
     expect(
       approvedNotSentTimelineItem({
-        caseStatus: "human_takeover",
+        ticketStatus: "human_takeover",
         approvedNotSent: null,
       }),
     ).toBeNull();
   });
 
-  it("returns null unless the case is under human_takeover", () => {
-    for (const caseStatus of ["in_progress", "resolved", "waiting_for_approval"]) {
+  it("returns null unless the ticket is under human_takeover", () => {
+    for (const ticketStatus of ["in_progress", "resolved", "waiting_for_approval"]) {
       expect(
-        approvedNotSentTimelineItem({ caseStatus, approvedNotSent }),
+        approvedNotSentTimelineItem({ ticketStatus, approvedNotSent }),
       ).toBeNull();
     }
   });

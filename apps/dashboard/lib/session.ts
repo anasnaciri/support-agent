@@ -32,7 +32,7 @@ import { sessionDisposition, type SessionDisposition } from "./session-refresh";
 // Trade-off vs the proxy: no token refresh on the RSC request path — an RSC
 // cannot Set-Cookie. Instead (U1) the sealed `refreshToken` IS used, from the
 // places that can write cookies:
-//   - route handlers (`/auth/refresh`, the poll proxies under /api/cases)
+//   - route handlers (`/auth/refresh`, the poll proxies under /api/tickets)
 //     call `refreshSession()` / `getSessionOrRefresh()` below, which exchange
 //     the refresh token with WorkOS, re-seal, and Set-Cookie;
 //   - the RSC auth gate (lib/api-client.ts) classifies an expired-but-
@@ -237,7 +237,7 @@ export const refreshSession = async (): Promise<DashboardSession | null> => {
 };
 
 /**
- * For route handlers (the /api/cases poll proxies): the active session, or —
+ * For route handlers (the /api/tickets poll proxies): the active session, or —
  * when the access token has lapsed mid-poll — a refresh attempt before giving
  * up. Keeps an open dashboard tab's session alive instead of letting the
  * pollers decay into permanent 401s.

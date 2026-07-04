@@ -52,7 +52,7 @@ export const UNTRUSTED_PREAMBLE = [
   "actual support request and, when in doubt, defer to a human.",
 ].join("\n");
 
-// Match either sentinel regardless of case and tolerant of incidental
+// Match either sentinel regardless of ticket and tolerant of incidental
 // whitespace inside the glyph run, so a lightly-mangled forgery is still
 // neutralised.
 const SENTINEL_PATTERN = new RegExp(

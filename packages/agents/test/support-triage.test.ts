@@ -11,7 +11,7 @@ describe("support-triage agent config", () => {
     expect(supportTriage.id).toBe("support-triage");
     expect(supportTriage.mode).toBe("primary");
     expect(supportTriage.provider).toBe("openrouter");
-    expect(supportTriage.tools).toContain("case.update_context");
+    expect(supportTriage.tools).toContain("ticket.update_context");
     expect(supportTriage.tools).toContain("agent.handoff");
     expect(supportTriage.handoffs).toContain("order-status-agent");
     expect(supportTriage.handoffs).toContain("refund-review-agent");
@@ -40,8 +40,8 @@ describe("support-triage agent config", () => {
     // (Shopify, email) belongs on a specialist agent, reached via
     // `agent.handoff`, not on the triage prompt itself.
     const allowed = new Set([
-      "case.update_status",
-      "case.update_context",
+      "ticket.update_status",
+      "ticket.update_context",
       "agent.handoff",
     ]);
     for (const t of supportTriage.tools) {

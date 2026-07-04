@@ -8,7 +8,7 @@ import { asDate } from "./format";
 // `ShopifyFulfillment` date field (`updatedAt`, `estimatedDeliveryAt`,
 // `deliveredAt`) arrives as an ISO *string*, even though the domain type says
 // `Date`. Calling `.getTime()` / `.toISOString()` on those strings throws and
-// crashes the case page; these helpers coerce first.
+// crashes the ticket page; these helpers coerce first.
 
 /** The most recently updated fulfillment, or null when there are none. */
 export const latestFulfillment = (

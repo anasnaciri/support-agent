@@ -4,7 +4,7 @@ import {
   issuableRefund,
   refundAlreadyIssued,
   refundRecommendationFromEntry,
-} from "../app/cases/[id]/refund-recommendation";
+} from "../app/tickets/[id]/refund-recommendation";
 
 const recommendEntry = (
   recommendation: string,
@@ -41,7 +41,7 @@ describe("refund recommendation timeline helpers", () => {
     });
   });
 
-  it("uses the latest recommendation when a case was re-run", () => {
+  it("uses the latest recommendation when a ticket was re-run", () => {
     const out = extractRefundRecommendation([
       {
         action: "tool.invoked",
@@ -92,10 +92,10 @@ describe("issuableRefund — gates the 'Issue refund' button", () => {
     expect(issuableRefund([recommendEntry("investigate", null)])).toBeNull();
   });
 
-  it("offers nothing once a refund has already been issued on the case", () => {
+  it("offers nothing once a refund has already been issued on the ticket", () => {
     const entries = [
       recommendEntry("full_refund", { amount: "24.92", currencyCode: "USD" }),
-      { action: "case.refund_issued", details: { refundId: "r1" } },
+      { action: "ticket.refund_issued", details: { refundId: "r1" } },
     ];
     expect(refundAlreadyIssued(entries)).toBe(true);
     expect(issuableRefund(entries)).toBeNull();

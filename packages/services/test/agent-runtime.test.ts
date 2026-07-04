@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   UNTRUSTED_PREAMBLE,
   type AgentConfig,
   type DomainEvent,
@@ -33,18 +33,18 @@ import {
   type SupplierEscalationSheet,
 } from "../src/index.js";
 
-describe("deliveryScopeFor — case.resumed retry token", () => {
+describe("deliveryScopeFor — ticket.resumed retry token", () => {
   const base = {
-    type: "case.resumed" as const,
-    caseId: CaseId("c-1"),
+    type: "ticket.resumed" as const,
+    ticketId: TicketId("c-1"),
     trigger: "dashboard_full_retry",
   };
 
-  it("scopes a case.resumed by its resumeToken so a fresh retry re-runs the agent's tools", () => {
+  it("scopes a ticket.resumed by its resumeToken so a fresh retry re-runs the agent's tools", () => {
     const a: DomainEvent = { ...base, resumeToken: "tok-a" };
     const b: DomainEvent = { ...base, resumeToken: "tok-b" };
-    expect(deliveryScopeFor(a)).toBe("case:c-1:tok-a");
-    expect(deliveryScopeFor(b)).toBe("case:c-1:tok-b");
+    expect(deliveryScopeFor(a)).toBe("ticket:c-1:tok-a");
+    expect(deliveryScopeFor(b)).toBe("ticket:c-1:tok-b");
     // Distinct tokens → distinct scopes → no cross-retry dedup.
     expect(deliveryScopeFor(a)).not.toBe(deliveryScopeFor(b));
   });
@@ -56,28 +56,28 @@ describe("deliveryScopeFor — case.resumed retry token", () => {
     expect(deliveryScopeFor(a1)).toBe(deliveryScopeFor(a2));
   });
 
-  it("falls back to the case id when no resumeToken is present", () => {
+  it("falls back to the ticket id when no resumeToken is present", () => {
     const legacy: DomainEvent = { ...base };
-    expect(deliveryScopeFor(legacy)).toBe("case:c-1");
+    expect(deliveryScopeFor(legacy)).toBe("ticket:c-1");
   });
 
   // Defensive backstop (prod 3428f154): the switch is exhaustive over known
   // DomainEvent types, but a malformed event reaching the runtime (a `type`
   // the switch doesn't match) must NEVER yield a bare/unscoped key. A bare key
   // collides with legacy pre-scoping markers (`conversation.reply:<draftId>`)
-  // and silently dedups a fresh customer reply → the case auto-resolves with
+  // and silently dedups a fresh customer reply → the ticket auto-resolves with
   // nothing sent. So deliveryScopeFor must always return a non-empty,
-  // case-namespaced scope.
+  // ticket-namespaced scope.
   it("never returns a bare/empty scope, even for a malformed event type", () => {
     const malformed = {
       type: "totally.unknown" as never,
-      caseId: CaseId("c-9"),
+      ticketId: TicketId("c-9"),
     } as unknown as DomainEvent;
     const scope = deliveryScopeFor(malformed);
     expect(scope).toBeTruthy();
-    // Namespaced by the case id so a send key can't collide with a bare
+    // Namespaced by the ticket id so a send key can't collide with a bare
     // legacy marker.
-    expect(scope).toBe("case:c-9");
+    expect(scope).toBe("ticket:c-9");
   });
 
   it("never returns an empty scope even when no identifier is present", () => {
@@ -89,7 +89,7 @@ describe("deliveryScopeFor — case.resumed retry token", () => {
 describe("deliveryScopeFor — supplier.updated per escalation", () => {
   const update = (escalationId?: string): DomainEvent => ({
     type: "supplier.updated",
-    caseId: CaseId("c-1"),
+    ticketId: TicketId("c-1"),
     payload: {
       supplierId: "sup-1",
       note: "n",
@@ -98,15 +98,15 @@ describe("deliveryScopeFor — supplier.updated per escalation", () => {
     },
   });
 
-  // A case can be escalated to the supplier more than once (supplier updates
+  // A ticket can be escalated to the supplier more than once (supplier updates
   // always re-engage the agent, which may escalate again). Each escalation's
   // update must get its OWN scope, or the second update's reply cross-dedups
   // against the first and the agent silently sends nothing.
   it("scopes by the escalation id so a second escalation's reply is not cross-deduped", () => {
     const first = update("esc-1");
     const second = update("esc-2");
-    expect(deliveryScopeFor(first)).toBe("case:c-1:esc:esc-1");
-    expect(deliveryScopeFor(second)).toBe("case:c-1:esc:esc-2");
+    expect(deliveryScopeFor(first)).toBe("ticket:c-1:esc:esc-1");
+    expect(deliveryScopeFor(second)).toBe("ticket:c-1:esc:esc-2");
     expect(deliveryScopeFor(first)).not.toBe(deliveryScopeFor(second));
   });
 
@@ -116,8 +116,8 @@ describe("deliveryScopeFor — supplier.updated per escalation", () => {
     );
   });
 
-  it("falls back to the case id for a legacy event without an escalation id", () => {
-    expect(deliveryScopeFor(update())).toBe("case:c-1");
+  it("falls back to the ticket id for a legacy event without an escalation id", () => {
+    expect(deliveryScopeFor(update())).toBe("ticket:c-1");
   });
 });
 
@@ -146,7 +146,7 @@ describe("hasUnverifiedOrderMismatch", () => {
 });
 
 // The message-id candidates the runtime looks up to correlate a reply to its
-// existing case (its In-Reply-To + full References chain, NOT its own id).
+// existing ticket (its In-Reply-To + full References chain, NOT its own id).
 describe("inboundReplyCandidateIds", () => {
   const base: InboundMessage = {
     threadId: "imap:root-1" as never,
@@ -703,7 +703,7 @@ const triageAgent = (): AgentConfig =>
   baseAgent({
     id: AgentId("support-triage"),
     handoffs: [AgentId("order-status-agent")],
-    tools: ["case.update_context", "agent.handoff"],
+    tools: ["ticket.update_context", "agent.handoff"],
   });
 
 const routingPolicy = (): ResolutionPolicy => ({

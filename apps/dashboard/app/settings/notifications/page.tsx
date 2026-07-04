@@ -81,7 +81,7 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
         <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Get a Telegram message the moment your agent needs you — a reply
-          waiting for approval, a case it couldn&apos;t finish, a broken
+          waiting for approval, a ticket it couldn&apos;t finish, a broken
           connection, or your AI credits running low.
         </p>
       </div>
@@ -163,7 +163,7 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
         <CardContent>
           <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
             <li>Replies and refunds waiting for your approval, with one-tap approve/reject links.</li>
-            <li>Cases the agent couldn&apos;t finish and handed to you.</li>
+            <li>Tickets the agent couldn&apos;t finish and handed to you.</li>
             <li>Heads-ups the agent sends when it&apos;s unsure about something.</li>
             <li>A mailbox or store connection that stopped working.</li>
             <li>Your AI provider credits running low.</li>

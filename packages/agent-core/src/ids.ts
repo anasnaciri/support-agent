@@ -1,5 +1,5 @@
 export type TenantId = string & { readonly _b: "TenantId" };
-export type CaseId = string & { readonly _b: "CaseId" };
+export type TicketId = string & { readonly _b: "TicketId" };
 export type CustomerId = string & { readonly _b: "CustomerId" };
 export type OrderId = string & { readonly _b: "OrderId" };
 export type ApprovalId = string & { readonly _b: "ApprovalId" };
@@ -9,7 +9,7 @@ export type ThreadId = string & { readonly _b: "ThreadId" };
 export type ToolName = string & { readonly _b: "ToolName" };
 
 export const TenantId = (s: string): TenantId => s as TenantId;
-export const CaseId = (s: string): CaseId => s as CaseId;
+export const TicketId = (s: string): TicketId => s as TicketId;
 export const CustomerId = (s: string): CustomerId => s as CustomerId;
 export const OrderId = (s: string): OrderId => s as OrderId;
 export const ApprovalId = (s: string): ApprovalId => s as ApprovalId;

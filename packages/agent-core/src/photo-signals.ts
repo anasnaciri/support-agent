@@ -1,8 +1,8 @@
 import type { MessageAttachment } from "./payloads.js";
 
 /**
- * Per-case rollup of the EXIF fraud signal across all image attachments on
- * an inbound message. The runtime stamps this onto `case.context` so the
+ * Per-ticket rollup of the EXIF fraud signal across all image attachments on
+ * an inbound message. The runtime stamps this onto `ticket.context` so the
  * dashboard ApprovalCard can surface an "EXIF: stripped" chip without
  * re-reading the blobs. `null` when the message had no image attachments.
  */

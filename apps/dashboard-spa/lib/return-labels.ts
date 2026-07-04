@@ -1,8 +1,8 @@
 /**
  * Operator-facing copy + defensive parsers for the structured return fields
- * (`case.context.returnReason` / `requestedResolution`) that refund-review-agent
+ * (`ticket.context.returnReason` / `requestedResolution`) that refund-review-agent
  * stamps. The vocabularies mirror the closed literal unions in
- * `case.update_context`'s schema (packages/tools) — keep them in lockstep.
+ * `ticket.update_context`'s schema (packages/tools) — keep them in lockstep.
  */
 
 export const RETURN_REASONS = [

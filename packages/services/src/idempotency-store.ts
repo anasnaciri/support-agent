@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 
 // ============================================================
 // Idempotency stores (audit C2 / C3)
@@ -15,7 +15,7 @@ import type { CaseId, TenantId } from "@support-agent/agent-core";
 //     resolves to "duplicate" and the tick short-circuits instead of
 //     running a second full agent loop (second LLM spend, second reply).
 //
-//   - ToolExecutionStore (C2): one row per (case, execution key). A
+//   - ToolExecutionStore (C2): one row per (ticket, execution key). A
 //     side-effecting tool records the marker in the SAME transaction as
 //     its `tool.invoked` audit row; a re-delivered job (approval resume
 //     re-run after a crash, retry past expireInSeconds) consults the
@@ -41,7 +41,7 @@ export interface ClaimMessageInput {
   readonly provider: string;
   readonly messageId: string;
   readonly threadId?: string | null;
-  readonly caseId?: CaseId | null;
+  readonly ticketId?: TicketId | null;
 }
 
 export type ClaimMessageResult = "new" | "duplicate";
@@ -144,7 +144,7 @@ export const ProcessedEventStoreTest = Layer.sync(ProcessedEventStore, () => {
 
 export interface RecordExecutionInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   /** Stable execution key: tool idempotency key or the LLM callId. */
   readonly callId: string;
   readonly tool: string;
@@ -152,7 +152,7 @@ export interface RecordExecutionInput {
 }
 
 export interface ToolExecutionMarker {
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly callId: string;
   readonly tool: string;
   readonly resultOk: boolean | null;
@@ -165,7 +165,7 @@ export class ToolExecutionStore extends Context.Tag("ToolExecutionStore")<
     /**
      * Record an execution marker. Call inside the same transaction as
      * the tool's audit write so the marker and the audit row commit (or
-     * roll back) together. Conflicts on (caseId, callId) are upserts —
+     * roll back) together. Conflicts on (ticketId, callId) are upserts —
      * the first writer wins and later writes are no-ops.
      */
     readonly record: (
@@ -173,7 +173,7 @@ export class ToolExecutionStore extends Context.Tag("ToolExecutionStore")<
     ) => Effect.Effect<void, IdempotencyStoreDbError>;
 
     readonly find: (
-      caseId: CaseId,
+      ticketId: TicketId,
       callId: string,
     ) => Effect.Effect<ToolExecutionMarker | null, IdempotencyStoreDbError>;
   }
@@ -181,14 +181,14 @@ export class ToolExecutionStore extends Context.Tag("ToolExecutionStore")<
 
 export const ToolExecutionStoreTest = Layer.sync(ToolExecutionStore, () => {
   const rows = new Map<string, ToolExecutionMarker>();
-  const key = (caseId: string, callId: string) => `${caseId}:${callId}`;
+  const key = (ticketId: string, callId: string) => `${ticketId}:${callId}`;
   return ToolExecutionStore.of({
     record: (input) =>
       Effect.sync(() => {
-        const k = key(input.caseId, input.callId);
+        const k = key(input.ticketId, input.callId);
         if (!rows.has(k)) {
           rows.set(k, {
-            caseId: input.caseId,
+            ticketId: input.ticketId,
             callId: input.callId,
             tool: input.tool,
             resultOk: input.resultOk,
@@ -196,7 +196,7 @@ export const ToolExecutionStoreTest = Layer.sync(ToolExecutionStore, () => {
           });
         }
       }),
-    find: (caseId, callId) =>
-      Effect.sync(() => rows.get(key(caseId, callId)) ?? null),
+    find: (ticketId, callId) =>
+      Effect.sync(() => rows.get(key(ticketId, callId)) ?? null),
   });
 });

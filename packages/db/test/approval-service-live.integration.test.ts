@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   UserId,
 } from "@support-agent/agent-core";
@@ -17,7 +17,7 @@ import {
   DbClient,
   DbClientLive,
   approvals,
-  cases,
+  tickets,
   makeDbClient,
   tenants,
 } from "../src/index.js";
@@ -28,7 +28,7 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 describeIfDb("ApprovalService (Live, integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const tenantId = randomUUID();
-  const caseId = randomUUID();
+  const ticketId = randomUUID();
 
   const liveLayer = Layer.provide(
     ApprovalServiceLive,
@@ -49,8 +49,8 @@ describeIfDb("ApprovalService (Live, integration)", () => {
   beforeAll(async () => {
     if (!raw) return;
     await raw.db.insert(tenants).values({ id: tenantId, name: "appr-test" });
-    await raw.db.insert(cases).values({
-      id: caseId,
+    await raw.db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "new",
@@ -63,14 +63,14 @@ describeIfDb("ApprovalService (Live, integration)", () => {
     await raw.db
       .delete(approvals)
       .where(sql`${approvals.tenantId} = ${tenantId}`);
-    await raw.db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+    await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     await raw.close();
   });
 
   const sample = () => ({
     tenantId: TenantId(tenantId),
-    caseId: CaseId(caseId),
+    ticketId: TicketId(ticketId),
     agentId: AgentId("support-triage"),
     tool: "refund.create",
     proposedInput: { amountCents: 2000 },
@@ -148,11 +148,11 @@ describeIfDb("ApprovalService (Live, integration)", () => {
   // the L3b republish sweep silently never ran. Only a real-DB seam catches
   // it — the in-memory Test layer doesn't touch drizzle. Must run against PG.
   it("listDecidedUnresumed runs against postgres and returns decided-but-parked rows", async () => {
-    // Park the shared case so the inner join on case status matches.
+    // Park the shared ticket so the inner join on ticket status matches.
     await raw!.db
-      .update(cases)
+      .update(tickets)
       .set({ status: "waiting_for_approval" })
-      .where(sql`${cases.id} = ${caseId}`);
+      .where(sql`${tickets.id} = ${ticketId}`);
     const result = await runLive(
       Effect.gen(function* () {
         const svc = yield* ApprovalService;

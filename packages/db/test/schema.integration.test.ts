@@ -4,8 +4,8 @@ import { sql } from "drizzle-orm";
 import {
   approvals,
   auditLog,
-  caseStateTransitions,
-  cases,
+  ticketStateTransitions,
+  tickets,
   connectorConnections,
   makeDbClient,
   processedMessages,
@@ -34,51 +34,51 @@ describeIfDb("db schema (integration)", () => {
     const rows = await client.sql<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name IN ('tenants','cases','case_state_transitions','audit_log','approvals','timers')
+        AND table_name IN ('tenants','tickets','ticket_state_transitions','audit_log','approvals','timers')
       ORDER BY table_name
     `;
     expect(rows.map((r) => r.table_name)).toEqual([
       "approvals",
       "audit_log",
-      "case_state_transitions",
-      "cases",
       "tenants",
+      "ticket_state_transitions",
+      "tickets",
       "timers",
     ]);
   });
 
   it("insert + read round-trip across all six tables", async () => {
     const tenantId = randomUUID();
-    const caseId = randomUUID();
+    const ticketId = randomUUID();
     const approvalId = randomUUID();
 
     await db.transaction(async (tx) => {
       await tx.insert(tenants).values({ id: tenantId, name: "Acme" });
-      await tx.insert(cases).values({
-        id: caseId,
+      await tx.insert(tickets).values({
+        id: ticketId,
         tenantId,
         channel: "email",
         status: "new",
         currentAgentId: "support-triage",
       });
-      await tx.insert(caseStateTransitions).values({
-        caseId,
+      await tx.insert(ticketStateTransitions).values({
+        ticketId,
         fromStatus: "new",
         toStatus: "triaging",
       });
       await tx.insert(auditLog).values({
         tenantId,
-        caseId,
+        ticketId,
         actorType: "system",
-        action: "case.created",
+        action: "ticket.created",
         details: { source: "integration-test" },
       });
       await tx.insert(approvals).values({
         id: approvalId,
         tenantId,
-        caseId,
+        ticketId,
         agentId: "support-triage",
-        tool: "case.update_status",
+        tool: "ticket.update_status",
         proposedInput: { status: "resolved" },
         riskLevel: "low",
         status: "pending",
@@ -86,39 +86,39 @@ describeIfDb("db schema (integration)", () => {
       });
       await tx.insert(timers).values({
         id: randomUUID(),
-        caseId,
+        ticketId,
         fireAt: new Date(Date.now() + 60 * 60 * 1000),
         reason: "follow_up",
       });
     });
 
     const round = await db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(sql`${cases.id} = ${caseId}`);
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(sql`${tickets.id} = ${ticketId}`);
     expect(round[0]?.status).toBe("new");
 
     // cleanup so the test is rerunnable
     await db.transaction(async (tx) => {
       await tx.delete(approvals).where(sql`${approvals.id} = ${approvalId}`);
-      await tx.delete(timers).where(sql`${timers.caseId} = ${caseId}`);
-      await tx.delete(auditLog).where(sql`${auditLog.caseId} = ${caseId}`);
+      await tx.delete(timers).where(sql`${timers.ticketId} = ${ticketId}`);
+      await tx.delete(auditLog).where(sql`${auditLog.ticketId} = ${ticketId}`);
       await tx
-        .delete(caseStateTransitions)
-        .where(sql`${caseStateTransitions.caseId} = ${caseId}`);
-      await tx.delete(cases).where(sql`${cases.id} = ${caseId}`);
+        .delete(ticketStateTransitions)
+        .where(sql`${ticketStateTransitions.ticketId} = ${ticketId}`);
+      await tx.delete(tickets).where(sql`${tickets.id} = ${ticketId}`);
       await tx.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     });
   });
 
   it("rejects invalid status via CHECK constraint", async () => {
     const tenantId = randomUUID();
-    const caseId = randomUUID();
+    const ticketId = randomUUID();
     await db.insert(tenants).values({ id: tenantId, name: "Acme" });
     try {
       await expect(
-        db.insert(cases).values({
-          id: caseId,
+        db.insert(tickets).values({
+          id: ticketId,
           tenantId,
           channel: "email",
           status: "garbage_status",
@@ -166,11 +166,11 @@ describeIfDb("db schema (integration)", () => {
     }
   });
 
-  it("D2: cases carry a nullable conversation-provider stamp with a CHECK", async () => {
+  it("D2: tickets carry a nullable conversation-provider stamp with a CHECK", async () => {
     const tenantId = await seedTenant();
     try {
       const stamped = randomUUID();
-      await db.insert(cases).values({
+      await db.insert(tickets).values({
         id: stamped,
         tenantId,
         channel: "email",
@@ -179,7 +179,7 @@ describeIfDb("db schema (integration)", () => {
         provider: "outlook",
       });
       const unstamped = randomUUID();
-      await db.insert(cases).values({
+      await db.insert(tickets).values({
         id: unstamped,
         tenantId,
         channel: "email",
@@ -187,7 +187,7 @@ describeIfDb("db schema (integration)", () => {
         currentAgentId: "support-triage",
       });
       await expect(
-        db.insert(cases).values({
+        db.insert(tickets).values({
           id: randomUUID(),
           tenantId,
           channel: "email",
@@ -197,17 +197,17 @@ describeIfDb("db schema (integration)", () => {
         }),
       ).rejects.toThrow();
     } finally {
-      await db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+      await db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
       await db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     }
   });
 
-  it("D4: rejects a second case with the same (tenant_id, thread_id)", async () => {
+  it("D4: rejects a second ticket with the same (tenant_id, thread_id)", async () => {
     const tenantId = await seedTenant();
     const threadId = `gmail:${randomUUID()}`;
     const first = randomUUID();
     try {
-      await db.insert(cases).values({
+      await db.insert(tickets).values({
         id: first,
         tenantId,
         channel: "email",
@@ -216,7 +216,7 @@ describeIfDb("db schema (integration)", () => {
         threadId,
       });
       await expect(
-        db.insert(cases).values({
+        db.insert(tickets).values({
           id: randomUUID(),
           tenantId,
           channel: "email",
@@ -225,32 +225,32 @@ describeIfDb("db schema (integration)", () => {
           threadId,
         }),
       ).rejects.toThrow();
-      // Two NULL-thread cases are fine (the index is partial).
+      // Two NULL-thread tickets are fine (the index is partial).
       const nullA = randomUUID();
       const nullB = randomUUID();
-      await db.insert(cases).values([
+      await db.insert(tickets).values([
         { id: nullA, tenantId, channel: "email", status: "new", currentAgentId: "support-triage" },
         { id: nullB, tenantId, channel: "email", status: "new", currentAgentId: "support-triage" },
       ]);
     } finally {
-      await db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+      await db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
       await db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     }
   });
 
-  it("D5: hot-path indexes exist (audit_log tenant scans, approvals.case_id)", async () => {
+  it("D5: hot-path indexes exist (audit_log tenant scans, approvals.ticket_id)", async () => {
     const rows = await client.sql<{ indexname: string }[]>`
       SELECT indexname FROM pg_indexes
       WHERE schemaname = 'public'
         AND indexname IN (
           'audit_log_tenant_id_idx',
           'audit_log_tenant_action_occurred_idx',
-          'approvals_case_idx'
+          'approvals_ticket_idx'
         )
       ORDER BY indexname
     `;
     expect(rows.map((r) => r.indexname)).toEqual([
-      "approvals_case_idx",
+      "approvals_ticket_idx",
       "audit_log_tenant_action_occurred_idx",
       "audit_log_tenant_id_idx",
     ]);
@@ -275,11 +275,11 @@ describeIfDb("db schema (integration)", () => {
     }
   });
 
-  it("tool_executions dedups on (case_id, call_id)", async () => {
+  it("tool_executions dedups on (ticket_id, call_id)", async () => {
     const tenantId = await seedTenant();
-    const caseId = randomUUID();
-    await db.insert(cases).values({
-      id: caseId,
+    const ticketId = randomUUID();
+    await db.insert(tickets).values({
+      id: ticketId,
       tenantId,
       channel: "email",
       status: "new",
@@ -287,7 +287,7 @@ describeIfDb("db schema (integration)", () => {
     });
     const row = {
       tenantId,
-      caseId,
+      ticketId,
       callId: "call-1",
       tool: "refund.create",
       resultOk: true,
@@ -296,7 +296,7 @@ describeIfDb("db schema (integration)", () => {
       await db.insert(toolExecutions).values(row);
       await expect(db.insert(toolExecutions).values(row)).rejects.toThrow();
     } finally {
-      await db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+      await db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
       await db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     }
   });

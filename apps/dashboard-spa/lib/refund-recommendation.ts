@@ -75,20 +75,20 @@ export const extractRefundRecommendation = (
 };
 
 /**
- * True once the operator has issued a refund on this case (an
- * operator-initiated `refund.create` lands a `case.refund_issued` audit row).
+ * True once the operator has issued a refund on this ticket (an
+ * operator-initiated `refund.create` lands a `ticket.refund_issued` audit row).
  * Used to retire the "Issue refund" button so a refund can't be double-issued
  * from the dashboard.
  */
 export const refundAlreadyIssued = (
   entries: ReadonlyArray<RecommendationAuditEntry>,
-): boolean => entries.some((e) => e.action === "case.refund_issued");
+): boolean => entries.some((e) => e.action === "ticket.refund_issued");
 
 /**
  * The recommendation the "Issue refund" button should act on, or `null` when no
  * button should show. Requires (a) a latest recommendation that carries a
  * concrete `amount` — `deny` and amount-less `investigate` are advisory only and
- * have nothing to issue — and (b) no refund already issued on the case.
+ * have nothing to issue — and (b) no refund already issued on the ticket.
  */
 export const issuableRefund = (
   entries: ReadonlyArray<RecommendationAuditEntry>,

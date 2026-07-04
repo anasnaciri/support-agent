@@ -19,7 +19,7 @@ import {
  *   (`google/gemini-3-flash-preview`, `anthropic/claude-opus-4-7`, …).
  * - `anthropic` and `openai` accept their respective native model ids
  *   (`claude-opus-4-7`, `gpt-4o`, …). If the agent's model string isn't
- *   compatible the call fails at the provider SDK and the case parks in
+ *   compatible the call fails at the provider SDK and the ticket parks in
  *   `human_takeover` — surfaced as a warning on `/settings/llm`.
  */
 export type LLMProvider = "openrouter" | "anthropic" | "openai";
@@ -45,7 +45,7 @@ export interface LLMCredential {
  * decrypted credential per active tenant — there is no global key state.
  *
  * - `LLMCredentialMissing` → tenant has no active LLM row. Runtime should
- *   park the case in `human_takeover` with reason `llm_credential_missing`.
+ *   park the ticket in `human_takeover` with reason `llm_credential_missing`.
  * - `LLMCredentialRevoked` → tenant had a row but it was revoked. Same
  *   handling as missing, but the audit trail names the revoked provider.
  */

@@ -5,7 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 import {
   AgentId,
   ApprovalId,
-  CaseId,
+  TicketId,
   TenantId,
   ThreadId,
   UserId,
@@ -13,7 +13,7 @@ import {
 import {
   ApprovalService,
   AuditLogService,
-  CaseRepository,
+  TicketRepository,
   TimerService,
 } from "@support-agent/services";
 import {
@@ -21,9 +21,9 @@ import {
   AuditLogServiceLive,
   approvals as approvalsTable,
   auditLog as auditLogTable,
-  CaseRepositoryLive,
+  TicketRepositoryLive,
   DbClientLive,
-  cases as casesTable,
+  tickets as ticketsTable,
   makeDbClient,
   tenants,
   timers as timersTable,
@@ -31,7 +31,7 @@ import {
 } from "../src/index.js";
 
 // Audit D9 (optional-but-enforced tenant scoping on bare-id repo methods)
-// and D2 (provider stamp on cases + provider-aware thread lookups), against
+// and D2 (provider stamp on tickets + provider-aware thread lookups), against
 // the real Live impls. Gated on DATABASE_URL.
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
@@ -44,8 +44,8 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
 
   afterAll(async () => {
     if (seededTenants.length > 0) {
-      // FK order: approvals/audit_log reference cases without cascade;
-      // timers + state transitions cascade with the case delete.
+      // FK order: approvals/audit_log reference tickets without cascade;
+      // timers + state transitions cascade with the ticket delete.
       await db
         .delete(approvalsTable)
         .where(inArray(approvalsTable.tenantId, seededTenants));
@@ -53,8 +53,8 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
         .delete(auditLogTable)
         .where(inArray(auditLogTable.tenantId, seededTenants));
       await db
-        .delete(casesTable)
-        .where(inArray(casesTable.tenantId, seededTenants));
+        .delete(ticketsTable)
+        .where(inArray(ticketsTable.tenantId, seededTenants));
       await db.delete(tenants).where(inArray(tenants.id, seededTenants));
     }
     await client.close();
@@ -62,7 +62,7 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
 
   const dbLayer = DbClientLive({ databaseUrl: databaseUrl! });
   const layer = Layer.mergeAll(
-    CaseRepositoryLive,
+    TicketRepositoryLive,
     ApprovalServiceLive,
     AuditLogServiceLive,
     TimerServiceLive,
@@ -84,9 +84,9 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
 
   const agent = AgentId("support-triage");
 
-  const createCase = (tenantId: TenantId, threadId?: string, provider?: never) =>
+  const createTicket = (tenantId: TenantId, threadId?: string, provider?: never) =>
     Effect.gen(function* () {
-      const repo = yield* CaseRepository;
+      const repo = yield* TicketRepository;
       return yield* repo.create({
         tenantId,
         channel: "email",
@@ -104,7 +104,7 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     const tenantId = await seedTenant();
     const created = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.create({
           tenantId,
           channel: "email",
@@ -115,31 +115,31 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
       }),
     );
     const rows = await db
-      .select({ provider: casesTable.provider })
-      .from(casesTable)
-      .where(eq(casesTable.id, created.id));
+      .select({ provider: ticketsTable.provider })
+      .from(ticketsTable)
+      .where(eq(ticketsTable.id, created.id));
     expect(rows[0]?.provider).toBe("outlook");
   });
 
   it("D2: create derives the stamp from a namespaced threadId when not given", async () => {
     const tenantId = await seedTenant();
-    const created = await run(createCase(tenantId, `gmail:${randomUUID()}`));
+    const created = await run(createTicket(tenantId, `gmail:${randomUUID()}`));
     const rows = await db
-      .select({ provider: casesTable.provider })
-      .from(casesTable)
-      .where(eq(casesTable.id, created.id));
+      .select({ provider: ticketsTable.provider })
+      .from(ticketsTable)
+      .where(eq(ticketsTable.id, created.id));
     expect(rows[0]?.provider).toBe("gmail");
   });
 
   it("D2: findThreadProvider returns the stamp (and null when unstamped)", async () => {
     const tenantId = await seedTenant();
     const threadId = `imap:<${randomUUID()}@x.com>`;
-    await run(createCase(tenantId, threadId));
+    await run(createTicket(tenantId, threadId));
     const legacyThread = randomUUID(); // un-namespaced → no stamp derived
-    await run(createCase(tenantId, legacyThread));
+    await run(createTicket(tenantId, legacyThread));
     const [stamped, unstamped, missing] = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return [
           yield* repo.findThreadProvider(tenantId, ThreadId(threadId)),
           yield* repo.findThreadProvider(tenantId, ThreadId(legacyThread)),
@@ -155,10 +155,10 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   it("D2: findByThreadId scopes by provider when given", async () => {
     const tenantId = await seedTenant();
     const threadId = `gmail:${randomUUID()}`;
-    const created = await run(createCase(tenantId, threadId));
+    const created = await run(createTicket(tenantId, threadId));
     const [match, mismatch] = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return [
           yield* repo.findByThreadId(tenantId, ThreadId(threadId), "gmail"),
           yield* repo.findByThreadId(tenantId, ThreadId(threadId), "outlook"),
@@ -174,7 +174,7 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     const threadId = ThreadId(`gmail:${randomUUID()}`);
     const result = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const first = yield* repo.create({
           tenantId,
           channel: "email",
@@ -216,53 +216,53 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   });
 
   // ============================================================
-  // D9 — CaseRepository
+  // D9 — TicketRepository
   // ============================================================
 
   it("D9: getById enforces tenantId when present", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const created = await run(createCase(tenantA));
+    const created = await run(createTicket(tenantA));
     const ok = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.getById(created.id, tenantA);
       }),
     );
     expect(ok.id).toBe(created.id);
     const cross = await runExit(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.getById(created.id, tenantB);
       }),
     );
     expect(Exit.isFailure(cross)).toBe(true);
     if (Exit.isFailure(cross)) {
       const err = (cross.cause as { error?: { _tag?: string } }).error;
-      expect(err?._tag).toBe("CaseNotFound");
+      expect(err?._tag).toBe("TicketNotFound");
     }
   });
 
   it("D9: update enforces tenantId when present (no cross-tenant write)", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const created = await run(createCase(tenantA));
+    const created = await run(createTicket(tenantA));
     const cross = await runExit(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.update(created.id, { summary: "pwned" }, tenantB);
       }),
     );
     expect(Exit.isFailure(cross)).toBe(true);
     const rows = await db
-      .select({ summary: casesTable.summary })
-      .from(casesTable)
-      .where(eq(casesTable.id, created.id));
+      .select({ summary: ticketsTable.summary })
+      .from(ticketsTable)
+      .where(eq(ticketsTable.id, created.id));
     expect(rows[0]?.summary).toBeNull();
     // Scoped to the right tenant it works.
     const updated = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.update(created.id, { summary: "fine" }, tenantA);
       }),
     );
@@ -272,10 +272,10 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   it("D9: transitionStatus enforces opts.tenantId when present", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const created = await run(createCase(tenantA));
+    const created = await run(createTicket(tenantA));
     const cross = await runExit(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.transitionStatus(created.id, "triaging", {
           tenantId: tenantB,
         });
@@ -283,13 +283,13 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     );
     expect(Exit.isFailure(cross)).toBe(true);
     const rows = await db
-      .select({ status: casesTable.status })
-      .from(casesTable)
-      .where(eq(casesTable.id, created.id));
+      .select({ status: ticketsTable.status })
+      .from(ticketsTable)
+      .where(eq(ticketsTable.id, created.id));
     expect(rows[0]?.status).toBe("new");
     const ok = await run(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         return yield* repo.transitionStatus(created.id, "triaging", {
           tenantId: tenantA,
         });
@@ -305,13 +305,13 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   it("D9: approval getById/approve/reject enforce tenantId when present", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const c = await run(createCase(tenantA));
+    const c = await run(createTicket(tenantA));
     const approval = await run(
       Effect.gen(function* () {
         const svc = yield* ApprovalService;
         return yield* svc.create({
           tenantId: tenantA,
-          caseId: CaseId(c.id),
+          ticketId: TicketId(c.id),
           agentId: agent,
           tool: "refund.create",
           proposedInput: { amount: 10 },
@@ -377,19 +377,19 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   });
 
   // ============================================================
-  // D9 — AuditLogService.forCase
+  // D9 — AuditLogService.forTicket
   // ============================================================
 
-  it("D9: forCase scopes by tenantId when present", async () => {
+  it("D9: forTicket scopes by tenantId when present", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const c = await run(createCase(tenantA));
+    const c = await run(createTicket(tenantA));
     await run(
       Effect.gen(function* () {
         const audit = yield* AuditLogService;
         yield* audit.record({
           tenantId: tenantA,
-          caseId: CaseId(c.id),
+          ticketId: TicketId(c.id),
           actor: { type: "system", id: null },
           action: "test.scoping",
           details: {},
@@ -400,8 +400,8 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
       Effect.gen(function* () {
         const audit = yield* AuditLogService;
         return [
-          yield* audit.forCase(CaseId(c.id), { tenantId: tenantA }),
-          yield* audit.forCase(CaseId(c.id), { tenantId: tenantB }),
+          yield* audit.forTicket(TicketId(c.id), { tenantId: tenantA }),
+          yield* audit.forTicket(TicketId(c.id), { tenantId: tenantB }),
         ] as const;
       }),
     );
@@ -413,15 +413,15 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
   // D9 — TimerService
   // ============================================================
 
-  it("D9: schedule refuses a case outside the given tenant", async () => {
+  it("D9: schedule refuses a ticket outside the given tenant", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const c = await run(createCase(tenantA));
+    const c = await run(createTicket(tenantA));
     const cross = await runExit(
       Effect.gen(function* () {
         const svc = yield* TimerService;
         return yield* svc.schedule({
-          caseId: CaseId(c.id),
+          ticketId: TicketId(c.id),
           fireAt: new Date(Date.now() + 60_000),
           reason: "follow_up",
           tenantId: tenantB,
@@ -432,32 +432,32 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     const rows = await db
       .select({ id: timersTable.id })
       .from(timersTable)
-      .where(eq(timersTable.caseId, c.id));
+      .where(eq(timersTable.ticketId, c.id));
     expect(rows.length).toBe(0);
 
     const ok = await run(
       Effect.gen(function* () {
         const svc = yield* TimerService;
         return yield* svc.schedule({
-          caseId: CaseId(c.id),
+          ticketId: TicketId(c.id),
           fireAt: new Date(Date.now() + 60_000),
           reason: "follow_up",
           tenantId: tenantA,
         });
       }),
     );
-    expect(ok.caseId).toBe(c.id);
+    expect(ok.ticketId).toBe(c.id);
   });
 
-  it("D9: cancelOpenForCase scoped to the wrong tenant cancels nothing", async () => {
+  it("D9: cancelOpenForTicket scoped to the wrong tenant cancels nothing", async () => {
     const tenantA = await seedTenant();
     const tenantB = await seedTenant();
-    const c = await run(createCase(tenantA));
+    const c = await run(createTicket(tenantA));
     await run(
       Effect.gen(function* () {
         const svc = yield* TimerService;
         return yield* svc.schedule({
-          caseId: CaseId(c.id),
+          ticketId: TicketId(c.id),
           fireAt: new Date(Date.now() + 60_000),
           reason: "follow_up",
         });
@@ -466,10 +466,10 @@ describeIfDb("tenant scoping + provider stamp (integration)", () => {
     const [crossCount, scopedCount] = await run(
       Effect.gen(function* () {
         const svc = yield* TimerService;
-        const cross = yield* svc.cancelOpenForCase(CaseId(c.id), {
+        const cross = yield* svc.cancelOpenForTicket(TicketId(c.id), {
           tenantId: tenantB,
         });
-        const scoped = yield* svc.cancelOpenForCase(CaseId(c.id), {
+        const scoped = yield* svc.cancelOpenForTicket(TicketId(c.id), {
           tenantId: tenantA,
         });
         return [cross, scoped] as const;

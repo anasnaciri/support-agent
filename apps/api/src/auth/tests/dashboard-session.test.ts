@@ -184,10 +184,10 @@ describe("OAuth state (login-CSRF binding + returnTo)", () => {
   const KEY = "state-signing-key";
 
   it("round-trips a signed state", () => {
-    const token = signOAuthState(KEY, { nonce: "n1", returnTo: "/cases/42" });
+    const token = signOAuthState(KEY, { nonce: "n1", returnTo: "/tickets/42" });
     expect(verifyOAuthState(KEY, token)).toEqual({
       nonce: "n1",
-      returnTo: "/cases/42",
+      returnTo: "/tickets/42",
     });
   });
 
@@ -202,7 +202,7 @@ describe("OAuth state (login-CSRF binding + returnTo)", () => {
 
 describe("sanitizeReturnPath (open-redirect guard)", () => {
   it("keeps safe relative paths", () => {
-    expect(sanitizeReturnPath("/cases/42?tab=thread")).toBe("/cases/42?tab=thread");
+    expect(sanitizeReturnPath("/tickets/42?tab=thread")).toBe("/tickets/42?tab=thread");
     expect(sanitizeReturnPath("/")).toBe("/");
   });
 

@@ -8,7 +8,7 @@ import {
   type ThreadId,
 } from "@support-agent/agent-core";
 import {
-  CaseRepository,
+  TicketRepository,
   ConnectorCredentialStore,
   ConversationService,
   isConversationProvider,
@@ -32,13 +32,13 @@ import {
  * wrote to. The runtime, tools, and agents see only the `ConversationService`
  * Tag and opaque ids; they never learn which provider answered.
  *
- * LEGACY thread ids (cases created before namespacing landed) carry no
+ * LEGACY thread ids (tickets created before namespacing landed) carry no
  * prefix. For those the optional `resolveLegacyProvider` hook supplies the
- * owning provider — `makeCaseProviderResolver` below reads the provider
- * stamped on the case row (audit D2), with the tenant's active conversation
+ * owning provider — `makeTicketProviderResolver` below reads the provider
+ * stamped on the ticket row (audit D2), with the tenant's active conversation
  * connector as a last resort for unstamped rows. Legacy ids are passed to
  * the connector raw and stay un-namespaced on the way out, so the stored
- * case threadId keeps matching.
+ * ticket threadId keeps matching.
  *
  * Two `Layer`s can't both provide the same Tag, so each connector exposes its
  * inner builder (`make…Conversation(cfg): Effect<ConversationServiceShape, …>`)
@@ -106,7 +106,7 @@ export const makeConversationRouter = (
       );
     }
     // No / unknown prefix: a LEGACY id from before namespacing — route by the
-    // case's stamped provider when a resolver is wired (audit D2). Without
+    // ticket's stamped provider when a resolver is wired (audit D2). Without
     // one, this id can't belong to any connector we could dispatch to, which
     // is indistinguishable from the thread not existing.
     if (!resolveLegacyProvider) {
@@ -117,7 +117,7 @@ export const makeConversationRouter = (
         provider === null
           ? Effect.fail(new ThreadNotFound({ threadId, tenantId }))
           : // Legacy ids are stored raw and must STAY raw on the way out so
-            // the case row keeps matching.
+            // the ticket row keeps matching.
             dispatchTo(tenantId, threadId, provider, threadId, () => threadId),
       ),
     );
@@ -178,33 +178,33 @@ export const makeConversationRouter = (
 };
 
 /**
- * Legacy-thread resolver backed by the case table (audit D2): the provider
- * stamped on the case that owns the thread wins; for unstamped rows (cases
+ * Legacy-thread resolver backed by the ticket table (audit D2): the provider
+ * stamped on the ticket that owns the thread wins; for unstamped rows (tickets
  * older than the stamp) fall back to the tenant's most recently installed
  * ACTIVE conversation connector — the only remaining signal. Repo/store
  * failures surface as `ConversationProviderUnavailable` (retryable) rather
  * than a misleading ThreadNotFound.
  *
- * Wire it as `ConversationRouterLive(builders, makeCaseProviderResolver)`;
- * the resulting Layer then also requires `CaseRepository`.
+ * Wire it as `ConversationRouterLive(builders, makeTicketProviderResolver)`;
+ * the resulting Layer then also requires `TicketRepository`.
  */
-export const makeCaseProviderResolver: Effect.Effect<
+export const makeTicketProviderResolver: Effect.Effect<
   LegacyThreadProviderResolver,
   never,
-  CaseRepository | ConnectorCredentialStore
+  TicketRepository | ConnectorCredentialStore
 > = Effect.gen(function* () {
-  const cases = yield* CaseRepository;
+  const tickets = yield* TicketRepository;
   const store = yield* ConnectorCredentialStore;
 
   const unavailable = () =>
     new ConversationProviderUnavailable({ provider: "conversation-router" });
 
   return (tenantId, threadId) =>
-    cases.findThreadProvider(tenantId, threadId).pipe(
+    tickets.findThreadProvider(tenantId, threadId).pipe(
       Effect.mapError(unavailable),
       Effect.flatMap((stamped) => {
         if (stamped !== null) return Effect.succeed(stamped);
-        // Tenant-level fallback for unstamped legacy cases: the most
+        // Tenant-level fallback for unstamped legacy tickets: the most
         // recently installed active conversation connector, deterministic
         // by (installedAt DESC, provider ASC).
         return store.listForTenant(tenantId).pipe(
@@ -237,10 +237,10 @@ export const makeCaseProviderResolver: Effect.Effect<
  * `["gmail", makeGmailConversation(cfg)]`). All builders share the same
  * `ConnectorCredentialStore` from context.
  *
- * Pass {@link makeCaseProviderResolver} as `legacyResolver` to route legacy
- * (un-namespaced) thread ids by the case's stamped provider (audit D2); the
+ * Pass {@link makeTicketProviderResolver} as `legacyResolver` to route legacy
+ * (un-namespaced) thread ids by the ticket's stamped provider (audit D2); the
  * Layer then additionally requires whatever the resolver needs (for the
- * case-stamp resolver: `CaseRepository`). Omitted → un-prefixed ids keep
+ * ticket-stamp resolver: `TicketRepository`). Omitted → un-prefixed ids keep
  * failing ThreadNotFound, and existing call sites compile unchanged.
  */
 export const ConversationRouterLive = <RFallback = never>(

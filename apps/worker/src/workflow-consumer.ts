@@ -3,16 +3,16 @@
 // ============================================================
 //
 // The `workflow.events` queue is policy `key_strict_fifo`: pg-boss keeps at
-// most one job ACTIVE per `singletonKey` (= `case:<id>` / `thread:<id>`) via a
-// unique index, so different cases/threads are safe to run in parallel while a
-// single case's events stay strictly ordered.
+// most one job ACTIVE per `singletonKey` (= `ticket:<id>` / `thread:<id>`) via a
+// unique index, so different tickets/threads are safe to run in parallel while a
+// single ticket's events stay strictly ordered.
 //
 // The consumer historically ran as a SINGLE serial `boss.work()` (default
 // `localConcurrency` 1, `batchSize` 1). That threw away the whole point of the
 // policy: one slow/hung `message.received` autonomous run held the only work
-// slot, and `approval.approved` / `approval.rejected` events for OTHER cases
+// slot, and `approval.approved` / `approval.rejected` events for OTHER tickets
 // starved behind it in `created` state — never dispatched, so approved drafts
-// never sent and cases sat in `waiting_for_approval` indefinitely.
+// never sent and tickets sat in `waiting_for_approval` indefinitely.
 //
 // This module re-enables the concurrency the queue was designed for, and wraps
 // each tick in a wall-clock timeout so a hung run fails → retries (and
@@ -152,7 +152,7 @@ export interface RegisterWorkflowConsumerOptions {
 
 /**
  * Register the concurrent `workflow.events` consumer. `localConcurrency` spawns
- * N independent pollers in-process; `key_strict_fifo` keeps same-case events
+ * N independent pollers in-process; `key_strict_fifo` keeps same-ticket events
  * serialized across them. Returns the pg-boss worker id.
  */
 export const registerWorkflowConsumer = (

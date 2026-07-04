@@ -30,7 +30,7 @@ export const ReplyDeliveryServiceLive = Layer.effect(
             try: () =>
               enqueueReplyDelivery(activeDb, {
                 tenantId: input.tenantId,
-                caseId: input.caseId,
+                ticketId: input.ticketId,
                 agentId: String(input.agentId),
                 tool: input.tool,
                 mailbox: input.mailbox,

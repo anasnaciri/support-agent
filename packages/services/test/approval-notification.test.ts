@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApprovalId, CaseId, TenantId } from "@support-agent/agent-core";
+import { ApprovalId, TicketId, TenantId } from "@support-agent/agent-core";
 import {
   buildApprovalNotification,
   verifyApprovalToken,
@@ -14,7 +14,7 @@ const linkConfig = {
 const base = {
   approvalId: ApprovalId("11111111-1111-1111-1111-111111111111"),
   tenantId: TenantId("tenant-1"),
-  caseId: CaseId("case-1"),
+  ticketId: TicketId("ticket-1"),
   tool: "conversation.reply",
   linkConfig,
 };

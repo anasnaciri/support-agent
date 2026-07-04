@@ -1,12 +1,12 @@
 import { Context, Data, Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 
 export type TimerReason = "follow_up" | "sla" | "escalation";
 
 export interface TimerRecord {
   readonly id: string;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly fireAt: Date;
   readonly reason: TimerReason;
   readonly firedAt: Date | null;
@@ -14,14 +14,14 @@ export interface TimerRecord {
 }
 
 export interface ScheduleTimerInput {
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly fireAt: Date;
   readonly reason: TimerReason;
   /**
    * Defense-in-depth tenant scope (audit D9): when present, scheduling
-   * against a case outside the tenant fails instead of arming a timer on a
-   * foreign case. Timers carry no tenant column — the check goes through
-   * the case row.
+   * against a ticket outside the tenant fails instead of arming a timer on a
+   * foreign ticket. Timers carry no tenant column — the check goes through
+   * the ticket row.
    */
   readonly tenantId?: TenantId;
 }
@@ -46,8 +46,8 @@ export class TimerService extends Context.Tag("TimerService")<
     readonly schedule: (
       input: ScheduleTimerInput,
     ) => Effect.Effect<TimerRecord, TimerServiceError>;
-    readonly cancelOpenForCase: (
-      caseId: CaseId,
+    readonly cancelOpenForTicket: (
+      ticketId: TicketId,
       opts?: CancelTimersOptions,
     ) => Effect.Effect<number, TimerServiceError>;
     /**
@@ -73,7 +73,7 @@ export const TimerServiceTest = Layer.effect(
   TimerService,
   Effect.sync(() => {
     const timers: TimerRecord[] = [];
-    // D9: the in-memory layer has no case table to check tenancy against, so
+    // D9: the in-memory layer has no ticket table to check tenancy against, so
     // it records the tenant given at schedule time and enforces it on cancel.
     const tenantOf = new Map<string, TenantId>();
 
@@ -82,7 +82,7 @@ export const TimerServiceTest = Layer.effect(
         Effect.sync(() => {
           const timer: TimerRecord = {
             id: randomUUID(),
-            caseId: input.caseId,
+            ticketId: input.ticketId,
             fireAt: input.fireAt,
             reason: input.reason,
             firedAt: null,
@@ -95,13 +95,13 @@ export const TimerServiceTest = Layer.effect(
           return timer;
         }),
 
-      cancelOpenForCase: (caseId, opts = {}) =>
+      cancelOpenForTicket: (ticketId, opts = {}) =>
         Effect.sync(() => {
           const now = opts.now ?? new Date();
           let count = 0;
           for (let i = 0; i < timers.length; i += 1) {
             const timer = timers[i]!;
-            if (timer.caseId !== caseId) continue;
+            if (timer.ticketId !== ticketId) continue;
             if (timer.firedAt || timer.cancelledAt) continue;
             if (opts.reason && timer.reason !== opts.reason) continue;
             if (opts.tenantId !== undefined) {

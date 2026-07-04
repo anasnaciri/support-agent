@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   resyncDraft,
   type ComposerMode,
-} from "../app/cases/[id]/composer-draft-sync";
+} from "../app/tickets/[id]/composer-draft-sync";
 
 const approval = (approvalId: string, draftBody: string): ComposerMode => ({
   kind: "approval",
   approvalId,
   draftBody,
-  returnTo: "/cases/x",
+  returnTo: "/tickets/x",
 });
 
 // The composer stays mounted across live refreshes (router.refresh keeps the

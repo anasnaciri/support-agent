@@ -82,7 +82,7 @@ const bannerFor = (params: {
       tone: "success",
       text: isApprove
         ? "Approved. The customer reply will be sent in a moment."
-        : "Rejected. The case is now in human takeover.",
+        : "Rejected. The ticket is now in human takeover.",
     };
   }
   if (params.kind === "already_decided") {
@@ -243,7 +243,7 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
               <TableHead>Status</TableHead>
               <TableHead>Risk</TableHead>
               <TableHead>Agent</TableHead>
-              <TableHead>Case</TableHead>
+              <TableHead>Ticket</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Decided</TableHead>
             </TableRow>
@@ -284,10 +284,10 @@ export default async function ApprovalsPage({ searchParams }: SearchParams) {
                   </TableCell>
                   <TableCell>
                     <Link
-                      href={`/cases/${r.caseId}`}
+                      href={`/tickets/${r.ticketId}`}
                       className="font-mono text-xs text-primary hover:underline"
                     >
-                      {r.caseId.slice(0, 8)}…
+                      {r.ticketId.slice(0, 8)}…
                     </Link>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

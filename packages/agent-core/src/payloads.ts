@@ -21,9 +21,9 @@ export interface InboundMessage {
    * RFC 5322 threading headers, when the connector can supply them (IMAP/SMTP
    * does; Gmail/Outlook thread on a provider-stable conversation id and leave
    * these unset). The runtime uses them to correlate a reply to its existing
-   * case via a recorded message-id index — robust against clients that reorder
+   * ticket via a recorded message-id index — robust against clients that reorder
    * or drop the `References` chain, which would otherwise mint a duplicate
-   * case. `inReplyTo` is the immediate parent; `references` is the full chain
+   * ticket. `inReplyTo` is the immediate parent; `references` is the full chain
    * (root id is somewhere in here, not reliably first).
    */
   readonly inReplyTo?: string | null;
@@ -33,7 +33,7 @@ export interface InboundMessage {
    * `Reply-To` address when the connector parsed one from the inbound
    * headers. Relay-delivered mail (e.g. a Shopify contact form sent
    * `From: mailer@shopify.com`) carries the real customer here. The runtime
-   * stamps the case's `customerEmail` from `replyTo ?? from` so replies and
+   * stamps the ticket's `customerEmail` from `replyTo ?? from` so replies and
    * identity checks target the human, not the relay. See
    * `ConversationMessage.replyTo`.
    */
@@ -113,7 +113,7 @@ export interface SupplierUpdate {
   readonly proposedResolution: string | null;
   /**
    * The escalation this update answers. Scopes the runtime's tool-execution
-   * dedup marker per escalation, so a case escalated twice can reply to each
+   * dedup marker per escalation, so a ticket escalated twice can reply to each
    * update. Optional only for legacy in-flight events minted before it existed.
    */
   readonly escalationId?: string;

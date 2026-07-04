@@ -2,7 +2,7 @@
 // Dashboard "Rephrase with AI" — one-shot polish of a reply draft
 // ============================================================
 //
-// While drafting a manual reply (see case-reply.ts) the agent can ask the model
+// While drafting a manual reply (see ticket-reply.ts) the agent can ask the model
 // to rewrite their draft to be clearer/warmer before sending. This is a single
 // text-generation call — NOT the agent runtime — so it lives as its own thin
 // orchestration core, dependency-injected (`hasCredential` / `generate`) so it

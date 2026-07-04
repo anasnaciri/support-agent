@@ -7,7 +7,7 @@ const seen = (entries: Record<string, string | null>) =>
 describe("refundCustomerMismatchFlag", () => {
   const input = { orderId: "gid://shopify/Order/1", amount: { amount: "5", currencyCode: "USD" } };
 
-  it("flags a refund whose order customer differs from the case customer", () => {
+  it("flags a refund whose order customer differs from the ticket customer", () => {
     const flag = refundCustomerMismatchFlag(
       input,
       { customerEmail: "jane@example.com" },
@@ -25,7 +25,7 @@ describe("refundCustomerMismatchFlag", () => {
     expect(flag).toBeNull();
   });
 
-  it("does not flag when the case has no known customer email", () => {
+  it("does not flag when the ticket has no known customer email", () => {
     const flag = refundCustomerMismatchFlag(
       input,
       {},

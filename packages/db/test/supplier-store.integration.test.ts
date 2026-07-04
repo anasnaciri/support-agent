@@ -6,9 +6,9 @@ import {
   auditLog,
   bindSupplierUser,
   bindSupplierUserAllTenants,
-  caseStateTransitions,
-  caseSupplierEscalations,
-  cases,
+  ticketStateTransitions,
+  ticketSupplierEscalations,
+  tickets,
   createInvitation,
   createSupplier,
   ensureSupplierRole,
@@ -17,7 +17,7 @@ import {
   getEscalationForSupplier,
   getSupplierByEmail,
   getSupplierForUser,
-  hasOpenEscalationForCase,
+  hasOpenEscalationForTicket,
   insertEscalation,
   listOpenEscalationsForSupplier,
   listSupplierWorkspacesForUser,
@@ -30,10 +30,10 @@ import {
 } from "../src/index.js";
 
 // Exercises the real SQL behind the supplier portal data model: supplier
-// identity + login binding, the per-case escalation record, the MINIMAL privacy
+// identity + login binding, the per-ticket escalation record, the MINIMAL privacy
 // projection (the supplier must never see customer PII), per-supplier row
 // isolation, and the one-transaction `recordSupplierUpdate` (note + escalation
-// resolve + case flip + audit). Gated on DATABASE_URL (skipped without a DB).
+// resolve + ticket flip + audit). Gated on DATABASE_URL (skipped without a DB).
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
@@ -44,13 +44,13 @@ describeIfDb("supplier-store", () => {
 
   afterAll(async () => {
     if (seededTenants.length > 0) {
-      // approvals.case_id is NO ACTION, so seeded approval rows must go before
-      // their cases. Then cases (cascades escalations + transitions), then the
+      // approvals.ticket_id is NO ACTION, so seeded approval rows must go before
+      // their tickets. Then tickets (cascades escalations + transitions), then the
       // tenant delete (cascades suppliers + any remaining escalations).
       await db
         .delete(approvals)
         .where(inArray(approvals.tenantId, seededTenants));
-      await db.delete(cases).where(inArray(cases.tenantId, seededTenants));
+      await db.delete(tickets).where(inArray(tickets.tenantId, seededTenants));
       await db.delete(tenants).where(inArray(tenants.id, seededTenants));
     }
     await client.close();
@@ -68,12 +68,12 @@ describeIfDb("supplier-store", () => {
     return id;
   };
 
-  const seedCase = async (
+  const seedTicket = async (
     tenantId: string,
     status: string,
   ): Promise<string> => {
     const id = randomUUID();
-    await db.insert(cases).values({
+    await db.insert(tickets).values({
       id,
       tenantId,
       channel: "email",
@@ -85,7 +85,7 @@ describeIfDb("supplier-store", () => {
 
   const seedApproval = async (
     tenantId: string,
-    caseId: string,
+    ticketId: string,
     status: "pending" | "approved",
     tool = "conversation.reply",
   ): Promise<string> => {
@@ -93,7 +93,7 @@ describeIfDb("supplier-store", () => {
     await db.insert(approvals).values({
       id,
       tenantId,
-      caseId,
+      ticketId,
       agentId: "missing-package-agent",
       tool,
       proposedInput: { draftId: id, bodyText: "draft" },
@@ -219,11 +219,11 @@ describeIfDb("supplier-store", () => {
     const supplierB = (
       await createSupplier(db, tenantId, { name: "B", email: "b@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+    const ticketId = await seedTicket(tenantId, "waiting_for_supplier");
 
     await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplierA,
       problem: "Order stuck in transit 12 days",
       orderRef: "#1001",
@@ -238,7 +238,7 @@ describeIfDb("supplier-store", () => {
     // EXACT projected fields — no customer PII keys (email/address/thread) leak.
     expect(Object.keys(item).sort()).toEqual(
       [
-        "caseId",
+        "ticketId",
         "createdAt",
         "id",
         "orderRef",
@@ -265,10 +265,10 @@ describeIfDb("supplier-store", () => {
     const supplierB = (
       await createSupplier(db, tenantId, { name: "B", email: "b2@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+    const ticketId = await seedTicket(tenantId, "waiting_for_supplier");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplierA,
       problem: "P",
       orderRef: "#2002",
@@ -283,15 +283,15 @@ describeIfDb("supplier-store", () => {
     expect(await getEscalationForSupplier(db, supplierB, escId)).toBeNull();
   });
 
-  it("recordSupplierUpdate writes note + resolves the escalation + flips the case in ONE tx", async () => {
+  it("recordSupplierUpdate writes note + resolves the escalation + flips the ticket in ONE tx", async () => {
     const tenantId = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "a3@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+    const ticketId = await seedTicket(tenantId, "waiting_for_supplier");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId,
       problem: "P",
       orderRef: "#3003",
@@ -310,7 +310,7 @@ describeIfDb("supplier-store", () => {
     });
     expect(res.kind).toBe("recorded");
     if (res.kind === "recorded") {
-      expect(res.caseId).toBe(caseId);
+      expect(res.ticketId).toBe(ticketId);
       expect(res.resumed).toBe(true);
     }
 
@@ -319,11 +319,11 @@ describeIfDb("supplier-store", () => {
     expect(detail?.status).toBe("resolved");
     expect(detail?.note).toBe("Reshipped today, new tracking TRK999");
 
-    // Case flipped waiting_for_supplier → in_progress + supplierUpdate stamped.
+    // Ticket flipped waiting_for_supplier → in_progress + supplierUpdate stamped.
     const [row] = await db
-      .select({ status: cases.status, context: cases.context })
-      .from(cases)
-      .where(eq(cases.id, caseId));
+      .select({ status: tickets.status, context: tickets.context })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
     expect(row?.status).toBe("in_progress");
     expect(
       (row?.context as Record<string, unknown>)["supplierUpdate"],
@@ -334,13 +334,13 @@ describeIfDb("supplier-store", () => {
       .select({ action: auditLog.action })
       .from(auditLog)
       .where(
-        and(eq(auditLog.caseId, caseId), eq(auditLog.action, "supplier.updated")),
+        and(eq(auditLog.ticketId, ticketId), eq(auditLog.action, "supplier.updated")),
       );
     expect(audits).toHaveLength(1);
     const transitions = await db
-      .select({ to: caseStateTransitions.toStatus })
-      .from(caseStateTransitions)
-      .where(eq(caseStateTransitions.caseId, caseId));
+      .select({ to: ticketStateTransitions.toStatus })
+      .from(ticketStateTransitions)
+      .where(eq(ticketStateTransitions.ticketId, ticketId));
     expect(transitions.some((t) => t.to === "in_progress")).toBe(true);
 
     // Idempotent: a second submission on a resolved escalation is rejected.
@@ -355,13 +355,13 @@ describeIfDb("supplier-store", () => {
     expect(again.kind).toBe("already_resolved");
   });
 
-  // A case can escape `waiting_for_supplier` while the escalation is still open
+  // A ticket can escape `waiting_for_supplier` while the escalation is still open
   // (manual status change, "Take over", a manual reply resolving it, restart
   // from triage). The supplier's update must STILL re-engage the agent: every
-  // status a person can park the case in flips back to `in_progress` so the
+  // status a person can park the ticket in flips back to `in_progress` so the
   // published `supplier.updated` event isn't held by a runtime park guard.
   it.each(["resolved", "human_takeover", "failed", "waiting_for_customer"])(
-    "recordSupplierUpdate resumes a case that escaped to %s",
+    "recordSupplierUpdate resumes a ticket that escaped to %s",
     async (escapedStatus) => {
       const tenantId = await seedTenant();
       const supplierId = (
@@ -370,10 +370,10 @@ describeIfDb("supplier-store", () => {
           email: `esc-${escapedStatus}@wh.com`,
         })
       ).id;
-      const caseId = await seedCase(tenantId, escapedStatus);
+      const ticketId = await seedTicket(tenantId, escapedStatus);
       const { id: escId } = await insertEscalation(db, {
         tenantId,
-        caseId,
+        ticketId,
         supplierId,
         problem: "P",
         orderRef: null,
@@ -394,18 +394,18 @@ describeIfDb("supplier-store", () => {
       if (res.kind === "recorded") expect(res.resumed).toBe(true);
 
       const [row] = await db
-        .select({ status: cases.status })
-        .from(cases)
-        .where(eq(cases.id, caseId));
+        .select({ status: tickets.status })
+        .from(tickets)
+        .where(eq(tickets.id, ticketId));
       expect(row?.status).toBe("in_progress");
 
       const transitions = await db
         .select({
-          from: caseStateTransitions.fromStatus,
-          to: caseStateTransitions.toStatus,
+          from: ticketStateTransitions.fromStatus,
+          to: ticketStateTransitions.toStatus,
         })
-        .from(caseStateTransitions)
-        .where(eq(caseStateTransitions.caseId, caseId));
+        .from(ticketStateTransitions)
+        .where(eq(ticketStateTransitions.ticketId, ticketId));
       expect(
         transitions.some(
           (t) => t.from === escapedStatus && t.to === "in_progress",
@@ -414,15 +414,15 @@ describeIfDb("supplier-store", () => {
     },
   );
 
-  it("recordSupplierUpdate on an in_progress case records without a redundant flip", async () => {
+  it("recordSupplierUpdate on an in_progress ticket records without a redundant flip", async () => {
     const tenantId = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "a5@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "in_progress");
+    const ticketId = await seedTicket(tenantId, "in_progress");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId,
       problem: "P",
       orderRef: null,
@@ -441,43 +441,43 @@ describeIfDb("supplier-store", () => {
     expect(res.kind).toBe("recorded");
     if (res.kind === "recorded") expect(res.resumed).toBe(false);
     const [row] = await db
-      .select({ status: cases.status, context: cases.context })
-      .from(cases)
-      .where(eq(cases.id, caseId));
+      .select({ status: tickets.status, context: tickets.context })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
     expect(row?.status).toBe("in_progress");
     expect(
       (row?.context as Record<string, unknown>)["supplierUpdate"],
     ).toBeTruthy();
     const transitions = await db
-      .select({ id: caseStateTransitions.id })
-      .from(caseStateTransitions)
-      .where(eq(caseStateTransitions.caseId, caseId));
+      .select({ id: ticketStateTransitions.id })
+      .from(ticketStateTransitions)
+      .where(eq(ticketStateTransitions.ticketId, ticketId));
     expect(transitions).toHaveLength(0);
   });
 
-  // Redraft (concurrent wait states): a supplier update on a case parked
+  // Redraft (concurrent wait states): a supplier update on a ticket parked
   // `waiting_for_approval` supersedes every still-pending approval (the drafts
   // may now be stale in light of the supplier's note) and re-engages the agent
   // in ONE tx. Decided rows are untouched. The published `supplier.updated`
   // event then re-runs the agent, which produces a fresh draft.
-  it("recordSupplierUpdate supersedes pending approvals and resumes a waiting_for_approval case", async () => {
+  it("recordSupplierUpdate supersedes pending approvals and resumes a waiting_for_approval ticket", async () => {
     const tenantId = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "a6@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_approval");
-    const pending1 = await seedApproval(tenantId, caseId, "pending");
+    const ticketId = await seedTicket(tenantId, "waiting_for_approval");
+    const pending1 = await seedApproval(tenantId, ticketId, "pending");
     const pending2 = await seedApproval(
       tenantId,
-      caseId,
+      ticketId,
       "pending",
       "refund.create",
     );
     // A row decided BEFORE the supplier answered must stay decided.
-    const decided = await seedApproval(tenantId, caseId, "approved");
+    const decided = await seedApproval(tenantId, ticketId, "approved");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId,
       problem: "P",
       orderRef: null,
@@ -496,11 +496,11 @@ describeIfDb("supplier-store", () => {
     expect(res.kind).toBe("recorded");
     if (res.kind === "recorded") expect(res.resumed).toBe(true);
 
-    // Case flipped waiting_for_approval → in_progress.
+    // Ticket flipped waiting_for_approval → in_progress.
     const [row] = await db
-      .select({ status: cases.status })
-      .from(cases)
-      .where(eq(cases.id, caseId));
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
     expect(row?.status).toBe("in_progress");
 
     // Both pending rows cancelled with the supersede reason + null decidedBy.
@@ -512,7 +512,7 @@ describeIfDb("supplier-store", () => {
         decisionReason: approvals.decisionReason,
       })
       .from(approvals)
-      .where(eq(approvals.caseId, caseId));
+      .where(eq(approvals.ticketId, ticketId));
     const byId = new Map(approvalRows.map((a) => [a.id, a]));
     for (const pid of [pending1, pending2]) {
       expect(byId.get(pid)?.status).toBe("cancelled");
@@ -530,7 +530,7 @@ describeIfDb("supplier-store", () => {
       .from(auditLog)
       .where(
         and(
-          eq(auditLog.caseId, caseId),
+          eq(auditLog.ticketId, ticketId),
           eq(auditLog.action, "approval.superseded"),
         ),
       );
@@ -548,10 +548,10 @@ describeIfDb("supplier-store", () => {
     const supplierB = (
       await createSupplier(db, tenantId, { name: "B", email: "b4@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+    const ticketId = await seedTicket(tenantId, "waiting_for_supplier");
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId: supplierA,
       problem: "P",
       orderRef: null,
@@ -571,23 +571,23 @@ describeIfDb("supplier-store", () => {
   });
 
   // The notify outbox keys on the ESCALATION ROW (open + unsent), not on the
-  // case sitting in `waiting_for_supplier`: under concurrent wait states a case
+  // ticket sitting in `waiting_for_supplier`: under concurrent wait states a ticket
   // can carry an open escalation while parked `waiting_for_approval` (or
-  // actively in_progress) and the supplier must still get the email. Cases a
+  // actively in_progress) and the supplier must still get the email. Tickets a
   // human closed or owns are excluded — never email a supplier about those.
-  it("listUnsentSupplierEscalations keys on open+unsent rows, excluding closed/owned cases", async () => {
+  it("listUnsentSupplierEscalations keys on open+unsent rows, excluding closed/owned tickets", async () => {
     const tenantId = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "outbox@wh.com" })
     ).id;
 
-    const seedEscalated = async (caseStatus: string): Promise<string> => {
-      const caseId = await seedCase(tenantId, caseStatus);
+    const seedEscalated = async (ticketStatus: string): Promise<string> => {
+      const ticketId = await seedTicket(tenantId, ticketStatus);
       const { id } = await insertEscalation(db, {
         tenantId,
-        caseId,
+        ticketId,
         supplierId,
-        problem: `P-${caseStatus}`,
+        problem: `P-${ticketStatus}`,
         orderRef: null,
         shipCity: null,
         shipCountry: null,
@@ -603,12 +603,12 @@ describeIfDb("supplier-store", () => {
     const takenOver = await seedEscalated("human_takeover");
     const failed = await seedEscalated("failed");
     // An escalation the supplier already answered is never re-sent, even on a
-    // still-parked case.
+    // still-parked ticket.
     const answered = await seedEscalated("waiting_for_supplier");
     await db
-      .update(caseSupplierEscalations)
+      .update(ticketSupplierEscalations)
       .set({ status: "resolved", resolvedAt: new Date() })
-      .where(eq(caseSupplierEscalations.id, answered));
+      .where(eq(ticketSupplierEscalations.id, answered));
 
     const listed = (await listUnsentSupplierEscalations(db, 100_000, 5)).filter(
       (r) => r.tenantId === tenantId,
@@ -623,19 +623,19 @@ describeIfDb("supplier-store", () => {
     expect(ids).not.toContain(answered);
   });
 
-  it("hasOpenEscalationForCase is true only while an OPEN row exists for that tenant+case", async () => {
+  it("hasOpenEscalationForTicket is true only while an OPEN row exists for that tenant+ticket", async () => {
     const tenantId = await seedTenant();
     const otherTenant = await seedTenant();
     const supplierId = (
       await createSupplier(db, tenantId, { name: "A", email: "open@wh.com" })
     ).id;
-    const caseId = await seedCase(tenantId, "waiting_for_supplier");
+    const ticketId = await seedTicket(tenantId, "waiting_for_supplier");
 
-    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(false);
+    expect(await hasOpenEscalationForTicket(db, tenantId, ticketId)).toBe(false);
 
     const { id: escId } = await insertEscalation(db, {
       tenantId,
-      caseId,
+      ticketId,
       supplierId,
       problem: "P",
       orderRef: null,
@@ -643,15 +643,15 @@ describeIfDb("supplier-store", () => {
       shipCountry: null,
       trackingNumber: null,
     });
-    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(true);
-    // Tenant-scoped: another tenant asking about this case id sees nothing.
-    expect(await hasOpenEscalationForCase(db, otherTenant, caseId)).toBe(false);
+    expect(await hasOpenEscalationForTicket(db, tenantId, ticketId)).toBe(true);
+    // Tenant-scoped: another tenant asking about this ticket id sees nothing.
+    expect(await hasOpenEscalationForTicket(db, otherTenant, ticketId)).toBe(false);
 
     await db
-      .update(caseSupplierEscalations)
+      .update(ticketSupplierEscalations)
       .set({ status: "resolved", resolvedAt: new Date() })
-      .where(eq(caseSupplierEscalations.id, escId));
-    expect(await hasOpenEscalationForCase(db, tenantId, caseId)).toBe(false);
+      .where(eq(ticketSupplierEscalations.id, escId));
+    expect(await hasOpenEscalationForTicket(db, tenantId, ticketId)).toBe(false);
   });
 
   it("ensureSupplierRole creates a non-owner Supplier role granting the supplier perms (idempotent)", async () => {
@@ -665,8 +665,8 @@ describeIfDb("supplier-store", () => {
     expect(supplierRoles).toHaveLength(1);
     expect(supplierRoles[0]!.isOwner).toBe(false);
     expect([...supplierRoles[0]!.permissionIds].sort()).toEqual([
-      "supplier.cases.respond",
-      "supplier.cases.view",
+      "supplier.tickets.respond",
+      "supplier.tickets.view",
     ]);
   });
 });

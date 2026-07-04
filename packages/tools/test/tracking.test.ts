@@ -2,7 +2,7 @@ import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   NetworkError,
   TenantId,
   ToolOutputInvalid,
@@ -13,9 +13,9 @@ import { TrackingServiceTest } from "@support-agent/services";
 import { trackingLookup } from "../src/index.js";
 
 const tenantId = TenantId("t1");
-const baseCtx = (caseId: string): ToolContext => ({
+const baseCtx = (ticketId: string): ToolContext => ({
   tenantId,
-  caseId: CaseId(caseId),
+  ticketId: TicketId(ticketId),
   agentId: AgentId("order-status-agent"),
   callId: "call_1",
   attemptNumber: 1,

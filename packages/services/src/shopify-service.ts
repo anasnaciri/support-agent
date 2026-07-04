@@ -319,7 +319,7 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     /**
      * List a customer's orders by the email they placed them under, most
      * recent first. Backs `shopify.find_customer_order`, which a specialist
-     * calls when the case carries no identified order id: if the customer
+     * calls when the ticket carries no identified order id: if the customer
      * has exactly one order we infer that's the one they're writing about
      * (no need to ask for an order number); zero or many means we still
      * have to ask. Looking up BY the customer's own address is the
@@ -337,7 +337,7 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
     /**
      * List a customer's orders by their Shopify customer id, most recent first.
      * The identity-safe way to answer "which orders does this customer have?"
-     * once the case has resolved the customer (by email/phone/name → a
+     * once the ticket has resolved the customer (by email/phone/name → a
      * `shopifyCustomerId`): every order returned belongs to that ONE account,
      * regardless of which email each order was placed under. Backs
      * `shopify.find_customer_order`'s by-customer path. `limit` caps the result
@@ -723,12 +723,12 @@ export interface ShopifyTestFixtures {
   >;
   /**
    * Fixture for `listRecentOrderPiiPresence`. When unset the default Test
-   * impl returns an empty list (the "no orders on the store yet" case).
+   * impl returns an empty list (the "no orders on the store yet" ticket).
    */
   readonly recentOrderPiiPresence?: ReadonlyArray<OrderPiiPresence>;
   /**
    * Fixture for `getShopInfo`. When unset the default Test impl fails with
-   * `ShopifyAuthMissing` — the "no Shopify connection" case, which best-
+   * `ShopifyAuthMissing` — the "no Shopify connection" ticket, which best-
    * effort callers treat as "store currency unknown".
    */
   readonly shopInfo?: ShopInfo;
@@ -736,7 +736,7 @@ export interface ShopifyTestFixtures {
    * Fixture for `getShopPolicies`. A thunk (like `refundOrder`) so a test can
    * return policies on the happy path OR simulate a fetch failure — the policy
    * import's "fail silently" boundary needs both. When unset the default Test
-   * impl returns an empty list (the "no policies configured" case).
+   * impl returns an empty list (the "no policies configured" ticket).
    */
   readonly shopPolicies?: () => Effect.Effect<
     ReadonlyArray<ShopPolicy>,
@@ -754,7 +754,7 @@ export interface ShopifyTestFixtures {
   >;
   /**
    * Fixture for `listPickupLocations`. When unset the default Test impl
-   * returns an empty list (the common "store offers no pickup" case).
+   * returns an empty list (the common "store offers no pickup" ticket).
    */
   readonly pickupLocations?: ReadonlyArray<PickupLocation>;
 }

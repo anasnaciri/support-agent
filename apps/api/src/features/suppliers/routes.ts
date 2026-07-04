@@ -3,8 +3,8 @@ import type { RouteContext } from "../../platform/context.js";
 import { makeSupplierRoutes } from "../../auth/supplier-routes.js";
 import { makeDashboardRoutes } from "../../auth/dashboard-routes.js";
 import {
-  handleSupplierCase,
-  handleSupplierCases,
+  handleSupplierTicket,
+  handleSupplierTickets,
   handleSupplierInvite,
   handleSupplierSession,
   handleSupplierTracking,
@@ -20,7 +20,7 @@ export const registerSupplierRoutes = (
   const { dashboardGet, dashboardPost } = makeDashboardRoutes(app, ctx);
 
   // Supplier bootstrap + switcher — identity-only / binding-anchored, so NOT
-  // gated by supplierGet (which needs an x-workspace-id + supplier.cases.* the
+  // gated by supplierGet (which needs an x-workspace-id + supplier.tickets.* the
   // caller doesn't have yet at bootstrap). Each handler self-authenticates.
   dashboardGet(
     "/dashboard/supplier/workspaces",
@@ -33,31 +33,31 @@ export const registerSupplierRoutes = (
     handleSupplierSession,
   );
 
-  // Supplier-facing surface — gated on the constrained supplier.cases.* and
+  // Supplier-facing surface — gated on the constrained supplier.tickets.* and
   // walled off from merchant endpoints by decideSupplierAuthz.
   supplierGet(
-    "/dashboard/supplier/cases",
+    "/dashboard/supplier/tickets",
     "Open escalations for the logged-in supplier",
-    handleSupplierCases,
-    "supplier.cases.view",
+    handleSupplierTickets,
+    "supplier.tickets.view",
   );
   supplierGet(
-    "/dashboard/supplier/cases/:id",
-    "One escalated case (minimal privacy projection)",
-    handleSupplierCase,
-    "supplier.cases.view",
+    "/dashboard/supplier/tickets/:id",
+    "One escalated ticket (minimal privacy projection)",
+    handleSupplierTicket,
+    "supplier.tickets.view",
   );
   supplierPost(
-    "/dashboard/supplier/cases/:id/update",
+    "/dashboard/supplier/tickets/:id/update",
     "Post a supplier update + resolve the escalation",
     handleSupplierUpdate,
-    "supplier.cases.respond",
+    "supplier.tickets.respond",
   );
   supplierPost(
-    "/dashboard/supplier/cases/:id/tracking",
+    "/dashboard/supplier/tickets/:id/tracking",
     "Replace the order's fulfillment tracking number (Shopify store write)",
     handleSupplierTracking,
-    "supplier.cases.respond",
+    "supplier.tickets.respond",
   );
 
   // Merchant-facing — invite a supplier into the workspace (members.manage).

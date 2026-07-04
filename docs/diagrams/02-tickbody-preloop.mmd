@@ -1,6 +1,6 @@
 %% Agent runtime — tickBody pre-loop (load, approval-resume, park guards)
 flowchart TD
-    START["tickBody"] --> LOAD["1. load/create case + audit in 1 tx; unique(tenant,thread) guards double-create"]
+    START["tickBody"] --> LOAD["1. load/create ticket + audit in 1 tx; unique(tenant,thread) guards double-create"]
     LOAD --> KIND{"event.type"}
 
     KIND -->|"approval.approved"| AA1
@@ -32,8 +32,8 @@ flowchart TD
     ROPEN --> LOOP
 
     E5["E5: refund.create as gated tool resolves with NO customer reply"]:::hi
-    E6["E6: only guards 'resolved'; reopened/handed-back case can run a stale draft"]:::med
-    E8["E8: steps 3-5 RUN even when the case is about to be HELD"]:::med
+    E6["E6: only guards 'resolved'; reopened/handed-back ticket can run a stale draft"]:::med
+    E8["E8: steps 3-5 RUN even when the ticket is about to be HELD"]:::med
     E3["E3: those writes are fail-OPEN, can drop the disclosure flag"]:::hi
     AARES -.-> E5
     AA1 -.-> E6

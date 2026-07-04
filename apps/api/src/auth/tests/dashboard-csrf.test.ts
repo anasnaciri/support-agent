@@ -10,7 +10,7 @@ const allowed = new Set(["https://app-spa.example.com"]);
 const withCookie = `${SESSION_COOKIE_NAME}=sealed; other=1`;
 
 const base = {
-  url: "/dashboard/cases/x/resolve",
+  url: "/dashboard/tickets/x/resolve",
   method: "POST",
   cookieHeader: withCookie,
   authorizationHeader: undefined as string | undefined,

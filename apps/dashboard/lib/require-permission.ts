@@ -5,7 +5,7 @@ import { getDashboardContext, type DashboardContext } from "./api-client";
 
 /**
  * Page-level RBAC guard for admin pages. Loads the dashboard context and
- * redirects a member who lacks `permission` back to the cases home ("/")
+ * redirects a member who lacks `permission` back to the tickets home ("/")
  * instead of letting the page's gated data fetch 403 (which the api-client
  * would otherwise treat as "needs onboarding"). Returns the context so the
  * page can reuse it without a second round-trip.

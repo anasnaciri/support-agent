@@ -2,7 +2,7 @@ import { Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   CustomerId,
   OrderId,
   OrderCancelFailed,
@@ -19,8 +19,8 @@ import {
   type ToolContext,
 } from "@support-agent/agent-core";
 import {
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   ShopifyServiceTest,
 } from "@support-agent/services";
 import {
@@ -47,9 +47,9 @@ import {
 } from "@support-agent/services";
 
 const tenantId = TenantId("t1");
-const baseCtx = (caseId: string): ToolContext => ({
+const baseCtx = (ticketId: string): ToolContext => ({
   tenantId,
-  caseId: CaseId(caseId),
+  ticketId: TicketId(ticketId),
   agentId: AgentId("support-triage"),
   callId: "call_1",
   attemptNumber: 1,
@@ -1293,7 +1293,7 @@ describe("refund.recommend — tool wire-up", () => {
   const refundTenantId = TenantId("tenant-rec-1");
   const refundCtx: ToolContext = {
     tenantId: refundTenantId,
-    caseId: CaseId("c-rec-1"),
+    ticketId: TicketId("c-rec-1"),
     agentId: AgentId("refund-review-agent"),
     callId: "call_1",
     attemptNumber: 1,
@@ -1391,21 +1391,21 @@ describe("refund.recommend — tool wire-up", () => {
 });
 
 describe("shopify.find_customer_order tool", () => {
-  // The tool reads the case's resolved customer via CaseRepository, so provide
-  // an (empty) test repo alongside Shopify. With no seeded case, the context
-  // read fails-open to the by-email path these cases exercise.
+  // The tool reads the ticket's resolved customer via TicketRepository, so provide
+  // an (empty) test repo alongside Shopify. With no seeded ticket, the context
+  // read fails-open to the by-email path these tickets exercise.
   const run = (
     email: string,
     env: ReturnType<typeof ShopifyServiceTest>,
-    caseId = "c-fco",
+    ticketId = "c-fco",
   ) =>
     Effect.runPromiseExit(
       Effect.provide(
         shopifyFindCustomerOrder.execute(
           { email } as never,
-          baseCtx(caseId),
+          baseCtx(ticketId),
         ) as Effect.Effect<unknown, unknown, never>,
-        Layer.merge(env, CaseRepositoryTest),
+        Layer.merge(env, TicketRepositoryTest),
       ),
     );
 
@@ -1460,8 +1460,8 @@ describe("shopify.find_customer_order tool", () => {
     expect(result["order"]).toBeNull();
   });
 
-  it("looks up by the case's RESOLVED customer (not the email) when one is bound", async () => {
-    // The case resolved the customer (by email/phone/name → shopifyCustomerId).
+  it("looks up by the ticket's RESOLVED customer (not the email) when one is bound", async () => {
+    // The ticket resolved the customer (by email/phone/name → shopifyCustomerId).
     // The by-EMAIL fixture is empty on purpose: a hit proves the tool used the
     // customer-id lookup, finding an order placed under a DIFFERENT email.
     const custId = "gid://shopify/Customer/777";
@@ -1473,7 +1473,7 @@ describe("shopify.find_customer_order tool", () => {
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId,
             channel: "email",
@@ -1485,7 +1485,7 @@ describe("shopify.find_customer_order tool", () => {
             baseCtx(created.id),
           );
         }) as Effect.Effect<unknown, unknown, never>,
-        Layer.merge(env, CaseRepositoryTest),
+        Layer.merge(env, TicketRepositoryTest),
       ),
     );
     expect(Exit.isSuccess(exit)).toBe(true);

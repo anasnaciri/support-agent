@@ -28,7 +28,7 @@ describe("scenario-resolution-agent config", () => {
       "shopify.get_order",
       "shopify.find_customer_order",
       "knowledge.search",
-      "case.update_context",
+      "ticket.update_context",
       "conversation.reply",
       "conversation.ask_customer",
       "merchant.notify",
@@ -48,7 +48,7 @@ describe("scenario-resolution-agent config", () => {
     // It must NOT route (no handoff) or directly drive status (the runtime
     // maps end-of-loop state → status).
     expect(tools.has("agent.handoff")).toBe(false);
-    expect(tools.has("case.update_status")).toBe(false);
+    expect(tools.has("ticket.update_status")).toBe(false);
   });
 
   it("tells the agent gated actions are QUEUED, not executed, and to stop on its own", () => {

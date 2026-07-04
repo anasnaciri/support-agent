@@ -37,7 +37,7 @@ export const SUPPLIER_MODE_OPTIONS: ReadonlyArray<SupplierModeOption> = [
   {
     value: "escalate_and_wait",
     label: "Escalate to my supplier and wait",
-    help: "Loop the supplier in and pause the case until they respond.",
+    help: "Loop the supplier in and pause the ticket until they respond.",
   },
   {
     value: "notify_and_proceed",

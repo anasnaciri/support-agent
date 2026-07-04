@@ -70,7 +70,7 @@ describeIfDb("apps/api — /dashboard custom-agents (integration)", () => {
     instructions: "Be warm. Look up the order before promising anything.",
     model: "google/gemini-3.5-flash",
     // Non-scope-gated tools so the happy path needs no connector; the
-    // scope-miss case below uses refund.create deliberately.
+    // scope-miss ticket below uses refund.create deliberately.
     tools: ["conversation.reply", "knowledge.search"],
     handoffs: [],
     callableFrom: ["support-triage"],

@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import { AuditLogService } from "@support-agent/services";
 import {
   AuditLogServiceLive,
@@ -20,7 +20,7 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 describeIfDb("AuditLogService (Live, integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const tenantId = randomUUID();
-  const caseId = randomUUID();
+  const ticketId = randomUUID();
 
   const liveLayer = Layer.provide(
     AuditLogServiceLive,
@@ -45,25 +45,25 @@ describeIfDb("AuditLogService (Live, integration)", () => {
     await raw.close();
   });
 
-  it("record persists an entry that can be read via forCase", async () => {
+  it("record persists an entry that can be read via forTicket", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         const log = yield* AuditLogService;
         const a = yield* log.record({
           tenantId: TenantId(tenantId),
-          caseId: CaseId(caseId),
+          ticketId: TicketId(ticketId),
           actor: { type: "system", id: "runtime" },
           action: "event.received",
           details: { event: "ticket.created" },
         });
         const b = yield* log.record({
           tenantId: TenantId(tenantId),
-          caseId: CaseId(caseId),
+          ticketId: TicketId(ticketId),
           actor: { type: "agent", id: "support-triage" },
           action: "llm.decision",
           details: { turn: 0 },
         });
-        const list = yield* log.forCase(CaseId(caseId));
+        const list = yield* log.forTicket(TicketId(ticketId));
         return { a, b, list };
       }),
     );
@@ -74,13 +74,13 @@ describeIfDb("AuditLogService (Live, integration)", () => {
     expect(result.b.id).toBeGreaterThan(result.a.id);
   });
 
-  it("forCase pagination via afterId returns only newer rows", async () => {
+  it("forTicket pagination via afterId returns only newer rows", async () => {
     const result = await runLive(
       Effect.gen(function* () {
         const log = yield* AuditLogService;
-        const all = yield* log.forCase(CaseId(caseId));
+        const all = yield* log.forTicket(TicketId(ticketId));
         const cursor = all[0]!.id;
-        const rest = yield* log.forCase(CaseId(caseId), { afterId: cursor });
+        const rest = yield* log.forTicket(TicketId(ticketId), { afterId: cursor });
         return { cursor, rest };
       }),
     );
@@ -90,7 +90,7 @@ describeIfDb("AuditLogService (Live, integration)", () => {
   });
 
   it("AuditLogServiceLiveRedacted scrubs PII fields on insert", async () => {
-    const redactedCaseId = randomUUID();
+    const redactedTicketId = randomUUID();
     const redactedLayer = Layer.provide(
       AuditLogServiceLiveRedacted,
       DbClientLive({ databaseUrl: databaseUrl! }),
@@ -101,9 +101,9 @@ describeIfDb("AuditLogService (Live, integration)", () => {
           const log = yield* AuditLogService;
           return yield* log.record({
             tenantId: TenantId(tenantId),
-            caseId: CaseId(redactedCaseId),
+            ticketId: TicketId(redactedTicketId),
             actor: { type: "agent", id: "refund-review-agent" },
-            action: "case.resolved",
+            action: "ticket.resolved",
             details: {
               tool: "conversation.reply",
               ok: true,

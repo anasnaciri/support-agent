@@ -171,7 +171,7 @@ export const visibleSettingsGroups = (
 /**
  * True when the member holds at least one PERMISSION-GATED settings item — the
  * IconRail uses this to decide whether to show the Settings cog at all. The
- * always-visible Overview/Legal items don't count (a cases-only member has no
+ * always-visible Overview/Legal items don't count (a tickets-only member has no
  * reason to land in Settings).
  */
 export const hasAnySettingsAccess = (

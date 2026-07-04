@@ -8,8 +8,8 @@ import { useAppNavigate } from "./navigation";
 // `requirePermission` redirect. The api enforces the real boundary; this just
 // keeps a direct-URL visit from firing a gated fetch that would 403 (which the
 // api-client treats as "needs onboarding") and instead bounces the member back
-// to the cases home. Session permissions fail-open to empty on a load blip, in
-// which case the home page (no permission required) still renders.
+// to the tickets home. Session permissions fail-open to empty on a load blip, in
+// which ticket the home page (no permission required) still renders.
 
 /** Returns whether the member has `permission`; redirects to "/" if not. */
 export const useRequirePermission = (

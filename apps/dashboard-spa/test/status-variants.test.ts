@@ -3,31 +3,31 @@ import { describe, expect, it } from "vitest";
 import {
   actorVariant,
   approvalStatusVariant,
-  caseStatusVariant,
+  ticketStatusVariant,
   integrationStatusVariant,
   permissionVariant,
   riskVariant,
 } from "../lib/status-variants.js";
 
-// Cases, audit, and approvals use brighter, more saturated (Bright) tags so the
+// Tickets, audit, and approvals use brighter, more saturated (Bright) tags so the
 // status colors pop — same soft pill style, vivid hue ramp. The settings pages
 // (permissions, integrations) keep the calmer base tints — those must not
 // regress.
 describe("status badge variants", () => {
-  describe("cases / audit / approvals use the bright saturated variants", () => {
-    it("case status maps colored states to bright variants", () => {
-      expect(caseStatusVariant("resolved")).toBe("successBright");
-      expect(caseStatusVariant("archived")).toBe("secondary");
-      expect(caseStatusVariant("human_takeover")).toBe("destructiveBright");
+  describe("tickets / audit / approvals use the bright saturated variants", () => {
+    it("ticket status maps colored states to bright variants", () => {
+      expect(ticketStatusVariant("resolved")).toBe("successBright");
+      expect(ticketStatusVariant("archived")).toBe("secondary");
+      expect(ticketStatusVariant("human_takeover")).toBe("destructiveBright");
       // "Needs approval" uses the calmer amber, not the bright yellow: the
       // vivid hue had too little contrast on the off-white background.
-      expect(caseStatusVariant("waiting_for_approval")).toBe("warning");
-      expect(caseStatusVariant("in_progress")).toBe("infoBright");
+      expect(ticketStatusVariant("waiting_for_approval")).toBe("warning");
+      expect(ticketStatusVariant("in_progress")).toBe("infoBright");
     });
 
     it("keeps waiting states quiet", () => {
-      expect(caseStatusVariant("waiting_for_customer")).toBe("muted");
-      expect(caseStatusVariant("waiting_for_supplier")).toBe("muted");
+      expect(ticketStatusVariant("waiting_for_customer")).toBe("muted");
+      expect(ticketStatusVariant("waiting_for_supplier")).toBe("muted");
     });
 
     it("approval status maps to bright variants, except pending's amber", () => {

@@ -883,7 +883,7 @@ describe("ShopifyServiceLive — getCustomer + searchByEmail + getFulfillment", 
 
   // Backs `shopify.find_customer_order` — list a customer's orders by the
   // email they ordered under, most recent first, so a specialist can infer
-  // the order when the case carries no order id.
+  // the order when the ticket carries no order id.
   it("findOrdersByEmail issues an email search and maps every result", async () => {
     reset();
     const layer = buildLayer(
@@ -1458,9 +1458,9 @@ const UUID_RE =
 
 describe("toIdempotencyUuid", () => {
   it("is a valid v5-shaped UUID and deterministic for the same seed", () => {
-    const a = toIdempotencyUuid("dash-refund:case1:order1:20.00:USD");
+    const a = toIdempotencyUuid("dash-refund:ticket1:order1:20.00:USD");
     expect(a).toMatch(UUID_RE);
-    expect(toIdempotencyUuid("dash-refund:case1:order1:20.00:USD")).toBe(a);
+    expect(toIdempotencyUuid("dash-refund:ticket1:order1:20.00:USD")).toBe(a);
   });
   it("differs when the seed differs (amount change → new key)", () => {
     expect(toIdempotencyUuid("x:20.00:USD")).not.toBe(

@@ -24,7 +24,7 @@ export default async function SuppliersSettingsPage({
         <h1 className="text-2xl font-semibold tracking-tight">Suppliers</h1>
         <p className="pt-1 text-sm text-muted-foreground">
           Invite a warehouse or supplier contact. They get a sign-in link and a
-          portal showing only the cases your agent escalates to them — the
+          portal showing only the tickets your agent escalates to them — the
           problem, order reference, ship-to, and tracking, never your customers&apos;
           details.
         </p>
@@ -33,7 +33,7 @@ export default async function SuppliersSettingsPage({
       {sp.ok === "invited" ? (
         <Alert>
           <AlertDescription>
-            Invitation sent. They&apos;ll see escalated cases after they sign in.
+            Invitation sent. They&apos;ll see escalated tickets after they sign in.
           </AlertDescription>
         </Alert>
       ) : null}

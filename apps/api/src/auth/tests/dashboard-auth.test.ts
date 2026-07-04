@@ -111,7 +111,7 @@ describe("authenticateDashboardToken", () => {
 // a cast error (→ 500). The shape guard turns garbage into a clean 400 before
 // any query runs.
 describe("isWorkspaceIdShape", () => {
-  it("accepts canonical UUIDs (any case)", () => {
+  it("accepts canonical UUIDs (any ticket)", () => {
     expect(isWorkspaceIdShape("7b9f8e3a-1d2c-4e5f-9a6b-8c7d6e5f4a3b")).toBe(true);
     expect(isWorkspaceIdShape("7B9F8E3A-1D2C-4E5F-9A6B-8C7D6E5F4A3B")).toBe(true);
   });

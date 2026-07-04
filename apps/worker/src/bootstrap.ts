@@ -10,7 +10,7 @@ import {
   AccountOpenRouterCredentialStoreTest,
   ApprovalLinkConfig,
   BlobStorageTest,
-  CaseLifecycleWriterLive,
+  TicketLifecycleWriterLive,
   ConnectorCredentialStore,
   ConversationServiceTest,
   OrgDirectoryServiceTest,
@@ -22,8 +22,8 @@ import {
   type ApprovalService,
   type AuditLogService,
   type BlobStorage,
-  type CaseLifecycleWriter,
-  type CaseRepository,
+  type TicketLifecycleWriter,
+  type TicketRepository,
   type ConnectorConnection,
   type ConversationService,
   type ShopifyService,
@@ -44,7 +44,7 @@ import {
   AccountOpenRouterCredentialStoreLive,
   AuditLogServiceLive,
   AuditLogServiceLiveRedacted,
-  CaseRepositoryLive,
+  TicketRepositoryLive,
   ConnectorCredentialStoreLive,
   CustomAgentServiceLive,
   DbClient,
@@ -67,7 +67,7 @@ import {
   BlobStorageConfigFromEnv,
   BlobStorageLive,
   ConversationRouterLive,
-  makeCaseProviderResolver,
+  makeTicketProviderResolver,
   makeGmailConversation,
   makeGraphConversation,
   makeImapSmtpConversation,
@@ -96,7 +96,7 @@ import { makeQueue, type PgBoss } from "./queue.js";
 /**
  * Everything the worker entrypoint needs to start consuming events.
  * The `runtimeLayer` exposes `AgentRuntime` AND its tool-side dependencies
- * (`CaseRepository`, `ShopifyService`, etc.) to the outer fiber — tools
+ * (`TicketRepository`, `ShopifyService`, etc.) to the outer fiber — tools
  * yield those services from inside `execute`, so the runtime alone is
  * not enough on the consumer side.
  */
@@ -104,8 +104,8 @@ export interface WorkerBootstrap {
   readonly boss: PgBoss;
   readonly runtimeLayer: Layer.Layer<
     | AgentRuntime
-    | CaseLifecycleWriter
-    | CaseRepository
+    | TicketLifecycleWriter
+    | TicketRepository
     | AuditLogService
     | ApprovalService
     | ShopifyService
@@ -284,7 +284,7 @@ export const buildWorker = async (
 
   // Repos + tx runner — all depend on DbClient.
   const baseRepos = Layer.mergeAll(
-    CaseRepositoryLive,
+    TicketRepositoryLive,
     auditLogLayer,
     ApprovalServiceLive,
     TransactionRunnerLive,
@@ -313,7 +313,7 @@ export const buildWorker = async (
     // provide below).
     ReplyDeliveryServiceLive,
   );
-  const repos = Layer.provideMerge(CaseLifecycleWriterLive, baseRepos);
+  const repos = Layer.provideMerge(TicketLifecycleWriterLive, baseRepos);
 
   // LLM — depends on LLMCredentialResolver. In production each tenant
   // brings their own provider + key (resolver consults the same
@@ -496,7 +496,7 @@ export const buildWorker = async (
   ];
   // In production the in-memory fallback is forbidden outright (audit
   // L16): ConversationServiceTest "sends" replies into memory, the agent
-  // resolves the case, and the customer receives nothing — a silent
+  // resolves the ticket, and the customer receives nothing — a silent
   // outage. (Unreachable today because CREDENTIAL_ENCRYPTION_KEY is
   // already required in prod and the IMAP builder needs only that key,
   // but the hard fail keeps a future builder-gating change from quietly
@@ -508,18 +508,18 @@ export const buildWorker = async (
   }
   const conversation =
     credKeyB64 && connectorBuilders.length > 0
-      ? // The case-provider resolver (audit D2) routes a legacy
+      ? // The ticket-provider resolver (audit D2) routes a legacy
         // (un-namespaced) thread through the provider stamped on its
-        // case before falling back to most-recently-installed — so
-        // connecting a second mailbox no longer breaks open cases.
+        // ticket before falling back to most-recently-installed — so
+        // connecting a second mailbox no longer breaks open tickets.
         ConversationRouterLive(
           connectorBuilders,
-          makeCaseProviderResolver,
+          makeTicketProviderResolver,
         ).pipe(
           Layer.provide(
             Layer.mergeAll(
               ConnectorCredentialStoreLive(encryptionKeys!),
-              CaseRepositoryLive.pipe(Layer.provide(dbLayer)),
+              TicketRepositoryLive.pipe(Layer.provide(dbLayer)),
             ),
           ),
         )
@@ -651,7 +651,7 @@ export const buildWorker = async (
 
   // env = everything the AgentRuntime AND the tool bodies need, except
   // DbClient (which we feed in via provide below). We expose env to the
-  // outer fiber because tool.execute yields its own deps (CaseRepository,
+  // outer fiber because tool.execute yields its own deps (TicketRepository,
   // ShopifyService) at call time — they are NOT consumed by
   // AgentRuntimeDefault itself; they're consumed inside the tools.
   const env = Layer.mergeAll(

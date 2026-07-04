@@ -276,14 +276,14 @@ describe("renderSupplierEscalationEmail (copy builder)", () => {
       tenantId,
       escalationId: "esc-1",
       supplierEmail: "wh@acme.com",
-      portalUrl: "https://app.example.com/supplier/cases/esc-1",
+      portalUrl: "https://app.example.com/supplier/tickets/esc-1",
       problem: "Order #1001 to Berlin, DE is stuck — please chase or reship",
       orderRef: "#1001",
     });
     expect(subject).toContain("#1001");
-    expect(text).toContain("https://app.example.com/supplier/cases/esc-1");
+    expect(text).toContain("https://app.example.com/supplier/tickets/esc-1");
     expect(text).toContain("please chase or reship");
-    expect(html).toContain("https://app.example.com/supplier/cases/esc-1");
+    expect(html).toContain("https://app.example.com/supplier/tickets/esc-1");
     // The input never carries customer data; assert nothing leaked in anyway.
     expect(text).not.toContain("@example.com");
     expect(`${subject}${text}${html}`.toLowerCase()).not.toContain("customer email");
@@ -299,6 +299,6 @@ describe("renderSupplierEscalationEmail (copy builder)", () => {
       orderRef: null,
     });
     expect(text).toContain("Log in to your supplier portal");
-    expect(text).not.toContain("/supplier/cases/");
+    expect(text).not.toContain("/supplier/tickets/");
   });
 });

@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // Approval link tokens
 // ============================================================
 //
-// When the runtime parks a case in `waiting_for_approval`, the platform
+// When the runtime parks a ticket in `waiting_for_approval`, the platform
 // emails the merchant's operator with two URLs:
 //
 //   GET /approvals/:id/approve?token=<sig>   (renders a confirm page)

@@ -9,7 +9,7 @@ import {
 import { describeShopifyError } from "../shopify-error-detail.js";
 
 describe("describeShopifyError", () => {
-  it("preserves a ShopifyResponseInvalid's GraphQL message (the refund-502 case)", () => {
+  it("preserves a ShopifyResponseInvalid's GraphQL message (the refund-502 ticket)", () => {
     const e = new ShopifyResponseInvalid({
       message: `Cannot query field "code" on type "UserError".`,
     });

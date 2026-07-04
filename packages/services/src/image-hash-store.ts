@@ -1,7 +1,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 import {
   hammingDistance,
-  type CaseId,
+  type TicketId,
   type TenantId,
 } from "@support-agent/agent-core";
 
@@ -14,14 +14,14 @@ import {
 
 export interface RecordImageHashInput {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly phash: bigint;
 }
 
 export interface FindSimilarInput {
   readonly tenantId: TenantId;
-  /** The current case — excluded from results so a photo never matches itself. */
-  readonly caseId: CaseId;
+  /** The current ticket — excluded from results so a photo never matches itself. */
+  readonly ticketId: TicketId;
   readonly phash: bigint;
   /** Inclusive Hamming-distance threshold for a "match" (typically 5). */
   readonly maxDistance: number;
@@ -32,7 +32,7 @@ export interface FindSimilarInput {
 }
 
 export interface SimilarImageHit {
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly phash: bigint;
   readonly distance: number;
 }
@@ -60,7 +60,7 @@ export class ImageHashStore extends Context.Tag("ImageHashStore")<
 
 interface StoredHash {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly phash: bigint;
   readonly createdAt: Date;
 }
@@ -68,7 +68,7 @@ interface StoredHash {
 /**
  * Pure matcher shared by the Test layer and the Live layer (which fetches
  * the candidate window from Postgres, then filters here). Returns hits
- * within `maxDistance`, nearest first, excluding the originating case.
+ * within `maxDistance`, nearest first, excluding the originating ticket.
  */
 export const matchSimilar = (
   rows: ReadonlyArray<StoredHash>,
@@ -79,11 +79,11 @@ export const matchSimilar = (
   const hits: SimilarImageHit[] = [];
   for (const row of rows) {
     if (row.tenantId !== input.tenantId) continue;
-    if (row.caseId === input.caseId) continue;
+    if (row.ticketId === input.ticketId) continue;
     if (row.createdAt.getTime() < cutoff) continue;
     const distance = hammingDistance(row.phash, input.phash);
     if (distance <= input.maxDistance) {
-      hits.push({ caseId: row.caseId, phash: row.phash, distance });
+      hits.push({ ticketId: row.ticketId, phash: row.phash, distance });
     }
   }
   return hits.sort((a, b) => a.distance - b.distance);

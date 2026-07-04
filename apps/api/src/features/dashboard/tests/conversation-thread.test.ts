@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   conversationUnavailableReason,
   projectConversationThread,
-  resolveCaseConversationMailbox,
-  resolveCaseConversationThread,
+  resolveTicketConversationMailbox,
+  resolveTicketConversationThread,
   sanitizeEmailHtml,
   stripQuotedText,
 } from "../conversation-thread.js";
@@ -246,7 +246,7 @@ describe("dashboard conversation thread", () => {
     ).toBe("provider_unavailable");
   });
 
-  it("fails closed when an old case is ambiguous across active mailboxes", () => {
+  it("fails closed when an old ticket is ambiguous across active mailboxes", () => {
     const connections = [
       {
         tenantId,
@@ -275,12 +275,12 @@ describe("dashboard conversation thread", () => {
         status: "active" as const,
       },
     ];
-    expect(resolveCaseConversationMailbox(null, "gmail", connections)).toEqual({
+    expect(resolveTicketConversationMailbox(null, "gmail", connections)).toEqual({
       ok: false,
       reason: "mailbox_ambiguous",
     });
     expect(
-      resolveCaseConversationMailbox(
+      resolveTicketConversationMailbox(
         "first@merchant.com",
         "gmail",
         connections,
@@ -288,7 +288,7 @@ describe("dashboard conversation thread", () => {
     ).toEqual({ ok: true, mailbox: "first@merchant.com" });
   });
 
-  it("loads a legacy case by probing connected mailboxes until one matches", async () => {
+  it("loads a legacy ticket by probing connected mailboxes until one matches", async () => {
     const connections = [
       {
         tenantId,
@@ -318,7 +318,7 @@ describe("dashboard conversation thread", () => {
       },
     ];
     const thread = await Effect.runPromise(
-      resolveCaseConversationThread(
+      resolveTicketConversationThread(
         null,
         null,
         connections,

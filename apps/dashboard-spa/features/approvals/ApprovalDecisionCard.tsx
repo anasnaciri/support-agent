@@ -2,17 +2,17 @@ import { useState } from "react";
 import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
-import { useApprovalDecision } from "@/lib/use-case-mutation";
+import { useApprovalDecision } from "@/lib/use-ticket-mutation";
 import { useAppNavigate } from "@/lib/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ConfirmButton } from "@/features/cases/ConfirmButton";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 
 // The decision surface on the standalone approval-detail page. Rendered only
 // once the approval has loaded (so the decision hooks always run), it mirrors
-// the case-page approve/reject: edit-and-approve for a reply draft, a plain
+// the ticket-page approve/reject: edit-and-approve for a reply draft, a plain
 // Approve otherwise, and a confirm-gated Reject. On a settled decision it
 // returns to the approvals list (like the Next redirect); a decided approval
 // shows a read-only summary instead.
@@ -37,7 +37,7 @@ export function ApprovalDecisionCard({
   const backToList = () => nav.push("/approvals");
   const approveM = useApprovalDecision({
     workspaceId,
-    caseId: approval.caseId,
+    ticketId: approval.ticketId,
     action: "approve",
     mutationFn: () =>
       api.approveApproval(
@@ -51,7 +51,7 @@ export function ApprovalDecisionCard({
   });
   const rejectM = useApprovalDecision({
     workspaceId,
-    caseId: approval.caseId,
+    ticketId: approval.ticketId,
     action: "reject",
     mutationFn: () => api.rejectApproval({ workspaceId }, approval.id),
     onDone: backToList,
@@ -122,7 +122,7 @@ export function ApprovalDecisionCard({
 
         <ConfirmButton
           title="Reject this approval?"
-          description="No customer reply goes out, and the case escalates to human takeover — you'll handle it manually from there."
+          description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
           confirmLabel="Reject & take over"
           pending={rejectM.isPending}
           onConfirm={() => rejectM.mutate()}
@@ -132,7 +132,7 @@ export function ApprovalDecisionCard({
 
         <p className="text-sm text-muted-foreground">
           Approving sends the reply — with any edits you made — to the customer
-          from your connected mailbox. Rejecting sends nothing and hands the case
+          from your connected mailbox. Rejecting sends nothing and hands the ticket
           over to you.
         </p>
       </CardContent>

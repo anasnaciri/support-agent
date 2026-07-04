@@ -55,7 +55,7 @@ export function AgentsPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {loading
               ? "Loading agents…"
-              : `${agents.length} support agent${agents.length === 1 ? "" : "s"} working your cases.`}
+              : `${agents.length} support agent${agents.length === 1 ? "" : "s"} working your tickets.`}
           </p>
         </div>
         <Button asChild>

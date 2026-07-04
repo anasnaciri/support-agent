@@ -19,7 +19,7 @@ for the write-ups.
 > - `01-dispatch-retry.mmd` — top-level dispatch + retry/redelivery
 > - `02-tickbody-preloop.mmd` — load, approval-resume, park guards
 > - `03-agent-loop.mmd` — the per-turn agent loop
-> - `04-state-machine.mmd` — case state machine
+> - `04-state-machine.mmd` — ticket state machine
 
 ---
 
@@ -34,7 +34,7 @@ flowchart TD
     C3 -->|no| LOCK
     TICK -->|"customer.replied / approval / timer / …<br/>(no top-level dedup)"| LOCK
 
-    LOCK["pg_advisory_lock(case|thread)<br/>BLOCKING · no timeout"]:::warn --> BODY["tickBody(event)<br/>wrapped in catchAllCause"]
+    LOCK["pg_advisory_lock(ticket|thread)<br/>BLOCKING · no timeout"]:::warn --> BODY["tickBody(event)<br/>wrapped in catchAllCause"]
     BODY --> RES{"WorkflowResult"}
 
     RES -->|"Failed retryable:true"| THROW["worker throws"]
@@ -44,12 +44,12 @@ flowchart TD
     PGB -->|retry| REPLAY["replay WHOLE tick from turn 0<br/>(LLM re-samples → new callId)"]:::warn
     REPLAY --> TICK
     PGB -->|exhausted| DL["workflow.events.dead"]
-    DL --> DLC["dead-letter consumer<br/>park case → human_takeover"]
+    DL --> DLC["dead-letter consumer<br/>park ticket → human_takeover"]
 
     DONE -.->|"C3 claim written AFTER tick,<br/>only if NOT retryable-Failed"| C3CLAIM["ProcessedMessageStore.claim"]
 
     REPLAY -. "E1: side-effect tools w/o idempotencyKey<br/>re-run (key falls back to volatile callId)" .-> REPLAY
-    DLC -. "E12: msg.received lookup uses provider=undefined<br/>→ may miss the case" .-> DLC
+    DLC -. "E12: msg.received lookup uses provider=undefined<br/>→ may miss the ticket" .-> DLC
 
     classDef warn fill:#fff3cd,stroke:#b45309,color:#191919;
 ```
@@ -67,9 +67,9 @@ flowchart LR
         RET["retention-sweep"]
         LC["llm-credits"]
     end
-    AM --> CASE[(cases / approvals)]
-    RD --> CASE
-    RD -. "E10: 'skip' marks row sent though nothing sent;<br/>auto-resolve runs WITHOUT the per-case lock" .-> RD
+    AM --> TICKET[(tickets / approvals)]
+    RD --> TICKET
+    RD -. "E10: 'skip' marks row sent though nothing sent;<br/>auto-resolve runs WITHOUT the per-ticket lock" .-> RD
     classDef x fill:#fde2e2,stroke:#b91c1c;
 ```
 
@@ -79,7 +79,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    START["tickBody"] --> LOAD["1. load/create case + audit (1 tx)<br/>unique(tenant,thread) guards double-create"]
+    START["tickBody"] --> LOAD["1. load/create ticket + audit (1 tx)<br/>unique(tenant,thread) guards double-create"]
     LOAD --> KIND{event.type}
 
     KIND -->|approval.approved| AA["approval-resume"]
@@ -101,10 +101,10 @@ flowchart TD
     end
 
     AARES -. "E5: refund.create as gated tool →<br/>resolves with NO customer reply" .-> AARES
-    AA1 -. "E6: only guards 'resolved';<br/>reopened/handed-back case can run stale draft" .-> AA1
+    AA1 -. "E6: only guards 'resolved';<br/>reopened/handed-back ticket can run stale draft" .-> AA1
 
     ID["3. customer identification (Shopify)<br/>4. order-identity verify (may set identityVerified)<br/>5. photo signals + dup-photo hash store"]:::warn
-    ID -. "E8: these RUN even when the case is about to be HELD;<br/>E3: writes are fail-OPEN → can drop the disclosure flag" .-> ID
+    ID -. "E8: these RUN even when the ticket is about to be HELD;<br/>E3: writes are fail-OPEN → can drop the disclosure flag" .-> ID
     ID --> G1{"status ==<br/>waiting_for_approval<br/>(pending row)?"}
     G1 -->|yes| P1["PausedWaitingForApproval"]
     G1 -->|no| G2{"status ==<br/>human_takeover?"}
@@ -137,7 +137,7 @@ flowchart TD
     FM -->|no| FMR["resolve<br/>(InvalidTransition → PausedForHumanTakeover)"]
     FM -->|yes| FMC["Completed"]
     FMR --> FMC
-    FMR -. "E2: NO check that a reply was actually sent →<br/>case can resolve in silence" .-> FMR
+    FMR -. "E2: NO check that a reply was actually sent →<br/>ticket can resolve in silence" .-> FMR
 
     D -->|handoff| HO["swap agent (allowlist) · continue"]
     D -->|"wait_for_customer / escalate_supplier"| HN["→ human_takeover ('not wired')"]:::warn
@@ -167,7 +167,7 @@ flowchart TD
 
 ---
 
-## 4. Case state machine (as driven by the runtime)
+## 4. Ticket state machine (as driven by the runtime)
 
 ```mermaid
 stateDiagram-v2
@@ -209,18 +209,18 @@ Severity: 🔴 high · 🟠 medium · 🟡 lower.
 
 | ID | Sev | What's not caught | Confirmed |
 |----|-----|-------------------|-----------|
-| **E1** | 🔴 | Side-effecting tools **without an `idempotencyKey`** (`case.update_status`, `case.update_context`, `merchant.notify`) re-execute on pg-boss retry — the C2 key falls back to `decision.callId`, which the LLM regenerates on every re-sample. | ✅ |
-| **E2** | 🔴 | A case can `resolve` via `final_message` with **no customer reply ever sent** — the runtime never asserts an outbound message happened. Reply-delivery park only fires on a *send error*, not on the agent skipping the reply. | ✅ |
+| **E1** | 🔴 | Side-effecting tools **without an `idempotencyKey`** (`ticket.update_status`, `ticket.update_context`, `merchant.notify`) re-execute on pg-boss retry — the C2 key falls back to `decision.callId`, which the LLM regenerates on every re-sample. | ✅ |
+| **E2** | 🔴 | A ticket can `resolve` via `final_message` with **no customer reply ever sent** — the runtime never asserts an outbound message happened. Reply-delivery park only fires on a *send error*, not on the agent skipping the reply. | ✅ |
 | **E3** | 🔴 | The `order_customer_mismatch` / `refund_customer_mismatch` flags are written **fail-open** (`catchAll → current`). `shouldForceReplyApproval` reads in-memory `current.context`; a DB blip on that write drops the flag → the cross-customer disclosure gate doesn't fire → auto-reply leaks another customer's order. | ✅ |
-| **E4** | 🟠 | **No timeout on `llm.runToolCalling`** at the runtime layer (tools honour `tool.timeout`; the LLM call doesn't). A hung provider pins the tick *while holding the `pg_advisory_lock`* → every other event for that case blocks; job can expire/redeliver underneath. | ✅ |
+| **E4** | 🟠 | **No timeout on `llm.runToolCalling`** at the runtime layer (tools honour `tool.timeout`; the LLM call doesn't). A hung provider pins the tick *while holding the `pg_advisory_lock`* → every other event for that ticket blocks; job can expire/redeliver underneath. | ✅ |
 | **E5** | 🟠 | Approval-resume **assumes the gated tool is terminal** and always `resolve`s after it. If `refund.create` is the gated action (conditional-threshold), approving issues the refund and resolves with no customer reply. | ✅ |
-| **E6** | 🟠 | Approval-resume's redelivery dup guard only checks `status == resolved`. A case that went `waiting_for_approval → expired → human_takeover → handed back → in_progress` can still run a stale `approved` draft. | 🔎 |
+| **E6** | 🟠 | Approval-resume's redelivery dup guard only checks `status == resolved`. A ticket that went `waiting_for_approval → expired → human_takeover → handed back → in_progress` can still run a stale `approved` draft. | 🔎 |
 | **E7** | 🟠 | Only `ContextTooLarge` / `SafetyBlocked` / `Credential*` short-circuit; any other LLM `_tag` is treated as transient. A deterministic 400 (e.g. tenant model-override → non-existent model id) burns all 5 retries before dead-lettering, every message. | ✅ |
-| **E8** | 🟠 | Park guards run **after** customer-identification / identity-verify / photo-hash steps, so a reply to a *held* case still mutates context and records image hashes. "Held" events aren't inert. | ✅ |
+| **E8** | 🟠 | Park guards run **after** customer-identification / identity-verify / photo-hash steps, so a reply to a *held* ticket still mutates context and records image hashes. "Held" events aren't inert. | ✅ |
 | **E9** | 🟡 | Top-level `ProcessedMessageStore` dedup covers **`message.received` only** — `customer.replied`, `timer.expired`, etc. rely solely on C2 + the lock (compounds E1). | ✅ |
-| **E10** | 🟡 | Reply-delivery cron marks a row **`sent` on "skip"** though nothing was sent (draft silently dropped, data reads "sent"); its auto-resolve runs **without the per-case advisory lock**. | ✅ |
+| **E10** | 🟡 | Reply-delivery cron marks a row **`sent` on "skip"** though nothing was sent (draft silently dropped, data reads "sent"); its auto-resolve runs **without the per-ticket advisory lock**. | ✅ |
 | **E11** | 🟡 | `ToolExecutionStore` / `ProcessedMessageStore` are optional — if a deploy forgets to wire them, **all dedup silently degrades** (same failure class as the connector-cron prod outage). No boot-time assertion. | ✅ |
-| **E12** | 🟡 | Dead-letter consumer looks up `message.received` cases with `provider=undefined` (tickBody uses the parsed provider). If `findByThreadId` filters on provider, a dead-lettered inbound may not find its case → dangles un-parked. | 🔎 |
+| **E12** | 🟡 | Dead-letter consumer looks up `message.received` tickets with `provider=undefined` (tickBody uses the parsed provider). If `findByThreadId` filters on provider, a dead-lettered inbound may not find its ticket → dangles un-parked. | 🔎 |
 | **E13** | 🟡 | The `escalate_supplier` / `wait_for_customer` *decision types* still dead-end to human ("not wired"), but supplier escalation is wired via the `supplier.escalate` *tool* — a model emitting the decision gets parked instead. | ✅ |
 
 ### Where to start

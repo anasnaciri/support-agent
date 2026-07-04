@@ -35,7 +35,7 @@ export default async function AgentsListPage() {
           <h1 className="text-3xl font-semibold tracking-tight">Agents</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {agents.length} support agent{agents.length === 1 ? "" : "s"} working
-            your cases.
+            your tickets.
           </p>
         </div>
         <Button asChild>

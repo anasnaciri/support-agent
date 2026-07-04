@@ -6,19 +6,19 @@
 // `next_attempt_at` is due means a customer reply failed to send and is owed a
 // retry. This cron re-sends due rows through the SAME connector
 // (ConversationService) with the verbatim draft — no LLM re-run — and:
-//   - on success: marks the row `sent` and AUTO-RESOLVES the case (it was
+//   - on success: marks the row `sent` and AUTO-RESOLVES the ticket (it was
 //     parked in human_takeover when the send first failed);
 //   - on failure under the attempt cap: bumps the attempt + reschedules with
 //     exponential backoff;
-//   - at the cap: marks the row `abandoned` and leaves the case in
+//   - at the cap: marks the row `abandoned` and leaves the ticket in
 //     human_takeover for a person.
 //
-// A guard skips re-sending when the case is no longer `human_takeover` (a human
+// A guard skips re-sending when the ticket is no longer `human_takeover` (a human
 // handed it back or resolved it) so the auto-retry never races a manual reply.
 
 import { Effect } from "effect";
 import {
-  CaseId,
+  TicketId,
   TenantId,
   ThreadId,
   type MessageParticipant,
@@ -32,8 +32,8 @@ import {
   type DueReplyDelivery,
 } from "@support-agent/db";
 import {
-  CaseLifecycleWriter,
-  CaseRepository,
+  TicketLifecycleWriter,
+  TicketRepository,
   ConversationService,
   REPLY_DELIVERY_FAILED_FLAG,
   nextReplyDeliveryBackoffMs,
@@ -58,7 +58,7 @@ export interface ReplyDeliveryRetryDeps {
   readonly listDue: () => Promise<ReadonlyArray<DueReplyDelivery>>;
   readonly send: (d: DueReplyDelivery) => Promise<ReplySendOutcome>;
   readonly markSent: (id: string) => Promise<void>;
-  readonly resolveCase: (caseId: string, tenantId: string) => Promise<void>;
+  readonly resolveTicket: (ticketId: string, tenantId: string) => Promise<void>;
   readonly recordFailure: (
     id: string,
     error: string,
@@ -84,10 +84,10 @@ export const fireReplyDeliveryRetryOnce = async (
     const outcome = await deps.send(d);
     if (outcome === "sent") {
       await deps.markSent(d.id);
-      await deps.resolveCase(d.caseId, d.tenantId);
+      await deps.resolveTicket(d.ticketId, d.tenantId);
       sent += 1;
     } else if (outcome === "skip") {
-      // The case is no longer parked on this delivery — stop retrying without
+      // The ticket is no longer parked on this delivery — stop retrying without
       // resolving (a human took it over / already resolved it).
       await deps.markSent(d.id);
       skipped += 1;
@@ -122,12 +122,12 @@ const participantsOf = (raw: unknown): ReadonlyArray<MessageParticipant> =>
 /** Re-send a stored draft through the connector. Returns the send outcome. */
 const reSendEffect = (
   d: DueReplyDelivery,
-): Effect.Effect<ReplySendOutcome, never, ConversationService | CaseRepository> =>
+): Effect.Effect<ReplySendOutcome, never, ConversationService | TicketRepository> =>
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
-    // Guard: only auto-retry while the case is still parked on this failure.
-    const current = yield* cases
-      .getById(CaseId(d.caseId), TenantId(d.tenantId))
+    const tickets = yield* TicketRepository;
+    // Guard: only auto-retry while the ticket is still parked on this failure.
+    const current = yield* tickets
+      .getById(TicketId(d.ticketId), TenantId(d.tenantId))
       .pipe(Effect.either);
     if (current._tag === "Left") return "skip" as const;
     if (current.right.status !== "human_takeover") return "skip" as const;
@@ -173,20 +173,20 @@ const reSendEffect = (
   });
 
 /**
- * Auto-resolve a case whose reply finally delivered: clear the
+ * Auto-resolve a ticket whose reply finally delivered: clear the
  * `reply_delivery_failed` flag and move it to `resolved` (via `in_progress`
  * when it's still parked in `human_takeover`, which can't go straight to
- * resolved). Skips a case that's already resolved.
+ * resolved). Skips a ticket that's already resolved.
  */
 const resolveDeliveredEffect = (
-  caseId: string,
+  ticketId: string,
   tenantId: string,
-): Effect.Effect<void, never, CaseLifecycleWriter> =>
+): Effect.Effect<void, never, TicketLifecycleWriter> =>
   Effect.gen(function* () {
-    const lifecycle = yield* CaseLifecycleWriter;
+    const lifecycle = yield* TicketLifecycleWriter;
     yield* lifecycle
       .resolve({
-        caseId: CaseId(caseId),
+        ticketId: TicketId(ticketId),
         tenantId: TenantId(tenantId),
         actor: { type: "system", id: "reply-delivery-retry" },
         reason: "reply delivered on retry",
@@ -235,10 +235,10 @@ export const registerReplyDeliveryRetrySweep = async (
               const db = yield* DbClient;
               const runSend = (d: DueReplyDelivery) =>
                 Effect.runPromise(Effect.provide(reSendEffect(d), opts.runtimeLayer));
-              const runResolve = (caseId: string, tenantId: string) =>
+              const runResolve = (ticketId: string, tenantId: string) =>
                 Effect.runPromise(
                   Effect.provide(
-                    resolveDeliveredEffect(caseId, tenantId),
+                    resolveDeliveredEffect(ticketId, tenantId),
                     opts.runtimeLayer,
                   ),
                 );
@@ -247,7 +247,7 @@ export const registerReplyDeliveryRetrySweep = async (
                   listDue: () => listDueReplyDeliveries(db, new Date(), limit),
                   send: runSend,
                   markSent: (id) => markReplyDeliverySent(db, id),
-                  resolveCase: runResolve,
+                  resolveTicket: runResolve,
                   recordFailure: (id, err, attempt) =>
                     recordReplyDeliveryFailure(
                       db,

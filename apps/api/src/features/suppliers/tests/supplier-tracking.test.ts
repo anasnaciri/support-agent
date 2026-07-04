@@ -6,7 +6,7 @@ import {
 } from "../supplier-tracking.js";
 
 // Unit tests for the dependency-injected orchestration core (same pattern as
-// updateCaseShippingAddress): fulfillment picking + ordering of the Shopify
+// updateTicketShippingAddress): fulfillment picking + ordering of the Shopify
 // write vs the bookkeeping, with fakes for every dep.
 
 const fulfillment = (

@@ -1,11 +1,11 @@
 # Building This Support Agent
 
-This tutorial explains how to build the agent architecture used in this repo. It is not a prompt-only chatbot. It is an event-driven support operations runtime: external events create or resume durable cases, agents decide what should happen next, tools perform typed side effects, and the runtime enforces permission and approval policy before anything risky happens.
+This tutorial explains how to build the agent architecture used in this repo. It is not a prompt-only chatbot. It is an event-driven support operations runtime: external events create or resume durable tickets, agents decide what should happen next, tools perform typed side effects, and the runtime enforces permission and approval policy before anything risky happens.
 
 The core idea is:
 
 ```text
-event -> case -> agent config -> LLM decision -> permission check -> tool / approval / handoff -> audit
+event -> ticket -> agent config -> LLM decision -> permission check -> tool / approval / handoff -> audit
 ```
 
 ## 1. Start With The System Shape
@@ -22,7 +22,7 @@ The repo is split into a few important layers:
 - `packages/db`: Drizzle schema and Postgres-backed service implementations.
 - `apps/worker`: queue consumer that runs the agent runtime.
 - `apps/api`: webhook and OAuth edge.
-- `apps/dashboard`: manager UI for cases, approvals, settings, and audit.
+- `apps/dashboard`: manager UI for tickets, approvals, settings, and audit.
 
 ## 2. Define The Core Contracts
 
@@ -58,7 +58,7 @@ export const supportTriage: AgentConfig = {
     "You are a support-triage agent for an ecommerce store.",
     "Classify the customer message, record the classification, then hand off if needed.",
   ].join("\n"),
-  tools: ["case.update_context", "agent.handoff"],
+  tools: ["ticket.update_context", "agent.handoff"],
   permissionOverrides: {},
   handoffs: [AgentId("order-status-agent"), AgentId("refund-review-agent")],
   maxTurnsPerTick: 4,
@@ -115,36 +115,36 @@ const event: DomainEvent = {
 
 These contracts keep the model boxed in. The model can ask for tools, but the runtime decides whether those tools are valid, allowed, denied, or require approval.
 
-## 3. Create Durable Case State
+## 3. Create Durable Ticket State
 
 The durable state lives in the Drizzle schema in [`packages/db/src/schema.ts`](../packages/db/src/schema.ts).
 
 The important tables are:
 
 - `tenants`: merchant/account boundary.
-- `cases`: durable unit of work for the agent.
-- `case_state_transitions`: status history.
+- `tickets`: durable unit of work for the agent.
+- `ticket_state_transitions`: status history.
 - `audit_log`: every major event, model decision, and tool invocation.
 - `approvals`: pending and decided human approval requests.
 - `connector_connections`: encrypted Shopify, Gmail, and LLM credentials.
 - `tenant_agent_overrides`: per-tenant model overrides.
 
-The key design choice is that the case is the unit of work. The agent does not hold a long-running chat process in memory. A worker receives an event, loads or creates a case, runs a bounded agent tick, persists the result, and exits.
+The key design choice is that the ticket is the unit of work. The agent does not hold a long-running chat process in memory. A worker receives an event, loads or creates a ticket, runs a bounded agent tick, persists the result, and exits.
 
 ## 4. Build Typed Tools
 
 Tools are declared in `packages/tools` with `defineTool`.
 
-A simple example is [`packages/tools/src/case/update-context.ts`](../packages/tools/src/case/update-context.ts). It shallow-merges derived facts into the case context, such as classification, order id, customer id, and notes.
+A simple example is [`packages/tools/src/ticket/update-context.ts`](../packages/tools/src/ticket/update-context.ts). It shallow-merges derived facts into the ticket context, such as classification, order id, customer id, and notes.
 
 A higher-risk example is [`packages/tools/src/conversation/reply.ts`](../packages/tools/src/conversation/reply.ts). It sends a customer-facing reply through the conversation connector. Its `defaultPermission` is `ask`, so the runtime creates an approval instead of sending immediately.
 
-Here is a simplified tool declaration in the same style as `case.update_context`:
+Here is a simplified tool declaration in the same style as `ticket.update_context`:
 
 ```ts
 import { Effect, Schema } from "effect";
 import { defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
-import { CaseRepository } from "@support-agent/services";
+import { TicketRepository } from "@support-agent/services";
 
 const Input = Schema.Struct({
   classification: Schema.optional(Schema.String),
@@ -152,13 +152,13 @@ const Input = Schema.Struct({
 });
 
 const Output = Schema.Struct({
-  caseId: Schema.String,
+  ticketId: Schema.String,
   contextKeys: Schema.Array(Schema.String),
 });
 
-export const caseUpdateContext = defineTool({
-  name: "case.update_context",
-  description: "Merge derived facts into the case context.",
+export const ticketUpdateContext = defineTool({
+  name: "ticket.update_context",
+  description: "Merge derived facts into the ticket context.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "write",
@@ -166,12 +166,12 @@ export const caseUpdateContext = defineTool({
   sideEffectClass: "external_state",
   execute: (input, ctx) =>
     Effect.gen(function* () {
-      const repo = yield* CaseRepository;
-      const current = yield* repo.getById(ctx.caseId).pipe(
+      const repo = yield* TicketRepository;
+      const current = yield* repo.getById(ctx.ticketId).pipe(
         Effect.mapError(
           (e) =>
             new ToolOutputInvalid({
-              tool: "case.update_context",
+              tool: "ticket.update_context",
               issues: [e._tag],
             }),
         ),
@@ -186,19 +186,19 @@ export const caseUpdateContext = defineTool({
       };
 
       const updated = yield* repo
-        .update(ctx.caseId, { context: nextContext })
+        .update(ctx.ticketId, { context: nextContext })
         .pipe(
           Effect.mapError(
             (e) =>
               new ToolOutputInvalid({
-                tool: "case.update_context",
+                tool: "ticket.update_context",
                 issues: [e._tag],
               }),
           ),
         );
 
       return {
-        caseId: updated.id,
+        ticketId: updated.id,
         contextKeys: Object.keys(updated.context),
       };
     }),
@@ -252,7 +252,7 @@ It classifies inbound support messages into:
 Its allowed tools are deliberately narrow:
 
 ```ts
-tools: ["case.update_context", "agent.handoff"]
+tools: ["ticket.update_context", "agent.handoff"]
 ```
 
 The prompt gives the model instructions, but the `tools` array is what actually limits capability:
@@ -261,11 +261,11 @@ The prompt gives the model instructions, but the `tools` array is what actually 
 export const supportTriage: AgentConfig = {
   // ...
   promptTemplate: [
-    "Turn 1: call `case.update_context` once with the classification.",
+    "Turn 1: call `ticket.update_context` once with the classification.",
     "Turn 2: call `agent.handoff` only when a specialist should handle it.",
     "Never send email. Never call Shopify.",
   ].join("\n"),
-  tools: ["case.update_context", "agent.handoff"],
+  tools: ["ticket.update_context", "agent.handoff"],
   handoffs: [AgentId("order-status-agent"), AgentId("refund-review-agent")],
 };
 ```
@@ -276,9 +276,9 @@ That means triage can classify and route, but it cannot email customers, call Sh
 
 Specialist agents live next to triage in `packages/agents/src`.
 
-`order-status-agent` handles `where_is_order` cases. It can call Shopify read tools and draft a customer reply, but the reply requires approval.
+`order-status-agent` handles `where_is_order` tickets. It can call Shopify read tools and draft a customer reply, but the reply requires approval.
 
-`refund-review-agent` handles `refund_request` cases. It can fetch the order, draft a reply, or call `refund.create`. The runtime applies tenant-specific refund thresholds before a refund is allowed.
+`refund-review-agent` handles `refund_request` tickets. It can fetch the order, draft a reply, or call `refund.create`. The runtime applies tenant-specific refund thresholds before a refund is allowed.
 
 The important pattern is that these are still config objects. There is no custom class per agent. The generic runtime interprets all agents the same way.
 
@@ -297,7 +297,7 @@ export const orderStatusAgent: AgentConfig = {
     "Draft a short customer-facing delivery-status reply.",
     "`conversation.reply` requires human approval, so the runtime will pause.",
   ].join("\n"),
-  tools: ["shopify.get_order", "case.update_context", "conversation.reply"],
+  tools: ["shopify.get_order", "ticket.update_context", "conversation.reply"],
   permissionOverrides: {},
   handoffs: [],
   maxTurnsPerTick: 6,
@@ -319,8 +319,8 @@ The tool registry is built with:
 
 ```ts
 ToolRegistryWith([
-  caseUpdateContext,
-  caseUpdateStatus,
+  ticketUpdateContext,
+  ticketUpdateStatus,
   shopifyGetOrder,
   shopifyGetCustomer,
   shopifyRefundCreate,
@@ -386,8 +386,8 @@ The core runtime is [`packages/services/src/agent-runtime.ts`](../packages/servi
 
 For each event, it:
 
-1. Converts the event into a case lookup.
-2. Loads or creates the case.
+1. Converts the event into a ticket lookup.
+2. Loads or creates the ticket.
 3. Records `event.received` in the audit log.
 4. Resolves the current agent.
 5. Builds the initial messages.
@@ -404,7 +404,7 @@ LLM tool call
   -> find tool in ToolRegistry
   -> PermissionService.check(...)
   -> deny: return denied tool result to model
-  -> ask: create approval and pause case
+  -> ask: create approval and pause ticket
   -> allow: execute tool and audit result
 ```
 
@@ -426,14 +426,14 @@ for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
 
   yield* audit.record({
     tenantId: current.tenantId,
-    caseId: current.id,
+    ticketId: current.id,
     actor: { type: "agent", id: agent.id },
     action: "llm.decision",
     details: { turn, decisionType: decision.type },
   });
 
   if (decision.type === "final_message") {
-    yield* cases.transitionStatus(current.id, "resolved", {
+    yield* tickets.transitionStatus(current.id, "resolved", {
       reason: "runtime: final_message",
     });
     return { type: "Completed" };
@@ -451,7 +451,7 @@ for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
     if (permission === "ask") {
       const approval = yield* approvals.create({
         tenantId: current.tenantId,
-        caseId: current.id,
+        ticketId: current.id,
         agentId: agent.id,
         tool: tool.name,
         proposedInput: decision.input,
@@ -479,7 +479,7 @@ When the model calls `agent.handoff`, the runtime:
 
 1. Reads `targetAgent`.
 2. Checks that the current agent's `handoffs` list allows that target.
-3. Updates `cases.currentAgentId`.
+3. Updates `tickets.currentAgentId`.
 4. Audits the handoff.
 5. Pushes a tool result into the conversation.
 6. Continues the tick with the target agent.
@@ -566,7 +566,7 @@ export const applyRefundPolicy = (
 };
 ```
 
-When permission is `ask`, the runtime creates an approval row, moves the case to `waiting_for_approval`, and sends an approval link if mail is configured.
+When permission is `ask`, the runtime creates an approval row, moves the ticket to `waiting_for_approval`, and sends an approval link if mail is configured.
 
 ## 12. Resume Approved Work
 
@@ -578,9 +578,9 @@ For `approval.approved`, the runtime:
 2. Finds the original tool.
 3. Executes the approved input.
 4. Audits the tool invocation with `viaApprovalId`.
-5. Resolves the case.
+5. Resolves the ticket.
 
-For `approval.rejected`, the runtime moves the case to `human_takeover`.
+For `approval.rejected`, the runtime moves the ticket to `human_takeover`.
 
 This avoids asking the LLM to regenerate a previously approved action.
 
@@ -593,7 +593,7 @@ if (event.type === "approval.approved") {
 
   const ctx: ToolContext = {
     tenantId: working.tenantId,
-    caseId: working.id,
+    ticketId: working.id,
     agentId: approval.agentId,
     callId: `approval-${approval.id}`,
     attemptNumber: 1,
@@ -604,7 +604,7 @@ if (event.type === "approval.approved") {
 
   yield* audit.record({
     tenantId: working.tenantId,
-    caseId: working.id,
+    ticketId: working.id,
     actor: { type: "user", id: event.managerId },
     action: "tool.invoked",
     details: {
@@ -642,7 +642,7 @@ const registry = Layer.mergeAll(
   ),
   Layer.orDie(
     ToolRegistryWith([
-      caseUpdateContext as AnyTool,
+      ticketUpdateContext as AnyTool,
       shopifyGetOrder as AnyTool,
       conversationReply as AnyTool,
       agentHandoff as AnyTool,
@@ -727,8 +727,8 @@ The dashboard is a client of the runtime state.
 It shows:
 
 - today view
-- case list
-- case detail
+- ticket list
+- ticket detail
 - audit trail
 - approvals
 - settings
@@ -756,7 +756,7 @@ const llm = LLMServiceScripted([
   {
     type: "tool_call",
     callId: "call-1",
-    tool: "case.update_context",
+    tool: "ticket.update_context",
     input: {
       classification: "where_is_order",
       identifiedOrderId: "#1001",
@@ -793,10 +793,10 @@ expect(result.type).toBe("Completed");
 
 The useful test cases are:
 
-- triage updates case context
+- triage updates ticket context
 - triage hands off to the correct specialist
 - unknown or disallowed tools do not execute
-- `ask` creates an approval and pauses the case
+- `ask` creates an approval and pauses the ticket
 - approved work executes exactly once
 - rejected work moves to human takeover
 - refund thresholds allow, ask, or deny correctly
@@ -826,7 +826,7 @@ For local end-to-end operation, the minimum moving parts are:
 The finished system works because each piece has a narrow responsibility:
 
 - Events wake the system.
-- Cases persist state.
+- Tickets persist state.
 - Agents choose the next action.
 - Tools define what actions exist.
 - Permission policy decides whether actions can run.

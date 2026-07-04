@@ -1,6 +1,6 @@
-// Pure parsing + helpers for the case Tracking card. The agent stamps a
-// tolerant `liveTrackingStatus` projection onto `case.context` (see
-// `case.update_context`); this normalizes it into a shape the card can paint,
+// Pure parsing + helpers for the ticket Tracking card. The agent stamps a
+// tolerant `liveTrackingStatus` projection onto `ticket.context` (see
+// `ticket.update_context`); this normalizes it into a shape the card can paint,
 // dropping anything malformed so a bad stamp never crashes the page.
 
 export type TrackingStatusValue =
@@ -25,8 +25,8 @@ export interface ParsedTracking {
   readonly estimatedDeliveryAt: string | null;
   readonly trackingUrl: string | null;
   readonly reason: "no_api_key" | "unsupported_carrier" | null;
-  // Rich fields from the live `caseTracking` endpoint (absent on the narrower
-  // on-case `liveTrackingStatus` stamp → null / []).
+  // Rich fields from the live `ticketTracking` endpoint (absent on the narrower
+  // on-ticket `liveTrackingStatus` stamp → null / []).
   readonly originCountry: string | null;
   readonly destinationCountry: string | null;
   readonly transitDays: number | null;

@@ -231,7 +231,7 @@ export type LLMError =
  *
  *   - `SheetsAuthMissing`: no `google_sheets` row in `connector_connections`
  *     (the tenant never connected Sheets) OR the row exists but has no
- *     refresh token. Maps to `case → human_takeover` upstream.
+ *     refresh token. Maps to `ticket → human_takeover` upstream.
  *   - `SheetsAuthFailed`: token refresh returned 401/403 (refresh token
  *     revoked from the merchant's Google account, or scopes withdrawn).
  *     Distinguished from `*Missing` so we can prompt the operator to
@@ -278,7 +278,7 @@ export type SheetsError =
 
 /**
  * Errors raised by the `TrackingService` Live implementation. Note that
- * "no upstream provider configured" is NOT an error — that case maps to
+ * "no upstream provider configured" is NOT an error — that ticket maps to
  * `TrackingLookup.kind === "no_provider"` in the success channel so
  * agents can branch on it in their prompt without dealing with a typed
  * failure. The errors below are only for genuine provider problems

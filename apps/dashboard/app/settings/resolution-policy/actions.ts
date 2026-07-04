@@ -24,7 +24,7 @@ export const saveResolutionPolicyAction = async (
   redirect("/settings/resolution-policy?saved=1");
 };
 
-// Toggle whether triage routes new cases to the resolution agent. Submitted by
+// Toggle whether triage routes new tickets to the resolution agent. Submitted by
 // the switch on change; no redirect — the page revalidates in place.
 export const toggleResolutionAgentAction = async (
   formData: FormData,

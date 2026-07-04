@@ -37,7 +37,7 @@ const BAD_RANGE_MSG =
   "Range must be an A1 reference with a sheet name (e.g. Escalations!A:F).";
 const SAVED_MSG = "Sheet target saved.";
 const CLEARED_MSG =
-  "Sheet target cleared. The agent will skip the sheet write on future missing-package cases.";
+  "Sheet target cleared. The agent will skip the sheet write on future missing-package tickets.";
 const GENERIC_ERROR_MSG = "Something went wrong. Please try again.";
 
 // The sheet-target form is a controlled component because the Clear button is
@@ -225,7 +225,7 @@ function SheetTargetForm({
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              <strong>Case</strong> / Case ID / Ticket — the support case id
+              <strong>Ticket</strong> / Ticket ID / Ticket — the support ticket id
             </li>
             <li>
               <strong>Email</strong> / Customer — the customer&apos;s email

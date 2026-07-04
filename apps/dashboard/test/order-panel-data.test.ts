@@ -5,14 +5,14 @@ import type { ShopifyFulfillment } from "@support-agent/agent-core";
 import {
   fulfillmentDay,
   latestFulfillment,
-} from "../app/cases/[id]/order-panel-data";
+} from "../app/tickets/[id]/order-panel-data";
 
 // The dashboard reads orders through apps/api over JSON (Path B). JSON has no
 // Date type, so a ShopifyFulfillment's `updatedAt` / `estimatedDeliveryAt` /
 // `deliveredAt` arrive as ISO *strings* at runtime even though the type says
 // `Date`. These fixtures reproduce that — the regression is that the old code
 // called `.getTime()` / `.toISOString()` directly on those strings and threw
-// `TypeError: ... is not a function`, crashing the whole case page on open.
+// `TypeError: ... is not a function`, crashing the whole ticket page on open.
 const fulfillment = (
   over: Partial<Record<keyof ShopifyFulfillment, unknown>>,
 ): ShopifyFulfillment =>

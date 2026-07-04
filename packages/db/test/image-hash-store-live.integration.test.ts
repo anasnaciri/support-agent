@@ -2,10 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import { ImageHashStore } from "@support-agent/services";
 import {
-  cases,
+  tickets,
   DbClientLive,
   imageHashes,
   ImageHashStoreLive,
@@ -28,25 +28,25 @@ describeIfDb("ImageHashStoreLive", () => {
     Layer.provide(DbClientLive({ databaseUrl: databaseUrl! })),
   );
 
-  it("records hashes and finds near-matches across cases (signed 64-bit round-trip)", async () => {
+  it("records hashes and finds near-matches across tickets (signed 64-bit round-trip)", async () => {
     const tenantId = randomUUID();
     const otherTenantId = randomUUID();
-    const caseA = randomUUID();
-    const caseB = randomUUID();
+    const ticketA = randomUUID();
+    const ticketB = randomUUID();
     await db.insert(tenants).values([
       { id: tenantId, name: "Hash Test" },
       { id: otherTenantId, name: "Hash Test Other" },
     ]);
-    await db.insert(cases).values([
+    await db.insert(tickets).values([
       {
-        id: caseA,
+        id: ticketA,
         tenantId,
         channel: "email",
         status: "new",
         currentAgentId: "damaged-product-agent",
       },
       {
-        id: caseB,
+        id: ticketB,
         tenantId,
         channel: "email",
         status: "new",
@@ -65,13 +65,13 @@ describeIfDb("ImageHashStoreLive", () => {
             const store = yield* ImageHashStore;
             yield* store.record({
               tenantId: TenantId(tenantId),
-              caseId: CaseId(caseA),
+              ticketId: TicketId(ticketA),
               phash: phashA,
             });
-            // Same tenant, different case, distance 1 (one extra low bit).
+            // Same tenant, different ticket, distance 1 (one extra low bit).
             return yield* store.findSimilar({
               tenantId: TenantId(tenantId),
-              caseId: CaseId(caseB),
+              ticketId: TicketId(ticketB),
               phash: BigInt.asIntN(64, 0xf000_0000_0000_0003n),
               maxDistance: 5,
               sinceDays: 90,
@@ -82,12 +82,12 @@ describeIfDb("ImageHashStoreLive", () => {
       );
 
       expect(hits).toHaveLength(1);
-      expect(hits[0]?.caseId).toBe(caseA);
+      expect(hits[0]?.ticketId).toBe(ticketA);
       expect(hits[0]?.distance).toBe(1);
       expect(hits[0]?.phash).toBe(phashA);
     } finally {
       await db.delete(imageHashes).where(eq(imageHashes.tenantId, tenantId));
-      await db.delete(cases).where(eq(cases.tenantId, tenantId));
+      await db.delete(tickets).where(eq(tickets.tenantId, tenantId));
       await db.delete(tenants).where(eq(tenants.id, tenantId));
       await db.delete(tenants).where(eq(tenants.id, otherTenantId));
     }

@@ -30,7 +30,7 @@ export class ConversationService extends Context.Tag("ConversationService")<
     /**
      * Fetch the full message history of a thread, ordered oldest →
      * newest. Used by `conversation.fetch_thread` and by the runtime to
-     * resume a paused case with surrounding context.
+     * resume a paused ticket with surrounding context.
      */
     readonly fetchThread: (
       tenantId: TenantId,
@@ -40,7 +40,7 @@ export class ConversationService extends Context.Tag("ConversationService")<
 
     /**
      * Send a customer-facing reply through the tenant's configured
-     * connector. Idempotent on `(caseId, draftId)` — the connector tracks
+     * connector. Idempotent on `(ticketId, draftId)` — the connector tracks
      * sends and returns the prior `SentMessage` on a re-attempt so a
      * runtime retry doesn't double-send (master-plan §9).
      */
@@ -52,7 +52,7 @@ export class ConversationService extends Context.Tag("ConversationService")<
     /**
      * Send a question to the customer and signal the workflow should
      * pause until `customer.replied` arrives. Distinct from `reply`
-     * because the runtime transitions the case to `waiting_for_customer`
+     * because the runtime transitions the ticket to `waiting_for_customer`
      * after this call and schedules any configured follow-up timer.
      */
     readonly askCustomer: (
@@ -98,7 +98,7 @@ export interface ConversationTestFixtures {
  * `askCustomer` call in a public `sent` array so tests can assert on
  * what would have gone out over the wire without a real connector.
  *
- * The fixture is intentionally NOT idempotent on `(caseId, draftId)` —
+ * The fixture is intentionally NOT idempotent on `(ticketId, draftId)` —
  * tests that care about idempotency assert it at the call-site (e.g.
  * "two replies with same draftId produce two recorded sends; the runtime
  * dedupes upstream"). Production Live impls MUST dedupe.

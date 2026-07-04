@@ -148,7 +148,7 @@ export const processTelegramUpdate = (
 
     if (outcome === "linked") {
       yield* reply(
-        "You're connected. This chat now receives your support agent's notifications — approval requests, cases that need you, and account alerts. Disconnect any time from the dashboard's notification settings.",
+        "You're connected. This chat now receives your support agent's notifications — approval requests, tickets that need you, and account alerts. Disconnect any time from the dashboard's notification settings.",
       );
     }
     return outcome;

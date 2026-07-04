@@ -19,7 +19,7 @@ describe("missing-package-agent config", () => {
       "shopify.find_customer_order",
       "shopify.get_customer",
       "tracking.lookup",
-      "case.update_context",
+      "ticket.update_context",
       "supplier.read_sheet_columns",
       "supplier.add_sheet_row",
       "supplier.escalate",
@@ -35,14 +35,14 @@ describe("missing-package-agent config", () => {
     expect(missingPackageAgent.maxTurnsPerTick).toBeGreaterThan(1);
     // The supplier-sheet read + write are auto-allowed inside this agent —
     // the reply still needs an operator approval, but discovering the
-    // columns and logging the warehouse row shouldn't pause the case.
+    // columns and logging the warehouse row shouldn't pause the ticket.
     expect(
       missingPackageAgent.permissionOverrides["supplier.read_sheet_columns"],
     ).toBe("allow");
     expect(missingPackageAgent.permissionOverrides["supplier.add_sheet_row"]).toBe(
       "allow",
     );
-    // Escalating to the supplier parks the case in waiting_for_supplier — it
+    // Escalating to the supplier parks the ticket in waiting_for_supplier — it
     // must be auto-allowed so it parks instead of creating an approval.
     expect(missingPackageAgent.permissionOverrides["supplier.escalate"]).toBe(
       "allow",

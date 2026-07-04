@@ -8,13 +8,13 @@ import {
   type AuditActorType,
   type AuditEntry,
   type AuditLogError,
-  type ForCaseOptions,
+  type ForTicketOptions,
   type RecordAuditEntryInput,
 } from "@support-agent/services";
 import {
-  CaseId as makeCaseId,
+  TicketId as makeTicketId,
   TenantId as makeTenantId,
-  type CaseId,
+  type TicketId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import type { DrizzleDb } from "./client.js";
@@ -26,7 +26,7 @@ import { auditLog, type AuditLogRow } from "./schema.js";
 const rowToEntry = (r: AuditLogRow): AuditEntry => ({
   id: r.id,
   tenantId: makeTenantId(r.tenantId),
-  caseId: r.caseId ? makeCaseId(r.caseId) : null,
+  ticketId: r.ticketId ? makeTicketId(r.ticketId) : null,
   actor: { type: r.actorType as AuditActorType, id: r.actorId },
   action: r.action,
   details: (r.details ?? {}) as Readonly<Record<string, unknown>>,
@@ -80,7 +80,7 @@ export const AuditLogServiceLiveBuilder = (
               .insert(auditLog)
               .values({
                 tenantId: input.tenantId,
-                caseId: input.caseId ?? null,
+                ticketId: input.ticketId ?? null,
                 actorType: input.actor.type,
                 actorId: input.actor.id,
                 action: input.action,
@@ -100,17 +100,17 @@ export const AuditLogServiceLiveBuilder = (
           return rowToEntry(row);
         });
 
-      const forCase = (
-        caseId: CaseId,
-        opts: ForCaseOptions = {},
+      const forTicket = (
+        ticketId: TicketId,
+        opts: ForTicketOptions = {},
       ): Effect.Effect<ReadonlyArray<AuditEntry>, AuditLogError> =>
         Effect.gen(function* () {
           const db = yield* useDb(defaultDb);
           const limit = opts.limit ?? 100;
-          // D9: enforce the tenant scope when given — a cross-tenant caseId
+          // D9: enforce the tenant scope when given — a cross-tenant ticketId
           // reads as an empty history.
           const whereClause = and(
-            eq(auditLog.caseId, caseId),
+            eq(auditLog.ticketId, ticketId),
             ...(opts.tenantId !== undefined
               ? [eq(auditLog.tenantId, opts.tenantId)]
               : []),
@@ -119,7 +119,7 @@ export const AuditLogServiceLiveBuilder = (
               : []),
           );
           const rows = yield* wrap(
-            "forCase",
+            "forTicket",
             db
               .select()
               .from(auditLog)
@@ -130,7 +130,7 @@ export const AuditLogServiceLiveBuilder = (
           return rows.map(rowToEntry);
         });
 
-      return AuditLogService.of({ record, forCase });
+      return AuditLogService.of({ record, forTicket });
     }),
   );
 

@@ -18,7 +18,7 @@ const baseAgent = (
   provider: "openrouter",
   model: "google/gemini-3.1-flash-lite",
   promptTemplate: "...",
-  tools: ["case.update_status"],
+  tools: ["ticket.update_status"],
   permissionOverrides: overrides,
   handoffs: [],
   maxTurnsPerTick: 4,

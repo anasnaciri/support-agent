@@ -6,11 +6,11 @@
 // truth about the order's tracking number, but until now could only paste it
 // into their free-text update for a human to act on. This closes that gap
 // from the escalation page: the new number is written to the REAL Shopify
-// fulfillment (so the customer's order status page and the case's tracking
+// fulfillment (so the customer's order status page and the ticket's tracking
 // card update), under the authenticated supplier's authority.
 //
 // This is the dependency-injected orchestration core (same shape as
-// `updateCaseShippingAddress`): pure async over its deps so it unit-tests
+// `updateTicketShippingAddress`): pure async over its deps so it unit-tests
 // with fakes. The HTTP handler wires `loadFulfillments` / `update` /
 // `recordUpdated` to the live services and owns the escalation authz guard
 // (this supplier's, still open) BEFORE calling in here.
@@ -53,7 +53,7 @@ export interface UpdateSupplierTrackingOptions {
   /** The escalation's tracking-number projection (the number being replaced). */
   readonly currentTrackingNumber: string | null;
   /**
-   * Resolve the case's order and list its fulfillments; `null` = the order
+   * Resolve the ticket's order and list its fulfillments; `null` = the order
    * couldn't be resolved (no bound order, no creds, revoked connector).
    */
   readonly loadFulfillments: () => Promise<ReadonlyArray<SupplierFulfillmentView> | null>;

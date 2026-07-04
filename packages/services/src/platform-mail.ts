@@ -75,8 +75,8 @@ export interface SendMerchantNotificationInput {
   readonly title: string;
   /** Plain-text body (1–3 sentences). May contain URLs; never customer PII. */
   readonly body: string;
-  /** Present when the ping is about a specific case (rendered as a reference). */
-  readonly caseId?: string;
+  /** Present when the ping is about a specific ticket (rendered as a reference). */
+  readonly ticketId?: string;
 }
 
 export interface SendSupplierEscalationInput {
@@ -89,7 +89,7 @@ export interface SendSupplierEscalationInput {
    * is the external supplier, not the merchant operator.
    */
   readonly supplierEmail: string;
-  /** Deep link to the supplier's case in the portal, or null if unconfigured. */
+  /** Deep link to the supplier's ticket in the portal, or null if unconfigured. */
   readonly portalUrl: string | null;
   /** The agent's PII-free problem statement (never carries customer data). */
   readonly problem: string;
@@ -115,7 +115,7 @@ export class PlatformMailService extends Context.Tag("PlatformMailService")<
       input: SendConnectorAlertInput,
     ) => Effect.Effect<void, PlatformMailError>;
     /**
-     * Notify a supplier that a case was escalated to them, with a link to the
+     * Notify a supplier that a ticket was escalated to them, with a link to the
      * supplier portal. The durable outbox sweep (worker) calls this; the
      * escalation row's notified_at ledger drives retry, so a transient failure
      * here just means the next sweep pass re-sends.

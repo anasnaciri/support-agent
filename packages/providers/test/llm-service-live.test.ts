@@ -108,8 +108,8 @@ const baseRequest: ToolCallingRequest = {
   ],
   tools: [
     {
-      name: "case.update_status",
-      description: "transition the case",
+      name: "ticket.update_status",
+      description: "transition the ticket",
       inputSchema: { type: "object", properties: { to: { type: "string" } } },
     },
   ],
@@ -144,12 +144,12 @@ describe("LLMServiceLive — request mapping", () => {
     expect(arg.messages).toEqual([
       { role: "user", content: "where is my order?" },
     ]);
-    expect(Object.keys(arg.tools)).toEqual(["case.update_status"]);
-    expect(arg.tools["case.update_status"]!.description).toBe(
-      "transition the case",
+    expect(Object.keys(arg.tools)).toEqual(["ticket.update_status"]);
+    expect(arg.tools["ticket.update_status"]!.description).toBe(
+      "transition the ticket",
     );
     // jsonSchema() wraps the raw JSON schema so the SDK doesn't introspect.
-    expect(arg.tools["case.update_status"]!.inputSchema).toEqual({
+    expect(arg.tools["ticket.update_status"]!.inputSchema).toEqual({
       __wrapped: { type: "object", properties: { to: { type: "string" } } },
     });
     expect(arg.model.__chat).toBe("google/gemini-3.1-flash-lite");
@@ -166,13 +166,13 @@ describe("LLMServiceLive — request mapping", () => {
         role: "assistant",
         content: "thinking",
         toolCalls: [
-          { id: "c1", name: "case.update_status", input: { to: "resolved" } },
+          { id: "c1", name: "ticket.update_status", input: { to: "resolved" } },
         ],
       },
       {
         role: "tool",
         toolCallId: "c1",
-        toolName: "case.update_status",
+        toolName: "ticket.update_status",
         content: { ok: true },
       },
     ];
@@ -192,7 +192,7 @@ describe("LLMServiceLive — request mapping", () => {
         {
           type: "tool-call",
           toolCallId: "c1",
-          toolName: "case.update_status",
+          toolName: "ticket.update_status",
           input: { to: "resolved" },
         },
       ],
@@ -204,7 +204,7 @@ describe("LLMServiceLive — request mapping", () => {
         {
           type: "tool-result",
           toolCallId: "c1",
-          toolName: "case.update_status",
+          toolName: "ticket.update_status",
           output: { type: "json", value: { ok: true } },
         },
       ],
@@ -309,7 +309,7 @@ describe("LLMServiceLive — decision mapping", () => {
       toolCalls: [
         {
           toolCallId: "call-1",
-          toolName: "case.update_status",
+          toolName: "ticket.update_status",
           input: { to: "resolved" },
         },
       ],
@@ -323,7 +323,7 @@ describe("LLMServiceLive — decision mapping", () => {
     expect(exit.value).toEqual({
       type: "tool_call",
       callId: "call-1",
-      tool: "case.update_status",
+      tool: "ticket.update_status",
       input: { to: "resolved" },
     });
   });
@@ -423,19 +423,19 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
         role: "assistant",
         content: "",
         toolCalls: [
-          { id: "call-a", name: "case.update_context", input: { x: 1 } },
+          { id: "call-a", name: "ticket.update_context", input: { x: 1 } },
         ],
       },
       {
         role: "tool",
         toolCallId: "call-a",
-        toolName: "case.update_context",
+        toolName: "ticket.update_context",
         content: { ok: true },
       },
     ],
     tools: [
       {
-        name: "case.update_context",
+        name: "ticket.update_context",
         description: "update context",
         inputSchema: { type: "object" },
       },
@@ -459,8 +459,8 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
     // Anthropic sees ONLY the underscored names — the dotted ones would
     // be rejected with `tools.0.custom.name: String should match
     // pattern '^[a-zA-Z0-9_-]{1,128}$'`.
-    expect(toolNames).toEqual(["case_update_context", "shopify_get_order"]);
-    expect(arg.tools["case.update_context"]).toBeUndefined();
+    expect(toolNames).toEqual(["shopify_get_order", "ticket_update_context"]);
+    expect(arg.tools["ticket.update_context"]).toBeUndefined();
   });
 
   it("rewrites tool-call + tool-result toolName references in conversation history for anthropic/* models", async () => {
@@ -478,7 +478,7 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
       content: ReadonlyArray<{ type: string; toolName?: string }>;
     };
     const toolCallEntry = assistant.content.find((c) => c.type === "tool-call");
-    expect(toolCallEntry?.toolName).toBe("case_update_context");
+    expect(toolCallEntry?.toolName).toBe("ticket_update_context");
     // tool message: tool-result must also reference the sanitized name.
     const toolMsg = arg.messages[2] as {
       content: ReadonlyArray<{ type: string; toolName?: string }>;
@@ -486,7 +486,7 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
     const toolResultEntry = toolMsg.content.find(
       (c) => c.type === "tool-result",
     );
-    expect(toolResultEntry?.toolName).toBe("case_update_context");
+    expect(toolResultEntry?.toolName).toBe("ticket_update_context");
   });
 
   it("reverse-maps the sanitized tool name when the SDK returns a tool_call for an anthropic/* model", async () => {
@@ -552,8 +552,8 @@ describe("LLMServiceLive — Anthropic tool-name sanitization + routing", () => 
     };
     // Tool names pass through unchanged for non-Anthropic providers.
     expect(Object.keys(arg.tools).sort()).toEqual([
-      "case.update_context",
       "shopify.get_order",
+      "ticket.update_context",
     ]);
     // No provider routing pin for non-Anthropic — `chatSettings` is
     // undefined because we call `provider.chat(model)` with no second

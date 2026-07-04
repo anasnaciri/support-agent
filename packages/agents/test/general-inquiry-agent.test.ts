@@ -20,7 +20,7 @@ describe("general-inquiry-agent config", () => {
       "shopify.search_products",
       "shopify.get_store_info",
       "shopify.list_pickup_locations",
-      "case.update_context",
+      "ticket.update_context",
       "conversation.reply",
       "merchant.notify",
     ]);
@@ -61,7 +61,7 @@ describe("general-inquiry-agent config", () => {
       "refund.recommend",
       "shopify.refund",
       "agent.handoff",
-      "case.update_status",
+      "ticket.update_status",
     ]);
     for (const t of generalInquiryAgent.tools) {
       expect(forbidden.has(t)).toBe(false);

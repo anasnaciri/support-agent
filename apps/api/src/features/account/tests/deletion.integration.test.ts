@@ -5,8 +5,8 @@ import {
   adminAuditLog,
   approvals,
   auditLog,
-  caseStateTransitions,
-  cases,
+  ticketStateTransitions,
+  tickets,
   connectorConnections,
   makeDbClient,
   tenantAgentOverrides,
@@ -69,27 +69,27 @@ describeIfDb("apps/api — account deletion (integration)", () => {
 
   // Seed one tenant with a row in every tenant-scoped table.
   const seedTenant = async (id: string, org: string) => {
-    const caseId = randomUUID();
-    const caseId2 = randomUUID();
+    const ticketId = randomUUID();
+    const ticketId2 = randomUUID();
     await raw!.db.insert(tenants).values({
       id,
       name: `T-${org}`,
       workosOrganizationId: org,
       settings: { notificationEmail: `owner-${org}@example.com` },
     });
-    await raw!.db.insert(cases).values([
-      { id: caseId, tenantId: id, channel: "email", status: "new", currentAgentId: "support-triage" },
-      { id: caseId2, tenantId: id, channel: "email", status: "resolved", currentAgentId: "support-triage" },
+    await raw!.db.insert(tickets).values([
+      { id: ticketId, tenantId: id, channel: "email", status: "new", currentAgentId: "support-triage" },
+      { id: ticketId2, tenantId: id, channel: "email", status: "resolved", currentAgentId: "support-triage" },
     ]);
-    await raw!.db.insert(caseStateTransitions).values({
-      caseId,
+    await raw!.db.insert(ticketStateTransitions).values({
+      ticketId,
       fromStatus: "new",
       toStatus: "resolved",
     });
     await raw!.db.insert(approvals).values({
       id: randomUUID(),
       tenantId: id,
-      caseId,
+      ticketId,
       agentId: "refund-review-agent",
       tool: "conversation.reply",
       proposedInput: { bodyText: "x" },
@@ -99,10 +99,10 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     });
     await raw!.db.insert(auditLog).values({
       tenantId: id,
-      caseId,
+      ticketId,
       actorType: "system",
       actorId: "test",
-      action: "case.created",
+      action: "ticket.created",
       details: {},
     });
     // Real AES-GCM ciphertext (under cfg.encryptionKey) so the B1
@@ -128,7 +128,7 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     const c = async (q: Promise<Array<unknown>>) => (await q).length;
     return {
       tenants: await c(raw!.db.select().from(tenants).where(eq(tenants.id, id))),
-      cases: await c(raw!.db.select().from(cases).where(eq(cases.tenantId, id))),
+      tickets: await c(raw!.db.select().from(tickets).where(eq(tickets.tenantId, id))),
       approvals: await c(
         raw!.db.select().from(approvals).where(eq(approvals.tenantId, id)),
       ),
@@ -178,7 +178,7 @@ describeIfDb("apps/api — account deletion (integration)", () => {
         .where(eq(connectorConnections.tenantId, id));
       await raw.db.delete(approvals).where(sql`${approvals.tenantId} = ${id}`);
       await raw.db.delete(auditLog).where(sql`${auditLog.tenantId} = ${id}`);
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
       await raw.db
         .delete(adminAuditLog)
@@ -215,22 +215,22 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       kind: string;
-      deletedCases: number;
+      deletedTickets: number;
       deletedConnectorRows: number;
       workosOrganizationId: string | null;
       cleanupEnqueued: boolean;
     };
     expect(body.kind).toBe("deleted");
-    expect(body.deletedCases).toBe(2);
+    expect(body.deletedTickets).toBe(2);
     expect(body.deletedConnectorRows).toBe(1);
     expect(body.workosOrganizationId).toBe(orgA);
     expect(body.cleanupEnqueued).toBe(true);
 
     // Every tenant-A row is gone (transitions/timers/image_hashes cascade
-    // from the cases delete; overrides cascade from the tenant delete).
+    // from the tickets delete; overrides cascade from the tenant delete).
     expect(await counts(tenantA)).toEqual({
       tenants: 0,
-      cases: 0,
+      tickets: 0,
       approvals: 0,
       audit: 0,
       connectors: 0,
@@ -239,7 +239,7 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     // Tenant B is untouched.
     expect(await counts(tenantB)).toEqual({
       tenants: 1,
-      cases: 2,
+      tickets: 2,
       approvals: 1,
       audit: 1,
       connectors: 1,
@@ -270,7 +270,7 @@ describeIfDb("apps/api — account deletion (integration)", () => {
     expect(((await res.json()) as { kind: string }).kind).toBe("deleted");
     expect(await counts(tenantB)).toEqual({
       tenants: 0,
-      cases: 0,
+      tickets: 0,
       approvals: 0,
       audit: 0,
       connectors: 0,

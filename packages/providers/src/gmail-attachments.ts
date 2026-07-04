@@ -127,7 +127,7 @@ export const processGmailImageAttachments = async (
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
       });
       // Honour the per-attachment cap against the actual bytes too, in
-      // case Gmail's `size` was wildly under-reported. Defensive — the
+      // ticket Gmail's `size` was wildly under-reported. Defensive — the
       // server side is the only honest source.
       if (fetched.bytes.byteLength > MAX_BYTES_PER_ATTACHMENT) {
         // eslint-disable-next-line no-console

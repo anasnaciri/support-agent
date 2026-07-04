@@ -13,7 +13,7 @@ const access = (over: Partial<MemberAccess>): MemberAccess => ({
 describe("decideAuthz", () => {
   it("401s when there's no acting user id", () => {
     expect(
-      decideAuthz(access({ anyAssignmentsInWorkspace: true }), undefined, "cases.view"),
+      decideAuthz(access({ anyAssignmentsInWorkspace: true }), undefined, "tickets.view"),
     ).toEqual({ ok: false, status: 401, error: "missing_user" });
   });
 
@@ -25,7 +25,7 @@ describe("decideAuthz", () => {
 
   it("allows open-mode reads even without an actor id (legacy flows)", () => {
     expect(
-      decideAuthz(access({ anyAssignmentsInWorkspace: false }), undefined, "cases.view"),
+      decideAuthz(access({ anyAssignmentsInWorkspace: false }), undefined, "tickets.view"),
     ).toEqual({ ok: true });
   });
 
@@ -43,11 +43,11 @@ describe("decideAuthz", () => {
     const member = access({
       anyAssignmentsInWorkspace: true,
       assigned: true,
-      grantedIds: ["cases.reply"],
+      grantedIds: ["tickets.reply"],
     });
-    expect(decideAuthz(member, "u", "cases.reply")).toEqual({ ok: true });
-    // cases.reply implies cases.view
-    expect(decideAuthz(member, "u", "cases.view")).toEqual({ ok: true });
+    expect(decideAuthz(member, "u", "tickets.reply")).toEqual({ ok: true });
+    // tickets.reply implies tickets.view
+    expect(decideAuthz(member, "u", "tickets.view")).toEqual({ ok: true });
     expect(decideAuthz(member, "u", "audit.view")).toEqual({
       ok: false,
       status: 403,
@@ -84,10 +84,10 @@ describe("sessionPermissions", () => {
       access({
         anyAssignmentsInWorkspace: true,
         assigned: true,
-        grantedIds: ["cases.reply"],
+        grantedIds: ["tickets.reply"],
       }),
     );
-    expect([...s.permissions].sort()).toEqual(["cases.reply", "cases.view"]);
+    expect([...s.permissions].sort()).toEqual(["tickets.reply", "tickets.view"]);
     expect(s.assigned).toBe(true);
   });
 });

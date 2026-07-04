@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 
 // ============================================================
 // Errors
@@ -26,7 +26,7 @@ export interface AuditActor {
 export interface AuditEntry {
   readonly id: bigint;
   readonly tenantId: TenantId;
-  readonly caseId: CaseId | null;
+  readonly ticketId: TicketId | null;
   readonly actor: AuditActor;
   readonly action: string;
   readonly details: Readonly<Record<string, unknown>>;
@@ -35,18 +35,18 @@ export interface AuditEntry {
 
 export interface RecordAuditEntryInput {
   readonly tenantId: TenantId;
-  readonly caseId?: CaseId | null;
+  readonly ticketId?: TicketId | null;
   readonly actor: AuditActor;
   readonly action: string;
   readonly details: Readonly<Record<string, unknown>>;
 }
 
-export interface ForCaseOptions {
+export interface ForTicketOptions {
   readonly limit?: number;
   readonly afterId?: bigint;
   /**
    * Defense-in-depth tenant scope (audit D9): when present, only entries
-   * belonging to the tenant are returned — a cross-tenant caseId reads as
+   * belonging to the tenant are returned — a cross-tenant ticketId reads as
    * an empty history.
    */
   readonly tenantId?: TenantId;
@@ -63,9 +63,9 @@ export class AuditLogService extends Context.Tag("AuditLogService")<
       entry: RecordAuditEntryInput,
     ) => Effect.Effect<AuditEntry, AuditLogError>;
 
-    readonly forCase: (
-      caseId: CaseId,
-      opts?: ForCaseOptions,
+    readonly forTicket: (
+      ticketId: TicketId,
+      opts?: ForTicketOptions,
     ) => Effect.Effect<ReadonlyArray<AuditEntry>, AuditLogError>;
   }
 >() {}
@@ -86,7 +86,7 @@ export const AuditLogServiceTest = Layer.effect(
           const entry: AuditEntry = {
             id: nextId++,
             tenantId: input.tenantId,
-            caseId: input.caseId ?? null,
+            ticketId: input.ticketId ?? null,
             actor: input.actor,
             action: input.action,
             details: input.details,
@@ -96,10 +96,10 @@ export const AuditLogServiceTest = Layer.effect(
           return entry;
         }),
 
-      forCase: (caseId, opts = {}) =>
+      forTicket: (ticketId, opts = {}) =>
         Effect.sync(() => {
           const limit = opts.limit ?? 100;
-          let filtered = entries.filter((e) => e.caseId === caseId);
+          let filtered = entries.filter((e) => e.ticketId === ticketId);
           if (opts.tenantId !== undefined) {
             const tenantId = opts.tenantId;
             filtered = filtered.filter((e) => e.tenantId === tenantId);

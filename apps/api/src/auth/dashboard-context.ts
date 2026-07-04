@@ -350,7 +350,7 @@ export type DashboardOrgAuthResult =
  * Auth for the pre-tenant endpoints (`GET /dashboard/tenant`,
  * `POST /dashboard/onboarding`): verify the service token + read the asserted
  * WorkOS org, but do NOT require a tenant (those endpoints exist precisely for
- * the org-without-a-tenant onboarding case). Pure — no DB lookup.
+ * the org-without-a-tenant onboarding ticket). Pure — no DB lookup.
  */
 export const authenticateDashboardOrg = async (
   _cfg: ApiConfig,

@@ -1,6 +1,6 @@
 import { Deferred, Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { CaseId, OrderId, TenantId, ThreadId } from "@support-agent/agent-core";
+import { TicketId, OrderId, TenantId, ThreadId } from "@support-agent/agent-core";
 import {
   WorkflowQueue,
   WorkflowQueueTest,
@@ -29,7 +29,7 @@ describe("WorkflowQueue (Test layer)", () => {
       workflowEventKey(
         {
           type: "customer.replied",
-          caseId: CaseId("case-1"),
+          ticketId: TicketId("ticket-1"),
           payload: {
             threadId: ThreadId("thread-1"),
             messageId: "message-1",
@@ -44,7 +44,7 @@ describe("WorkflowQueue (Test layer)", () => {
         },
         "event-1",
       ),
-    ).toBe("case:case-1");
+    ).toBe("ticket:ticket-1");
 
     expect(
       workflowEventKey(

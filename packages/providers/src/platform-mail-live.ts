@@ -109,7 +109,7 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
   const lines = [
     `Your ${input.tenantName} account on the support platform has been deleted.`,
     ``,
-    `All associated data — cases, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.`,
+    `All associated data — tickets, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.`,
     ``,
     `If you did not request this, contact support immediately.`,
   ];
@@ -121,7 +121,7 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
       .replace(/>/gu, "&gt;");
   const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
   <p>Your <strong>${escape(input.tenantName)}</strong> account on the support platform has been deleted.</p>
-  <p>All associated data — cases, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.</p>
+  <p>All associated data — tickets, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.</p>
   <p style="color:#666;font-size:12px;margin-top:24px">If you did not request this, contact support immediately.</p>
 </body></html>`;
   return { subject, text, html };
@@ -135,17 +135,17 @@ export const renderSupplierEscalationEmail = (
   readonly html: string;
 } => {
   const orderBit = input.orderRef ? ` (order ${input.orderRef})` : "";
-  const subject = `Action needed: a case was escalated to you${orderBit}`;
+  const subject = `Action needed: a ticket was escalated to you${orderBit}`;
   const escape = (s: string): string =>
     s
       .replace(/&/gu, "&amp;")
       .replace(/</gu, "&lt;")
       .replace(/>/gu, "&gt;");
   const cta = input.portalUrl
-    ? `Open the case to respond: ${input.portalUrl}`
-    : `Log in to your supplier portal to view and respond to this case.`;
+    ? `Open the ticket to respond: ${input.portalUrl}`
+    : `Log in to your supplier portal to view and respond to this ticket.`;
   const text = [
-    `A support case has been escalated to you${orderBit}.`,
+    `A support ticket has been escalated to you${orderBit}.`,
     ``,
     `What's needed:`,
     input.problem,
@@ -153,13 +153,13 @@ export const renderSupplierEscalationEmail = (
     cta,
   ].join("\n");
   const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
-  <p>A support case has been escalated to you${escape(orderBit)}.</p>
+  <p>A support ticket has been escalated to you${escape(orderBit)}.</p>
   <p><strong>What's needed:</strong></p>
   <pre style="white-space:pre-wrap;background:#f6f6f6;padding:12px;border-radius:6px">${escape(input.problem)}</pre>
   ${
     input.portalUrl
-      ? `<p style="margin-top:24px"><a href="${escape(input.portalUrl)}" style="background:#0345fc;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block">Open the case</a></p>`
-      : `<p style="margin-top:24px">Log in to your supplier portal to view and respond to this case.</p>`
+      ? `<p style="margin-top:24px"><a href="${escape(input.portalUrl)}" style="background:#0345fc;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;display:inline-block">Open the ticket</a></p>`
+      : `<p style="margin-top:24px">Log in to your supplier portal to view and respond to this ticket.</p>`
   }
 </body></html>`;
   return { subject, text, html };
@@ -305,12 +305,12 @@ export const PlatformMailServiceLive = Layer.effect(
               new PlatformMailUnconfigured({ tenantId: input.tenantId }),
             );
           }
-          const ref = input.caseId ? ` (case ${input.caseId})` : "";
+          const ref = input.ticketId ? ` (ticket ${input.ticketId})` : "";
           const subject = `[support-agent] ${input.title}`;
           const text = `${input.body}${ref}`;
           const html = `<p>${input.body}</p>${
-            input.caseId
-              ? `<p style="color:#666">Case reference: ${input.caseId}</p>`
+            input.ticketId
+              ? `<p style="color:#666">Ticket reference: ${input.ticketId}</p>`
               : ""
           }`;
           yield* post(input.tenantId, recipient, { subject, text, html });

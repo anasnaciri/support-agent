@@ -123,7 +123,7 @@ describe("imap-poll pollOne", () => {
       (published[0]!.payload as { mailbox?: string }).mailbox,
     ).toBe(mailbox);
     // RFC threading headers flow through so the runtime can correlate the
-    // reply to its case via the message-id index.
+    // reply to its ticket via the message-id index.
     expect(
       (published[0]!.payload as { inReplyTo?: string | null }).inReplyTo,
     ).toBe("root@host");

@@ -4,7 +4,7 @@ import {
   requestedResolutionLabel,
   parseReturnReason,
   parseRequestedResolution,
-} from "../app/cases/[id]/return-labels";
+} from "../app/tickets/[id]/return-labels";
 
 describe("return field labels", () => {
   it("humanises every known return reason", () => {

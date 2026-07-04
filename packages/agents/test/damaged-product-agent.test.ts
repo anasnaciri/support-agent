@@ -21,7 +21,7 @@ describe("damaged-product-agent config", () => {
       "shopify.find_customer_order",
       "shopify.get_product",
       "shopify.get_customer",
-      "case.update_context",
+      "ticket.update_context",
       "supplier.escalate",
       "conversation.reply",
       "conversation.ask_customer",
@@ -35,7 +35,7 @@ describe("damaged-product-agent config", () => {
     expect(damagedProductAgent.maxTurnsPerTick).toBeGreaterThan(1);
     // A verified damaged item that warrants a REPLACEMENT escalates to the
     // warehouse/supplier (they ship it + log the defect), which parks the
-    // case in waiting_for_supplier. It must be auto-allowed so it parks
+    // ticket in waiting_for_supplier. It must be auto-allowed so it parks
     // instead of creating an approval — mirroring missing-package-agent.
     expect(damagedProductAgent.tools).toContain("supplier.escalate");
     expect(damagedProductAgent.permissionOverrides["supplier.escalate"]).toBe(
@@ -45,7 +45,7 @@ describe("damaged-product-agent config", () => {
     // The replacement path escalates only when the damage is verified
     // (productMatch === "match"); refunds + mismatch/uncertain still reply.
     expect(damagedProductAgent.promptTemplate).toContain("PATH REPLACEMENT");
-    // When the supplier answers, the case re-engages here to draft the
+    // When the supplier answers, the ticket re-engages here to draft the
     // customer reply — the SUPPLIER-RESPONDED flow must be in the prompt.
     expect(damagedProductAgent.promptTemplate).toContain("SUPPLIER-RESPONDED");
     // The prompt must describe the two decision branches so the model

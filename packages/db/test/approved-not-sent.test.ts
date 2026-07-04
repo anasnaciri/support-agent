@@ -3,14 +3,14 @@ import type { ApprovalDetail, AuditEntry } from "@support-agent/dashboard-contra
 import { resurfaceableApprovedReply } from "../src/approved-not-sent.js";
 
 // H9 — surface an "approved but not sent" reply. A conversation.reply approval
-// that a manager approved AFTER the case was taken over is skipped by the
+// that a manager approved AFTER the ticket was taken over is skipped by the
 // runtime (audit `approval.stale_delivery_skipped`) and retired; the drafted
 // reply never goes out. This pure helper picks the approval to resurface so the
 // operator can one-click resend it.
 
 const approval = (over: Partial<ApprovalDetail> = {}): ApprovalDetail => ({
   id: "appr-1",
-  caseId: "case-1",
+  ticketId: "ticket-1",
   agentId: "support-triage",
   tool: "conversation.reply",
   proposedInput: { draftId: "d-1", bodyText: "Your order shipped." },
@@ -28,7 +28,7 @@ const approval = (over: Partial<ApprovalDetail> = {}): ApprovalDetail => ({
 
 const skipEntry = (approvalId: string, id = "a-skip"): AuditEntry => ({
   id,
-  caseId: "case-1",
+  ticketId: "ticket-1",
   action: "approval.stale_delivery_skipped",
   actorType: "system",
   actorId: "runtime",
@@ -38,8 +38,8 @@ const skipEntry = (approvalId: string, id = "a-skip"): AuditEntry => ({
 
 const resentEntry = (approvalId: string, id = "a-resent"): AuditEntry => ({
   id,
-  caseId: "case-1",
-  action: "case.approved_reply_resent",
+  ticketId: "ticket-1",
+  action: "ticket.approved_reply_resent",
   actorType: "user",
   actorId: "user-1",
   occurredAt: "2026-07-01T11:00:00.000Z",

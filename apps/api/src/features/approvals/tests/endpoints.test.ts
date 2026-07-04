@@ -21,7 +21,7 @@ import {
 import type { Approval } from "@support-agent/agent-core";
 import {
   ApprovalId,
-  CaseId,
+  TicketId,
   TenantId,
   UserId,
   AgentId,
@@ -252,7 +252,7 @@ describe("decideApproval — orchestration", () => {
   ) => {
     const row = env.seed({
       tenantId: TenantId("tenant-1"),
-      caseId: CaseId("case-1"),
+      ticketId: TicketId("ticket-1"),
       agentId: AgentId("refund-review-agent"),
       tool: "conversation.reply",
       proposedInput: { hello: "world" },
@@ -292,7 +292,7 @@ describe("decideApproval — orchestration", () => {
     expect(published[0]?.type).toBe("approval.approved");
     if (published[0]?.type === "approval.approved") {
       expect(published[0].approvalId).toBe(row.id);
-      expect(published[0].caseId).toBe(row.caseId);
+      expect(published[0].ticketId).toBe(row.ticketId);
     }
   });
 
@@ -547,7 +547,7 @@ describe("makePgBossApprovalPublisher", () => {
     const event: DomainEvent = {
       type: "approval.approved",
       approvalId: ApprovalId("aaaa"),
-      caseId: CaseId("bbbb"),
+      ticketId: TicketId("bbbb"),
       managerId: UserId("cccc"),
     };
     await publish(event);

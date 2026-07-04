@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { TenantId, CaseId } from "@support-agent/agent-core";
+import { TenantId, TicketId } from "@support-agent/agent-core";
 import {
   MerchantNotificationService,
   MerchantNotificationSendFailed,
@@ -18,7 +18,7 @@ const note: MerchantNotification = {
   kind: "agent_note",
   title: "Agent needs a sanity check",
   body: "Customer claims a promo code that isn't in the knowledge base.",
-  caseId: CaseId("c1"),
+  ticketId: TicketId("c1"),
 };
 
 describe("MerchantNotificationService test layer", () => {
@@ -82,7 +82,7 @@ describe("MerchantNotificationService test layer", () => {
     expect(handle.sent).toHaveLength(0);
   });
 
-  it("accepts notifications without a caseId (account-level alerts)", async () => {
+  it("accepts notifications without a ticketId (account-level alerts)", async () => {
     const { layer, handle } = makeMerchantNotificationServiceTest();
     const accountAlert: MerchantNotification = {
       kind: "llm_credits_low",
@@ -99,7 +99,7 @@ describe("MerchantNotificationService test layer", () => {
       ),
     );
     expect(result.delivered).toBe(true);
-    expect(handle.sent[0]?.notification.caseId).toBeUndefined();
+    expect(handle.sent[0]?.notification.ticketId).toBeUndefined();
   });
 });
 
@@ -116,7 +116,7 @@ describe("MerchantNotificationSendFailed", () => {
 
 describe("approvalRequestedNotification", () => {
   const base = {
-    caseId: CaseId("c1"),
+    ticketId: TicketId("c1"),
     toolName: "conversation.reply",
     draftSubject: "Re: refund for #1001",
     draftPreview: "Hi Jane — we can refund order #1001 on receipt.",
@@ -127,7 +127,7 @@ describe("approvalRequestedNotification", () => {
   it("carries the draft preview and both decision links", () => {
     const n = approvalRequestedNotification(base);
     expect(n.kind).toBe("approval_requested");
-    expect(n.caseId).toBe(base.caseId);
+    expect(n.ticketId).toBe(base.ticketId);
     expect(n.title).toContain("Re: refund for #1001");
     expect(n.body).toContain(base.draftPreview);
     expect(n.body).toContain(base.approveUrl);
@@ -144,12 +144,12 @@ describe("approvalRequestedNotification", () => {
 describe("humanTakeoverNotification", () => {
   it("maps known escalation reasons to merchant-friendly copy", () => {
     const n = humanTakeoverNotification({
-      caseId: CaseId("c1"),
+      ticketId: TicketId("c1"),
       subject: "Where is my order?",
       reason: "max_turns_exceeded",
     });
     expect(n.kind).toBe("human_takeover");
-    expect(n.caseId).toBe(CaseId("c1"));
+    expect(n.ticketId).toBe(TicketId("c1"));
     expect(n.body).toContain("Where is my order?");
     // Friendly copy, not the internal reason code.
     expect(n.body).not.toContain("max_turns_exceeded");
@@ -158,7 +158,7 @@ describe("humanTakeoverNotification", () => {
 
   it("points at the provider key settings for credential escalations", () => {
     const n = humanTakeoverNotification({
-      caseId: CaseId("c1"),
+      ticketId: TicketId("c1"),
       subject: null,
       reason: "llm_credential_missing",
     });
@@ -167,7 +167,7 @@ describe("humanTakeoverNotification", () => {
 
   it("falls back to quoting an unknown reason verbatim", () => {
     const n = humanTakeoverNotification({
-      caseId: CaseId("c1"),
+      ticketId: TicketId("c1"),
       subject: null,
       reason: "weird_new_reason",
     });
@@ -183,7 +183,7 @@ describe("llmCreditsLowNotification", () => {
       thresholdUsd: 5,
     });
     expect(n.kind).toBe("llm_credits_low");
-    expect(n.caseId).toBeUndefined();
+    expect(n.ticketId).toBeUndefined();
     expect(n.body).toContain("$3.20");
     expect(n.body).toContain("$5");
     expect(n.body.toLowerCase()).toContain("openrouter");
@@ -198,7 +198,7 @@ describe("connectorBrokenNotification", () => {
       reason: "refresh token revoked",
     });
     expect(n.kind).toBe("connector_broken");
-    expect(n.caseId).toBeUndefined();
+    expect(n.ticketId).toBeUndefined();
     expect(n.title).toContain("outlook");
     expect(n.body).toContain("support@merchant.com");
     expect(n.body).toContain("refresh token revoked");

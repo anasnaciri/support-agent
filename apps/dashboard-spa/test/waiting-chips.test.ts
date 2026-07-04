@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { extraWaitChips } from "../lib/waiting-chips.js";
 
-// Concurrent wait states: a case's status is the single primary-wait pointer
-// (approval wins), but a case can hold BOTH an open approval and an open
+// Concurrent wait states: a ticket's status is the single primary-wait pointer
+// (approval wins), but a ticket can hold BOTH an open approval and an open
 // supplier escalation. extraWaitChips returns the wait facts that hold but are
 // NOT already the status badge, so the header/list can render them as a second
 // chip without ever duplicating the status badge.
 describe("extraWaitChips", () => {
-  it("shows the supplier chip when a waiting_for_approval case also waits on a supplier", () => {
+  it("shows the supplier chip when a waiting_for_approval ticket also waits on a supplier", () => {
     expect(
       extraWaitChips("waiting_for_approval", {
         approval: true,

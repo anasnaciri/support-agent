@@ -1,18 +1,18 @@
 // ============================================================
-// Case retention sweep
+// Ticket retention sweep
 // ============================================================
 //
-// Daily cron that stages case retention:
-//   1. `resolved` cases older than 30 days are moved to `archived`.
-//   2. `archived` cases older than 12 months are deleted with their
+// Daily cron that stages ticket retention:
+//   1. `resolved` tickets older than 30 days are moved to `archived`.
+//   2. `archived` tickets older than 12 months are deleted with their
 //      cascaded rows.
 //
 // The deletion uses the same FK ordering as the Shopify compliance
 // `customers/redact` webhook (see `apps/api/src/compliance-redaction.ts`):
-//   approvals (FK to cases) → audit_log (no FK cascade) →
-//   cases (CASCADE to case_state_transitions)
+//   approvals (FK to tickets) → audit_log (no FK cascade) →
+//   tickets (CASCADE to ticket_state_transitions)
 //
-// Per-tenant scoping happens INSIDE each SELECT for matched case ids, so a
+// Per-tenant scoping happens INSIDE each SELECT for matched ticket ids, so a
 // misconfigured tenant can't accidentally wipe another tenant's data. The cron
 // walks tenants one at a time — sequential rather than concurrent because a
 // misbehaving tenant deletion shouldn't slow every other tenant down, and the
@@ -23,8 +23,8 @@ import { and, eq, inArray, lt } from "drizzle-orm";
 import {
   approvals,
   auditLog,
-  cases,
-  caseStateTransitions,
+  tickets,
+  ticketStateTransitions,
   DbClient,
   tenants,
 } from "@support-agent/db";
@@ -37,8 +37,8 @@ export interface SweepTenantResult {
   readonly tenantId: string;
   readonly archiveCutoff: Date;
   readonly deleteCutoff: Date;
-  readonly archivedCases: number;
-  readonly deletedCases: number;
+  readonly archivedTickets: number;
+  readonly deletedTickets: number;
   readonly deletedAuditRows: number;
   readonly deletedApprovals: number;
 }
@@ -52,7 +52,7 @@ export interface SweepTenantFailure {
 export type SweepResult = SweepTenantResult | SweepTenantFailure;
 
 /**
- * Compute the cutoff timestamp for archiving resolved cases. Pure — exported
+ * Compute the cutoff timestamp for archiving resolved tickets. Pure — exported
  * so the cron schedule + tests share the same calc.
  */
 export const computeResolvedArchiveCutoff = (now: Date): Date =>
@@ -84,14 +84,14 @@ const subtractUtcMonths = (now: Date, months: number): Date => {
   return firstOfTarget;
 };
 
-/** Compute the cutoff timestamp for deleting archived cases. */
+/** Compute the cutoff timestamp for deleting archived tickets. */
 export const computeArchivedDeleteCutoff = (now: Date): Date =>
   subtractUtcMonths(now, ARCHIVED_CASE_DELETE_AFTER_MONTHS);
 
 /**
- * Archive resolved cases past the 30-day window, then delete archived cases
+ * Archive resolved tickets past the 30-day window, then delete archived tickets
  * past the 12-month window. Returns counts so the cron can log them. Skips
- * cases that aren't `resolved`/`archived` — `human_takeover` / `failed` stay
+ * tickets that aren't `resolved`/`archived` — `human_takeover` / `failed` stay
  * parked unless a separate explicit deletion/redaction path handles them.
  */
 export const sweepTenant = (
@@ -105,37 +105,37 @@ export const sweepTenant = (
     return yield* Effect.tryPromise({
       try: () =>
         db.transaction(async (tx) => {
-          // 1. Archive resolved cases in the mutation itself. The status +
-          // cutoff predicates are repeated here so a case that reopens while
+          // 1. Archive resolved tickets in the mutation itself. The status +
+          // cutoff predicates are repeated here so a ticket that reopens while
           // the sweep waits on its row lock is not force-archived.
           const archivedRows = await tx
-            .update(cases)
+            .update(tickets)
             .set({ status: "archived", updatedAt: now, archivedAt: now })
             .where(
               and(
-                eq(cases.tenantId, tenantId),
-                eq(cases.status, "resolved"),
-                lt(cases.resolvedAt, archiveCutoff),
+                eq(tickets.tenantId, tenantId),
+                eq(tickets.status, "resolved"),
+                lt(tickets.resolvedAt, archiveCutoff),
               ),
             )
-            .returning({ id: cases.id });
+            .returning({ id: tickets.id });
           const archiveIds = archivedRows.map((r) => r.id);
           if (archiveIds.length > 0) {
-            await tx.insert(caseStateTransitions).values(
-              archiveIds.map((caseId) => ({
-                caseId,
+            await tx.insert(ticketStateTransitions).values(
+              archiveIds.map((ticketId) => ({
+                ticketId,
                 fromStatus: "resolved",
                 toStatus: "archived",
                 reason: "retention archive after 30 days resolved",
               })),
             );
             await tx.insert(auditLog).values(
-              archiveIds.map((caseId) => ({
+              archiveIds.map((ticketId) => ({
                 tenantId,
-                caseId,
+                ticketId,
                 actorType: "system",
                 actorId: "retention-sweep",
-                action: "case.archived",
+                action: "ticket.archived",
                 details: {
                   archiveCutoff: archiveCutoff.toISOString(),
                   archivedAt: now.toISOString(),
@@ -144,17 +144,17 @@ export const sweepTenant = (
             );
           }
 
-          // 2. Lock archived cases before deleting dependent rows. With
+          // 2. Lock archived tickets before deleting dependent rows. With
           // READ COMMITTED, SELECT ... FOR UPDATE rechecks the predicate after
-          // a concurrent reopen commits, so live cases keep their audit trail.
+          // a concurrent reopen commits, so live tickets keep their audit trail.
           const deleteMatched = await tx
-            .select({ id: cases.id })
-            .from(cases)
+            .select({ id: tickets.id })
+            .from(tickets)
             .where(
               and(
-                eq(cases.tenantId, tenantId),
-                eq(cases.status, "archived"),
-                lt(cases.archivedAt, deleteCutoff),
+                eq(tickets.tenantId, tenantId),
+                eq(tickets.status, "archived"),
+                lt(tickets.archivedAt, deleteCutoff),
               ),
             )
             .for("update");
@@ -165,8 +165,8 @@ export const sweepTenant = (
               tenantId,
               archiveCutoff,
               deleteCutoff,
-              archivedCases: archiveIds.length,
-              deletedCases: 0,
+              archivedTickets: archiveIds.length,
+              deletedTickets: 0,
               deletedAuditRows: 0,
               deletedApprovals: 0,
             } satisfies SweepTenantResult;
@@ -175,31 +175,31 @@ export const sweepTenant = (
           // 3. Cascaded delete in FK-safe order.
           const deletedApprovals = await tx
             .delete(approvals)
-            .where(inArray(approvals.caseId, deleteIds))
+            .where(inArray(approvals.ticketId, deleteIds))
             .returning({ id: approvals.id });
           const deletedAudit = await tx
             .delete(auditLog)
-            .where(inArray(auditLog.caseId, deleteIds))
+            .where(inArray(auditLog.ticketId, deleteIds))
             .returning({ id: auditLog.id });
-          const deletedCases = await tx
-            .delete(cases)
+          const deletedTickets = await tx
+            .delete(tickets)
             .where(
               and(
-                inArray(cases.id, deleteIds),
-                eq(cases.tenantId, tenantId),
-                eq(cases.status, "archived"),
-                lt(cases.archivedAt, deleteCutoff),
+                inArray(tickets.id, deleteIds),
+                eq(tickets.tenantId, tenantId),
+                eq(tickets.status, "archived"),
+                lt(tickets.archivedAt, deleteCutoff),
               ),
             )
-            .returning({ id: cases.id });
+            .returning({ id: tickets.id });
 
           return {
             kind: "ok",
             tenantId,
             archiveCutoff,
             deleteCutoff,
-            archivedCases: archiveIds.length,
-            deletedCases: deletedCases.length,
+            archivedTickets: archiveIds.length,
+            deletedTickets: deletedTickets.length,
             deletedAuditRows: deletedAudit.length,
             deletedApprovals: deletedApprovals.length,
           } satisfies SweepTenantResult;

@@ -5,24 +5,24 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseLifecycleWriterLive,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketLifecycleWriterLive,
+  TicketRepository,
+  TicketRepositoryTest,
   TransactionRunnerPassthrough,
 } from "@support-agent/services";
 import { escalateDeadLetteredEvent } from "../src/workflow-dead-letter.js";
 
 const deps = Layer.mergeAll(
   ApprovalServiceTest,
-  CaseRepositoryTest,
+  TicketRepositoryTest,
   AuditLogServiceTest,
   TransactionRunnerPassthrough,
 );
-const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
 
-const timerExpired = (caseId: string): DomainEvent => ({
+const timerExpired = (ticketId: string): DomainEvent => ({
   type: "timer.expired",
-  caseId: caseId as never,
+  ticketId: ticketId as never,
   timerId: "t1",
   reason: "follow_up",
 });
@@ -32,9 +32,9 @@ describe("escalateDeadLetteredEvent — underlying failure reason", () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const cases = yield* CaseRepository;
+          const tickets = yield* TicketRepository;
           const audit = yield* AuditLogService;
-          const created = yield* cases.create({
+          const created = yield* tickets.create({
             tenantId: TenantId("tenant-dl"),
             channel: "email",
             currentAgentId: AgentId("scenario-resolution-agent"),
@@ -44,8 +44,8 @@ describe("escalateDeadLetteredEvent — underlying failure reason", () => {
             timerExpired(created.id),
             "retryable workflow failure: llm transient error: ProviderUnavailable",
           );
-          const fetched = yield* cases.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const fetched = yield* tickets.getById(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { fetched, entries };
         }),
         layer,
@@ -64,7 +64,7 @@ describe("escalateDeadLetteredEvent — underlying failure reason", () => {
 
     expect(out.fetched.status).toBe("human_takeover");
     const escalation = out.entries.find(
-      (e) => e.action === "case.escalated_to_human",
+      (e) => e.action === "ticket.escalated_to_human",
     );
     expect(escalation?.details["reason"]).toBe("workflow_retries_exhausted");
     // The actual cause that exhausted the retries is preserved for diagnosis,
@@ -78,16 +78,16 @@ describe("escalateDeadLetteredEvent — underlying failure reason", () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const cases = yield* CaseRepository;
+          const tickets = yield* TicketRepository;
           const audit = yield* AuditLogService;
-          const created = yield* cases.create({
+          const created = yield* tickets.create({
             tenantId: TenantId("tenant-dl2"),
             channel: "email",
             currentAgentId: AgentId("scenario-resolution-agent"),
             subject: "Dead letter test 2",
           });
           yield* escalateDeadLetteredEvent(timerExpired(created.id));
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { entries };
         }),
         layer,
@@ -103,7 +103,7 @@ describe("escalateDeadLetteredEvent — underlying failure reason", () => {
       >,
     );
     const escalation = out.entries.find(
-      (e) => e.action === "case.escalated_to_human",
+      (e) => e.action === "ticket.escalated_to_human",
     );
     expect(escalation).toBeDefined();
     expect("underlyingError" in (escalation?.details ?? {})).toBe(false);

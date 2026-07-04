@@ -7,14 +7,14 @@ import {
 
 import { AuthedLayout } from "@/components/shell/DashboardShell";
 import { HomePage } from "@/features/home/HomePage";
-import { CasesPage } from "@/features/cases/CasesPage";
-import { CaseDetailPage } from "@/features/cases/CaseDetailPage";
+import { TicketsPage } from "@/features/tickets/TicketsPage";
+import { TicketDetailPage } from "@/features/tickets/TicketDetailPage";
 import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
 import { ApprovalDetailPage } from "@/features/approvals/ApprovalDetailPage";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
-import { SupplierCasesPage } from "@/features/supplier/SupplierCasesPage";
-import { SupplierCaseDetailPage } from "@/features/supplier/SupplierCaseDetailPage";
+import { SupplierTicketsPage } from "@/features/supplier/SupplierTicketsPage";
+import { SupplierTicketDetailPage } from "@/features/supplier/SupplierTicketDetailPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AccountSettingsPage } from "@/features/settings/AccountSettingsPage";
 import { IntegrationsPage } from "@/features/settings/IntegrationsPage";
@@ -61,8 +61,8 @@ const authedChild = (
 ) => createRoute({ getParentRoute: () => authedRoute, path, component });
 
 const homeRoute = authedChild("/", HomePage);
-const casesRoute = authedChild("/cases", CasesPage);
-const caseDetailRoute = authedChild("/cases/$caseId", CaseDetailPage);
+const ticketsRoute = authedChild("/tickets", TicketsPage);
+const ticketDetailRoute = authedChild("/tickets/$ticketId", TicketDetailPage);
 const approvalsRoute = authedChild("/approvals", ApprovalsPage);
 const approvalDetailRoute = authedChild("/approvals/$approvalId", ApprovalDetailPage);
 const auditRoute = authedChild("/audit", AuditPage);
@@ -120,10 +120,10 @@ const settingsSupplierEscalationRoute = authedChild(
 );
 const settingsLegalRoute = authedChild("/settings/legal", LegalPage);
 const newWorkspaceRoute = authedChild("/workspaces/new", NewWorkspacePage);
-const supplierCasesRoute = authedChild("/supplier/cases", SupplierCasesPage);
-const supplierCaseDetailRoute = authedChild(
-  "/supplier/cases/$escalationId",
-  SupplierCaseDetailPage,
+const supplierTicketsRoute = authedChild("/supplier/tickets", SupplierTicketsPage);
+const supplierTicketDetailRoute = authedChild(
+  "/supplier/tickets/$escalationId",
+  SupplierTicketDetailPage,
 );
 // Fallback for any settings subpage not explicitly routed above.
 const settingsSplatRoute = authedChild("/settings/$", () => (
@@ -142,8 +142,8 @@ const onboardingRoute = publicRoute("/onboarding", OnboardingPage);
 const routeTree = rootRoute.addChildren([
   authedRoute.addChildren([
     homeRoute,
-    casesRoute,
-    caseDetailRoute,
+    ticketsRoute,
+    ticketDetailRoute,
     approvalsRoute,
     approvalDetailRoute,
     auditRoute,
@@ -168,8 +168,8 @@ const routeTree = rootRoute.addChildren([
     settingsSupplierEscalationRoute,
     settingsLegalRoute,
     newWorkspaceRoute,
-    supplierCasesRoute,
-    supplierCaseDetailRoute,
+    supplierTicketsRoute,
+    supplierTicketDetailRoute,
     settingsSplatRoute,
   ]),
   signInRoute,

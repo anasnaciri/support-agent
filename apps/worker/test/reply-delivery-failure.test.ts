@@ -19,8 +19,8 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   DEFAULT_RETENTION_DAYS,
   LLMServiceScripted,
   PlatformMailServiceTest,
@@ -37,14 +37,14 @@ import {
   AgentResolverTest,
 } from "@support-agent/services";
 
-// A failed customer-reply send must NEVER silently resolve the case, in either
+// A failed customer-reply send must NEVER silently resolve the ticket, in either
 // path:
 //   - in-loop (auto): the error used to be fed back to the LLM, which could
 //     emit final_message → resolved (the silent-delivery bug, Bug 2);
 //   - approval-resume: the approved draft must be captured for retry, not just
 //     escalated as a generic approved_tool_failed.
 // Both now: enqueue the verbatim draft into the reply-delivery outbox, stamp the
-// `reply_delivery_failed` flag, and park the case in human_takeover.
+// `reply_delivery_failed` flag, and park the ticket in human_takeover.
 
 const tenantSettings = new TenantSettings({
   notificationEmail: null,
@@ -107,7 +107,7 @@ const buildLayer = (
 ) => {
   const replyDelivery = makeReplyDeliveryServiceTest(replyDeliveryFixtures);
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest(agents as never),
@@ -130,9 +130,9 @@ const buildLayer = (
   };
 };
 
-const customerReplied = (caseId: string): DomainEvent => ({
+const customerReplied = (ticketId: string): DomainEvent => ({
   type: "customer.replied",
-  caseId: caseId as never,
+  ticketId: ticketId as never,
   payload: {
     threadId: "thread-1" as never,
     messageId: "msg-1",
@@ -146,15 +146,15 @@ const customerReplied = (caseId: string): DomainEvent => ({
   },
 });
 
-const runWithCase = <A>(
+const runWithTicket = <A>(
   layer: Layer.Layer<never, never, never>,
   agentId: string,
-  program: (caseId: string) => Effect.Effect<A, unknown, never>,
+  program: (ticketId: string) => Effect.Effect<A, unknown, never>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const created = yield* repo.create({
           tenantId: TenantId("tenant-acme"),
           channel: "email",
@@ -169,7 +169,7 @@ const runWithCase = <A>(
   );
 
 describe("AgentRuntime — failed customer-reply delivery", () => {
-  it("in-loop (auto): a failed reply does NOT resolve the case — parks + flags + enqueues", async () => {
+  it("in-loop (auto): a failed reply does NOT resolve the ticket — parks + flags + enqueues", async () => {
     const { layer, handle } = buildLayer(
       LLMServiceScripted([
         {
@@ -186,14 +186,14 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
       [replyAgent({ permissionOverrides: { "conversation.reply": "allow" } })],
     );
 
-    const out = await runWithCase(layer as never, "reply-test-agent", (caseId) =>
+    const out = await runWithTicket(layer as never, "reply-test-agent", (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -210,7 +210,7 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
     expect(handle.enqueued[0]!.draftId).toBe("draft-A");
     expect(handle.enqueued[0]!.mailbox).toBe("support@shop.com");
     expect(out.entries.map((e) => e.action)).toContain(
-      "case.escalated_to_human",
+      "ticket.escalated_to_human",
     );
     // The failed tool.invoked row now carries the reason (not just ok:false),
     // so a send failure is debuggable from the audit log alone.
@@ -220,7 +220,7 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
     expect(toolInvoked?.details["error"]).toBe("ConversationSendFailed");
   });
 
-  it("does not park the case when the retryable reply draft cannot be captured", async () => {
+  it("does not park the ticket when the retryable reply draft cannot be captured", async () => {
     const { layer, handle } = buildLayer(
       LLMServiceScripted([
         {
@@ -234,14 +234,14 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
       { writeFailed: true },
     );
 
-    const out = await runWithCase(layer as never, "reply-test-agent", (caseId) =>
+    const out = await runWithTicket(layer as never, "reply-test-agent", (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -256,7 +256,7 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
     );
     expect(handle.enqueued).toHaveLength(0);
     expect(out.entries.map((e) => e.action)).not.toContain(
-      "case.escalated_to_human",
+      "ticket.escalated_to_human",
     );
   });
 
@@ -266,15 +266,15 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
       [replyAgent()],
     );
 
-    const out = await runWithCase(layer as never, "reply-test-agent", (caseId) =>
+    const out = await runWithTicket(layer as never, "reply-test-agent", (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("reply-test-agent"),
           tool: "conversation.reply",
           proposedInput: { draftId: "draft-B", bodyText: "Approved reply" },
@@ -285,11 +285,11 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
         const result = yield* runtime.handleEvent({
           type: "approval.approved",
           approvalId: approval.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("manager-1"),
         });
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -301,7 +301,7 @@ describe("AgentRuntime — failed customer-reply delivery", () => {
     expect(handle.enqueued[0]!.draftId).toBe("draft-B");
     // Escalation reason reflects the delivery failure, not generic tool failure.
     const escalation = out.entries.find(
-      (e) => e.action === "case.escalated_to_human",
+      (e) => e.action === "ticket.escalated_to_human",
     );
     expect(escalation?.details["reason"]).toBe("reply_delivery_failed");
   });

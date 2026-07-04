@@ -2,7 +2,7 @@ import { Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   ThreadId,
   ToolOutputInvalid,
@@ -23,17 +23,17 @@ import {
 } from "../src/index.js";
 
 const tenantId = TenantId("t1");
-const baseCtx = (caseId: string): ToolContext => ({
+const baseCtx = (ticketId: string): ToolContext => ({
   tenantId,
-  caseId: CaseId(caseId),
+  ticketId: TicketId(ticketId),
   agentId: AgentId("support-triage"),
   callId: "call_1",
   attemptNumber: 1,
   mailbox: "support@example.com",
 });
 
-const legacyCtx = (caseId: string): ToolContext => {
-  const { mailbox: _mailbox, ...ctx } = baseCtx(caseId);
+const legacyCtx = (ticketId: string): ToolContext => {
+  const { mailbox: _mailbox, ...ctx } = baseCtx(ticketId);
   return ctx;
 };
 
@@ -108,7 +108,7 @@ describe("conversation.fetch_thread tool", () => {
     }
   });
 
-  it("fails closed when the case is not bound to a mailbox", async () => {
+  it("fails closed when the ticket is not bound to a mailbox", async () => {
     const env = ConversationServiceTest({
       threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
     });
@@ -168,7 +168,7 @@ describe("conversation.reply tool", () => {
     expect(handle.sent[0]!.tenantId).toBe(tenantId);
   });
 
-  it("fails closed when the case is not bound to a mailbox", async () => {
+  it("fails closed when the ticket is not bound to a mailbox", async () => {
     const { layer, handle } = makeConversationServiceTest({});
     const exit = await Effect.runPromiseExit(
       Effect.provide(
@@ -329,7 +329,7 @@ describe("conversation.reply tool", () => {
 
   // Audit S9 — the recipient list is LLM output and the LLM's context
   // contains the (attacker-controlled) inbound email. Without a
-  // participant constraint, a prompt-injected email can exfiltrate case
+  // participant constraint, a prompt-injected email can exfiltrate ticket
   // content to an arbitrary address the moment replies run on auto.
   describe("recipient constraint (audit S9)", () => {
     const replyInput = (email: string) =>
@@ -497,7 +497,7 @@ describe("conversation.ask_customer tool", () => {
     expect(handle.sent[0]!.input.subject).toBe("Re: Where is my order?");
   });
 
-  it("fails closed when the case is not bound to a mailbox", async () => {
+  it("fails closed when the ticket is not bound to a mailbox", async () => {
     const { layer, handle } = makeConversationServiceTest({});
     const exit = await Effect.runPromiseExit(
       Effect.provide(
@@ -550,7 +550,7 @@ describe("conversation.ask_customer tool", () => {
     const due = result as ReadonlyArray<Record<string, unknown>>;
     expect(handle.sent).toHaveLength(1);
     expect(due).toHaveLength(1);
-    expect(due[0]!["caseId"]).toBe(CaseId("c-reminder"));
+    expect(due[0]!["ticketId"]).toBe(TicketId("c-reminder"));
     expect(due[0]!["reason"]).toBe("follow_up");
   });
 
@@ -564,7 +564,7 @@ describe("conversation.ask_customer tool", () => {
             cause: new Error("db unavailable"),
           }),
         ),
-      cancelOpenForCase: () => Effect.succeed(0),
+      cancelOpenForTicket: () => Effect.succeed(0),
       listDue: () => Effect.succeed([]),
       markFired: () => Effect.succeed(undefined as void),
     });

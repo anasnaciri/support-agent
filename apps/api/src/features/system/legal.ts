@@ -74,8 +74,8 @@ export const renderDataProcessingNoticeHtml = (): string => {
 
     <h2>Retention</h2>
     <p>
-      Resolved cases are archived after 30 days. Archived cases are retained for
-      12 months, then a daily retention sweep deletes the case, state
+      Resolved tickets are archived after 30 days. Archived tickets are retained for
+      12 months, then a daily retention sweep deletes the ticket, state
       transitions, approvals, and audit rows.
     </p>
 

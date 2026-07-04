@@ -23,15 +23,15 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 ## Critical — money and silent customer-facing failure
 
-- [x] **C1. Transient LLM errors permanently drop the event; case sticks forever.**
+- [x] **C1. Transient LLM errors permanently drop the event; ticket sticks forever.**
   `packages/services/src/agent-runtime.ts:1190-1198` `catchAllCause` converts every error (OpenRouter 503, network blip, malformed tool call) into `{type:"Failed", retryable:false}`, and `apps/worker/src/index.ts:71-83` treats that as job *success*. The `retryLimit: 5` in `apps/worker/src/workflow-queue-live.ts:49` is dead code — nothing ever throws.
   **Fix:** let retryable errors fail the job so pg-boss retries with backoff; transition to `human_takeover` on exhaustion via a dead-letter consumer. At minimum honor the existing `retryable` field in the worker.
 
 - [x] **C2. Approval resume is not idempotent — retry can double-execute a refund or customer email.**
-  `agent-runtime.ts:442-525` never checks approval status / case status and records no execution marker; pg-boss is at-least-once (crash or >900s job expiry → re-run). The dedup the code *claims* exists, doesn't:
-  - `refund.create` description (`packages/tools/src/shopify/refund.ts:39,59-67`) claims `(caseId, callId)` execution-tying — no such mechanism anywhere (`Tool.idempotencyKey` at `packages/agent-core/src/tool.ts:82` has zero consumers; `shopify-service-live.ts:854-967` ignores the key it's passed).
+  `agent-runtime.ts:442-525` never checks approval status / ticket status and records no execution marker; pg-boss is at-least-once (crash or >900s job expiry → re-run). The dedup the code *claims* exists, doesn't:
+  - `refund.create` description (`packages/tools/src/shopify/refund.ts:39,59-67`) claims `(ticketId, callId)` execution-tying — no such mechanism anywhere (`Tool.idempotencyKey` at `packages/agent-core/src/tool.ts:82` has zero consumers; `shopify-service-live.ts:854-967` ignores the key it's passed).
   - `conversation.reply` description claims draftId send-dedup — none of the three connectors implement it (`packages/providers/src/gmail-conversation-live.ts:218-279` sends unconditionally; same for Graph and IMAP/SMTP).
-  **Fix:** persist an executed-marker keyed by `(caseId, callId)` in the tool's tx, short-circuit on it; implement real draftId dedup in connectors; fix the lying tool descriptions immediately even before the mechanisms.
+  **Fix:** persist an executed-marker keyed by `(ticketId, callId)` in the tool's tx, short-circuit on it; implement real draftId dedup in connectors; fix the lying tool descriptions immediately even before the mechanisms.
 
 - [x] **C3. Duplicate webhook deliveries run full duplicate agent ticks.**
   Pub/Sub and Graph are at-least-once; `apps/api/src/gmail-webhook.ts:337` delegates dedup downstream, but downstream (`agent-runtime.ts:393-414`) only correlates by threadId and runs another complete tick. With replies on auto, each duplicate = a fresh LLM call with a fresh draftId → second reply to the customer. The Gmail cursor-expiry reseed (`gmail-webhook.ts:443-470`) can replay **50 historical messages**.
@@ -103,22 +103,22 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 ## Logic / runtime — high
 
-- [x] **L1. The case state machine doesn't exist (master-plan §10 unimplemented).**
-  `packages/db/src/case-repository-live.ts:172-242` accepts any from→to; no runtime caller passes `expectedFromStatus`. Concrete race: manager takes over mid-tick → the `final_message` branch (`agent-runtime.ts:862-885`) checks stale in-memory status and flips `human_takeover` → `resolved`. Also `case.update_status` (`packages/tools/src/case/update-status.ts`, defaultPermission `allow`) lets the LLM set any status while its description claims state-machine compliance.
+- [x] **L1. The ticket state machine doesn't exist (master-plan §10 unimplemented).**
+  `packages/db/src/ticket-repository-live.ts:172-242` accepts any from→to; no runtime caller passes `expectedFromStatus`. Concrete race: manager takes over mid-tick → the `final_message` branch (`agent-runtime.ts:862-885`) checks stale in-memory status and flips `human_takeover` → `resolved`. Also `ticket.update_status` (`packages/tools/src/ticket/update-status.ts`, defaultPermission `allow`) lets the LLM set any status while its description claims state-machine compliance.
   **Fix:** allowed-transition map inside `transitionStatus` (terminal states exit only via explicit resume paths); runtime passes `expectedFromStatus` and treats conflict as re-read-and-re-park.
 
-- [x] **L2. Per-case serialization split across two queue keys.**
-  `packages/services/src/workflow-queue.ts:58-79`: `message.received` keys `thread:{tenant}:{threadId}`; approvals/timers/resume key `case:{caseId}` → `key_strict_fifo` doesn't serialize them for the same case. Race: customer replies at the moment the manager approves → approval tick executes + resolves while the message tick falls through guard 2.9 (no pending row, by design, `agent-runtime.ts:684-705`) and runs a full loop → double reply.
-  **Fix:** resolve threadId → caseId at enqueue and key everything by case, or per-case advisory lock in the runtime.
+- [x] **L2. Per-ticket serialization split across two queue keys.**
+  `packages/services/src/workflow-queue.ts:58-79`: `message.received` keys `thread:{tenant}:{threadId}`; approvals/timers/resume key `ticket:{ticketId}` → `key_strict_fifo` doesn't serialize them for the same ticket. Race: customer replies at the moment the manager approves → approval tick executes + resolves while the message tick falls through guard 2.9 (no pending row, by design, `agent-runtime.ts:684-705`) and runs a full loop → double reply.
+  **Fix:** resolve threadId → ticketId at enqueue and key everything by ticket, or per-ticket advisory lock in the runtime.
 
 - [x] **L3. No transactional outbox (master-plan §4 unimplemented) — events can be lost forever.**
-  - Timers: `packages/db/src/timer-service-live.ts:91-122` marks `firedAt` and commits; `apps/worker/src/timer-sweep-schedule.ts:57-73` enqueues afterwards; crash/enqueue-failure between = case sleeps forever (sweep's `catchAllCause` at :100 swallows).
-  - Approvals: decided-but-publish-failed (`apps/api/src/approval-endpoints.ts:134-144`) leaves the case parked in `waiting_for_approval` with no pending row — approved tool never executes, nothing surfaces it.
-  **Fix:** real outbox (event row in the same tx; relay publishes + marks delivered), or at minimum mark `firedAt` only after successful enqueue (duplicate fire is safe under case-key FIFO; lost fire is not).
+  - Timers: `packages/db/src/timer-service-live.ts:91-122` marks `firedAt` and commits; `apps/worker/src/timer-sweep-schedule.ts:57-73` enqueues afterwards; crash/enqueue-failure between = ticket sleeps forever (sweep's `catchAllCause` at :100 swallows).
+  - Approvals: decided-but-publish-failed (`apps/api/src/approval-endpoints.ts:134-144`) leaves the ticket parked in `waiting_for_approval` with no pending row — approved tool never executes, nothing surfaces it.
+  **Fix:** real outbox (event row in the same tx; relay publishes + marks delivered), or at minimum mark `firedAt` only after successful enqueue (duplicate fire is safe under ticket-key FIFO; lost fire is not).
 
-- [x] **L4. Several `HumanTakeoverRequired` paths change nothing — invisible stuck cases.**
+- [x] **L4. Several `HumanTakeoverRequired` paths change nothing — invisible stuck tickets.**
   `max_turns_exceeded` (`agent-runtime.ts:1186-1189`), `wait_for_customer`/`escalate_supplier` (:899-911), and **approved-tool-failed** (:495-504) return a result the worker only logs (`apps/worker/src/index.ts:74-83`).
-  **Fix:** every such path transitions the case to `human_takeover` (in tx, with audit) before returning — as the BYOK-credential path already does (:792-828).
+  **Fix:** every such path transitions the ticket to `human_takeover` (in tx, with audit) before returning — as the BYOK-credential path already does (:792-828).
 
 - [x] **L5. Connectors go dark silently on refresh/renewal failure — no alerting.**
   `apps/worker/src/graph-subscription-renewal.ts:112-118,140-148`, `gmail-watch-renewal-schedule.ts:101-108`, `imap-poll.ts:112-118`: revoked/missing refresh token → `console.warn` only. Outlook is a hard outage: subscription lapses (~3 days), Graph stops delivering, no replayable cursor → inbound customer mail dropped indefinitely, nobody notified. (Gmail self-heals — cursor not advanced on failure.)
@@ -127,7 +127,7 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 ## Logic / runtime — medium
 
 - [x] **L6. The `ask` path isn't atomic; park transition has no audit row.**
-  `agent-runtime.ts:1052-1067`: `approvals.create` and `transitionStatus(waiting_for_approval)` are two separate txs (crash between = pending approval on an un-parked case → agent keeps acting, second approval) and no companion audit row (§4 near-miss). Contrast `packages/db/src/dashboard-writes.ts:61-121` which does it correctly.
+  `agent-runtime.ts:1052-1067`: `approvals.create` and `transitionStatus(waiting_for_approval)` are two separate txs (crash between = pending approval on an un-parked ticket → agent keeps acting, second approval) and no companion audit row (§4 near-miss). Contrast `packages/db/src/dashboard-writes.ts:61-121` which does it correctly.
   **Fix:** one `tx.run` for create + park + audit.
 
 - [x] **L7. Approval expiry is written but never enforced — `expired` status unreachable.**
@@ -140,13 +140,13 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 - [x] **L9. Refund threshold has no aggregation — N small refunds bypass the cap.**
   `packages/services/src/permission-service-live.ts:88-129` evaluates each `refund.create` in isolation; three $40 refunds auto-pass a $50 askAbove (over denyAbove in total).
-  **Fix:** sum prior successful `refund.create` amounts for the case/order into the compared amount.
+  **Fix:** sum prior successful `refund.create` amounts for the ticket/order into the compared amount.
 
 - [x] **L10. No tool-input runtime validation.**
   `agent-runtime.ts:1118-1121` passes `decision.input` straight to `execute`; `llm-service-live.ts:195` wraps schemas with `jsonSchema()` without a validate fn; `defineTool` is identity (`define-tool.ts:20`).
   **Fix:** `Schema.decodeUnknown(tool.inputSchema)` before the permission check; on failure push a structured `invalid_input` tool-result so the model self-corrects.
 
-- [x] **L11. Poison job blocks its case/thread FIFO key for up to 7 days; no dead-letter queue.**
+- [x] **L11. Poison job blocks its ticket/thread FIFO key for up to 7 days; no dead-letter queue.**
   `key_strict_fifo` keeps `failed` rows in the partial unique index until deletion (default `deleteAfterSeconds` 604800); `workflow-queue-live.ts:44-60` configures no `deadLetter`.
   **Fix:** configure `deadLetter` on `workflow.events` + alert on it; shorten failed-row retention.
 
@@ -156,10 +156,10 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 ## Logic / runtime — low
 
-- [x] **L13. `decision.type === "handoff"` path skips the handoff allowlist** (`agent-runtime.ts:888-897` vs the checked pseudo-tool path :955-985); latent (LLM layer never emits it today) and an un-audited `cases.update` outside any tx.
+- [x] **L13. `decision.type === "handoff"` path skips the handoff allowlist** (`agent-runtime.ts:888-897` vs the checked pseudo-tool path :955-985); latent (LLM layer never emits it today) and an un-audited `tickets.update` outside any tx.
 - [x] **L14. Only the first of parallel LLM tool calls is honored** — `llm-service-live.ts:410` takes `toolCalls[0]`, rest silently dropped (no tool-result, no audit). Declare single-tool choice to the provider or handle the array.
 - [x] **L15. `tool.timeout` / `tool.retrySchedule` declared but never consumed** (`packages/agent-core/src/tool.ts:83-84`) — a hung connector call holds the tick *and its DB tx* (`agent-runtime.ts:1122`); job can pass `expireInSeconds` → concurrent re-delivery (feeds C2).
-- [x] **L16. Prod with no conversation connector env silently falls back to `ConversationServiceTest`** (`apps/api/src/bootstrap.ts:397-406`) — replies "succeed" in-memory, case resolves, customer gets nothing. Hard-fail in prod like the LLM-key check at :213-217.
+- [x] **L16. Prod with no conversation connector env silently falls back to `ConversationServiceTest`** (`apps/api/src/bootstrap.ts:397-406`) — replies "succeed" in-memory, ticket resolves, customer gets nothing. Hard-fail in prod like the LLM-key check at :213-217.
 - [x] **L17. Tool-set `human_takeover` clobbered by final_message auto-resolve** — known/accepted; same root cause as L1 (no matrix forbids `resolved` over it).
 
 ---
@@ -170,20 +170,20 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
   `packages/db/src/schema.ts:247` partial unique covers only `provider='shopify'`; two tenants can hold active rows for the same mailbox. `apps/api/src/gmail-webhook.ts:164-188` selects with `.limit(1)` and **no orderBy** → which tenant receives the customer's email (full PII) is plan-dependent.
   **Fix:** partial unique index `(provider, shop_domain) WHERE provider IN ('gmail','outlook','imap') AND status='active'` + deterministic orderBy backstop.
 
-- [x] **D2. (HIGH) Cases have no provider/connector stamp; router resolves per tenant, not per thread.**
-  `schema.ts:70` bare `threadId`; `packages/providers/src/conversation-router-live.ts:45-66` picks "most recently installed active connector" tenant-wide → connecting Outlook silently breaks every open Gmail case (fetch/reply dispatched to Graph with a Gmail threadId → `ThreadNotFound`; approved replies fail post-approval). Also theoretical cross-provider threadId collision in `findByThreadId` (`case-repository-live.ts:127-143`).
-  **Fix:** stamp provider/connection-id on the case at create (known in the `message.received` path), route on it, include it in the thread lookup key.
+- [x] **D2. (HIGH) Tickets have no provider/connector stamp; router resolves per tenant, not per thread.**
+  `schema.ts:70` bare `threadId`; `packages/providers/src/conversation-router-live.ts:45-66` picks "most recently installed active connector" tenant-wide → connecting Outlook silently breaks every open Gmail ticket (fetch/reply dispatched to Graph with a Gmail threadId → `ThreadNotFound`; approved replies fail post-approval). Also theoretical cross-provider threadId collision in `findByThreadId` (`ticket-repository-live.ts:127-143`).
+  **Fix:** stamp provider/connection-id on the ticket at create (known in the `message.received` path), route on it, include it in the thread lookup key.
 
 - [x] **D3. (HIGH) `patchMetadata`'s SELECT FOR UPDATE is a no-op for every current caller.**
   `packages/db/src/connector-credential-store-live.ts:302-365`: `useDb` only yields a tx inside `withTransaction`; no caller wraps (`gmail-webhook.ts:493-505` historyId advance, `apps/worker/src/imap-poll.ts:148-162` UID cursor, graph metadata). Concurrent pushes interleave read-merge-write → regressed historyId / lost keys → duplicate ticks or a stalled cursor.
   **Fix:** open the transaction inside `patchMetadata` itself, as `transitionStatus` already does.
 
-- [x] **D4. No index/unique on `cases(tenant_id, thread_id)` — hottest lookup seq-scans.**
+- [x] **D4. No index/unique on `tickets(tenant_id, thread_id)` — hottest lookup seq-scans.**
   `findByThreadId` runs per inbound email (`agent-runtime.ts:399`); `schema.ts:86-105` has no covering index. Uniqueness rests solely on queue FIFO (the Gmail unread backfill at `gmail-webhook.ts:286-322` already runs alongside push handling).
   **Fix:** partial unique index `(tenant_id, thread_id) WHERE thread_id IS NOT NULL`.
 
 - [x] **D5. Missing indexes on other hot paths.**
-  `audit_log` has only `(case_id, id)` — `auditList` (`dashboard-reads.ts:534-561`) and `usageRows` (:707-728) seq-scan the fastest-growing table; add `(tenant_id, id DESC)` and/or `(tenant_id, action, occurred_at)`. `approvals.case_id` unindexed (`caseDetail`, takeover's pending-cancel scan).
+  `audit_log` has only `(ticket_id, id)` — `auditList` (`dashboard-reads.ts:534-561`) and `usageRows` (:707-728) seq-scan the fastest-growing table; add `(tenant_id, id DESC)` and/or `(tenant_id, action, occurred_at)`. `approvals.ticket_id` unindexed (`ticketDetail`, takeover's pending-cancel scan).
 
 - [x] **D6. Tool side effects (external HTTP) execute inside the SQL transaction.**
   `agent-runtime.ts:477-494` and :1118-1143: `tx.run` wraps the Gmail/Graph/Shopify network call with the audit insert — pool connection (max 10) held across provider latency, and a commit failure *after* the email sent erases the audit record of an email that did go out.
@@ -197,13 +197,13 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
   `apps/api/src/account-deletion.ts:43,51-53` `REVOCABLE_GRANT_PROVIDERS` lacks `outlook` (mirrored in `apps/worker/src/account-cleanup.ts:31-37`); Microsoft refresh token stays valid ~90 days post-deletion.
   **Fix:** add outlook revocation; note IMAP passwords (nothing to revoke) in the deletion email/runbook.
 
-- [x] **D9. Bare-id repo methods (defense-in-depth).** `CaseRepository.getById/update/transitionStatus`, `ApprovalService.getById/approve/reject`, `AuditLogService.forCase`, `TimerService.schedule/cancelOpenForCase` take no tenantId. No exploitable caller today (all traced), but one future user-controlled `caseId` into `CaseRepository.update` is a cross-tenant write. Require `tenantId` in the Tag signatures.
+- [x] **D9. Bare-id repo methods (defense-in-depth).** `TicketRepository.getById/update/transitionStatus`, `ApprovalService.getById/approve/reject`, `AuditLogService.forTicket`, `TimerService.schedule/cancelOpenForTicket` take no tenantId. No exploitable caller today (all traced), but one future user-controlled `ticketId` into `TicketRepository.update` is a cross-tenant write. Require `tenantId` in the Tag signatures.
 
 - [x] **D10. `tenantAgentOverrides.clearModel`/`clearSystemPrompt` race** (`tenant-agent-overrides-live.ts:89-113`): UPDATE + conditional DELETE are two autocommit statements and the DELETE predicate omits the just-cleared column — a concurrent `setModel` can get its row deleted. One tx + include the column.
 
-- [x] **D11. Smaller items:** `markConnected` two-step shop transfer not in a tx (`shopify-app-provisioning-live.ts:150-179`, recoverable); `todaySummary` uses server-local midnight not tenant TZ (`dashboard-reads.ts:167-168`); pool sizing implicit (~40 potential connections api+worker, fine today, size explicitly before raising work concurrency); BYOK second-active-provider insert surfaces as raw `ConnectorStoreDbError`; unvalidated JSONB casts (`cases.context`, connector `metadata`, `toolPermissions`) vs the exemplary `tenants.settings` decoder; retention sweep skips `failed`/`human_takeover` cases (documented) and pg-boss archives (see D7).
+- [x] **D11. Smaller items:** `markConnected` two-step shop transfer not in a tx (`shopify-app-provisioning-live.ts:150-179`, recoverable); `todaySummary` uses server-local midnight not tenant TZ (`dashboard-reads.ts:167-168`); pool sizing implicit (~40 potential connections api+worker, fine today, size explicitly before raising work concurrency); BYOK second-active-provider insert surfaces as raw `ConnectorStoreDbError`; unvalidated JSONB casts (`tickets.context`, connector `metadata`, `toolPermissions`) vs the exemplary `tenants.settings` decoder; retention sweep skips `failed`/`human_takeover` tickets (documented) and pg-boss archives (see D7).
 
-- [x] **D12. `caseEvents` inner query missing redundant tenant filter** (`packages/db/src/dashboard-reads.ts:405-416`) — not exploitable (caseId pre-verified), but every sibling query double-scopes; add for consistency.
+- [x] **D12. `ticketEvents` inner query missing redundant tenant filter** (`packages/db/src/dashboard-reads.ts:405-416`) — not exploitable (ticketId pre-verified), but every sibling query double-scopes; add for consistency.
 
 ---
 
@@ -212,14 +212,14 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 ### High
 
 - [x] **U1. Session expiry destroys work and kills polling silently.**
-  `apps/dashboard/lib/session.ts:82-87` never uses the sealed `refreshToken`; WorkOS access-token TTL can be ~5 min. A manager loses a 10-minute approval-reply edit to a `redirect("/sign-up?returnTo=…")` on submit; pollers degrade to silent 401s (`CaseLiveBoundary.tsx:34-36` amber dot forever; `CasesSidebar.tsx:71-72`).
+  `apps/dashboard/lib/session.ts:82-87` never uses the sealed `refreshToken`; WorkOS access-token TTL can be ~5 min. A manager loses a 10-minute approval-reply edit to a `redirect("/sign-up?returnTo=…")` on submit; pollers degrade to silent 401s (`TicketLiveBoundary.tsx:34-36` amber dot forever; `TicketsSidebar.tsx:71-72`).
   **Fix:** implement refresh via the sealed refreshToken (re-seal + Set-Cookie in a route handler/action); have pollers detect 401 → hard-navigate to sign-in; verify the WorkOS TTL configured for this env.
 
 - [x] **U2. Destructive one-click actions with zero confirmation.**
   Disconnect connector (`settings/integrations/page.tsx:204-210` — kills the production mailbox), delete knowledge doc (`settings/knowledge/page.tsx:109-114` — 8px from "Edit"), reject approval (`ApprovalCard.tsx:264-270` — escalates to takeover). The branded `AlertDialog` exists and is used exactly once (PermissionToggle) — reuse it for these three.
 
 - [x] **U3. No pending/disabled state on most server-action forms.**
-  Bare `<form action>` + static buttons: Approve/Reject (`ApprovalCard.tsx:229,251,267`; `approvals/[id]/page.tsx:123-145`), Take over / Hand back (`cases/[id]/page.tsx:436-458`), **IMAP "Verify & connect"** (`connect/imap/page.tsx:212` — 10–30s live check, no spinner), knowledge save, refund-policy save, LLM connect, all admin forms. Double-submits everywhere.
+  Bare `<form action>` + static buttons: Approve/Reject (`ApprovalCard.tsx:229,251,267`; `approvals/[id]/page.tsx:123-145`), Take over / Hand back (`tickets/[id]/page.tsx:436-458`), **IMAP "Verify & connect"** (`connect/imap/page.tsx:212` — 10–30s live check, no spinner), knowledge save, refund-policy save, LLM connect, all admin forms. Double-submits everywhere.
   **Fix:** shared `SubmitButton` using `useFormStatus`.
 
 - [x] **U4. Form input loss on validation failure (PRG, no state).**
@@ -229,17 +229,17 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 - [x] **U5. Outlook/IMAP disconnect shows no banner.** Actions redirect with `?outlook=disconnected` / `?imap=disconnected` (`settings/integrations/actions.ts:30-38`) but the page only reads shopify/gmail/sheets/connected params (`integrations/page.tsx:46-63`). Generalize to one `?disconnected=<provider>` param.
 - [x] **U6. OAuth denial/cancel is a dead end.** Only success params render (`integrations/page.tsx:129-133`); cancel Google consent → back on the page, connector "missing", zero explanation. Agree an `?error=<provider>:<code>` contract with the api callback + render a warning Alert.
-- [x] **U7. No `loading.tsx` in either app.** Case detail blocks on `caseDetail` + a live Shopify call (`cases/[id]/page.tsx:325-328`) before painting. Add route-level loading for `/cases/[id]`, `/approvals`, `/settings/*` (Skeleton component already exists).
-- [x] **U8. Case-switcher sidebar goes stale after actions.** `CasesSidebar.tsx` is client state; `router.refresh()`/`revalidatePath` re-render server components only — the case you just took over keeps its old badge. Refetch page 1 on pathname change or subscribe to the poll.
+- [x] **U7. No `loading.tsx` in either app.** Ticket detail blocks on `ticketDetail` + a live Shopify call (`tickets/[id]/page.tsx:325-328`) before painting. Add route-level loading for `/tickets/[id]`, `/approvals`, `/settings/*` (Skeleton component already exists).
+- [x] **U8. Ticket-switcher sidebar goes stale after actions.** `TicketsSidebar.tsx` is client state; `router.refresh()`/`revalidatePath` re-render server components only — the ticket you just took over keeps its old badge. Refetch page 1 on pathname change or subscribe to the poll.
 - [x] **U9. Prod error boundary is useless + dead redirect.** `app/error.tsx:18-37` branches on `error.name === "NoTenantAccess"` / renders `error.message` — Next.js redacts both in production (digest boilerplate; the `/no-access` redirect can never fire). The class is dead code anyway (`api-client.ts:75-87`). Drop it; give the boundary actionable copy + retry.
 - [x] **U10. Refund-policy save can silently zero stored thresholds.** `refund-policy/actions.ts:48-61` coalesces unparseable thresholds to `?? 0` in non-threshold modes — a stale tab overwrites saved thresholds with 0/0 and the UI says "saved". Omit the fields on parse failure instead.
-- [x] **U11. Live-updates failure state is invisible.** `CaseLiveBoundary.tsx:60-89` — permanent amber dot, aria-only explanation. After N consecutive failures show "Updates paused — reload".
+- [x] **U11. Live-updates failure state is invisible.** `TicketLiveBoundary.tsx:60-89` — permanent amber dot, aria-only explanation. After N consecutive failures show "Updates paused — reload".
 
 ### Low
 
-- [x] **U12. Approval receipt pages dead-end** (`approval-endpoints.ts:157-204`) — good states (approved/rejected/already-decided/expired) but no link into the dashboard case (the code comment says these become redirects — the dashboard exists now), and "ask to re-send" has no re-send mechanism.
+- [x] **U12. Approval receipt pages dead-end** (`approval-endpoints.ts:157-204`) — good states (approved/rejected/already-decided/expired) but no link into the dashboard ticket (the code comment says these become redirects — the dashboard exists now), and "ask to re-send" has no re-send mechanism.
 - [x] **U13. MultiSelect keyboard support** (`components/ui/multi-select.tsx`): no Escape-to-close, no arrow nav, mousedown-outside-only close.
-- [x] **U14. "Couldn't load cases" has no Retry button** (`CasesSidebar.tsx`); watch `text-[10px]` badge legibility (`CasesSidebar.tsx:224`).
+- [x] **U14. "Couldn't load tickets" has no Retry button** (`TicketsSidebar.tsx`); watch `text-[10px]` badge legibility (`TicketsSidebar.tsx:224`).
 - [ ] **U15. Next.js deprecation: the `middleware` file convention is deprecated — rename to `proxy`.**
   Build warns `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` Affects `apps/dashboard/middleware.ts` (the pathname-passthrough that stamps `x-pathname` for `returnTo` — not auth). Rename the file to `proxy.ts` and the export from `middleware` to `proxy` per the Next.js 16 convention; verify the OpenNext/Cloudflare build still picks it up.
 
@@ -255,7 +255,7 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 - The 23557d8 revoked-row-shadows-active class fixed consistently across every lookup (`status='active'` filters + active-first ordering).
 - No `dangerouslySetInnerHTML` anywhere; customer email renders as escaped text; open-redirect hygiene at all five entry points, with tests.
 - Approval decision layer: `SELECT … FOR UPDATE` + CAS, lost race → honest `already_decided` on both surfaces; frozen `approvedInput` snapshot executes (never re-derived).
-- `transitionStatus`, `takeOverCase`/`resumeCase`, `redactShop` are model transactional implementations; `withTransaction` distinguishes rollback from commit failure correctly.
+- `transitionStatus`, `takeOverTicket`/`resumeTicket`, `redactShop` are model transactional implementations; `withTransaction` distinguishes rollback from commit failure correctly.
 - `key_strict_fifo` real in pg-boss 12.18.2; cron singletons can't double-fire across replicas; Microsoft rotated refresh token persisted on every refresh; migrations strictly additive, all timestamps `timestamptz`.
 - Dashboard: no `withAuth({ensureSignedIn:true})` regressions; CSRF safe by construction (server actions); no secrets in client bundles; legalAcceptedAt flow sound; typed-name delete confirmations re-checked server-side; contrast ≥ AA; race-aware "already decided" banners.
 
@@ -263,9 +263,9 @@ Full five-area audit (API security, connectors/providers, runtime/worker logic, 
 
 ## Suggested fix order
 
-1. **C1 → C2 → C3** — the retry/idempotency trio (silent stuck cases, double refunds, duplicate replies).
+1. **C1 → C2 → C3** — the retry/idempotency trio (silent stuck tickets, double refunds, duplicate replies).
 2. **S2 + S3 + S6** — approval GET mutation + token hardening + log redaction (one journey: a scanner or log reader approving refunds).
 3. **S4, S1** — Graph fail-closed; SSRF IP pinning.
-4. **D1, D2, D3** — mailbox uniqueness, provider stamp on cases, patchMetadata tx (multi-connector tenants are exactly what this branch ships).
+4. **D1, D2, D3** — mailbox uniqueness, provider stamp on tickets, patchMetadata tx (multi-connector tenants are exactly what this branch ships).
 5. **L1, L3** — implement the transition matrix and outbox the master plan already promises (L2, L4–L8 follow naturally).
 6. **U1 + U3/U4, then U2** — session refresh + form pending/state preservation; confirmations on destructive actions.

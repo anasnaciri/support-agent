@@ -10,16 +10,16 @@ import { replyDeliveries } from "./schema.js";
 // through these functions.
 //
 // Lifecycle: `pending` (a send failed, awaiting retry) → `sent` (delivered, the
-// case auto-resolves) | `abandoned` (attempt cap tripped, the case parks in
+// ticket auto-resolves) | `abandoned` (attempt cap tripped, the ticket parks in
 // human_takeover). `draft` holds the verbatim tool input so a retry re-sends the
 // SAME email without re-running the LLM. At most one `pending` row per
-// (case, draftId) — a re-run of the same failed send bumps the existing row.
+// (ticket, draftId) — a re-run of the same failed send bumps the existing row.
 
 const LAST_ERROR_MAX = 500;
 
 export interface EnqueueReplyDeliveryInput {
   readonly tenantId: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly agentId: string;
   /** The send tool to replay: `conversation.reply` | `conversation.ask_customer`. */
   readonly tool: string;
@@ -38,7 +38,7 @@ export interface EnqueueReplyDeliveryInput {
 export interface DueReplyDelivery {
   readonly id: string;
   readonly tenantId: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly agentId: string;
   readonly tool: string;
   readonly mailbox: string | null;
@@ -49,7 +49,7 @@ export interface DueReplyDelivery {
 }
 
 /** The shape the dashboard reads for surfacing + the manual retry button. */
-export interface ReplyDeliveryForCase extends DueReplyDelivery {
+export interface ReplyDeliveryForTicket extends DueReplyDelivery {
   readonly status: string;
   readonly lastError: string | null;
   readonly nextAttemptAt: string;
@@ -59,7 +59,7 @@ export interface ReplyDeliveryForCase extends DueReplyDelivery {
 
 /**
  * Record a failed customer-reply send. If a `pending` row already exists for the
- * same (case, draftId) — a re-run of the same failed draft — bump its attempt
+ * same (ticket, draftId) — a re-run of the same failed draft — bump its attempt
  * counter and reschedule instead of inserting a duplicate. Returns the row id.
  */
 export const enqueueReplyDelivery = async (
@@ -71,7 +71,7 @@ export const enqueueReplyDelivery = async (
     .from(replyDeliveries)
     .where(
       and(
-        eq(replyDeliveries.caseId, input.caseId),
+        eq(replyDeliveries.ticketId, input.ticketId),
         eq(replyDeliveries.draftId, input.draftId),
         eq(replyDeliveries.status, "pending"),
       ),
@@ -94,7 +94,7 @@ export const enqueueReplyDelivery = async (
     .insert(replyDeliveries)
     .values({
       tenantId: input.tenantId,
-      caseId: input.caseId,
+      ticketId: input.ticketId,
       agentId: input.agentId,
       tool: input.tool,
       mailbox: input.mailbox,
@@ -115,7 +115,7 @@ export const enqueueReplyDelivery = async (
 const toDue = (r: {
   id: string;
   tenantId: string;
-  caseId: string;
+  ticketId: string;
   agentId: string;
   tool: string;
   mailbox: string | null;
@@ -126,7 +126,7 @@ const toDue = (r: {
 }): DueReplyDelivery => ({
   id: r.id,
   tenantId: r.tenantId,
-  caseId: r.caseId,
+  ticketId: r.ticketId,
   agentId: r.agentId,
   tool: r.tool,
   mailbox: r.mailbox,
@@ -146,7 +146,7 @@ export const listDueReplyDeliveries = async (
     .select({
       id: replyDeliveries.id,
       tenantId: replyDeliveries.tenantId,
-      caseId: replyDeliveries.caseId,
+      ticketId: replyDeliveries.ticketId,
       agentId: replyDeliveries.agentId,
       tool: replyDeliveries.tool,
       mailbox: replyDeliveries.mailbox,
@@ -199,7 +199,7 @@ export const recordReplyDeliveryFailure = async (
     .where(eq(replyDeliveries.id, id));
 };
 
-/** Give up: park the row at the attempt cap (the case stays in human_takeover). */
+/** Give up: park the row at the attempt cap (the ticket stays in human_takeover). */
 export const abandonReplyDelivery = async (
   db: DrizzleDb,
   id: string,
@@ -217,20 +217,20 @@ export const abandonReplyDelivery = async (
 };
 
 /**
- * The case's most recent UNSENT delivery (pending or abandoned) — what the
+ * The ticket's most recent UNSENT delivery (pending or abandoned) — what the
  * dashboard surfaces ("delivery failed" + last error) and the retry button acts
- * on. Returns null when the case has no failed delivery (or it already sent).
+ * on. Returns null when the ticket has no failed delivery (or it already sent).
  */
-export const getActiveReplyDeliveryForCase = async (
+export const getActiveReplyDeliveryForTicket = async (
   db: DrizzleDb,
-  caseId: string,
-): Promise<ReplyDeliveryForCase | null> => {
+  ticketId: string,
+): Promise<ReplyDeliveryForTicket | null> => {
   const rows = await db
     .select()
     .from(replyDeliveries)
     .where(
       and(
-        eq(replyDeliveries.caseId, caseId),
+        eq(replyDeliveries.ticketId, ticketId),
         ne(replyDeliveries.status, "sent"),
       ),
     )
@@ -249,16 +249,16 @@ export const getActiveReplyDeliveryForCase = async (
 };
 
 /**
- * Manual "Retry sending email": revive the case's failed delivery — flip it back
+ * Manual "Retry sending email": revive the ticket's failed delivery — flip it back
  * to `pending`, due now, with a fresh attempt budget so the merchant's explicit
- * retry isn't immediately abandoned. Returns the row id, or null if the case has
+ * retry isn't immediately abandoned. Returns the row id, or null if the ticket has
  * no failed delivery to retry.
  */
 export const requeueReplyDeliveryNow = async (
   db: DrizzleDb,
-  caseId: string,
+  ticketId: string,
 ): Promise<{ readonly id: string } | null> => {
-  const active = await getActiveReplyDeliveryForCase(db, caseId);
+  const active = await getActiveReplyDeliveryForTicket(db, ticketId);
   if (!active) return null;
   await db
     .update(replyDeliveries)

@@ -2,7 +2,7 @@ export * from "./ids.js";
 export * from "./payloads.js";
 export * from "./photo-signals.js";
 export * from "./image-hash.js";
-export * from "./case.js";
+export * from "./ticket.js";
 export * from "./agent.js";
 export * from "./tool.js";
 export * from "./approval.js";

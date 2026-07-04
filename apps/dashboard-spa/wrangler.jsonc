@@ -9,7 +9,7 @@
   // Pure static SPA — no Worker script (no `main`). Cloudflare serves the Vite
   // `dist/` output directly; `single-page-application` returns index.html (200)
   // for any unmatched path so the client router (TanStack Router) can take over
-  // deep links like /cases/:id. Real assets (/assets/*.js) still match + serve.
+  // deep links like /tickets/:id. Real assets (/assets/*.js) still match + serve.
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"

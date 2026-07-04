@@ -2,7 +2,7 @@ import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   SheetsAuthMissing,
   SheetsNotFound,
   TenantId,
@@ -17,9 +17,9 @@ import {
 } from "../src/index.js";
 
 const tenantId = TenantId("t1");
-const baseCtx = (caseId: string): ToolContext => ({
+const baseCtx = (ticketId: string): ToolContext => ({
   tenantId,
-  caseId: CaseId(caseId),
+  ticketId: TicketId(ticketId),
   agentId: AgentId("missing-package-agent"),
   callId: "call_1",
   attemptNumber: 1,
@@ -34,7 +34,7 @@ describe("supplier.add_sheet_row tool", () => {
           {
             spreadsheetId: "sheet-1",
             range: "Escalations!A:E",
-            values: ["case-42", "missing package", "urgent", "warehouse", null],
+            values: ["ticket-42", "missing package", "urgent", "warehouse", null],
           } as never,
           baseCtx("c-supplier-1"),
         ) as Effect.Effect<unknown, unknown, never>,
@@ -124,7 +124,7 @@ describe("supplier.add_sheet_row tool", () => {
 
   it("read_sheet_columns returns the sheet's header cells", async () => {
     const env = SheetsServiceTest({
-      headers: { "sheet-1": ["Case ID", "Email", "Order"] },
+      headers: { "sheet-1": ["Ticket ID", "Email", "Order"] },
     });
     const exit = await Effect.runPromiseExit(
       Effect.provide(
@@ -141,7 +141,7 @@ describe("supplier.add_sheet_row tool", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     if (!Exit.isSuccess(exit)) return;
     const result = exit.value as { columns: ReadonlyArray<string> };
-    expect(result.columns).toEqual(["Case ID", "Email", "Order"]);
+    expect(result.columns).toEqual(["Ticket ID", "Email", "Order"]);
   });
 
   it("read_sheet_columns maps SheetsAuthMissing to ToolOutputInvalid", async () => {

@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { CaseId, TenantId } from "@support-agent/agent-core";
+import type { TicketId, TenantId } from "@support-agent/agent-core";
 
 // ============================================================
 // MerchantNotificationService
@@ -23,9 +23,9 @@ import type { CaseId, TenantId } from "@support-agent/agent-core";
 export type MerchantNotificationKind =
   /** Agent-initiated heads-up via the `merchant.notify` tool. */
   | "agent_note"
-  /** A tool call parked the case in `waiting_for_approval`. */
+  /** A tool call parked the ticket in `waiting_for_approval`. */
   | "approval_requested"
-  /** The case was escalated to `human_takeover`. */
+  /** The ticket was escalated to `human_takeover`. */
   | "human_takeover"
   /** A connector's health flipped ok → broken. */
   | "connector_broken"
@@ -38,8 +38,8 @@ export interface MerchantNotification {
   readonly title: string;
   /** Plain-text body. May contain URLs; channel impls must NOT interpret markup. */
   readonly body: string;
-  /** Present when the notification is about a specific case. */
-  readonly caseId?: CaseId;
+  /** Present when the notification is about a specific ticket. */
+  readonly ticketId?: TicketId;
 }
 
 export type MerchantNotificationChannel = "telegram" | "email";
@@ -88,7 +88,7 @@ export class MerchantNotificationService extends Context.Tag(
 // (channel impls don't interpret markup).
 
 export interface ApprovalRequestedNotificationInput {
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly toolName: string;
   readonly draftSubject: string | null;
   readonly draftPreview: string;
@@ -111,7 +111,7 @@ export const approvalRequestedNotification = (
     `Approve: ${input.approveUrl}`,
     `Reject:  ${input.rejectUrl}`,
   ].join("\n"),
-  caseId: input.caseId,
+  ticketId: input.ticketId,
 });
 
 /**
@@ -121,9 +121,9 @@ export const approvalRequestedNotification = (
  */
 const HUMAN_TAKEOVER_REASON_COPY: Readonly<Record<string, string>> = {
   max_turns_exceeded:
-    "The agent hit its work limit before it could finish this case.",
+    "The agent hit its work limit before it could finish this ticket.",
   approval_expired:
-    "An approval request expired before anyone decided, so the case stopped.",
+    "An approval request expired before anyone decided, so the ticket stopped.",
   approval_input_invalid:
     "An edited approval no longer matched what the action expects, so nothing was sent.",
   approval_denied_by_policy:
@@ -131,7 +131,7 @@ const HUMAN_TAKEOVER_REASON_COPY: Readonly<Record<string, string>> = {
   approved_tool_failed:
     "The action you approved failed while executing — nothing further was sent.",
   "approval rejected":
-    "You rejected the agent's draft, so the case is now with you.",
+    "You rejected the agent's draft, so the ticket is now with you.",
   llm_credential_missing:
     "Your AI provider key is missing — reconnect it under Settings so the agent can work.",
   llm_credential_revoked:
@@ -141,7 +141,7 @@ const HUMAN_TAKEOVER_REASON_COPY: Readonly<Record<string, string>> = {
 };
 
 export interface HumanTakeoverNotificationInput {
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly subject: string | null;
   readonly reason: string;
 }
@@ -154,13 +154,13 @@ export const humanTakeoverNotification = (
     `The agent stopped and needs a person to continue (${input.reason}).`;
   return {
     kind: "human_takeover",
-    title: "A case needs your attention",
+    title: "A ticket needs your attention",
     body: [
-      ...(input.subject ? [`Case: ${input.subject}`, ``] : []),
+      ...(input.subject ? [`Ticket: ${input.subject}`, ``] : []),
       friendly,
       `Open the dashboard to take it from here.`,
     ].join("\n"),
-    caseId: input.caseId,
+    ticketId: input.ticketId,
   };
 };
 
@@ -184,7 +184,7 @@ export const llmCreditsLowNotification = (
   body: [
     `Your ${input.provider} balance is down to $${input.remainingUsd.toFixed(2)} (alert threshold $${input.thresholdUsd}).`,
     ``,
-    `The agent stops handling customer cases once credits run out — top up your ${input.provider} account to keep it running.`,
+    `The agent stops handling customer tickets once credits run out — top up your ${input.provider} account to keep it running.`,
   ].join("\n"),
 });
 

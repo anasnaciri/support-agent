@@ -167,13 +167,13 @@ describe("graphGetConversation", () => {
     expect(thread.messages.map((message) => message.id)).toEqual(["sent-1"]);
   });
 
-  const cases: ReadonlyArray<{ status: number; kind: GraphHttpFailure["kind"] }> = [
+  const tickets: ReadonlyArray<{ status: number; kind: GraphHttpFailure["kind"] }> = [
     { status: 401, kind: "auth_failed" },
     { status: 403, kind: "auth_failed" },
     { status: 404, kind: "not_found" },
     { status: 500, kind: "network" },
   ];
-  for (const c of cases) {
+  for (const c of tickets) {
     it(`maps HTTP ${c.status} → ${c.kind}`, async () => {
       const fetchImpl = vi.fn(async () => fail(c.status)) as unknown as typeof fetch;
       await expect(

@@ -15,7 +15,7 @@ const describeIfDb = databaseUrl ? describe : describe.skip;
 const SPA_ORIGIN = "http://localhost:3198";
 const SESSION_PASSWORD = "integration-onboard-session-password-32-plus";
 // Unique per run so a crashed prior run can't leave an org id that makes the
-// "creates a fresh org" case see alreadyExisted:true.
+// "creates a fresh org" ticket see alreadyExisted:true.
 const RUN = randomBytes(4).toString("hex");
 const ORG_PREFIX = `org_onbtest_${RUN}`;
 

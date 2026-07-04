@@ -15,10 +15,10 @@ describe("dashboard auth origin", () => {
   it("preserves the sign-in query string when canonicalising the origin", () => {
     expect(
       canonicalSignInUrl({
-        requestUrl: "http://127.0.0.1:3000/sign-in?returnTo=%2Fcases",
+        requestUrl: "http://127.0.0.1:3000/sign-in?returnTo=%2Ftickets",
         redirectUri: "http://localhost:3000/callback",
       }),
-    ).toBe("http://localhost:3000/sign-in?returnTo=%2Fcases");
+    ).toBe("http://localhost:3000/sign-in?returnTo=%2Ftickets");
   });
 
   it("does nothing when the request already matches the callback origin", () => {

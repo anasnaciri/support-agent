@@ -15,7 +15,7 @@ const Participant = Schema.Struct({
 /**
  * Recipient constraint (audit S9). The `to` list is LLM output, and the
  * LLM's context contains the customer's (attacker-controlled) email body
- * — without this check a prompt-injected message can exfiltrate case
+ * — without this check a prompt-injected message can exfiltrate ticket
  * content to an arbitrary address once replies run on auto. A recipient
  * is allowed iff their address already participates in the thread
  * (thread-level participants or any message's from/to).

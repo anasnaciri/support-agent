@@ -5,9 +5,9 @@ import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
   approvals,
   auditLog,
-  caseStateTransitions,
-  caseSupplierEscalations,
-  cases,
+  ticketStateTransitions,
+  ticketSupplierEscalations,
+  tickets,
   memberInvitations,
   rolePermissions,
   roles,
@@ -22,7 +22,7 @@ import {
 // reads/writes goes through these functions.
 //
 // Privacy invariant: the supplier projections below select ONLY the denormalised
-// columns on `case_supplier_escalations` — never a join back to `cases` /
+// columns on `ticket_supplier_escalations` — never a join back to `tickets` /
 // customer tables. The supplier sees the problem + order ref + ship-to +
 // tracking, never the customer email, full address, or conversation thread.
 
@@ -32,8 +32,8 @@ import {
 
 const SUPPLIER_ROLE_NAME = "Supplier";
 const SUPPLIER_PERMISSION_IDS = [
-  "supplier.cases.view",
-  "supplier.cases.respond",
+  "supplier.tickets.view",
+  "supplier.tickets.respond",
 ] as const;
 
 const supplierRoleId = async (
@@ -55,7 +55,7 @@ const supplierRoleId = async (
 
 /**
  * Ensure the workspace has the constrained, non-owner "Supplier" role granting
- * exactly the supplier.cases.* permissions. Idempotent — called lazily from the
+ * exactly the supplier.tickets.* permissions. Idempotent — called lazily from the
  * supplier-invite endpoint so any workspace gets the role on first supplier
  * invite (no migration backfill). Returns the role id.
  */
@@ -269,7 +269,7 @@ export const listTenantsWithPendingSupplierInvitationForEmail = async (
 /** The minimal privacy projection a supplier may see — no customer PII. */
 export interface SupplierEscalationListItem {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly problem: string;
   readonly orderRef: string | null;
   readonly shipCity: string | null;
@@ -286,7 +286,7 @@ export interface SupplierEscalationDetail extends SupplierEscalationListItem {
 
 export interface InsertEscalationInput {
   readonly tenantId: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly supplierId: string;
   readonly problem: string;
   readonly orderRef: string | null;
@@ -300,10 +300,10 @@ export const insertEscalation = async (
   input: InsertEscalationInput,
 ): Promise<{ readonly id: string }> => {
   const id = randomUUID();
-  await db.insert(caseSupplierEscalations).values({
+  await db.insert(ticketSupplierEscalations).values({
     id,
     tenantId: input.tenantId,
-    caseId: input.caseId,
+    ticketId: input.ticketId,
     supplierId: input.supplierId,
     problem: input.problem,
     orderRef: input.orderRef,
@@ -320,27 +320,27 @@ export const listOpenEscalationsForSupplier = async (
 ): Promise<ReadonlyArray<SupplierEscalationListItem>> => {
   const rows = await db
     .select({
-      id: caseSupplierEscalations.id,
-      caseId: caseSupplierEscalations.caseId,
-      problem: caseSupplierEscalations.problem,
-      orderRef: caseSupplierEscalations.orderRef,
-      shipCity: caseSupplierEscalations.shipCity,
-      shipCountry: caseSupplierEscalations.shipCountry,
-      trackingNumber: caseSupplierEscalations.trackingNumber,
-      status: caseSupplierEscalations.status,
-      createdAt: caseSupplierEscalations.createdAt,
+      id: ticketSupplierEscalations.id,
+      ticketId: ticketSupplierEscalations.ticketId,
+      problem: ticketSupplierEscalations.problem,
+      orderRef: ticketSupplierEscalations.orderRef,
+      shipCity: ticketSupplierEscalations.shipCity,
+      shipCountry: ticketSupplierEscalations.shipCountry,
+      trackingNumber: ticketSupplierEscalations.trackingNumber,
+      status: ticketSupplierEscalations.status,
+      createdAt: ticketSupplierEscalations.createdAt,
     })
-    .from(caseSupplierEscalations)
+    .from(ticketSupplierEscalations)
     .where(
       and(
-        eq(caseSupplierEscalations.supplierId, supplierId),
-        eq(caseSupplierEscalations.status, "open"),
+        eq(ticketSupplierEscalations.supplierId, supplierId),
+        eq(ticketSupplierEscalations.status, "open"),
       ),
     )
-    .orderBy(asc(caseSupplierEscalations.createdAt));
+    .orderBy(asc(ticketSupplierEscalations.createdAt));
   return rows.map((r) => ({
     id: r.id,
-    caseId: r.caseId,
+    ticketId: r.ticketId,
     problem: r.problem,
     orderRef: r.orderRef,
     shipCity: r.shipCity,
@@ -352,25 +352,25 @@ export const listOpenEscalationsForSupplier = async (
 };
 
 /**
- * Whether the case is (still) waiting on a supplier — i.e. at least one OPEN
+ * Whether the ticket is (still) waiting on a supplier — i.e. at least one OPEN
  * escalation row exists for it. The row-derived source of truth for the
- * supplier wait under concurrent wait states: `cases.status` may show the
+ * supplier wait under concurrent wait states: `tickets.status` may show the
  * primary wait (e.g. `waiting_for_approval`) while an open escalation keeps
- * this true. Covered by the `cse_case_idx` index.
+ * this true. Covered by the `cse_ticket_idx` index.
  */
-export const hasOpenEscalationForCase = async (
+export const hasOpenEscalationForTicket = async (
   db: DrizzleDb,
   tenantId: string,
-  caseId: string,
+  ticketId: string,
 ): Promise<boolean> => {
   const rows = await db
-    .select({ id: caseSupplierEscalations.id })
-    .from(caseSupplierEscalations)
+    .select({ id: ticketSupplierEscalations.id })
+    .from(ticketSupplierEscalations)
     .where(
       and(
-        eq(caseSupplierEscalations.tenantId, tenantId),
-        eq(caseSupplierEscalations.caseId, caseId),
-        eq(caseSupplierEscalations.status, "open"),
+        eq(ticketSupplierEscalations.tenantId, tenantId),
+        eq(ticketSupplierEscalations.ticketId, ticketId),
+        eq(ticketSupplierEscalations.status, "open"),
       ),
     )
     .limit(1);
@@ -384,23 +384,23 @@ export const getEscalationForSupplier = async (
 ): Promise<SupplierEscalationDetail | null> => {
   const rows = await db
     .select({
-      id: caseSupplierEscalations.id,
-      caseId: caseSupplierEscalations.caseId,
-      problem: caseSupplierEscalations.problem,
-      orderRef: caseSupplierEscalations.orderRef,
-      shipCity: caseSupplierEscalations.shipCity,
-      shipCountry: caseSupplierEscalations.shipCountry,
-      trackingNumber: caseSupplierEscalations.trackingNumber,
-      status: caseSupplierEscalations.status,
-      note: caseSupplierEscalations.note,
-      proposedResolution: caseSupplierEscalations.proposedResolution,
-      createdAt: caseSupplierEscalations.createdAt,
+      id: ticketSupplierEscalations.id,
+      ticketId: ticketSupplierEscalations.ticketId,
+      problem: ticketSupplierEscalations.problem,
+      orderRef: ticketSupplierEscalations.orderRef,
+      shipCity: ticketSupplierEscalations.shipCity,
+      shipCountry: ticketSupplierEscalations.shipCountry,
+      trackingNumber: ticketSupplierEscalations.trackingNumber,
+      status: ticketSupplierEscalations.status,
+      note: ticketSupplierEscalations.note,
+      proposedResolution: ticketSupplierEscalations.proposedResolution,
+      createdAt: ticketSupplierEscalations.createdAt,
     })
-    .from(caseSupplierEscalations)
+    .from(ticketSupplierEscalations)
     .where(
       and(
-        eq(caseSupplierEscalations.id, escalationId),
-        eq(caseSupplierEscalations.supplierId, supplierId),
+        eq(ticketSupplierEscalations.id, escalationId),
+        eq(ticketSupplierEscalations.supplierId, supplierId),
       ),
     )
     .limit(1);
@@ -408,7 +408,7 @@ export const getEscalationForSupplier = async (
   if (!r) return null;
   return {
     id: r.id,
-    caseId: r.caseId,
+    ticketId: r.ticketId,
     problem: r.problem,
     orderRef: r.orderRef,
     shipCity: r.shipCity,
@@ -438,22 +438,22 @@ export interface RecordSupplierUpdateInput {
 export type RecordSupplierUpdateResult =
   | {
       readonly kind: "recorded";
-      readonly caseId: string;
-      /** True when the case was flipped waiting_for_supplier → in_progress. */
+      readonly ticketId: string;
+      /** True when the ticket was flipped waiting_for_supplier → in_progress. */
       readonly resumed: boolean;
     }
   | { readonly kind: "not_found" }
   | { readonly kind: "already_resolved" };
 
 /**
- * The statuses a supplier update flips back to `in_progress`. A case can escape
+ * The statuses a supplier update flips back to `in_progress`. A ticket can escape
  * `waiting_for_supplier` while its escalation is still open (manual status
  * change, "Take over", a manual reply resolving it, restart from triage) — the
  * supplier's answer must STILL re-engage the agent, so every such resting state
  * resumes. All are matrix-legal `→ in_progress` moves.
  *
  * `waiting_for_approval` resumes too, but is special: under concurrent wait
- * states a case can hold a pending approval AND an open escalation at once
+ * states a ticket can hold a pending approval AND an open escalation at once
  * (`primaryWaitStatus` = approval). When the supplier answers, the pending
  * draft(s) may be stale in light of the note, so the flip ALSO supersedes every
  * pending approval (redraft) — the re-run agent produces a fresh draft. See the
@@ -474,10 +474,10 @@ const SUPPLIER_RESUMABLE_STATUSES: ReadonlySet<string> = new Set([
 
 /**
  * The supplier's reply, recorded atomically (master-plan §4 outbox): resolve the
- * escalation, flip the case back to `in_progress` from any resting status
- * ({@link SUPPLIER_RESUMABLE_STATUSES}), stamp the note onto case context, and
+ * escalation, flip the ticket back to `in_progress` from any resting status
+ * ({@link SUPPLIER_RESUMABLE_STATUSES}), stamp the note onto ticket context, and
  * write the audit row — all in ONE transaction. The caller then ALWAYS
- * publishes `supplier.updated` (flip-then-publish, like retryCaseNow) so the
+ * publishes `supplier.updated` (flip-then-publish, like retryTicketNow) so the
  * agent re-engages; `resumed: false` only means no status flip was needed (or,
  * for a pending approval, allowed — the runtime park guard holds that event).
  */
@@ -487,16 +487,16 @@ export const recordSupplierUpdate = async (
 ): Promise<RecordSupplierUpdateResult> => {
   const existing = await db
     .select({
-      id: caseSupplierEscalations.id,
-      caseId: caseSupplierEscalations.caseId,
-      status: caseSupplierEscalations.status,
+      id: ticketSupplierEscalations.id,
+      ticketId: ticketSupplierEscalations.ticketId,
+      status: ticketSupplierEscalations.status,
     })
-    .from(caseSupplierEscalations)
+    .from(ticketSupplierEscalations)
     .where(
       and(
-        eq(caseSupplierEscalations.id, input.escalationId),
-        eq(caseSupplierEscalations.tenantId, input.tenantId),
-        eq(caseSupplierEscalations.supplierId, input.supplierId),
+        eq(ticketSupplierEscalations.id, input.escalationId),
+        eq(ticketSupplierEscalations.tenantId, input.tenantId),
+        eq(ticketSupplierEscalations.supplierId, input.supplierId),
       ),
     )
     .limit(1);
@@ -506,30 +506,30 @@ export const recordSupplierUpdate = async (
 
   const resumed = await db.transaction(async (tx) => {
     await tx
-      .update(caseSupplierEscalations)
+      .update(ticketSupplierEscalations)
       .set({
         note: input.note,
         proposedResolution: input.proposedResolution,
         status: "resolved",
         resolvedAt: new Date(),
       })
-      .where(eq(caseSupplierEscalations.id, input.escalationId));
+      .where(eq(ticketSupplierEscalations.id, input.escalationId));
 
-    const caseRows = await tx
-      .select({ status: cases.status, context: cases.context })
-      .from(cases)
+    const ticketRows = await tx
+      .select({ status: tickets.status, context: tickets.context })
+      .from(tickets)
       .where(
-        and(eq(cases.id, esc.caseId), eq(cases.tenantId, input.tenantId)),
+        and(eq(tickets.id, esc.ticketId), eq(tickets.tenantId, input.tenantId)),
       )
       .limit(1);
-    const caseRow = caseRows[0];
+    const ticketRow = ticketRows[0];
     const willResume =
-      caseRow !== undefined &&
-      SUPPLIER_RESUMABLE_STATUSES.has(caseRow.status);
+      ticketRow !== undefined &&
+      SUPPLIER_RESUMABLE_STATUSES.has(ticketRow.status);
 
-    if (caseRow) {
+    if (ticketRow) {
       const mergedContext = {
-        ...(caseRow.context as Record<string, unknown>),
+        ...(ticketRow.context as Record<string, unknown>),
         supplierUpdate: {
           supplierId: input.supplierId,
           note: input.note,
@@ -537,13 +537,13 @@ export const recordSupplierUpdate = async (
         },
       };
       if (willResume) {
-        // Concurrent wait states: the case was parked `waiting_for_approval`
+        // Concurrent wait states: the ticket was parked `waiting_for_approval`
         // with an open escalation. The supplier's answer may make the pending
         // draft(s) stale, so supersede every pending approval (mirror
-        // `supersedePendingForCase` field semantics exactly) before the re-run
+        // `supersedePendingForTicket` field semantics exactly) before the re-run
         // agent drafts fresh. `applyApprovalDecision` returns `already_decided`
         // for non-pending rows, so any stale approve link is an inert 409.
-        if (caseRow.status === "waiting_for_approval") {
+        if (ticketRow.status === "waiting_for_approval") {
           const superseded = await tx
             .update(approvals)
             .set({
@@ -555,7 +555,7 @@ export const recordSupplierUpdate = async (
             .where(
               and(
                 eq(approvals.tenantId, input.tenantId),
-                eq(approvals.caseId, esc.caseId),
+                eq(approvals.ticketId, esc.ticketId),
                 eq(approvals.status, "pending"),
               ),
             )
@@ -563,7 +563,7 @@ export const recordSupplierUpdate = async (
           if (superseded.length > 0) {
             await tx.insert(auditLog).values({
               tenantId: input.tenantId,
-              caseId: esc.caseId,
+              ticketId: esc.ticketId,
               actorType: "user",
               actorId: input.actorUuid,
               action: "approval.superseded",
@@ -575,30 +575,30 @@ export const recordSupplierUpdate = async (
           }
         }
         await tx
-          .update(cases)
+          .update(tickets)
           .set({
             status: "in_progress",
             context: mergedContext,
             updatedAt: new Date(),
           })
-          .where(eq(cases.id, esc.caseId));
-        await tx.insert(caseStateTransitions).values({
-          caseId: esc.caseId,
-          fromStatus: caseRow.status,
+          .where(eq(tickets.id, esc.ticketId));
+        await tx.insert(ticketStateTransitions).values({
+          ticketId: esc.ticketId,
+          fromStatus: ticketRow.status,
           toStatus: "in_progress",
           reason: "supplier.updated",
         });
       } else {
         await tx
-          .update(cases)
+          .update(tickets)
           .set({ context: mergedContext, updatedAt: new Date() })
-          .where(eq(cases.id, esc.caseId));
+          .where(eq(tickets.id, esc.ticketId));
       }
     }
 
     await tx.insert(auditLog).values({
       tenantId: input.tenantId,
-      caseId: esc.caseId,
+      ticketId: esc.ticketId,
       actorType: "user",
       actorId: input.actorUuid,
       action: "supplier.updated",
@@ -613,7 +613,7 @@ export const recordSupplierUpdate = async (
     return willResume;
   });
 
-  return { kind: "recorded", caseId: esc.caseId, resumed };
+  return { kind: "recorded", ticketId: esc.ticketId, resumed };
 };
 
 // ---------------------------------------------------------------------------
@@ -636,7 +636,7 @@ export interface RecordSupplierTrackingUpdateInput {
  * Bookkeeping for a supplier's tracking-number edit, AFTER the Shopify
  * fulfillment write succeeded: re-stamp the escalation's tracking projection
  * (so the portal and the merchant's escalation view show the new number),
- * drop the case's stale `liveTrackingStatus` cache (the tracking card would
+ * drop the ticket's stale `liveTrackingStatus` cache (the tracking card would
  * otherwise keep rendering the OLD number until the next lookup), and write
  * the audit row — all in ONE transaction (§4: audit shares the tx with the
  * state it describes). Never called for a foreign escalation — the handler
@@ -648,39 +648,39 @@ export const recordSupplierTrackingUpdate = async (
 ): Promise<void> => {
   await db.transaction(async (tx) => {
     const updated = await tx
-      .update(caseSupplierEscalations)
+      .update(ticketSupplierEscalations)
       .set({ trackingNumber: input.trackingNumber })
       .where(
         and(
-          eq(caseSupplierEscalations.id, input.escalationId),
-          eq(caseSupplierEscalations.tenantId, input.tenantId),
-          eq(caseSupplierEscalations.supplierId, input.supplierId),
+          eq(ticketSupplierEscalations.id, input.escalationId),
+          eq(ticketSupplierEscalations.tenantId, input.tenantId),
+          eq(ticketSupplierEscalations.supplierId, input.supplierId),
         ),
       )
-      .returning({ caseId: caseSupplierEscalations.caseId });
-    const caseId = updated[0]?.caseId;
-    if (!caseId) return;
+      .returning({ ticketId: ticketSupplierEscalations.ticketId });
+    const ticketId = updated[0]?.ticketId;
+    if (!ticketId) return;
 
-    const caseRows = await tx
-      .select({ context: cases.context })
-      .from(cases)
-      .where(and(eq(cases.id, caseId), eq(cases.tenantId, input.tenantId)))
+    const ticketRows = await tx
+      .select({ context: tickets.context })
+      .from(tickets)
+      .where(and(eq(tickets.id, ticketId), eq(tickets.tenantId, input.tenantId)))
       .limit(1);
-    const caseRow = caseRows[0];
-    if (caseRow) {
-      const context = { ...(caseRow.context as Record<string, unknown>) };
+    const ticketRow = ticketRows[0];
+    if (ticketRow) {
+      const context = { ...(ticketRow.context as Record<string, unknown>) };
       if ("liveTrackingStatus" in context) {
         delete context["liveTrackingStatus"];
         await tx
-          .update(cases)
+          .update(tickets)
           .set({ context, updatedAt: new Date() })
-          .where(eq(cases.id, caseId));
+          .where(eq(tickets.id, ticketId));
       }
     }
 
     await tx.insert(auditLog).values({
       tenantId: input.tenantId,
-      caseId,
+      ticketId,
       actorType: "user",
       actorId: input.actorUuid,
       action: "supplier.tracking_updated",
@@ -702,7 +702,7 @@ export const recordSupplierTrackingUpdate = async (
 
 export interface UnsentSupplierEscalation {
   readonly id: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly tenantId: string;
   readonly supplierEmail: string;
   readonly problem: string;
@@ -714,11 +714,11 @@ export interface UnsentSupplierEscalation {
  * Escalations whose supplier email hasn't been sent yet (the durable outbox):
  * `notified_at IS NULL` and under the retry cap, oldest first. Joined to the
  * supplier for the recipient address. Keys on the ESCALATION ROW being open —
- * not on the case sitting in `waiting_for_supplier` — because under concurrent
- * wait states a case can carry an open escalation while parked
+ * not on the ticket sitting in `waiting_for_supplier` — because under concurrent
+ * wait states a ticket can carry an open escalation while parked
  * `waiting_for_approval` (or actively in_progress) and the supplier still
- * needs the email. Cases a human closed or owns are excluded: never email a
- * supplier about a case that is resolved, failed, or under human takeover.
+ * needs the email. Tickets a human closed or owns are excluded: never email a
+ * supplier about a ticket that is resolved, failed, or under human takeover.
  */
 export const listUnsentSupplierEscalations = async (
   db: DrizzleDb,
@@ -727,23 +727,23 @@ export const listUnsentSupplierEscalations = async (
 ): Promise<ReadonlyArray<UnsentSupplierEscalation>> => {
   const rows = await db
     .select({
-      id: caseSupplierEscalations.id,
-      caseId: caseSupplierEscalations.caseId,
-      tenantId: caseSupplierEscalations.tenantId,
+      id: ticketSupplierEscalations.id,
+      ticketId: ticketSupplierEscalations.ticketId,
+      tenantId: ticketSupplierEscalations.tenantId,
       supplierEmail: suppliers.email,
-      problem: caseSupplierEscalations.problem,
-      orderRef: caseSupplierEscalations.orderRef,
-      notifyAttempts: caseSupplierEscalations.notifyAttempts,
+      problem: ticketSupplierEscalations.problem,
+      orderRef: ticketSupplierEscalations.orderRef,
+      notifyAttempts: ticketSupplierEscalations.notifyAttempts,
     })
-    .from(caseSupplierEscalations)
-    .innerJoin(suppliers, eq(suppliers.id, caseSupplierEscalations.supplierId))
-    .innerJoin(cases, eq(cases.id, caseSupplierEscalations.caseId))
+    .from(ticketSupplierEscalations)
+    .innerJoin(suppliers, eq(suppliers.id, ticketSupplierEscalations.supplierId))
+    .innerJoin(tickets, eq(tickets.id, ticketSupplierEscalations.ticketId))
     .where(
       and(
-        sql`${caseSupplierEscalations.notifiedAt} IS NULL`,
-        sql`${caseSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
-        eq(caseSupplierEscalations.status, "open"),
-        notInArray(cases.status, [
+        sql`${ticketSupplierEscalations.notifiedAt} IS NULL`,
+        sql`${ticketSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
+        eq(ticketSupplierEscalations.status, "open"),
+        notInArray(tickets.status, [
           "resolved",
           "archived",
           "failed",
@@ -751,7 +751,7 @@ export const listUnsentSupplierEscalations = async (
         ]),
       ),
     )
-    .orderBy(asc(caseSupplierEscalations.createdAt))
+    .orderBy(asc(ticketSupplierEscalations.createdAt))
     .limit(limit);
   return rows;
 };
@@ -762,9 +762,9 @@ export const markSupplierEscalationNotified = async (
   id: string,
 ): Promise<void> => {
   await db
-    .update(caseSupplierEscalations)
+    .update(ticketSupplierEscalations)
     .set({ notifiedAt: new Date() })
-    .where(eq(caseSupplierEscalations.id, id));
+    .where(eq(ticketSupplierEscalations.id, id));
 };
 
 /**
@@ -778,10 +778,10 @@ export const recordSupplierNotifyFailure = async (
   error: string,
 ): Promise<void> => {
   await db
-    .update(caseSupplierEscalations)
+    .update(ticketSupplierEscalations)
     .set({
-      notifyAttempts: sql`${caseSupplierEscalations.notifyAttempts} + 1`,
+      notifyAttempts: sql`${ticketSupplierEscalations.notifyAttempts} + 1`,
       lastNotifyError: error.slice(0, 500),
     })
-    .where(eq(caseSupplierEscalations.id, id));
+    .where(eq(ticketSupplierEscalations.id, id));
 };

@@ -5,7 +5,7 @@ import type { ShopifyCustomer } from "@support-agent/agent-core";
 import {
   customerStats,
   formatMoneyAmount,
-} from "../app/cases/[id]/customer-panel-data";
+} from "../app/tickets/[id]/customer-panel-data";
 
 describe("formatMoneyAmount", () => {
   it("drops a whole `.00` tail and adds thousands separators", () => {

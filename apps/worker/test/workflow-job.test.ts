@@ -10,9 +10,9 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseLifecycleWriterLive,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketLifecycleWriterLive,
+  TicketRepository,
+  TicketRepositoryTest,
   TransactionRunnerPassthrough,
   makeMerchantNotificationServiceTest,
 } from "@support-agent/services";
@@ -23,7 +23,7 @@ import { escalateDeadLetteredEvent } from "../src/workflow-dead-letter.js";
 // Audit C1/L11 — worker-side settlement of a tick's WorkflowResult.
 // `Failed retryable:true` must surface as a retry (throw → pg-boss
 // backoff); everything else completes the job. Dead-lettered events
-// must park their case in human_takeover so retry exhaustion is
+// must park their ticket in human_takeover so retry exhaustion is
 // visible instead of silently dropping the event.
 // ------------------------------------------------------------
 
@@ -66,17 +66,17 @@ describe("settleWorkflowResult", () => {
 describe("escalateDeadLetteredEvent", () => {
   const deps = Layer.mergeAll(
     ApprovalServiceTest,
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     TransactionRunnerPassthrough,
   );
-  const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+  const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
 
-  it("parks the dead-lettered event's case in human_takeover with an audit row", async () => {
+  it("parks the dead-lettered event's ticket in human_takeover with an audit row", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -86,7 +86,7 @@ describe("escalateDeadLetteredEvent", () => {
           });
           const event: DomainEvent = {
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-dl" as never,
               messageId: "msg-dl",
@@ -101,7 +101,7 @@ describe("escalateDeadLetteredEvent", () => {
           };
           yield* escalateDeadLetteredEvent(event);
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { fetched, entries };
         }),
         layer,
@@ -110,15 +110,15 @@ describe("escalateDeadLetteredEvent", () => {
 
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.entries.map((e) => e.action)).toContain(
-      "case.escalated_to_human",
+      "ticket.escalated_to_human",
     );
   });
 
-  it("resolves the case for a dead-lettered message.received via the thread id", async () => {
+  it("resolves the ticket for a dead-lettered message.received via the thread id", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
             channel: "email",
@@ -153,11 +153,11 @@ describe("escalateDeadLetteredEvent", () => {
     expect(out.fetched.status).toBe("human_takeover");
   });
 
-  it("leaves an already human_takeover case untouched (idempotent)", async () => {
+  it("leaves an already human_takeover ticket untouched (idempotent)", async () => {
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -170,7 +170,7 @@ describe("escalateDeadLetteredEvent", () => {
           });
           const event: DomainEvent = {
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "thread-dl-3" as never,
               messageId: "msg-dl-3",
@@ -185,7 +185,7 @@ describe("escalateDeadLetteredEvent", () => {
           };
           yield* escalateDeadLetteredEvent(event);
           const fetched = yield* repo.getById(created.id);
-          const entries = yield* audit.forCase(created.id);
+          const entries = yield* audit.forTicket(created.id);
           return { fetched, entries };
         }),
         layer,
@@ -195,16 +195,16 @@ describe("escalateDeadLetteredEvent", () => {
     expect(out.fetched.status).toBe("human_takeover");
     // No second escalation audit row.
     expect(
-      out.entries.filter((e) => e.action === "case.escalated_to_human"),
+      out.entries.filter((e) => e.action === "ticket.escalated_to_human"),
     ).toHaveLength(0);
   });
 
-  it("never fails on an unknown case (logs and moves on)", async () => {
+  it("never fails on an unknown ticket (logs and moves on)", async () => {
     await Effect.runPromise(
       Effect.provide(
         escalateDeadLetteredEvent({
           type: "customer.replied",
-          caseId: "case-does-not-exist" as never,
+          ticketId: "ticket-does-not-exist" as never,
           payload: {
             threadId: "thread-x" as never,
             messageId: "msg-x",
@@ -224,20 +224,20 @@ describe("escalateDeadLetteredEvent", () => {
 });
 
 describe("escalateDeadLetteredEvent — merchant notification", () => {
-  it("pings the merchant after parking the case (best-effort)", async () => {
+  it("pings the merchant after parking the ticket (best-effort)", async () => {
     const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
     const deps = Layer.mergeAll(
       ApprovalServiceTest,
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
       notifLayer,
     );
-    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+    const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: "t1" as never,
             channel: "email",
@@ -246,7 +246,7 @@ describe("escalateDeadLetteredEvent — merchant notification", () => {
           });
           yield* escalateDeadLetteredEvent({
             type: "customer.replied",
-            caseId: created.id,
+            ticketId: created.id,
             payload: {
               threadId: "th-1" as never,
               messageId: "m1",
@@ -259,7 +259,7 @@ describe("escalateDeadLetteredEvent — merchant notification", () => {
               attachments: [],
             },
           });
-          return { caseId: created.id, row: yield* repo.getById(created.id) };
+          return { ticketId: created.id, row: yield* repo.getById(created.id) };
         }),
         layer,
       ),
@@ -268,24 +268,24 @@ describe("escalateDeadLetteredEvent — merchant notification", () => {
     expect(handle.sent).toHaveLength(1);
     const sent = handle.sent[0]!;
     expect(sent.notification.kind).toBe("human_takeover");
-    expect(sent.notification.caseId).toBe(out.caseId);
+    expect(sent.notification.ticketId).toBe(out.ticketId);
     expect(sent.notification.body).not.toContain("workflow_retries_exhausted");
   });
 
-  it("does not ping when the case is already parked or resolved", async () => {
+  it("does not ping when the ticket is already parked or resolved", async () => {
     const { layer: notifLayer, handle } = makeMerchantNotificationServiceTest();
     const deps = Layer.mergeAll(
       ApprovalServiceTest,
-      CaseRepositoryTest,
+      TicketRepositoryTest,
       AuditLogServiceTest,
       TransactionRunnerPassthrough,
       notifLayer,
     );
-    const layer = Layer.provideMerge(CaseLifecycleWriterLive, deps);
+    const layer = Layer.provideMerge(TicketLifecycleWriterLive, deps);
     await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const created = yield* repo.create({
             tenantId: "t1" as never,
             channel: "email",
@@ -295,8 +295,8 @@ describe("escalateDeadLetteredEvent — merchant notification", () => {
             reason: "manual",
           });
           yield* escalateDeadLetteredEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             payload: { trigger: "dashboard_retry" },
           } as never);
         }),

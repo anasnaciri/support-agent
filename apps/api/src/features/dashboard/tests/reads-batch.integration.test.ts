@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import {
   approvals,
   auditLog,
-  cases,
+  tickets,
   connectorConnections,
   makeDbClient,
   tenantAgentOverrides,
@@ -20,7 +20,7 @@ import type { ApiConfig } from "../../../bootstrap.js";
 const databaseUrl = process.env["DATABASE_URL"];
 const describeIfDb = databaseUrl ? describe : describe.skip;
 
-// cases/approvals/audit read endpoints (Path B, slices 2-4).
+// tickets/approvals/audit read endpoints (Path B, slices 2-4).
 describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
   const raw = databaseUrl ? makeDbClient({ databaseUrl }) : null;
   const token = "dash-batch-token";
@@ -29,10 +29,10 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
   const tenantId = randomUUID();
   const otherTenantId = randomUUID();
 
-  const caseA = randomUUID(); // resolved, 2 audit rows, 0 approvals
-  const caseB = randomUUID(); // waiting_for_approval, 1 audit row, 1 pending approval
-  const caseC = randomUUID(); // human_takeover
-  const caseX = randomUUID(); // OTHER tenant
+  const ticketA = randomUUID(); // resolved, 2 audit rows, 0 approvals
+  const ticketB = randomUUID(); // waiting_for_approval, 1 audit row, 1 pending approval
+  const ticketC = randomUUID(); // human_takeover
+  const ticketX = randomUUID(); // OTHER tenant
   const approvalId = randomUUID();
   const approvedApprovalId = randomUUID(); // approved, low risk
   const rejectedApprovalId = randomUUID(); // rejected, medium risk
@@ -57,7 +57,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
   let handle: ServerHandle | null = null;
   let baseUrl = "";
 
-  const mkCase = (
+  const mkTicket = (
     id: string,
     owner: string,
     status: string,
@@ -71,11 +71,11 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     ...extra,
   });
   const mkAudit = (
-    caseId: string,
+    ticketId: string,
     owner: string,
     action: string,
     actorType: string,
-  ) => ({ tenantId: owner, caseId, action, actorType, details: {} });
+  ) => ({ tenantId: owner, ticketId, action, actorType, details: {} });
 
   const auth = dashboardAuthHeaders(orgId);
   const get = (path: string, headers: Record<string, string> = auth) =>
@@ -87,33 +87,33 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       { id: tenantId, name: "batch", workosOrganizationId: orgId },
       { id: otherTenantId, name: "batch-other", workosOrganizationId: otherOrgId },
     ]);
-    await raw.db.insert(cases).values([
-      mkCase(caseA, tenantId, "resolved", {
-        subject: "Case A",
+    await raw.db.insert(tickets).values([
+      mkTicket(ticketA, tenantId, "resolved", {
+        subject: "Ticket A",
         category: "where_is_order",
         resolvedAt: new Date(),
       }),
-      mkCase(caseB, tenantId, "waiting_for_approval", {
-        subject: "Case B",
+      mkTicket(ticketB, tenantId, "waiting_for_approval", {
+        subject: "Ticket B",
         shopifyOrderId: "#1001",
       }),
-      mkCase(caseC, tenantId, "human_takeover", {
-        subject: "Case C",
+      mkTicket(ticketC, tenantId, "human_takeover", {
+        subject: "Ticket C",
         summary: "priority widget escalation",
       }),
-      mkCase(caseX, otherTenantId, "resolved", { subject: "Case X" }),
+      mkTicket(ticketX, otherTenantId, "resolved", { subject: "Ticket X" }),
     ]);
     await raw.db.insert(auditLog).values([
-      mkAudit(caseA, tenantId, "event.received", "system"),
-      mkAudit(caseA, tenantId, "tool.invoked", "agent"),
-      mkAudit(caseB, tenantId, "llm.decision", "agent"),
-      mkAudit(caseX, otherTenantId, "event.received", "system"),
+      mkAudit(ticketA, tenantId, "event.received", "system"),
+      mkAudit(ticketA, tenantId, "tool.invoked", "agent"),
+      mkAudit(ticketB, tenantId, "llm.decision", "agent"),
+      mkAudit(ticketX, otherTenantId, "event.received", "system"),
     ]);
     await raw.db.insert(approvals).values([
       {
         id: approvalId,
         tenantId,
-        caseId: caseB,
+        ticketId: ticketB,
         agentId: "refund-review-agent",
         tool: "refund.create",
         proposedInput: { amount: 500 },
@@ -124,7 +124,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       {
         id: approvedApprovalId,
         tenantId,
-        caseId: caseC,
+        ticketId: ticketC,
         agentId: "refund-review-agent",
         tool: "refund.create",
         proposedInput: { amount: 100 },
@@ -136,7 +136,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       {
         id: rejectedApprovalId,
         tenantId,
-        caseId: caseC,
+        ticketId: ticketC,
         agentId: "refund-review-agent",
         tool: "refund.create",
         proposedInput: { amount: 200 },
@@ -178,23 +178,23 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       await raw.db
         .delete(tenantAgentOverrides)
         .where(sql`${tenantAgentOverrides.tenantId} = ${id}`);
-      await raw.db.delete(cases).where(sql`${cases.tenantId} = ${id}`);
+      await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${id}`);
       await raw.db.delete(tenants).where(sql`${tenants.id} = ${id}`);
     }
     await raw.close();
   });
 
-  it("GET /dashboard/cases — tenant-scoped + paginated", async () => {
+  it("GET /dashboard/tickets — tenant-scoped + paginated", async () => {
     if (!raw) return;
-    const body = (await (await get("/dashboard/cases")).json()) as {
+    const body = (await (await get("/dashboard/tickets")).json()) as {
       totalRows: number;
       rows: ReadonlyArray<{ id: string; subject: string | null }>;
     };
-    expect(body.totalRows).toBe(3); // excludes other tenant's case X
-    expect(body.rows.map((r) => r.id)).not.toContain(caseX);
+    expect(body.totalRows).toBe(3); // excludes other tenant's ticket X
+    expect(body.rows.map((r) => r.id)).not.toContain(ticketX);
   });
 
-  it("GET /dashboard/cases?q= — case-insensitive search over subject, summary, category", async () => {
+  it("GET /dashboard/tickets?q= — case-insensitive search over subject, summary, category", async () => {
     if (!raw) return;
     const ids = async (path: string) =>
       (
@@ -204,29 +204,29 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       ).rows.map((r) => r.id);
 
     // category match
-    expect(await ids("/dashboard/cases?q=where_is_order")).toEqual([caseA]);
-    // subject match, case-insensitive ("Case B")
-    expect(await ids("/dashboard/cases?q=case+b")).toEqual([caseB]);
-    // summary match (caseC's seeded summary)
-    expect(await ids("/dashboard/cases?q=widget")).toEqual([caseC]);
-    // order-number match (caseB's seeded shopify order name "#1001")
-    expect(await ids("/dashboard/cases?q=1001")).toEqual([caseB]);
+    expect(await ids("/dashboard/tickets?q=where_is_order")).toEqual([ticketA]);
+    // subject match, case-insensitive ("Ticket B")
+    expect(await ids("/dashboard/tickets?q=ticket+b")).toEqual([ticketB]);
+    // summary match (ticketC's seeded summary)
+    expect(await ids("/dashboard/tickets?q=widget")).toEqual([ticketC]);
+    // order-number match (ticketB's seeded shopify order name "#1001")
+    expect(await ids("/dashboard/tickets?q=1001")).toEqual([ticketB]);
 
-    // a broad term narrows totalRows yet stays tenant-scoped (no caseX)
-    const broad = (await (await get("/dashboard/cases?q=case")).json()) as {
+    // a broad term narrows totalRows yet stays tenant-scoped (no ticketX)
+    const broad = (await (await get("/dashboard/tickets?q=ticket")).json()) as {
       totalRows: number;
       rows: ReadonlyArray<{ id: string }>;
     };
     expect(broad.totalRows).toBe(3);
-    expect(broad.rows.map((r) => r.id)).not.toContain(caseX);
+    expect(broad.rows.map((r) => r.id)).not.toContain(ticketX);
   });
 
-  it("GET /dashboard/cases/:id — detail with timeline + approvals", async () => {
+  it("GET /dashboard/tickets/:id — detail with timeline + approvals", async () => {
     if (!raw) return;
-    const res = await get(`/dashboard/cases/${caseB}`);
+    const res = await get(`/dashboard/tickets/${ticketB}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      case: {
+      ticket: {
         id: string;
         status: string;
         manualStatusTargets: ReadonlyArray<string>;
@@ -234,25 +234,25 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
       auditEntries: ReadonlyArray<unknown>;
       approvals: ReadonlyArray<{ tool: string }>;
     };
-    expect(body.case.id).toBe(caseB);
-    expect(body.case.status).toBe("waiting_for_approval");
+    expect(body.ticket.id).toBe(ticketB);
+    expect(body.ticket.status).toBe("waiting_for_approval");
     // The hand-settable status targets are matrix-derived server-side and never
-    // include the case's own current status (the SPA renders these directly).
-    expect(Array.isArray(body.case.manualStatusTargets)).toBe(true);
-    expect(body.case.manualStatusTargets).not.toContain("waiting_for_approval");
+    // include the ticket's own current status (the SPA renders these directly).
+    expect(Array.isArray(body.ticket.manualStatusTargets)).toBe(true);
+    expect(body.ticket.manualStatusTargets).not.toContain("waiting_for_approval");
     expect(body.auditEntries).toHaveLength(1);
     expect(body.approvals).toHaveLength(1);
     expect(body.approvals[0]?.tool).toBe("refund.create");
   });
 
-  it("GET /dashboard/cases/:id — 404 for another tenant's case", async () => {
+  it("GET /dashboard/tickets/:id — 404 for another tenant's ticket", async () => {
     if (!raw) return;
-    expect((await get(`/dashboard/cases/${caseX}`)).status).toBe(404);
+    expect((await get(`/dashboard/tickets/${ticketX}`)).status).toBe(404);
   });
 
-  it("GET /dashboard/cases/:id/conversation-thread — reports a case without a thread", async () => {
+  it("GET /dashboard/tickets/:id/conversation-thread — reports a ticket without a thread", async () => {
     if (!raw) return;
-    const res = await get(`/dashboard/cases/${caseA}/conversation-thread`);
+    const res = await get(`/dashboard/tickets/${ticketA}/conversation-thread`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       status: "unavailable",
@@ -260,25 +260,25 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     });
   });
 
-  it("GET /dashboard/cases/:id/conversation-thread — 404 for another tenant's case", async () => {
+  it("GET /dashboard/tickets/:id/conversation-thread — 404 for another tenant's ticket", async () => {
     if (!raw) return;
     expect(
-      (await get(`/dashboard/cases/${caseX}/conversation-thread`)).status,
+      (await get(`/dashboard/tickets/${ticketX}/conversation-thread`)).status,
     ).toBe(404);
   });
 
-  it("GET /dashboard/cases/:id/conversation-thread — requires dashboard auth", async () => {
+  it("GET /dashboard/tickets/:id/conversation-thread — requires dashboard auth", async () => {
     if (!raw) return;
     expect(
       (
-        await get(`/dashboard/cases/${caseA}/conversation-thread`, {})
+        await get(`/dashboard/tickets/${ticketA}/conversation-thread`, {})
       ).status,
     ).toBe(401);
   });
 
-  it("GET /dashboard/cases/:id/events — audit rows since cursor", async () => {
+  it("GET /dashboard/tickets/:id/events — audit rows since cursor", async () => {
     if (!raw) return;
-    const body = (await (await get(`/dashboard/cases/${caseA}/events?since=0`)).json()) as {
+    const body = (await (await get(`/dashboard/tickets/${ticketA}/events?since=0`)).json()) as {
       events: ReadonlyArray<{ action: string }>;
     };
     expect(body.events).toHaveLength(2);
@@ -288,9 +288,9 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     ]);
   });
 
-  it("GET /dashboard/cases/:id/events — 404 for another tenant's case", async () => {
+  it("GET /dashboard/tickets/:id/events — 404 for another tenant's ticket", async () => {
     if (!raw) return;
-    expect((await get(`/dashboard/cases/${caseX}/events`)).status).toBe(404);
+    expect((await get(`/dashboard/tickets/${ticketX}/events`)).status).toBe(404);
   });
 
   it("GET /dashboard/approvals — pending by default, with facets", async () => {
@@ -381,24 +381,24 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(body.connections[0]).toHaveProperty("metadata");
   });
 
-  it("GET /dashboard/cases/:id/shopify — panels (null entities + shop domain)", async () => {
+  it("GET /dashboard/tickets/:id/shopify — panels (null entities + shop domain)", async () => {
     if (!raw) return;
-    const res = await get(`/dashboard/cases/${caseA}/shopify`);
+    const res = await get(`/dashboard/tickets/${ticketA}/shopify`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       customer: unknown;
       order: unknown;
       shopDomain: string | null;
     };
-    // caseA has empty context -> no Shopify lookups, so customer/order null.
+    // ticketA has empty context -> no Shopify lookups, so customer/order null.
     expect(body.customer).toBeNull();
     expect(body.order).toBeNull();
     expect(body.shopDomain).toBe("batch-shop.myshopify.com");
   });
 
-  it("GET /dashboard/cases/:id/shopify — 404 cross-tenant", async () => {
+  it("GET /dashboard/tickets/:id/shopify — 404 cross-tenant", async () => {
     if (!raw) return;
-    expect((await get(`/dashboard/cases/${caseX}/shopify`)).status).toBe(404);
+    expect((await get(`/dashboard/tickets/${ticketX}/shopify`)).status).toBe(404);
   });
 
   it("GET /dashboard/usage — returns llm.decision rows in window", async () => {
@@ -406,7 +406,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     const body = (await (await get("/dashboard/usage")).json()) as {
       rows: ReadonlyArray<{ occurredAt: string; details: unknown }>;
     };
-    // caseB's seeded audit row is an llm.decision (the only one for tenant1).
+    // ticketB's seeded audit row is an llm.decision (the only one for tenant1).
     expect(body.rows).toHaveLength(1);
     expect(typeof body.rows[0]?.occurredAt).toBe("string");
   });
@@ -432,7 +432,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
 
   it("rejects without a token (401)", async () => {
     if (!raw) return;
-    const res = await fetch(`${baseUrl}/dashboard/cases`, {
+    const res = await fetch(`${baseUrl}/dashboard/tickets`, {
       headers: {},
     });
     expect(res.status).toBe(401);

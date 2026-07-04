@@ -92,7 +92,7 @@ const emptyStore = () =>
   );
 
 describe("GmailConversationLive — fetchThread", () => {
-  it("resolves the exact mailbox requested by the case", async () => {
+  it("resolves the exact mailbox requested by the ticket", async () => {
     const get = vi.fn(() =>
       Effect.succeed({
         tenantId,

@@ -3,7 +3,7 @@ import {
   type AgentConfig,
   type AnyTool,
   type ApprovalRiskLevel,
-  type CaseChannel,
+  type TicketChannel,
   type ChatMessage,
   type ConversationThread,
   type DomainEvent,
@@ -15,7 +15,7 @@ import {
   TenantId as makeTenantId,
   ThreadId as makeThreadId,
 } from "@support-agent/agent-core";
-import { CaseRepository } from "./case-repository.js";
+import { TicketRepository } from "./ticket-repository.js";
 import { parseThreadId } from "./conversation-thread-id.js";
 import { parseRefundAmount } from "./permission-service-live.js";
 import type { AgentOverride } from "./tenant-agent-overrides.js";
@@ -30,12 +30,12 @@ import type {
 // Helpers
 // ============================================================
 
-type CaseLookup =
-  | { readonly kind: "load"; readonly caseId: string }
+type TicketLookup =
+  | { readonly kind: "load"; readonly ticketId: string }
   | {
       readonly kind: "create";
       readonly tenantId: string;
-      readonly channel: CaseChannel;
+      readonly channel: TicketChannel;
       readonly subject: string | null;
       readonly initialUserMessage: string | null;
     }
@@ -44,12 +44,12 @@ type CaseLookup =
       readonly tenantId: string;
       readonly threadId: string;
       readonly mailbox: string | undefined;
-      readonly channel: CaseChannel;
+      readonly channel: TicketChannel;
       readonly subject: string | null;
       readonly initialUserMessage: string | null;
     };
 
-export const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
+export const eventToTicketLookup = (event: DomainEvent): TicketLookup | null => {
   switch (event.type) {
     case "ticket.created":
       return {
@@ -65,12 +65,12 @@ export const eventToCaseLookup = (event: DomainEvent): CaseLookup | null => {
     case "supplier.updated":
     case "timer.expired":
     case "manual.takeover":
-    case "case.resumed":
-      return { kind: "load", caseId: event.caseId };
+    case "ticket.resumed":
+      return { kind: "load", ticketId: event.ticketId };
     case "message.received":
       // The connector has already normalised this into a thread + body.
-      // First message on a thread → create a case bound to the thread;
-      // subsequent messages → resume the same case via `findByThreadId`.
+      // First message on a thread → create a ticket bound to the thread;
+      // subsequent messages → resume the same ticket via `findByThreadId`.
       // Channel defaults to "email" because every connector that emits
       // this event today (Gmail; later Outlook / IMAP) is email-shaped;
       // when a non-email connector (SMS, helpdesk) ships, widen this.
@@ -253,19 +253,19 @@ const buildUserMessageFromInbound = (
 };
 
 /**
- * Trusted directive injected on a `where_is_order` case flagged as an
+ * Trusted directive injected on a `where_is_order` ticket flagged as an
  * order/customer email mismatch. The mismatch is a HINT for the agent's
  * judgment, NOT a hard block: it shows BOTH emails (the customer's and the
  * order's) and asks the model to decide whether this is an obvious typo (the
- * same person) — in which case it may share the status — or genuinely different
- * people, in which case it should ask the customer to confirm the order's email
+ * same person) — in which ticket it may share the status — or genuinely different
+ * people, in which ticket it should ask the customer to confirm the order's email
  * before disclosing. Security is NOT carried by this prompt: any
  * `conversation.reply` on an unverified mismatch is force-routed to human
  * approval (`shouldForceReplyApproval`) and a bare `final_message` parks for a
  * human (`hasUnverifiedOrderMismatch`), so the model can never auto-disclose
  * across a mismatch — the human is the backstop. Once the runtime has verified
  * an exact-email confirmation, the directive flips to PASSED (proceed). Returns
- * "" for every non-mismatch case, so normal flows are untouched. Stays OUTSIDE
+ * "" for every non-mismatch ticket, so normal flows are untouched. Stays OUTSIDE
  * the untrusted fence — runtime-authored, not customer text.
  */
 const orderIdentityDirective = (
@@ -307,12 +307,12 @@ const orderIdentityDirective = (
     customerEmail && orderEmail
       ? `This customer is writing from ${customerEmail}, but ${orderRef} was placed under ${orderEmail}.`
       : `This customer is writing from a different email than the one ${orderRef} was placed under.`;
-  return `[Possible identity mismatch${wiringNote}: ${emailsLine} This is often a harmless typo — a transposed, missing or extra letter usually means the SAME person — but it can also mean someone is asking about another person's order. Use your judgment: if the two addresses are clearly the same person with a small typo, go ahead and share the order status normally. If they look like genuinely different people, do NOT share order details — instead ask the customer to confirm the exact email used to place the order via conversation.ask_customer, and only share once it matches. When you are unsure, ask rather than disclose. (Any reply you send on a flagged case is reviewed by a human before it goes out, so explain your reasoning.)]`;
+  return `[Possible identity mismatch${wiringNote}: ${emailsLine} This is often a harmless typo — a transposed, missing or extra letter usually means the SAME person — but it can also mean someone is asking about another person's order. Use your judgment: if the two addresses are clearly the same person with a small typo, go ahead and share the order status normally. If they look like genuinely different people, do NOT share order details — instead ask the customer to confirm the exact email used to place the order via conversation.ask_customer, and only share once it matches. When you are unsure, ask rather than disclose. (Any reply you send on a flagged ticket is reviewed by a human before it goes out, so explain your reasoning.)]`;
 };
 
 /**
  * Render a fetched conversation thread as a plain-text transcript, oldest
- * first, for inlining into a `case.resumed` prompt. Each line is labelled by
+ * first, for inlining into a `ticket.resumed` prompt. Each line is labelled by
  * direction so the model can tell a customer message from a reply WE already
  * sent — that's the "what was already done" the agent needs to avoid redoing
  * work or contradicting an earlier promise. The caller fences the whole string
@@ -356,7 +356,7 @@ export const inboundCustomerEmail = (
  * header carried one ("Maya Chen" <maya@…>). Mirrors {@link inboundCustomerEmail}:
  * when Reply-To is present it's the human (relay-delivered mail), so trust ONLY
  * its name — never fall back to the relay's From name. Null when no usable name
- * is present. Stamped onto `context.customerName` so cases are searchable by
+ * is present. Stamped onto `context.customerName` so tickets are searchable by
  * name, not just email.
  */
 export const inboundCustomerName = (
@@ -416,13 +416,13 @@ export const inboundCustomerPhone = (
 
 export const buildInitialMessages = (
   event: DomainEvent,
-  caseRow: {
+  ticketRow: {
     readonly subject: string | null;
     readonly threadId: ThreadId | null;
     readonly context: Record<string, unknown>;
     /**
      * The full thread transcript, pre-fetched by the runtime on a
-     * `case.resumed` tick (see `renderThreadTranscript`). When present it is
+     * `ticket.resumed` tick (see `renderThreadTranscript`). When present it is
      * inlined so even an agent WITHOUT the `conversation.fetch_thread` tool
      * (support-triage) re-orients on the real conversation. Absent/null on a
      * connector hiccup or a lean layer → the agent is told to fetch it itself.
@@ -430,9 +430,9 @@ export const buildInitialMessages = (
     readonly threadTranscript?: string | null;
   },
 ): ChatMessage[] => {
-  const caseSubject = caseRow.subject;
+  const ticketSubject = ticketRow.subject;
   if (event.type === "ticket.created") {
-    const subject = event.payload.subject ?? caseSubject ?? "(no subject)";
+    const subject = event.payload.subject ?? ticketSubject ?? "(no subject)";
     return [
       {
         role: "user",
@@ -446,12 +446,12 @@ export const buildInitialMessages = (
     // otherwise hand the agent the canonical bound order so it answers from the
     // single source of truth instead of re-searching the customer's quoted code.
     const directive =
-      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
-      boundOrderDirective(caseRow.context);
+      orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
+      boundOrderDirective(ticketRow.context);
     // A reply tick otherwise carries ONLY the latest message — hand the agent
-    // the established case facts (trusted, outside the fence) so it acts on the
-    // whole case, not just the newest line.
-    const facts = caseFactsHeader(caseRow.context);
+    // the established ticket facts (trusted, outside the fence) so it acts on the
+    // whole ticket, not just the newest line.
+    const facts = ticketFactsHeader(ticketRow.context);
     const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
     const preamble = [directive, facts].filter(Boolean).join("\n\n");
     return [
@@ -469,15 +469,15 @@ export const buildInitialMessages = (
     // specialists (refund-review, etc.) can wire `conversation.reply`
     // without an extra `conversation.fetch_thread` round trip.
     const subject =
-      event.payload.subject ?? caseSubject ?? "(no subject)";
+      event.payload.subject ?? ticketSubject ?? "(no subject)";
     // The runtime-built header (threadId / from) is trusted and stays OUTSIDE
     // the fence so the agent can still wire conversation.* tools from it. The
     // customer-authored subject + body go INSIDE the untrusted fence.
     const header = `[Thread context: threadId=${event.threadId}, from=${inboundCustomerEmail(event.payload)}]`;
     const directive =
-      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
-      boundOrderDirective(caseRow.context);
-    const facts = caseFactsHeader(caseRow.context);
+      orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
+      boundOrderDirective(ticketRow.context);
+    const facts = ticketFactsHeader(ticketRow.context);
     const customerBlock = wrapUntrusted(
       `Subject: ${subject}\n\n${event.payload.bodyText}`,
     );
@@ -489,32 +489,32 @@ export const buildInitialMessages = (
       ),
     ];
   }
-  if (event.type === "case.resumed") {
-    // A manager explicitly re-ran the case from the dashboard (or an
+  if (event.type === "ticket.resumed") {
+    // A manager explicitly re-ran the ticket from the dashboard (or an
     // operator replayed it). Unlike inbound events, there is no message
-    // payload here — the agent starts blind. Hand it everything the case
+    // payload here — the agent starts blind. Hand it everything the ticket
     // row knows so it can re-orient: the thread id (to wire
     // `conversation.fetch_thread` / `conversation.reply` without
     // guessing), the subject, and the context patches accumulated on
-    // previous attempts (`case.update_context`).
+    // previous attempts (`ticket.update_context`).
     const parts: string[] = [];
-    if (caseRow.threadId) {
-      parts.push(`[Thread context: threadId=${caseRow.threadId}]`);
+    if (ticketRow.threadId) {
+      parts.push(`[Thread context: threadId=${ticketRow.threadId}]`);
     }
     parts.push(
-      `(system event: case.resumed — trigger: ${event.trigger})`,
-      "A manager handed this case back to you and asked you to try again.",
+      `(system event: ticket.resumed — trigger: ${event.trigger})`,
+      "A manager handed this ticket back to you and asked you to try again.",
     );
-    if (caseSubject) {
-      parts.push(`Subject: ${caseSubject}`);
+    if (ticketSubject) {
+      parts.push(`Subject: ${ticketSubject}`);
     }
-    if (Object.keys(caseRow.context).length > 0) {
+    if (Object.keys(ticketRow.context).length > 0) {
       // The context blob holds agent-derived fields plus free-text the LLM
       // wrote on prior turns (notes, classification). Fence it so a prior
       // turn's injected text can't act as instructions on resume.
       parts.push(
         `Context gathered on previous attempts:\n${wrapUntrusted(
-          JSON.stringify(caseRow.context, null, 2),
+          JSON.stringify(ticketRow.context, null, 2),
         )}`,
       );
     }
@@ -525,15 +525,15 @@ export const buildInitialMessages = (
     // otherwise hand the agent the canonical bound order so it loads by GID
     // rather than re-searching.
     const directive =
-      orderIdentityDirective(caseRow.context, caseRow.threadId) ||
-      boundOrderDirective(caseRow.context);
+      orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
+      boundOrderDirective(ticketRow.context);
     if (directive) {
       parts.push(directive);
     }
     // The full context blob is inlined below (fenced, since it also holds the
     // agent's free-text). Surface the trusted, closed-vocab subset here too so
     // the agent can rely on it without trusting the fenced copy.
-    const facts = caseFactsHeader(caseRow.context);
+    const facts = ticketFactsHeader(ticketRow.context);
     if (facts) {
       parts.push(facts);
     }
@@ -542,7 +542,7 @@ export const buildInitialMessages = (
     // This is what lets a restart-from-triage actually "know what was already
     // done" — support-triage has no conversation.fetch_thread tool, so without
     // this it would re-classify from the subject alone.
-    const transcript = caseRow.threadTranscript?.trim();
+    const transcript = ticketRow.threadTranscript?.trim();
     if (transcript) {
       parts.push(
         `Conversation so far (oldest first — includes replies already sent):\n${wrapUntrusted(
@@ -550,11 +550,11 @@ export const buildInitialMessages = (
         )}`,
       );
     }
-    if (caseRow.threadId) {
+    if (ticketRow.threadId) {
       // Always steer toward a concrete TOOL action. A resumed agent that just
       // writes its answer as a plain `final_message` neither sends anything to
       // the customer nor parks correctly — the runtime would silently resolve a
-      // live case (prod 3428f154). Make "take an action" explicit for both the
+      // live ticket (prod 3428f154). Make "take an action" explicit for both the
       // transcript-inlined and the self-fetch path.
       parts.push(
         transcript
@@ -565,32 +565,32 @@ export const buildInitialMessages = (
     return [{ role: "user", content: parts.join("\n\n") }];
   }
   if (event.type === "supplier.updated") {
-    // The supplier responded on a parked case. Re-enter the agent loop so it
+    // The supplier responded on a parked ticket. Re-enter the agent loop so it
     // drafts a CUSTOMER-FACING reply. The supplier is a third party, so fence
     // their note as untrusted and instruct the agent to REWRITE it — never
     // quote it verbatim or reveal that the update came from a supplier. The
     // trusted thread header stays OUTSIDE the fence so the agent can still wire
     // conversation.* tools.
     const parts: string[] = [];
-    // The customer email is runtime-stamped on the case context (trusted), so
+    // The customer email is runtime-stamped on the ticket context (trusted), so
     // the agent can address conversation.reply without a thread fetch.
     const customerEmail =
-      typeof caseRow.context["customerEmail"] === "string"
-        ? (caseRow.context["customerEmail"] as string)
+      typeof ticketRow.context["customerEmail"] === "string"
+        ? (ticketRow.context["customerEmail"] as string)
         : null;
-    if (caseRow.threadId) {
+    if (ticketRow.threadId) {
       parts.push(
         customerEmail
-          ? `[Thread context: threadId=${caseRow.threadId}, customer=${customerEmail}]`
-          : `[Thread context: threadId=${caseRow.threadId}]`,
+          ? `[Thread context: threadId=${ticketRow.threadId}, customer=${customerEmail}]`
+          : `[Thread context: threadId=${ticketRow.threadId}]`,
       );
     }
     parts.push(
       "(system event: supplier.updated)",
-      "The supplier responded on this case. Draft a reply to the CUSTOMER that resolves their request, in your own words — do NOT quote the supplier's note verbatim, and never reveal that the update came from a supplier or warehouse.",
+      "The supplier responded on this ticket. Draft a reply to the CUSTOMER that resolves their request, in your own words — do NOT quote the supplier's note verbatim, and never reveal that the update came from a supplier or warehouse.",
     );
-    if (caseSubject) {
-      parts.push(`Subject: ${caseSubject}`);
+    if (ticketSubject) {
+      parts.push(`Subject: ${ticketSubject}`);
     }
     const proposed = event.payload.proposedResolution;
     parts.push(
@@ -600,15 +600,15 @@ export const buildInitialMessages = (
         }`,
       )}`,
     );
-    if (caseRow.threadId) {
+    if (ticketRow.threadId) {
       parts.push(
         "Send the customer reply with conversation.reply, using the threadId and customer address from the header above.",
       );
     }
     return [{ role: "user", content: parts.join("\n\n") }];
   }
-  // Other events resume an in-flight case; for Phase 1 we don't have message
-  // history, so we just signal what woke the case up.
+  // Other events resume an in-flight ticket; for Phase 1 we don't have message
+  // history, so we just signal what woke the ticket up.
   return [
     {
       role: "user",
@@ -648,7 +648,7 @@ export const deriveSubject = (input: unknown): string | null => {
 
 /**
  * Money details stamped onto `tool.invoked` audit rows for refund.create
- * (audit L9). PermissionServiceLive sums these per case so the refund
+ * (audit L9). PermissionServiceLive sums these per ticket so the refund
  * threshold compares the cumulative refunded amount, not each call alone.
  */
 /**
@@ -678,11 +678,11 @@ export const executionKeyFor = (
  * Per-delivery discriminator for the C2 execution-marker key. The marker
  * exists only to stop a REDELIVERED job (the same event replayed from turn
  * 0 after a crash) from re-running a side-effecting tool. Because the
- * marker is stored case-scoped and never expires, an UNscoped key also
+ * marker is stored ticket-scoped and never expires, an UNscoped key also
  * (wrongly) deduped a *different* delivery that happened to reuse a tool's
  * idempotency key — e.g. a second customer reply on the same thread whose
  * agent re-drafts `conversation.reply` with the same `draftId`, or a fresh
- * approval execution after an earlier approved send on the same case. That
+ * approval execution after an earlier approved send on the same ticket. That
  * silently swallowed the reply.
  *
  * Scoping the key by the delivery keeps the redelivery guarantee (a
@@ -690,13 +690,13 @@ export const executionKeyFor = (
  * new delivery re-invoke the tool. Inbound messages key by their provider
  * message id — stable across redeliveries, distinct per new message, and
  * already the unit `ProcessedMessageStore` claims on; resuming events key by
- * their own correlation id. A manager `case.resumed` retry mints a fresh
+ * their own correlation id. A manager `ticket.resumed` retry mints a fresh
  * `resumeToken`, so each restart re-runs the agent's tools (a stable-`draftId`
  * reply/ask no longer cross-dedups against the PRIOR attempt) while a pg-boss
  * redelivery of the SAME retry keeps the token and still can't double-send.
  * `supplier.updated` keys by its escalation id (each escalation's update is
  * its own delivery); `manual.takeover` carries no per-delivery id, so it falls
- * back to the case id (two of the same on one case could cross-dedup — rare).
+ * back to the ticket id (two of the same on one ticket could cross-dedup — rare).
  */
 export const deliveryScopeFor = (event: DomainEvent): string => {
   const scoped = ((): string | undefined => {
@@ -713,35 +713,35 @@ export const deliveryScopeFor = (event: DomainEvent): string => {
         return `ticket:${event.source}`;
       case "tracking.changed":
         return `track:${event.orderId}`;
-      case "case.resumed":
+      case "ticket.resumed":
         return event.resumeToken
-          ? `case:${event.caseId}:${event.resumeToken}`
-          : `case:${event.caseId}`;
+          ? `ticket:${event.ticketId}:${event.resumeToken}`
+          : `ticket:${event.ticketId}`;
       case "supplier.updated":
-        // Per-escalation scope: a case can be escalated more than once (a
+        // Per-escalation scope: a ticket can be escalated more than once (a
         // supplier update always re-engages the agent, which may escalate
         // again), and each update's reply must not cross-dedup the previous
-        // one's. Legacy events without the id fall back to the case id.
+        // one's. Legacy events without the id fall back to the ticket id.
         return event.payload.escalationId
-          ? `case:${event.caseId}:esc:${event.payload.escalationId}`
-          : `case:${event.caseId}`;
+          ? `ticket:${event.ticketId}:esc:${event.payload.escalationId}`
+          : `ticket:${event.ticketId}`;
       case "manual.takeover":
-        return `case:${event.caseId}`;
+        return `ticket:${event.ticketId}`;
     }
   })();
   if (scoped) return scoped;
   // Defensive backstop (prod 3428f154): the switch is exhaustive over the known
   // DomainEvent union, but a MALFORMED event reaching the runtime (a `type` no
-  // case matches) would otherwise fall through to `undefined` → an UNSCOPED
+  // ticket matches) would otherwise fall through to `undefined` → an UNSCOPED
   // execution key. A bare key collides with a legacy, pre-scoping marker
   // (`conversation.reply:<draftId>`) and silently dedups a fresh customer reply
-  // — the where_is_order case then auto-resolves with nothing sent. Never key
-  // bare: namespace by the case id when present (so a send can't collide with a
+  // — the where_is_order ticket then auto-resolves with nothing sent. Never key
+  // bare: namespace by the ticket id when present (so a send can't collide with a
   // bare legacy marker), else by the event type. Keeps the redelivery guarantee
   // while making the silent-swallow impossible regardless of event shape.
-  const caseId = (event as { readonly caseId?: unknown }).caseId;
-  return typeof caseId === "string" && caseId.length > 0
-    ? `case:${caseId}`
+  const ticketId = (event as { readonly ticketId?: unknown }).ticketId;
+  return typeof ticketId === "string" && ticketId.length > 0
+    ? `ticket:${ticketId}`
     : `event:${(event as { readonly type?: unknown }).type ?? "unknown"}`;
 };
 
@@ -749,10 +749,10 @@ export const deliveryScopeFor = (event: DomainEvent): string => {
  * RFC Message-IDs an inbound reply points at — its In-Reply-To plus every
  * entry in its References chain. These are the ids of EARLIER messages in the
  * thread (a prior inbound, or our own outbound reply), which the runtime looks
- * up in the message-id index to correlate the reply to its existing case when
+ * up in the message-id index to correlate the reply to its existing ticket when
  * the derived thread-id doesn't exact-match (clients reorder/truncate the
  * chain, so `references[0]` is not a reliable thread root). The message's own
- * id is deliberately excluded — it's new and can't match an existing case.
+ * id is deliberately excluded — it's new and can't match an existing ticket.
  * Deduped, brackets-trimmed, empties dropped. Exported for unit testing.
  */
 export const inboundReplyCandidateIds = (
@@ -834,14 +834,14 @@ export const toolFailureAuditDetail = (
 };
 
 /**
- * Lock key for serializing a tick (audit L2): the case id when the event
- * references (or correlates to) an existing case; the thread key for a
- * first message whose case doesn't exist yet; null for events with no
- * case affinity (fresh ticket create, unsupported types).
+ * Lock key for serializing a tick (audit L2): the ticket id when the event
+ * references (or correlates to) an existing ticket; the thread key for a
+ * first message whose ticket doesn't exist yet; null for events with no
+ * ticket affinity (fresh ticket create, unsupported types).
  */
 export const deriveTickLockKey = (
   event: DomainEvent,
-  cases: Context.Tag.Service<CaseRepository>,
+  tickets: Context.Tag.Service<TicketRepository>,
 ): Effect.Effect<string | null> => {
   switch (event.type) {
     case "customer.replied":
@@ -850,10 +850,10 @@ export const deriveTickLockKey = (
     case "supplier.updated":
     case "timer.expired":
     case "manual.takeover":
-    case "case.resumed":
-      return Effect.succeed(`case-tick:${event.caseId}`);
+    case "ticket.resumed":
+      return Effect.succeed(`ticket-tick:${event.ticketId}`);
     case "message.received":
-      return cases
+      return tickets
         .findByThreadId(
           makeTenantId(event.tenantId),
           makeThreadId(event.threadId),
@@ -863,7 +863,7 @@ export const deriveTickLockKey = (
         .pipe(
           Effect.map((row) =>
             row
-              ? `case-tick:${row.id}`
+              ? `ticket-tick:${row.id}`
               : `thread-tick:${event.tenantId}:${event.payload.mailbox ?? "legacy"}:${event.threadId}`,
           ),
           Effect.catchAll(() =>
@@ -881,14 +881,14 @@ export const deriveTickLockKey = (
 /**
  * Prompt-injection mitigation (refund scope): warn when a proposed
  * `refund.create` targets an order whose customer email doesn't match the
- * case's bound customer. A prompt-injected agent could be steered to refund an
+ * ticket's bound customer. A prompt-injected agent could be steered to refund an
  * unrelated order; the order's customer is authoritative (Shopify data) and
- * the case's `customerEmail` is stamped by the runtime from the inbound
+ * the ticket's `customerEmail` is stamped by the runtime from the inbound
  * sender (not the LLM), so a divergence is a strong "this refund may be aimed
  * at the wrong order" signal for the human approver.
  *
  * Returns the risk-flag string to stamp, or null when there's nothing to warn
- * about: not a refund, the case customer is unknown, the order wasn't looked
+ * about: not a refund, the ticket customer is unknown, the order wasn't looked
  * up this tick, the looked-up order has no email, or the emails match. Fails
  * OPEN (null) on every missing input so it never blocks a legitimate refund —
  * it only adds a warning when it has positive evidence of a mismatch.
@@ -897,18 +897,18 @@ export const deriveTickLockKey = (
  */
 export const refundCustomerMismatchFlag = (
   input: unknown,
-  caseContext: Record<string, unknown>,
+  ticketContext: Record<string, unknown>,
   seenOrderEmails: ReadonlyMap<string, string | null>,
 ): string | null => {
-  const caseEmail = caseContext["customerEmail"];
-  if (typeof caseEmail !== "string" || caseEmail.trim() === "") return null;
+  const ticketEmail = ticketContext["customerEmail"];
+  if (typeof ticketEmail !== "string" || ticketEmail.trim() === "") return null;
   if (!input || typeof input !== "object") return null;
   const orderId = (input as Record<string, unknown>)["orderId"];
   if (typeof orderId !== "string") return null;
   if (!seenOrderEmails.has(orderId)) return null;
   const orderEmail = seenOrderEmails.get(orderId);
   if (typeof orderEmail !== "string" || orderEmail.trim() === "") return null;
-  if (orderEmail.trim().toLowerCase() === caseEmail.trim().toLowerCase()) {
+  if (orderEmail.trim().toLowerCase() === ticketEmail.trim().toLowerCase()) {
     return null;
   }
   return "refund_customer_mismatch";
@@ -926,9 +926,9 @@ const isOrderGid = (v: unknown): v is string =>
   typeof v === "string" && v.startsWith("gid://shopify/Order/");
 
 /**
- * The value to stamp into `case.context.identifiedOrderId` after the runtime
+ * The value to stamp into `ticket.context.identifiedOrderId` after the runtime
  * resolves a concrete order through an order tool (`shopify.get_order` /
- * `shopify.find_customer_order`). This is the case's single source of truth for
+ * `shopify.find_customer_order`). This is the ticket's single source of truth for
  * "which order is this about": every consumer (the agent's `boundOrderDirective`,
  * the dashboard order panel, the Issue-refund button) re-resolves it EXACTLY via
  * `getOrder(gid)` — never a fuzzy name/confirmation search that can diverge.
@@ -949,12 +949,12 @@ export const orderContextRef = (order: {
 };
 
 /**
- * Trusted directive that hands the agent the order already bound to the case so
+ * Trusted directive that hands the agent the order already bound to the ticket so
  * it answers from the single source of truth instead of re-searching by the
  * customer's quoted (and possibly wrong) order number / confirmation code — the
- * scatter that let a case with a real order still draft "I can't find your
+ * scatter that let a ticket with a real order still draft "I can't find your
  * order". Fires only once `identifiedOrderId` holds a canonical GID; a legacy
- * fuzzy value or an unresolved case yields "" (the agent resolves normally).
+ * fuzzy value or an unresolved ticket yields "" (the agent resolves normally).
  * Stays OUTSIDE the untrusted fence — runtime-authored, not customer text.
  */
 export const boundOrderDirective = (
@@ -962,17 +962,17 @@ export const boundOrderDirective = (
 ): string => {
   const gid = context["identifiedOrderId"];
   if (!isOrderGid(gid)) return "";
-  return `[This case already has an identified order: ${gid}. Load it with shopify.get_order using exactly that id; do NOT search for the order again by any name or confirmation code the customer quoted.]`;
+  return `[This ticket already has an identified order: ${gid}. Load it with shopify.get_order using exactly that id; do NOT search for the order again by any name or confirmation code the customer quoted.]`;
 };
 
 /**
  * Trusted, compact summary of the substantive facts the system already knows
- * about a case, injected OUTSIDE the untrusted fence on inbound and reply ticks
+ * about a ticket, injected OUTSIDE the untrusted fence on inbound and reply ticks
  * so the agent reasons from the full picture rather than re-deriving it — or, on
  * a customer reply (which otherwise carries ONLY the latest message), flying
  * blind on what was already established. The order id and the identity-mismatch
  * specifics have their own directives ({@link boundOrderDirective} /
- * orderIdentityDirective); this carries the rest of the case substance.
+ * orderIdentityDirective); this carries the rest of the ticket substance.
  *
  * Includes ONLY runtime-owned fields (`customerEmail`, `verifiedCustomerEmail`,
  * `identityVerified`) and closed-vocabulary agent fields (`classification`,
@@ -981,10 +981,10 @@ export const boundOrderDirective = (
  * deliberately OMITS the agent's free-text `notes` and the untrusted customer
  * string `quotedOrderRef`, which stay inside the fence, so this header itself
  * can be trusted (a prompt-injected body can't reach it). Returns null when the
- * case has no established facts yet (a fresh inbound), so normal first-touch
+ * ticket has no established facts yet (a fresh inbound), so normal first-touch
  * flows are untouched.
  */
-export const caseFactsHeader = (
+export const ticketFactsHeader = (
   context: Record<string, unknown>,
 ): string | null => {
   const str = (k: string): string | null =>
@@ -1016,7 +1016,7 @@ export const caseFactsHeader = (
   if (context["identityVerified"] === true) facts.push("identityVerified=yes");
 
   if (facts.length === 0) return null;
-  return `[Case facts known to the system — treat these as established, don't re-derive or contradict them: ${facts.join("; ")}]`;
+  return `[Ticket facts known to the system — treat these as established, don't re-derive or contradict them: ${facts.join("; ")}]`;
 };
 
 /** Read `context.riskFlags` as a string array (the runtime's fraud/guard chips). */
@@ -1028,12 +1028,12 @@ export const readRiskFlags = (context: Record<string, unknown>): string[] =>
     : [];
 
 /**
- * Whether the case carries an order/customer identity mismatch the runtime has
+ * Whether the ticket carries an order/customer identity mismatch the runtime has
  * NOT yet verified — i.e. the disclosure gate is still closed. The runtime uses
- * this to refuse to auto-resolve such a case on a bare `final_message`: we never
+ * this to refuse to auto-resolve such a ticket on a bare `final_message`: we never
  * confirmed we're talking to the right person, so silently closing would leave a
- * live case unanswered (prod 3428f154: a resumed order-status-agent drafted a
- * prose answer instead of replying/challenging and the case auto-resolved).
+ * live ticket unanswered (prod 3428f154: a resumed order-status-agent drafted a
+ * prose answer instead of replying/challenging and the ticket auto-resolved).
  * Pure + exported so the decision is unit-tested without the runtime.
  */
 export const hasUnverifiedOrderMismatch = (
@@ -1045,21 +1045,21 @@ export const hasUnverifiedOrderMismatch = (
 /**
  * Order-status identity guard (the `where_is_order` flow). Returns
  * `"order_customer_mismatch"` when the looked-up order's customer email differs
- * from the case's bound (runtime-stamped) customer, else null. The sibling of
+ * from the ticket's bound (runtime-stamped) customer, else null. The sibling of
  * {@link refundCustomerMismatchFlag} for read-disclosure rather than refunds:
  * replying with the order's status would leak another customer's order details.
  *
  * Fails OPEN (null) on any missing input — an unknown order email or an
- * unidentified case customer never raises a false alarm. Pure + exported so the
+ * unidentified ticket customer never raises a false alarm. Pure + exported so the
  * decision is unit-tested without the runtime.
  */
 export const orderCustomerMismatchFlag = (
   orderEmail: unknown,
   orderCustomerId: unknown,
-  caseContext: Record<string, unknown>,
+  ticketContext: Record<string, unknown>,
 ): string | null => {
   // The order belongs to the person writing in if EITHER holds:
-  //  - CUSTOMER match: it's under the case's resolved customer account
+  //  - CUSTOMER match: it's under the ticket's resolved customer account
   //    (`shopifyCustomerId`, resolved by email/phone/name). Per the "trust any
   //    match" decision this clears the flag even when the order's email column
   //    differs (they ordered under a second address) — order↔customer, not
@@ -1068,8 +1068,8 @@ export const orderCustomerMismatchFlag = (
   //    parallel signal so a strong email match still clears the flag even if a
   //    FUZZY name-resolved customer disagrees (email is sender-controlled).
   const resolvedCustomer =
-    typeof caseContext["shopifyCustomerId"] === "string"
-      ? caseContext["shopifyCustomerId"].trim()
+    typeof ticketContext["shopifyCustomerId"] === "string"
+      ? ticketContext["shopifyCustomerId"].trim()
       : "";
   const orderCustomer =
     typeof orderCustomerId === "string" ? orderCustomerId.trim() : "";
@@ -1077,13 +1077,13 @@ export const orderCustomerMismatchFlag = (
   const customerMatch = haveCustomerBasis && resolvedCustomer === orderCustomer;
 
   const order = normalizeEmailForMatch(orderEmail);
-  const caseEmail = normalizeEmailForMatch(caseContext["customerEmail"]);
-  const haveEmailBasis = order !== null && caseEmail !== null;
-  const emailMatch = haveEmailBasis && order === caseEmail;
+  const ticketEmail = normalizeEmailForMatch(ticketContext["customerEmail"]);
+  const haveEmailBasis = order !== null && ticketEmail !== null;
+  const emailMatch = haveEmailBasis && order === ticketEmail;
 
   if (customerMatch || emailMatch) return null;
   // Only flag when we actually had something to compare; otherwise fail OPEN
-  // (an unknown order customer / unidentified case never raises a false alarm).
+  // (an unknown order customer / unidentified ticket never raises a false alarm).
   return haveCustomerBasis || haveEmailBasis ? "order_customer_mismatch" : null;
 };
 
@@ -1107,7 +1107,7 @@ export const replyProvesOrderIdentity = (
 };
 
 /**
- * Decide, in the runtime (never the model), what to stamp on the case when a
+ * Decide, in the runtime (never the model), what to stamp on the ticket when a
  * customer's inbound reply answers the order-status identity challenge. Returns
  * the context patch — `identityVerified` plus the now-confirmed
  * `verifiedCustomerEmail` — when the reply proves the order's email, else null.
@@ -1134,9 +1134,9 @@ export const orderIdentityVerificationPatch = (
 
 /**
  * Backstop that survives the tenant's auto/ask toggle: should a
- * `conversation.reply` on this case be forced to human approval no matter what
- * the per-agent permission resolves to? True when the case is a
- * `where_is_order` case flagged as an order/customer mismatch whose requester
+ * `conversation.reply` on this ticket be forced to human approval no matter what
+ * the per-agent permission resolves to? True when the ticket is a
+ * `where_is_order` ticket flagged as an order/customer mismatch whose requester
  * has NOT verified their identity — i.e. sending the reply would disclose a
  * different customer's order. Once {@link replyProvesOrderIdentity} has stamped
  * `identityVerified`, the gate lifts and the reply flows on its normal
@@ -1344,8 +1344,8 @@ export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
  *     — effectiveHandoffIds — permits it), deduped;
  *   - appends a trusted routing header listing each scenario (key +
  *     recognition) and instructing triage to stamp `scenarioKey` via
- *     case.update_context and hand off to the resolution agent, preferring it
- *     over the built-in specialists for any matching case.
+ *     ticket.update_context and hand off to the resolution agent, preferring it
+ *     over the built-in specialists for any matching ticket.
  * Both flow through the runtime automatically (effectiveHandoffIds reads
  * `handoffs`; buildSystemPrompt reads `promptTemplate`). Only ENABLED scenarios
  * are offered (a disabled one falls back to the built-in specialists); no
@@ -1364,10 +1364,10 @@ export const applyTriageScenarioRouting = (
       }`,
   );
   const header = [
-    "[Resolution scenarios — this store routes matching cases to the resolution agent. For a case that fits ONE of these scenarios, PREFER this over the built-in specialists:",
+    "[Resolution scenarios — this store routes matching tickets to the resolution agent. For a ticket that fits ONE of these scenarios, PREFER this over the built-in specialists:",
     ...lines,
     "",
-    'To route a matching case: (1) call case.update_context with `scenarioKey` set to the matching scenario\'s key (keep your usual `classification`/`quotedOrderRef`/`notes` too), then (2) call agent.handoff with targetAgent "scenario-resolution-agent". Only fall back to a built-in specialist when the case fits NONE of the scenarios above.]',
+    'To route a matching ticket: (1) call ticket.update_context with `scenarioKey` set to the matching scenario\'s key (keep your usual `classification`/`quotedOrderRef`/`notes` too), then (2) call agent.handoff with targetAgent "scenario-resolution-agent". Only fall back to a built-in specialist when the ticket fits NONE of the scenarios above.]',
   ].join("\n");
   const alreadyListed = agent.handoffs.some(
     (h) => (h as string) === SCENARIO_RESOLUTION_AGENT_ID,
@@ -1384,10 +1384,10 @@ export const applyTriageScenarioRouting = (
 
 /**
  * Resolution-agent-direct entry (2026-06-28). When the tenant has the resolution
- * agent enabled, inbound cases run the scenario-resolution-agent DIRECTLY (no
+ * agent enabled, inbound tickets run the scenario-resolution-agent DIRECTLY (no
  * support-triage hop). This wraps that agent with a steering header so it picks
  * the matching scenario ITSELF as its first step — replacing the brittle
- * triage→handoff classification that intermittently silently-resolved cases.
+ * triage→handoff classification that intermittently silently-resolved tickets.
  *
  * Unlike `applyScenarioEnvelope`, this does NOT touch `tools` or
  * `permissionOverrides`: tools/permissions are configured ONCE on the agent now
@@ -1421,8 +1421,8 @@ export const applyResolutionAgentEntry = (
     "[Resolution scenarios — you are the entry point for this store. FIRST, read the customer's message and decide which ONE of these scenarios it matches:",
     ...lines,
     "",
-    "As your FIRST action, call case.update_context with `scenarioKey` set to the matching scenario's key (and `classification`/`quotedOrderRef`/`notes` when useful). Then follow that scenario's guidance to resolve the case end-to-end using your available tools.",
-    "If the message genuinely fits NONE of these scenarios — spam, an offer/solicitation, or something only a human should decide — do NOT guess and do NOT send a customer reply: call merchant.notify and stop with a brief final message, which parks the case for a human. Never close a real customer's case without helping them.]",
+    "As your FIRST action, call ticket.update_context with `scenarioKey` set to the matching scenario's key (and `classification`/`quotedOrderRef`/`notes` when useful). Then follow that scenario's guidance to resolve the ticket end-to-end using your available tools.",
+    "If the message genuinely fits NONE of these scenarios — spam, an offer/solicitation, or something only a human should decide — do NOT guess and do NOT send a customer reply: call merchant.notify and stop with a brief final message, which parks the ticket for a human. Never close a real customer's ticket without helping them.]",
   ].join("\n");
   return {
     ...agent,

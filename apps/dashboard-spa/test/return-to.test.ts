@@ -8,12 +8,12 @@ import { sanitizeReturnTo } from "../lib/return-to";
 // same-origin relative path — anything else is an open-redirect vector.
 describe("sanitizeReturnTo", () => {
   it("keeps a plain absolute path", () => {
-    expect(sanitizeReturnTo("/cases/abc")).toBe("/cases/abc");
+    expect(sanitizeReturnTo("/tickets/abc")).toBe("/tickets/abc");
   });
 
   it("keeps an absolute path with a query string", () => {
-    expect(sanitizeReturnTo("/cases?status=open&page=2")).toBe(
-      "/cases?status=open&page=2",
+    expect(sanitizeReturnTo("/tickets?status=open&page=2")).toBe(
+      "/tickets?status=open&page=2",
     );
   });
 
@@ -25,7 +25,7 @@ describe("sanitizeReturnTo", () => {
 
   it("uses a caller-supplied fallback when the value is absent", () => {
     expect(sanitizeReturnTo(undefined, "/onboarding")).toBe("/onboarding");
-    expect(sanitizeReturnTo("/cases", "/onboarding")).toBe("/cases");
+    expect(sanitizeReturnTo("/tickets", "/onboarding")).toBe("/tickets");
   });
 
   it("rejects a protocol-relative URL (//evil.com)", () => {
@@ -38,17 +38,17 @@ describe("sanitizeReturnTo", () => {
   });
 
   it("rejects a path that does not start with a slash", () => {
-    expect(sanitizeReturnTo("cases/abc")).toBe("/");
+    expect(sanitizeReturnTo("tickets/abc")).toBe("/");
     expect(sanitizeReturnTo("javascript:alert(1)")).toBe("/");
   });
 
   it("rejects backslash tricks browsers normalise to //", () => {
     expect(sanitizeReturnTo("/\\evil.com")).toBe("/");
-    expect(sanitizeReturnTo("/cases\\..\\admin")).toBe("/");
+    expect(sanitizeReturnTo("/tickets\\..\\admin")).toBe("/");
   });
 
   it("rejects values with control characters or whitespace", () => {
-    expect(sanitizeReturnTo("/cases\nSet-Cookie: x")).toBe("/");
+    expect(sanitizeReturnTo("/tickets\nSet-Cookie: x")).toBe("/");
     expect(sanitizeReturnTo("/ca ses")).toBe("/");
   });
 });

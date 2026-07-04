@@ -50,7 +50,7 @@ export const tenants = pgTable(
       .on(t.shopifyDomain)
       .where(sql`${t.shopifyDomain} IS NOT NULL`),
     // A WorkOS organization owns MANY tenant rows — each row is one
-    // "workspace" (its own store, mailboxes, LLM key, cases). Plain index
+    // "workspace" (its own store, mailboxes, LLM key, tickets). Plain index
     // for the org→workspaces lookup; the "default" workspace is resolved
     // by ordering (created_at ASC, id ASC), not by a constraint.
     // Migration 0019 relaxed the previous 1:1 unique index.
@@ -100,8 +100,8 @@ export type AccountOpenRouterCredentialRow =
 export type AccountOpenRouterCredentialInsert =
   typeof accountOpenrouterCredentials.$inferInsert;
 
-export const cases = pgTable(
-  "cases",
+export const tickets = pgTable(
+  "tickets",
   {
     id: uuid("id").primaryKey(),
     tenantId: uuid("tenant_id")
@@ -114,8 +114,8 @@ export const cases = pgTable(
     // Exact connected mailbox that owns `thread_id`. Provider ids are opaque
     // within a mailbox, not guaranteed unique across two mailboxes.
     mailbox: text("mailbox"),
-    // Conversation-connector discriminator stamped at case create (audit D2):
-    // which provider owns `thread_id` (gmail/outlook/imap). NULL for cases
+    // Conversation-connector discriminator stamped at ticket create (audit D2):
+    // which provider owns `thread_id` (gmail/outlook/imap). NULL for tickets
     // created before the stamp existed and for non-conversation channels.
     // The conversation router uses it to route legacy (un-namespaced) thread
     // ids instead of guessing the tenant's "most recent active connector".
@@ -128,7 +128,7 @@ export const cases = pgTable(
     subject: text("subject"),
     context: jsonb("context").notNull().default(sql`'{}'::jsonb`),
     /**
-     * Per-case "round" counter. Bumped on every resume/takeover so events and
+     * Per-ticket "round" counter. Bumped on every resume/takeover so events and
      * approvals created in a prior attempt (a lower epoch) can be fenced out —
      * see `approvals.epoch`. Recovery hardening (double-send / stale-replay).
      */
@@ -144,64 +144,64 @@ export const cases = pgTable(
   },
   (t) => [
     check(
-      "cases_channel_check",
+      "tickets_channel_check",
       sql`${t.channel} IN ('email','form','chat','api')`,
     ),
     check(
-      "cases_priority_check",
+      "tickets_priority_check",
       sql`${t.priority} IN ('low','normal','high','urgent')`,
     ),
     check(
-      "cases_status_check",
+      "tickets_status_check",
       sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_supplier','waiting_for_approval','approved_action_running','resolved','archived','failed','human_takeover')`,
     ),
     // Mirrors CONVERSATION_PROVIDERS in @support-agent/services. NULL passes
-    // the CHECK (unstamped legacy cases / non-conversation channels).
+    // the CHECK (unstamped legacy tickets / non-conversation channels).
     check(
-      "cases_provider_check",
+      "tickets_provider_check",
       sql`${t.provider} IN ('gmail','outlook','imap')`,
     ),
-    index("cases_tenant_status_idx").on(
+    index("tickets_tenant_status_idx").on(
       t.tenantId,
       t.status,
       sql`${t.updatedAt} DESC`,
     ),
-    index("cases_customer_idx").on(t.customerId),
-    // One case per exact mailbox thread. Provider thread ids are opaque and
+    index("tickets_customer_idx").on(t.customerId),
+    // One ticket per exact mailbox thread. Provider thread ids are opaque and
     // can collide across two mailboxes connected by the same tenant.
-    uniqueIndex("cases_tenant_provider_mailbox_thread_unique")
+    uniqueIndex("tickets_tenant_provider_mailbox_thread_unique")
       .on(t.tenantId, t.provider, t.mailbox, t.threadId)
       .where(
         sql`${t.threadId} IS NOT NULL AND ${t.provider} IS NOT NULL AND ${t.mailbox} IS NOT NULL`,
       ),
-    // Preserve uniqueness for pre-mailbox legacy cases until a future
+    // Preserve uniqueness for pre-mailbox legacy tickets until a future
     // backfill can bind them to a connection.
-    uniqueIndex("cases_tenant_legacy_thread_unique")
+    uniqueIndex("tickets_tenant_legacy_thread_unique")
       .on(t.tenantId, t.threadId)
       .where(sql`${t.threadId} IS NOT NULL AND ${t.mailbox} IS NULL`),
   ],
 );
 
-// RFC 5322 Message-ID ↔ case index. IMAP/SMTP has no provider-stable thread
-// id, so a case's `thread_id` is reconstructed from the first inbound
+// RFC 5322 Message-ID ↔ ticket index. IMAP/SMTP has no provider-stable thread
+// id, so a ticket's `thread_id` is reconstructed from the first inbound
 // message's `References` header — brittle, because many clients reorder or
 // drop that chain on subsequent replies, which would otherwise mint a
-// duplicate case (the reply roots on a different id). We instead record the
+// duplicate ticket (the reply roots on a different id). We instead record the
 // RFC Message-ID of every message we accept (inbound) and send (outbound)
-// against its case; an incoming reply is correlated by matching ANY id in its
+// against its ticket; an incoming reply is correlated by matching ANY id in its
 // In-Reply-To / References against this index. Recording BOTH directions is
 // what makes a reply that only cites its immediate parent resolve — the parent
 // is always either a prior inbound or our own outbound, both indexed here.
-export const caseMessageIds = pgTable(
-  "case_message_ids",
+export const ticketMessageIds = pgTable(
+  "ticket_message_ids",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     /** RFC Message-ID, angle brackets stripped. */
     messageId: text("message_id").notNull(),
     direction: text("direction").notNull(),
@@ -211,31 +211,31 @@ export const caseMessageIds = pgTable(
   },
   (t) => [
     check(
-      "case_message_ids_direction_check",
+      "ticket_message_ids_direction_check",
       sql`${t.direction} IN ('inbound','outbound')`,
     ),
     // A Message-ID is globally unique by RFC, so within a tenant it maps to at
-    // most one case. The unique index doubles as the lookup index for
+    // most one ticket. The unique index doubles as the lookup index for
     // correlation and makes re-recording (redelivered poll / retried send)
     // idempotent via ON CONFLICT DO NOTHING.
-    uniqueIndex("case_message_ids_tenant_message_unique").on(
+    uniqueIndex("ticket_message_ids_tenant_message_unique").on(
       t.tenantId,
       t.messageId,
     ),
-    index("case_message_ids_case_idx").on(t.caseId),
+    index("ticket_message_ids_ticket_idx").on(t.ticketId),
   ],
 );
 
-export type CaseMessageIdRow = typeof caseMessageIds.$inferSelect;
-export type CaseMessageIdInsert = typeof caseMessageIds.$inferInsert;
+export type TicketMessageIdRow = typeof ticketMessageIds.$inferSelect;
+export type TicketMessageIdInsert = typeof ticketMessageIds.$inferInsert;
 
-export const caseStateTransitions = pgTable(
-  "case_state_transitions",
+export const ticketStateTransitions = pgTable(
+  "ticket_state_transitions",
   {
     id: bigserial("id", { mode: "bigint" }).primaryKey(),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     fromStatus: text("from_status").notNull(),
     toStatus: text("to_status").notNull(),
     eventId: uuid("event_id"),
@@ -244,7 +244,7 @@ export const caseStateTransitions = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("cst_case_idx").on(t.caseId, t.id)],
+  (t) => [index("ticket_state_transitions_ticket_idx").on(t.ticketId, t.id)],
 );
 
 export const auditLog = pgTable(
@@ -252,7 +252,7 @@ export const auditLog = pgTable(
   {
     id: bigserial("id", { mode: "bigint" }).primaryKey(),
     tenantId: uuid("tenant_id").notNull(),
-    caseId: uuid("case_id"),
+    ticketId: uuid("ticket_id"),
     actorType: text("actor_type").notNull(),
     actorId: text("actor_id"),
     action: text("action").notNull(),
@@ -266,7 +266,7 @@ export const auditLog = pgTable(
       "audit_log_actor_type_check",
       sql`${t.actorType} IN ('agent','user','system','customer')`,
     ),
-    index("audit_log_case_idx").on(t.caseId, t.id),
+    index("audit_log_ticket_idx").on(t.ticketId, t.id),
     // Tenant-wide scans (dashboard auditList pagination keyed on id DESC and
     // the usage rollup filtering on action + occurred_at) on the fastest-
     // growing table — audit D5.
@@ -286,9 +286,9 @@ export const approvals = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id),
+      .references(() => tickets.id),
     agentId: text("agent_id").notNull(),
     tool: text("tool").notNull(),
     proposedInput: jsonb("proposed_input").notNull(),
@@ -308,12 +308,12 @@ export const approvals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
-    /** The case round (`cases.epoch`) this approval was created in. */
+    /** The ticket round (`tickets.epoch`) this approval was created in. */
     epoch: integer("epoch").notNull().default(0),
     /**
      * Set once the decision has been ACTED ON — executed, deduped, or
      * deliberately skipped (e.g. delivery skipped because a human took the
-     * case over). A resumed approval is never re-run by a later bundle and
+     * ticket over). A resumed approval is never re-run by a later bundle and
      * never re-published by the maintenance sweep. Recovery hardening.
      */
     resumedAt: timestamp("resumed_at", { withTimezone: true }),
@@ -330,9 +330,9 @@ export const approvals = pgTable(
     index("approvals_pending_idx")
       .on(t.tenantId, t.status, t.expiresAt)
       .where(sql`${t.status} = 'pending'`),
-    // Per-case approval lookups (caseDetail, takeover's pending-cancel scan)
+    // Per-ticket approval lookups (ticketDetail, takeover's pending-cancel scan)
     // — audit D5.
-    index("approvals_case_idx").on(t.caseId),
+    index("approvals_ticket_idx").on(t.ticketId),
   ],
 );
 
@@ -687,9 +687,9 @@ export const timers = pgTable(
   "timers",
   {
     id: uuid("id").primaryKey(),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     fireAt: timestamp("fire_at", { withTimezone: true }).notNull(),
     reason: text("reason").notNull(),
     firedAt: timestamp("fired_at", { withTimezone: true }),
@@ -703,7 +703,7 @@ export const timers = pgTable(
     index("timers_due_idx")
       .on(t.fireAt)
       .where(sql`${t.firedAt} IS NULL AND ${t.cancelledAt} IS NULL`),
-    index("timers_case_idx").on(t.caseId, t.fireAt),
+    index("timers_ticket_idx").on(t.ticketId, t.fireAt),
   ],
 );
 
@@ -716,8 +716,8 @@ export type TimerInsert = typeof timers.$inferInsert;
  * message_id) key at the top of a tick so a duplicate webhook delivery —
  * or the Gmail cursor-expiry reseed replaying history — can't run a second
  * full agent tick (and send a second customer reply) for the same inbound
- * message. `case_id` is informational (which case the message landed on);
- * SET NULL on case deletion so redaction isn't blocked while the dedup
+ * message. `ticket_id` is informational (which ticket the message landed on);
+ * SET NULL on ticket deletion so redaction isn't blocked while the dedup
  * record survives.
  */
 export const processedMessages = pgTable(
@@ -730,7 +730,7 @@ export const processedMessages = pgTable(
     provider: text("provider").notNull(),
     messageId: text("message_id").notNull(),
     threadId: text("thread_id"),
-    caseId: uuid("case_id").references(() => cases.id, {
+    ticketId: uuid("ticket_id").references(() => tickets.id, {
       onDelete: "set null",
     }),
     processedAt: timestamp("processed_at", { withTimezone: true })
@@ -769,10 +769,10 @@ export type ProcessedEventInsert = typeof processedEvents.$inferInsert;
 
 /**
  * Tool-execution markers (audit C2). A side-effecting tool records a row
- * keyed by (case_id, call_id) in the same transaction as its audit write;
+ * keyed by (ticket_id, call_id) in the same transaction as its audit write;
  * an at-least-once redelivery (approval resume re-run, job retry) consults
  * the marker and short-circuits instead of double-executing a refund or
- * customer email. Cascades with the case (redaction).
+ * customer email. Cascades with the ticket (redaction).
  */
 export const toolExecutions = pgTable(
   "tool_executions",
@@ -781,9 +781,9 @@ export const toolExecutions = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     callId: text("call_id").notNull(),
     tool: text("tool").notNull(),
     executedAt: timestamp("executed_at", { withTimezone: true })
@@ -792,7 +792,7 @@ export const toolExecutions = pgTable(
     resultOk: boolean("result_ok"),
   },
   (t) => [
-    uniqueIndex("tool_executions_case_call_unique").on(t.caseId, t.callId),
+    uniqueIndex("tool_executions_ticket_call_unique").on(t.ticketId, t.callId),
   ],
 );
 
@@ -804,7 +804,7 @@ export type ToolExecutionInsert = typeof toolExecutions.$inferInsert;
  * product duplicate-photo fraud guard. One row per uploaded image. `phash`
  * is a 64-bit dHash stored as a signed `bigint` (two's-complement bit
  * pattern; Hamming distance is computed on the bits, so the sign is
- * irrelevant). We keep ONLY the hash, the case, and the tenant — never the
+ * irrelevant). We keep ONLY the hash, the ticket, and the tenant — never the
  * image — and a hash is not reversible to the original photo. Lookups
  * fetch a tenant's recent window (see the composite index) and compute
  * Hamming distance in app code.
@@ -816,9 +816,9 @@ export const imageHashes = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     phash: bigint("phash", { mode: "bigint" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -826,7 +826,7 @@ export const imageHashes = pgTable(
   },
   (t) => [
     index("image_hashes_tenant_created_idx").on(t.tenantId, t.createdAt),
-    index("image_hashes_case_idx").on(t.caseId),
+    index("image_hashes_ticket_idx").on(t.ticketId),
   ],
 );
 
@@ -835,11 +835,11 @@ export type ImageHashInsert = typeof imageHashes.$inferInsert;
 
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;
-export type CaseRow = typeof cases.$inferSelect;
-export type CaseInsert = typeof cases.$inferInsert;
-export type CaseStateTransitionRow = typeof caseStateTransitions.$inferSelect;
-export type CaseStateTransitionInsert =
-  typeof caseStateTransitions.$inferInsert;
+export type TicketRow = typeof tickets.$inferSelect;
+export type TicketInsert = typeof tickets.$inferInsert;
+export type TicketStateTransitionRow = typeof ticketStateTransitions.$inferSelect;
+export type TicketStateTransitionInsert =
+  typeof ticketStateTransitions.$inferInsert;
 export type AuditLogRow = typeof auditLog.$inferSelect;
 export type AuditLogInsert = typeof auditLog.$inferInsert;
 export type ApprovalRow = typeof approvals.$inferSelect;
@@ -890,7 +890,7 @@ export const roles = pgTable(
 );
 
 // A role's granted permission ids. `permission_id` is a value from the code
-// registry (e.g. 'cases.reply'); deliberately not FK'd — the catalog is code.
+// registry (e.g. 'tickets.reply'); deliberately not FK'd — the catalog is code.
 export const rolePermissions = pgTable(
   "role_permissions",
   {
@@ -993,7 +993,7 @@ export type MemberInvitationInsert = typeof memberInvitations.$inferInsert;
 // `user_decision_uuid` is bound on their first authenticated load (mirrors
 // member_role_assignments). A supplier is a heavily constrained WorkOS member
 // with the "Supplier" RBAC role — these rows just hold the named identity + the
-// case-visibility binding. One WorkOS user (userDecisionUuid) may be bound to
+// ticket-visibility binding. One WorkOS user (userDecisionUuid) may be bound to
 // MANY workspaces (one supplier ↔ many merchants); supplier-portal access is
 // anchored by this binding, org-independent (see resolveSupplierAuth).
 export const suppliers = pgTable(
@@ -1026,23 +1026,23 @@ export const suppliers = pgTable(
   ],
 );
 
-// The per-case escalation record + the MINIMAL privacy projection, denormalised
-// at escalate time so the supplier query never joins back to cases / customer
+// The per-ticket escalation record + the MINIMAL privacy projection, denormalised
+// at escalate time so the supplier query never joins back to tickets / customer
 // tables: the supplier sees the agent's problem statement, the order ref, the
 // ship-to city/country, and the tracking number — never the customer email,
 // full address, or conversation thread. `note`/`proposed_resolution` hold the
 // supplier's reply. The notification ledger (`notified_at` / `notify_attempts`
 // / `last_notify_error`) is the durable outbox the worker sweep relays.
-export const caseSupplierEscalations = pgTable(
-  "case_supplier_escalations",
+export const ticketSupplierEscalations = pgTable(
+  "ticket_supplier_escalations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     supplierId: uuid("supplier_id")
       .notNull()
       .references(() => suppliers.id, { onDelete: "restrict" }),
@@ -1064,15 +1064,15 @@ export const caseSupplierEscalations = pgTable(
   },
   (t) => [
     check(
-      "case_supplier_escalations_status_check",
+      "ticket_supplier_escalations_status_check",
       sql`${t.status} IN ('open','resolved')`,
     ),
-    // The supplier's "cases escalated to me" list.
-    index("cse_supplier_status_idx").on(t.supplierId, t.status),
-    index("cse_case_idx").on(t.caseId),
-    index("cse_tenant_idx").on(t.tenantId),
+    // The supplier's "tickets escalated to me" list.
+    index("tse_supplier_status_idx").on(t.supplierId, t.status),
+    index("tse_ticket_idx").on(t.ticketId),
+    index("tse_tenant_idx").on(t.tenantId),
     // The notification sweep scans unsent rows oldest-first.
-    index("cse_unsent_idx")
+    index("tse_unsent_idx")
       .on(t.createdAt)
       .where(sql`${t.notifiedAt} IS NULL`),
   ],
@@ -1080,22 +1080,22 @@ export const caseSupplierEscalations = pgTable(
 
 export type SupplierRow = typeof suppliers.$inferSelect;
 export type SupplierInsert = typeof suppliers.$inferInsert;
-export type CaseSupplierEscalationRow =
-  typeof caseSupplierEscalations.$inferSelect;
-export type CaseSupplierEscalationInsert =
-  typeof caseSupplierEscalations.$inferInsert;
+export type TicketSupplierEscalationRow =
+  typeof ticketSupplierEscalations.$inferSelect;
+export type TicketSupplierEscalationInsert =
+  typeof ticketSupplierEscalations.$inferInsert;
 
 // The durable outbox for customer-reply DELIVERY (the SMTP/Gmail/Graph send),
 // distinct from the supplier-notification outbox above. When a
 // `conversation.reply` / `conversation.ask_customer` send FAILS — in the agent
 // loop OR on approval-resume — the runtime persists the exact drafted message
-// here instead of losing it: the case is flagged `reply_delivery_failed` and
+// here instead of losing it: the ticket is flagged `reply_delivery_failed` and
 // never resolved, a worker cron re-sends due rows with exponential backoff, and
 // the dashboard "Retry sending email" button requeues one immediately. `draft`
 // holds the verbatim tool input (to/subject/body/threadId/inReplyTo/draftId) so
 // a retry re-sends the SAME email without re-running the LLM. On a successful
-// send the row flips to `sent` and the case auto-resolves; at the attempt cap it
-// flips to `abandoned` and the case parks in `human_takeover`.
+// send the row flips to `sent` and the ticket auto-resolves; at the attempt cap it
+// flips to `abandoned` and the ticket parks in `human_takeover`.
 export const replyDeliveries = pgTable(
   "reply_deliveries",
   {
@@ -1103,9 +1103,9 @@ export const replyDeliveries = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    caseId: uuid("case_id")
+    ticketId: uuid("ticket_id")
       .notNull()
-      .references(() => cases.id, { onDelete: "cascade" }),
+      .references(() => tickets.id, { onDelete: "cascade" }),
     agentId: text("agent_id").notNull(),
     /** The send tool to replay: `conversation.reply` | `conversation.ask_customer`. */
     tool: text("tool").notNull(),
@@ -1139,13 +1139,13 @@ export const replyDeliveries = pgTable(
     index("reply_deliveries_due_idx")
       .on(t.nextAttemptAt)
       .where(sql`${t.status} = 'pending'`),
-    // Per-case lookup (dashboard surfacing + manual retry).
-    index("reply_deliveries_case_idx").on(t.caseId),
+    // Per-ticket lookup (dashboard surfacing + manual retry).
+    index("reply_deliveries_ticket_idx").on(t.ticketId),
     index("reply_deliveries_tenant_idx").on(t.tenantId),
     // At most one in-flight delivery per draft, so a re-run of the same failed
     // send bumps the existing row instead of duplicating it.
-    uniqueIndex("reply_deliveries_case_draft_pending_unique")
-      .on(t.caseId, t.draftId)
+    uniqueIndex("reply_deliveries_ticket_draft_pending_unique")
+      .on(t.ticketId, t.draftId)
       .where(sql`${t.status} = 'pending'`),
   ],
 );

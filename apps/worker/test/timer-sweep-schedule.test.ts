@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { CaseId, TenantId } from "@support-agent/agent-core";
+import { TicketId, TenantId } from "@support-agent/agent-core";
 import {
   TimerService,
   TimerServiceTest,
@@ -16,7 +16,7 @@ import {
 describe("timer sweep schedule helpers", () => {
   const timer: TimerRecord = {
     id: "timer-123",
-    caseId: CaseId("case-123"),
+    ticketId: TicketId("ticket-123"),
     fireAt: new Date("2026-05-27T10:00:00.000Z"),
     reason: "follow_up",
     firedAt: new Date("2026-05-27T10:01:00.000Z"),
@@ -26,16 +26,16 @@ describe("timer sweep schedule helpers", () => {
   it("maps a fired timer to a timer.expired workflow event", () => {
     expect(timerExpiredEventFor(timer)).toEqual({
       type: "timer.expired",
-      caseId: CaseId("case-123"),
+      ticketId: TicketId("ticket-123"),
       timerId: "timer-123",
       reason: "follow_up",
     });
   });
 
-  it("uses the timer id as the event id and serializes by case", () => {
+  it("uses the timer id as the event id and serializes by ticket", () => {
     expect(timerExpiredEventOptions(timer)).toEqual({
       eventId: "timer-123",
-      key: "case:case-123",
+      key: "ticket:ticket-123",
     });
   });
 });
@@ -49,7 +49,7 @@ describe("fireDueTimersOnce — enqueue-then-mark (audit L3a)", () => {
   const scheduleDue = Effect.gen(function* () {
     const timers = yield* TimerService;
     return yield* timers.schedule({
-      caseId: CaseId("case-l3a"),
+      ticketId: TicketId("ticket-l3a"),
       tenantId: TenantId("tenant-acme"),
       fireAt: new Date(Date.now() - 60_000),
       reason: "follow_up",

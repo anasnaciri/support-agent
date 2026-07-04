@@ -15,7 +15,7 @@
 7. [Provider-Agnostic LLM Abstraction](#7-provider-agnostic-llm-abstraction)
 8. [Tool Registry and Tool Executor](#8-tool-registry-and-tool-executor)
 9. [Permission and Approval System](#9-permission-and-approval-system)
-10. [Case State Machine](#10-case-state-machine)
+10. [Ticket State Machine](#10-ticket-state-machine)
 11. [Database Schema](#11-database-schema)
 12. [API Design](#12-api-design)
 13. [Dashboard UX](#13-dashboard-ux)
@@ -31,7 +31,7 @@
 
 ## 1. System Overview
 
-This system is an **AI Support Operations Platform** — not a chatbot, not a copilot, not a "wrapper around GPT." It is an autonomous support employee that runs 24/7, ingests business events, reasons about customer cases, executes typed tools against ecommerce systems (Shopify, carriers, suppliers, email), persists durable case state, and escalates to humans only when policy requires it.
+This system is an **AI Support Operations Platform** — not a chatbot, not a copilot, not a "wrapper around GPT." It is an autonomous support employee that runs 24/7, ingests business events, reasons about customer tickets, executes typed tools against ecommerce systems (Shopify, carriers, suppliers, email), persists durable ticket state, and escalates to humans only when policy requires it.
 
 The system has five layers, top-down:
 
@@ -39,11 +39,11 @@ The system has five layers, top-down:
 | ---------------------- | ------------------------------------------------------------------------------------------ |
 | **Clients**            | Dashboard, Slack/email approvals, webhooks. Each is _one_ consumer of the runtime.         |
 | **API / Webhook Edge** | Translates HTTP/webhook events into typed domain events on the bus.                        |
-| **Agent Runtime**      | The core. Receives events, loads cases, runs workflows, calls tools, persists state.       |
+| **Agent Runtime**      | The core. Receives events, loads tickets, runs workflows, calls tools, persists state.       |
 | **Services**           | Effect Services with Live/Test Layers: LLM providers, Shopify, email, repositories, audit. |
-| **Storage**            | Postgres (cases, approvals, audit), object storage (evidence), queue (BullMQ / pg-boss).   |
+| **Storage**            | Postgres (tickets, approvals, audit), object storage (evidence), queue (BullMQ / pg-boss).   |
 
-The unit of work is the **Case**, not the conversation. A case is a durable, addressable, resumable entity with a state machine, a tool-call ledger, a decision history, and an outcome. Cases are woken up by events. The agent does _not_ hold a long-running process while waiting for a customer to reply — it persists a `waiting_for_customer` state, releases the worker, and resumes from an event later.
+The unit of work is the **Ticket**, not the conversation. A ticket is a durable, addressable, resumable entity with a state machine, a tool-call ledger, a decision history, and an outcome. Tickets are woken up by events. The agent does _not_ hold a long-running process while waiting for a customer to reply — it persists a `waiting_for_customer` state, releases the worker, and resumes from an event later.
 
 The mental model is closer to **Temporal + a typed tool harness + an LLM** than to "an agent SDK." The LLM is one Service among many.
 
@@ -61,9 +61,9 @@ The product is the runtime, not any one provider. Six tenets follow:
 
 **Permissions live in code, not in prompts.** "Don't issue refunds over $100" in a system prompt is a suggestion; in the runtime it is enforced. Policy is a function of `(tenant, agent, tool, payload) → allow | ask | deny`, evaluated before every tool execution.
 
-**Cases are durable; agents are stateless.** A case is a row in Postgres with a state machine, not a Python process holding memory. Any worker can pick up any case at any time. This is what makes the system survive crashes, scale horizontally, and handle "agent waits 3 days for customer reply" without consuming compute.
+**Tickets are durable; agents are stateless.** A ticket is a row in Postgres with a state machine, not a Python process holding memory. Any worker can pick up any ticket at any time. This is what makes the system survive crashes, scale horizontally, and handle "agent waits 3 days for customer reply" without consuming compute.
 
-**The dashboard is a client.** The runtime exposes events and commands. The dashboard, Slack approvals, email approvals, and webhook callbacks are equivalent peers — each a thin client over the same case/approval/audit APIs.
+**The dashboard is a client.** The runtime exposes events and commands. The dashboard, Slack approvals, email approvals, and webhook callbacks are equivalent peers — each a thin client over the same ticket/approval/audit APIs.
 
 ---
 
@@ -83,13 +83,13 @@ OpenCode's design lessons translate one-to-one to support operations:
 
 **6. The model is a Service.** OpenCode treats OpenAI, Anthropic, Gemini, local models, and OpenRouter as instances of one provider interface. Here: `LLMService` is an Effect Tag; `OpenAIProviderLive`, `AnthropicProviderLive`, etc. are Layers. The workflow asks `LLMService` for completion; it does not know who answered.
 
-**7. Sessions are persistent.** OpenCode persists sessions to disk for resume/share. Here: cases are persisted to Postgres with full tool-call ledger, agent reasoning, and event history. Any case is replayable, auditable, and resumable.
+**7. Sessions are persistent.** OpenCode persists sessions to disk for resume/share. Here: tickets are persisted to Postgres with full tool-call ledger, agent reasoning, and event history. Any ticket is replayable, auditable, and resumable.
 
 ---
 
 ## 4. Event-Driven Workflow Model
 
-The agent does not loop; it reacts. The entire system is a function from `(case, event) → (new case state, side effects)`.
+The agent does not loop; it reacts. The entire system is a function from `(ticket, event) → (new ticket state, side effects)`.
 
 ### Core Events
 
@@ -101,7 +101,7 @@ type DomainEvent =
       tenantId: string;
       payload: InboundEmail;
     }
-  | { type: "customer.replied"; caseId: string; payload: InboundEmail }
+  | { type: "customer.replied"; ticketId: string; payload: InboundEmail }
   | {
       type: "ticket.created";
       tenantId: string;
@@ -111,26 +111,26 @@ type DomainEvent =
   | {
       type: "approval.approved";
       approvalId: string;
-      caseId: string;
+      ticketId: string;
       managerId: string;
       edits?: unknown;
     }
   | {
       type: "approval.rejected";
       approvalId: string;
-      caseId: string;
+      ticketId: string;
       managerId: string;
       reason?: string;
     }
-  | { type: "supplier.updated"; caseId: string; payload: SupplierUpdate }
+  | { type: "supplier.updated"; ticketId: string; payload: SupplierUpdate }
   | { type: "tracking.changed"; orderId: string; payload: TrackingEvent }
   | {
       type: "timer.expired";
-      caseId: string;
+      ticketId: string;
       reason: "follow_up" | "sla" | "escalation";
     }
-  | { type: "manual.takeover"; caseId: string; managerId: string }
-  | { type: "case.resumed"; caseId: string; trigger: string };
+  | { type: "manual.takeover"; ticketId: string; managerId: string }
+  | { type: "ticket.resumed"; ticketId: string; trigger: string };
 ```
 
 ### Flow
@@ -145,32 +145,32 @@ External signal (webhook, cron, manager click)
    EventBus.publish(event)
         │
         ▼
-   WorkflowQueue   ──── durable, transactional with case write
+   WorkflowQueue   ──── durable, transactional with ticket write
         │
         ▼
    AgentRuntime.handle(event)
         │
-        ├─ load or create Case
-        ├─ load AgentConfig for the case's current agent
+        ├─ load or create Ticket
+        ├─ load AgentConfig for the ticket's current agent
         ├─ run AgentWorkflow until it returns a WorkflowResult
-        ├─ persist new case state + audit entries (one transaction)
+        ├─ persist new ticket state + audit entries (one transaction)
         └─ schedule follow-up timers if any
         │
         ▼
    WorkflowResult
-        ├─ Completed              → case.resolved
-        ├─ PausedWaitingForCustomer → case.waiting_for_customer
-        ├─ PausedWaitingForApproval → case.waiting_for_approval (+ approval row created)
-        ├─ PausedWaitingForSupplier → case.waiting_for_supplier
-        ├─ Failed                 → case.failed, alert
-        └─ HumanTakeoverRequired  → case.human_takeover
+        ├─ Completed              → ticket.resolved
+        ├─ PausedWaitingForCustomer → ticket.waiting_for_customer
+        ├─ PausedWaitingForApproval → ticket.waiting_for_approval (+ approval row created)
+        ├─ PausedWaitingForSupplier → ticket.waiting_for_supplier
+        ├─ Failed                 → ticket.failed, alert
+        └─ HumanTakeoverRequired  → ticket.human_takeover
 ```
 
 Two non-negotiables:
 
-**Workflows never block on humans.** A workflow that needs a customer reply returns `PausedWaitingForCustomer` and exits. When `customer.replied` arrives, the runtime loads the case and resumes from where it left off — which means workflows must be expressible as state transitions, not long-lived async functions.
+**Workflows never block on humans.** A workflow that needs a customer reply returns `PausedWaitingForCustomer` and exits. When `customer.replied` arrives, the runtime loads the ticket and resumes from where it left off — which means workflows must be expressible as state transitions, not long-lived async functions.
 
-**Event → case write must be atomic with audit.** The `case`, `audit_log`, `approval`, and `outbound_message` writes for a given event happen in one Postgres transaction. The event itself is marked consumed in the same transaction (outbox pattern). If anything fails, the event is retried; we never half-act.
+**Event → ticket write must be atomic with audit.** The `ticket`, `audit_log`, `approval`, and `outbound_message` writes for a given event happen in one Postgres transaction. The event itself is marked consumed in the same transaction (outbox pattern). If anything fails, the event is retried; we never half-act.
 
 ---
 
@@ -196,9 +196,9 @@ This is a pure config object. There is no `class DamagedProductAgent`. There is 
 
 ```
 AgentRuntime.handle(event):
-  case = CaseRepository.loadOrCreate(event)
-  agent = AgentRegistry.resolve(case.currentAgentId)
-  context = buildContext(case, event, agent)   // history, last tool results, customer info
+  ticket = TicketRepository.loadOrCreate(event)
+  agent = AgentRegistry.resolve(ticket.currentAgentId)
+  context = buildContext(ticket, event, agent)   // history, last tool results, customer info
 
   loop (bounded, e.g. max 8 LLM turns per tick):
     decision = LLMService.runToolCalling({
@@ -213,18 +213,18 @@ AgentRuntime.handle(event):
       return Completed(decision.text)
 
     if decision.type === "handoff":
-      case.currentAgentId = decision.targetAgent
+      ticket.currentAgentId = decision.targetAgent
       continue
 
     if decision.type === "tool_call":
-      permission = PermissionService.check(case.tenantId, agent, decision.tool, decision.input)
+      permission = PermissionService.check(ticket.tenantId, agent, decision.tool, decision.input)
       match permission:
         case Allow:
-          result = ToolExecutor.run(decision.tool, decision.input, case)
+          result = ToolExecutor.run(decision.tool, decision.input, ticket)
           context.appendToolResult(result)
           continue
         case Ask:
-          approval = ApprovalService.create(case, agent, decision)
+          approval = ApprovalService.create(ticket, agent, decision)
           return PausedWaitingForApproval(approval)
         case Deny:
           context.appendToolResult({ error: "denied_by_policy" })
@@ -244,9 +244,9 @@ AgentRuntime.handle(event):
 ### Key properties
 
 - **Bounded per tick.** No agent burns unlimited LLM calls in one event. Hard cap (e.g. 8 turns); over the cap → handoff to human.
-- **Subagent calls are recursive runtime invocations, not separate processes.** They share the same case and audit log, with a scoped permission view.
+- **Subagent calls are recursive runtime invocations, not separate processes.** They share the same ticket and audit log, with a scoped permission view.
 - **Reasoning is recorded.** Every LLM turn writes the model's text reasoning (if any) to the audit log alongside the tool calls it produced. Approvals show this verbatim.
-- **The runtime is stateless across ticks.** All state lives in Postgres. Two workers handling two events for the same case use row-level locks on the case to serialize.
+- **The runtime is stateless across ticks.** All state lives in Postgres. Two workers handling two events for the same ticket use row-level locks on the ticket to serialize.
 
 ---
 
@@ -398,17 +398,17 @@ const shopifyCall = http
 
 ### Concurrency and Resource Safety
 
-Tool execution for a batch of cases runs in bounded concurrency:
+Tool execution for a batch of tickets runs in bounded concurrency:
 
 ```ts
-Effect.forEach(cases, runWorkflow, { concurrency: 16 });
+Effect.forEach(tickets, runWorkflow, { concurrency: 16 });
 ```
 
 Database connections, HTTP clients, file handles, and outbox transactions are acquired with `Effect.acquireRelease` — guaranteed cleanup on success, failure, or interrupt.
 
 ### Observability
 
-`Effect.withSpan("agent.runtime.tick", { attributes: { caseId, tenantId, agent } })` wraps every meaningful operation. With an OpenTelemetry layer, every tool call, LLM call, and DB query becomes a span in Jaeger/Tempo — including its inputs, outputs (where safe), and errors.
+`Effect.withSpan("agent.runtime.tick", { attributes: { ticketId, tenantId, agent } })` wraps every meaningful operation. With an OpenTelemetry layer, every tool call, LLM call, and DB query becomes a span in Jaeger/Tempo — including its inputs, outputs (where safe), and errors.
 
 ---
 
@@ -495,7 +495,7 @@ tools:
     conversation.reply,
     conversation.ask_customer,
     supplier.addSheetRow,
-    case.updateStatus,
+    ticket.updateStatus,
     refund.recommend,
   ]
 permissions:
@@ -554,7 +554,7 @@ export interface Tool<I, O> {
 
 export interface ToolContext {
   readonly tenantId: string;
-  readonly caseId: string;
+  readonly ticketId: string;
   readonly callId: string;
   readonly agentId: string;
   readonly attemptNumber: number;
@@ -620,13 +620,13 @@ export const shopifyGetOrder = defineTool({
 Sits between the agent and the tool. Every call goes through it.
 
 ```
-ToolExecutor.run(toolName, input, case):
+ToolExecutor.run(toolName, input, ticket):
   1. tool ← ToolRegistry.get(toolName)                            // 404 if unknown
   2. Schema.decode(tool.inputSchema, input)                       // typed input or InvalidInput error
-  3. PermissionService.check(case.tenantId, agent, tool, input)   // Allow | Ask | Deny
+  3. PermissionService.check(ticket.tenantId, agent, tool, input)   // Allow | Ask | Deny
        Ask  → create Approval, return PausedWaitingForApproval
        Deny → return ToolDeniedError to the model (it can react)
-  4. idempotency: check ToolCallLedger by (caseId, idempotencyKey)
+  4. idempotency: check ToolCallLedger by (ticketId, idempotencyKey)
        hit  → return cached result, log "idempotent_hit"
        miss → continue
   5. tool.execute(input, ctx) under Effect with:
@@ -634,15 +634,15 @@ ToolExecutor.run(toolName, input, case):
        - Effect.retry(tool.retrySchedule ?? defaultRetry)
        - Effect.withSpan("tool." + tool.name)
   6. Schema.decode(tool.outputSchema, result)                     // protect against malformed live data
-  7. AuditLogService.recordToolCall({ caseId, agentId, tool, input, output | error, durationMs })
+  7. AuditLogService.recordToolCall({ ticketId, agentId, tool, input, output | error, durationMs })
   8. return result to caller
 ```
 
 Key properties:
 
 - **Schema-first.** Both input from LLM and output from external system are validated. A flaky carrier API returning `null` where `string` is expected produces a typed `ToolOutputInvalid` error, not a downstream crash.
-- **Idempotent by default for state-changing tools.** `conversation.reply` includes `(caseId, draftId)` in its idempotency key. Re-running a workflow tick doesn't double-send.
-- **Audit is mandatory.** No code path skips audit. The audit write is in the same transaction as the case write.
+- **Idempotent by default for state-changing tools.** `conversation.reply` includes `(ticketId, draftId)` in its idempotency key. Re-running a workflow tick doesn't double-send.
+- **Audit is mandatory.** No code path skips audit. The audit write is in the same transaction as the ticket write.
 - **Denied calls feed back to the model.** A denied tool call returns a structured `{ error: "denied_by_policy", reason }` to the LLM as a tool result. The model often then proposes an allowed alternative (e.g. propose a refund recommendation instead of executing one).
 
 ### ToolRegistry
@@ -673,7 +673,7 @@ export type Permission = "allow" | "ask" | "deny";
 ```
 
 - **allow** — the runtime executes the tool immediately.
-- **ask** — the runtime creates an `Approval`, pauses the case, and notifies a human. The tool runs _only_ if the human approves.
+- **ask** — the runtime creates an `Approval`, pauses the ticket, and notifies a human. The tool runs _only_ if the human approves.
 - **deny** — the runtime returns a denial to the model; tool is never executed.
 
 ### Policy Resolution
@@ -709,8 +709,8 @@ The first hit wins. Input-pattern policies allow rules like "refunds under $25 �
   "tracking.lookup": "allow",
   "conversation.ask_customer": "allow",
   "supplier.add_sheet_row": "allow",
-  "case.update_status": "allow",
-  "case.mark_waiting": "allow",
+  "ticket.update_status": "allow",
+  "ticket.mark_waiting": "allow",
 
   "conversation.reply": "ask",
   "refund.recommend": "allow",
@@ -732,7 +732,7 @@ ToolExecutor sees ask permission
   │
   ▼
 ApprovalService.create({
-  caseId, agentId, tool, input,
+  ticketId, agentId, tool, input,
   reasoning: "Customer reports damaged product, photos attached.
               Proposing replacement + supplier escalation.",
   riskLevel: "low",
@@ -763,16 +763,16 @@ ApprovalService.resolve({ id, decision, edits?, managerId })
   │
   ▼
 EventBus → WorkflowQueue → AgentRuntime.handle(event)
-  - load case (was waiting_for_approval)
+  - load ticket (was waiting_for_approval)
   - if approved: re-run the tool with possibly-edited input
   - if rejected: feed structured rejection to model, continue
   - if edit-and-approve: validate edited input against schema, then run
-  - if take-over: case → human_takeover, agent disabled until resumed
+  - if take-over: ticket → human_takeover, agent disabled until resumed
 ```
 
 Key properties:
 
-- **Approvals are durable.** A manager can approve at 3am from email; the case has been patiently sitting in `waiting_for_approval`.
+- **Approvals are durable.** A manager can approve at 3am from email; the ticket has been patiently sitting in `waiting_for_approval`.
 - **Approvals expire.** Default 24h. Expired → escalation or auto-deny per policy.
 - **Edits are validated.** A manager editing the proposed reply still goes through `outputSchema` validation; an edit cannot inject a different tool.
 - **All approval actions are audited** with the manager's identity, timestamp, IP, and any edits diffed.
@@ -784,7 +784,7 @@ The dashboard is the rich interface. Slack and email approvals are first-class f
 **Slack:**
 
 ```
-[bot] Approval needed — Case #1234
+[bot] Approval needed — Ticket #1234
 Customer: Sarah Chen
 Order: #1045 — Item damaged
 Agent recommends: replacement + supplier escalation
@@ -796,14 +796,14 @@ Signed, single-use approval links. Clicking the link hits `POST /approvals/:id/a
 
 ---
 
-## 10. Case State Machine
+## 10. Ticket State Machine
 
-The case is the durable unit. Its state machine is explicit and exhaustive.
+The ticket is the durable unit. Its state machine is explicit and exhaustive.
 
 ### States
 
 ```ts
-export type CaseStatus =
+export type TicketStatus =
   | "new"
   | "triaging"
   | "in_progress"
@@ -877,11 +877,11 @@ export type CaseStatus =
 
 ### Invariants
 
-1. Every transition is logged to `case_state_transitions` with `(from, to, event, eventId, occurredAt)`.
+1. Every transition is logged to `ticket_state_transitions` with `(from, to, event, eventId, occurredAt)`.
 2. State writes are always in the same transaction as the audit log entry and any approval/outbox writes for the same tick.
-3. A case in a `waiting_*` state holds no in-memory resources.
-4. A case in `human_takeover` ignores all events except `case.resumed` (explicit manager resume).
-5. A case in `resolved` or `failed` is terminal; new contact from the same customer creates a new case (linked via `customer_id`).
+3. A ticket in a `waiting_*` state holds no in-memory resources.
+4. A ticket in `human_takeover` ignores all events except `ticket.resumed` (explicit manager resume).
+5. A ticket in `resolved` or `failed` is terminal; new contact from the same customer creates a new ticket (linked via `customer_id`).
 
 ---
 
@@ -922,8 +922,8 @@ CREATE TABLE customers (
   UNIQUE (tenant_id, email)
 );
 
--- ---------- Cases ----------
-CREATE TABLE cases (
+-- ---------- Tickets ----------
+CREATE TABLE tickets (
   id                  UUID PRIMARY KEY,
   tenant_id           UUID NOT NULL REFERENCES tenants(id),
   customer_id         UUID REFERENCES customers(id),
@@ -931,7 +931,7 @@ CREATE TABLE cases (
   channel             TEXT NOT NULL CHECK (channel IN ('email','form','chat','api')),
   thread_id           TEXT,             -- email thread id, chat session id, etc.
   category            TEXT,             -- 'missing_package','damaged','refund_request','where_is_order',...
-  status              TEXT NOT NULL,    -- CaseStatus
+  status              TEXT NOT NULL,    -- TicketStatus
   current_agent_id    TEXT NOT NULL,    -- 'support-triage' initially
   priority            TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
   summary             TEXT,
@@ -940,24 +940,24 @@ CREATE TABLE cases (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at         TIMESTAMPTZ,
-  CONSTRAINT cases_status_check CHECK (status IN (
+  CONSTRAINT tickets_status_check CHECK (status IN (
     'new','triaging','in_progress','waiting_for_customer','waiting_for_supplier',
     'waiting_for_approval','approved_action_running','resolved','failed','human_takeover'
   ))
 );
-CREATE INDEX cases_tenant_status_idx ON cases (tenant_id, status, updated_at DESC);
-CREATE INDEX cases_customer_idx     ON cases (customer_id);
+CREATE INDEX tickets_tenant_status_idx ON tickets (tenant_id, status, updated_at DESC);
+CREATE INDEX tickets_customer_idx     ON tickets (customer_id);
 
-CREATE TABLE case_state_transitions (
+CREATE TABLE ticket_state_transitions (
   id              BIGSERIAL PRIMARY KEY,
-  case_id         UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  ticket_id         UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
   from_status     TEXT NOT NULL,
   to_status       TEXT NOT NULL,
   event_id        UUID,
   reason          TEXT,
   occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX cst_case_idx ON case_state_transitions (case_id, id);
+CREATE INDEX cst_ticket_idx ON ticket_state_transitions (ticket_id, id);
 
 -- ---------- Events (inbox + outbox pattern) ----------
 CREATE TABLE inbound_events (
@@ -967,14 +967,14 @@ CREATE TABLE inbound_events (
   payload         JSONB NOT NULL,
   received_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   consumed_at     TIMESTAMPTZ,
-  case_id         UUID
+  ticket_id         UUID
 );
 CREATE INDEX inbound_events_unconsumed_idx ON inbound_events (received_at) WHERE consumed_at IS NULL;
 
 CREATE TABLE outbound_messages (
   id              UUID PRIMARY KEY,
   tenant_id       UUID NOT NULL,
-  case_id         UUID NOT NULL REFERENCES cases(id),
+  ticket_id         UUID NOT NULL REFERENCES tickets(id),
   channel         TEXT NOT NULL,  -- 'email','slack','sms'
   recipient       TEXT NOT NULL,
   subject         TEXT,
@@ -989,7 +989,7 @@ CREATE TABLE outbound_messages (
 CREATE TABLE approvals (
   id                UUID PRIMARY KEY,
   tenant_id         UUID NOT NULL REFERENCES tenants(id),
-  case_id           UUID NOT NULL REFERENCES cases(id),
+  ticket_id           UUID NOT NULL REFERENCES tickets(id),
   agent_id          TEXT NOT NULL,
   tool              TEXT NOT NULL,
   proposed_input    JSONB NOT NULL,
@@ -1008,7 +1008,7 @@ CREATE INDEX approvals_pending_idx ON approvals (tenant_id, status, expires_at) 
 -- ---------- Tool call ledger ----------
 CREATE TABLE tool_calls (
   id                UUID PRIMARY KEY,
-  case_id           UUID NOT NULL REFERENCES cases(id),
+  ticket_id           UUID NOT NULL REFERENCES tickets(id),
   agent_id          TEXT NOT NULL,
   tool              TEXT NOT NULL,
   input             JSONB NOT NULL,
@@ -1021,14 +1021,14 @@ CREATE TABLE tool_calls (
   approval_id       UUID REFERENCES approvals(id),
   started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at       TIMESTAMPTZ,
-  UNIQUE (case_id, idempotency_key)
+  UNIQUE (ticket_id, idempotency_key)
 );
-CREATE INDEX tool_calls_case_idx ON tool_calls (case_id, started_at);
+CREATE INDEX tool_calls_ticket_idx ON tool_calls (ticket_id, started_at);
 
 -- ---------- LLM calls ----------
 CREATE TABLE llm_calls (
   id                UUID PRIMARY KEY,
-  case_id           UUID NOT NULL REFERENCES cases(id),
+  ticket_id           UUID NOT NULL REFERENCES tickets(id),
   agent_id          TEXT NOT NULL,
   provider          TEXT NOT NULL,
   model             TEXT NOT NULL,
@@ -1040,12 +1040,12 @@ CREATE TABLE llm_calls (
   latency_ms        INTEGER,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX llm_calls_case_idx ON llm_calls (case_id, created_at);
+CREATE INDEX llm_calls_ticket_idx ON llm_calls (ticket_id, created_at);
 
 -- ---------- Evidence ----------
 CREATE TABLE evidence (
   id              UUID PRIMARY KEY,
-  case_id         UUID NOT NULL REFERENCES cases(id),
+  ticket_id         UUID NOT NULL REFERENCES tickets(id),
   kind            TEXT NOT NULL,  -- 'photo','video','document','text'
   storage_url     TEXT NOT NULL,
   mime_type       TEXT,
@@ -1058,14 +1058,14 @@ CREATE TABLE evidence (
 CREATE TABLE audit_log (
   id              BIGSERIAL PRIMARY KEY,
   tenant_id       UUID NOT NULL,
-  case_id         UUID,
+  ticket_id         UUID,
   actor_type      TEXT NOT NULL CHECK (actor_type IN ('agent','user','system','customer')),
   actor_id        TEXT,
   action          TEXT NOT NULL,
   details         JSONB NOT NULL,
   occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX audit_log_case_idx ON audit_log (case_id, id);
+CREATE INDEX audit_log_ticket_idx ON audit_log (ticket_id, id);
 
 -- ---------- Agent / policy config (lives in DB so tenants can customize) ----------
 CREATE TABLE agent_configs (
@@ -1090,7 +1090,7 @@ CREATE TABLE policy_rules (
 -- ---------- Timers ----------
 CREATE TABLE timers (
   id              UUID PRIMARY KEY,
-  case_id         UUID NOT NULL REFERENCES cases(id),
+  ticket_id         UUID NOT NULL REFERENCES tickets(id),
   fire_at         TIMESTAMPTZ NOT NULL,
   reason          TEXT NOT NULL,
   fired_at        TIMESTAMPTZ,
@@ -1104,7 +1104,7 @@ CREATE INDEX timers_due_idx ON timers (fire_at) WHERE fired_at IS NULL AND cance
 - Money stored as `BIGINT` in micros or cents — never `FLOAT`/`NUMERIC` for transactional amounts in code.
 - `JSONB` for context/payloads, but key indexed fields (status, tenant, customer) are columns for fast filtering.
 - `audit_log` is append-only — no UPDATE/DELETE grants in production. The OLAP copy goes to a warehouse via CDC.
-- Row-level locking on `cases` (`SELECT ... FOR UPDATE`) serializes concurrent ticks for the same case.
+- Row-level locking on `tickets` (`SELECT ... FOR UPDATE`) serializes concurrent ticks for the same ticket.
 
 ---
 
@@ -1126,21 +1126,21 @@ Keep core workflows behind the existing Service Tags, keep webhook handlers read
 ### Resources (REST)
 
 ```
-GET    /cases                                     ?status=&category=&customer=&q=&cursor=
-GET    /cases/:id                                 (full detail incl. timeline)
-GET    /cases/:id/timeline                        (events, tool calls, llm calls, transitions)
-GET    /cases/:id/tool-calls
-GET    /cases/:id/llm-calls
-GET    /cases/:id/evidence
-POST   /cases/:id/evidence                        (multipart upload)
+GET    /tickets                                     ?status=&category=&customer=&q=&cursor=
+GET    /tickets/:id                                 (full detail incl. timeline)
+GET    /tickets/:id/timeline                        (events, tool calls, llm calls, transitions)
+GET    /tickets/:id/tool-calls
+GET    /tickets/:id/llm-calls
+GET    /tickets/:id/evidence
+POST   /tickets/:id/evidence                        (multipart upload)
 
 GET    /approvals                                 ?status=pending&risk=&cursor=
 GET    /approvals/:id
 
 GET    /customers/:id
-GET    /customers/:id/cases
+GET    /customers/:id/tickets
 
-GET    /audit-log                                 ?case=&actor=&from=&to=&cursor=
+GET    /audit-log                                 ?ticket=&actor=&from=&to=&cursor=
 
 GET    /agents                                    (list configured agents)
 GET    /agents/:id                                (current config)
@@ -1159,14 +1159,14 @@ POST   /approvals/:id/approve                     { managerId }
 POST   /approvals/:id/reject                      { managerId, reason? }
 POST   /approvals/:id/edit-and-approve            { managerId, edits: <ToolInput> }
 
-POST   /cases/:id/take-over                       { managerId }
-POST   /cases/:id/resume                          { managerId }       // from human_takeover
-POST   /cases/:id/close                           { managerId, resolution }
-POST   /cases/:id/reply                           { body, channel: "email"|"chat" }   // manager-authored reply
-POST   /cases/:id/comment                         { body }            // internal note
+POST   /tickets/:id/take-over                       { managerId }
+POST   /tickets/:id/resume                          { managerId }       // from human_takeover
+POST   /tickets/:id/close                           { managerId, resolution }
+POST   /tickets/:id/reply                           { body, channel: "email"|"chat" }   // manager-authored reply
+POST   /tickets/:id/comment                         { body }            // internal note
 
-POST   /cases/:id/handoff                         { targetAgent }     // force a handoff
-POST   /cases/:id/retry                           { fromState? }      // re-run from failed
+POST   /tickets/:id/handoff                         { targetAgent }     // force a handoff
+POST   /tickets/:id/retry                           { fromState? }      // re-run from failed
 ```
 
 ### Webhooks (inbound)
@@ -1203,7 +1203,7 @@ Cursor-based, `?cursor=...&limit=50`. No offset pagination on large tables.
 
 There are two web apps with different audiences and authorization boundaries:
 
-- **Merchant dashboard (`apps/dashboard`).** Tenant-scoped cockpit for case operations, approvals, policies, agent settings, and merchant-managed integrations.
+- **Merchant dashboard (`apps/dashboard`).** Tenant-scoped cockpit for ticket operations, approvals, policies, agent settings, and merchant-managed integrations.
 - **Internal admin dashboard (`apps/admin`).** Platform-operator surface for managing tenants and connector credentials/provisioning. This is where support-agent operators create/update tenants, set a tenant's pilot-variant Shopify custom app `client_id`/`client_secret` (the `shopify_app_provisioning` row), inspect connector health, revoke or rotate credentials, and recover broken onboarding. It is not exposed to merchant users and must have stricter platform-admin authorization, audit logging, and secret-handling controls than the merchant dashboard.
 
 The dashboard is the merchant's daily home, not a settings page. Optimized for a support manager who walks in at 9am wanting to know: _what does the AI need from me?_
@@ -1225,7 +1225,7 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  Inbox · In Progress · Waiting Customer · Waiting Supplier ·     │
-│  Resolved Today · All Cases                                       │
+│  Resolved Today · All Tickets                                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1234,7 +1234,7 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 | View                            | Purpose                                                                                  |
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
 | **Inbox**                       | Newly arrived, not yet picked up by the agent. Rarely populated; useful for diagnostics. |
-| **In Progress by AI**           | Cases the agent is actively working on. Live updates.                                    |
+| **In Progress by AI**           | Tickets the agent is actively working on. Live updates.                                    |
 | **Waiting for Customer**        | Sorted by oldest first; SLA color-coded.                                                 |
 | **Waiting for Supplier**        | Grouped by supplier; aging visible.                                                      |
 | **Needs Approval**              | The most important screen; sorted by risk × age.                                         |
@@ -1252,15 +1252,15 @@ The dashboard is the merchant's daily home, not a settings page. Optimized for a
 - Tenant list, tenant creation, tenant suspension, tenant-to-WorkOS/org mapping, and tenant support metadata.
 - Connector credential/provisioning records, including encrypted per-tenant provider credentials and pilot-variant Shopify custom app config (`shopify_app_provisioning`).
 - Credential lifecycle actions: mark ready, connect/reconnect link visibility, revoke, rotate, and inspect last sync/webhook status.
-- Read-only diagnostics into cases, connector health, webhook deliveries, and audit-log entries, always behind platform-admin authorization.
+- Read-only diagnostics into tickets, connector health, webhook deliveries, and audit-log entries, always behind platform-admin authorization.
 
 Every admin mutation must write an audit row and must avoid rendering raw secrets after creation; secrets are accepted once, encrypted, then displayed only as masked metadata.
 
-### Case detail page (the workhorse)
+### Ticket detail page (the workhorse)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Case #1234 · waiting_for_approval · Sarah Chen · Order #1045    │
+│ Ticket #1234 · waiting_for_approval · Sarah Chen · Order #1045    │
 │ Damaged product · opened 2h ago                                 │
 ├─────────────────────────────────────────────────────────────────┤
 │ Customer panel │ Timeline (the chronological story)             │
@@ -1269,7 +1269,7 @@ Every admin mutation must write an audit row and must avoid rendering raw secret
 │ ─ orders       │ • Tool: shopify.get_order  ✓ Order #1045       │
 │                │ • Agent: asked customer for photos              │
 │ Order panel    │ • Customer replied with 3 photos                │
-│ ─ #1045        │ • Tool: case.update_context  ✓ photos saved    │
+│ ─ #1045        │ • Tool: ticket.update_context  ✓ photos saved    │
 │ ─ items        │ • Agent proposes: refund $42 + supplier note   │
 │ ─ tracking     │   [ Approval pending ]   ◀── you are here      │
 │ ─ fulfillment  │                                                 │
@@ -1283,7 +1283,7 @@ Every admin mutation must write an audit row and must avoid rendering raw secret
 │ [ Take over ]  │ │ Proposed reply (drafted):                   │ │
 │ [ Add note ]   │ │   "Hi Sarah, so sorry about that..."        │ │
 │ [ Reply ]      │ │ [ Approve all ] [ Edit reply & approve ]    │ │
-│                │ │ [ Reject ] [ Take over case ]               │ │
+│                │ │ [ Reject ] [ Take over ticket ]               │ │
 │                │ └─────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -1292,14 +1292,14 @@ The timeline interleaves: inbound events, LLM reasoning (collapsed by default), 
 
 ### The "chat" interface — secondary
 
-A side panel on the case page lets a manager _talk to the agent about this case_:
+A side panel on the ticket page lets a manager _talk to the agent about this ticket_:
 
 - "Why did you classify this as damaged product?"
 - "Summarize what we know so far."
 - "Rewrite the proposed reply to be more apologetic."
 - "What did the agent do in the first hour?"
 
-This is a meta-conversation. It does not become the agent's working state; it is a manager's view into the agent's reasoning. Behind the scenes it's an `LLMService` call with the case timeline as context, no tools attached.
+This is a meta-conversation. It does not become the agent's working state; it is a manager's view into the agent's reasoning. Behind the scenes it's an `LLMService` call with the ticket timeline as context, no tools attached.
 
 ### Approval list page
 
@@ -1309,8 +1309,8 @@ Sortable by: risk level, age, customer LTV, amount (for money actions). Bulk app
 
 - **The dashboard never lies about what the agent did.** Tool inputs and outputs are visible verbatim (sensitive fields redacted with click-to-reveal + audit).
 - **Reasoning is visible but de-emphasized.** Collapsed by default; managers who want it can read it. Decisions are the focus.
-- **Every action is one click from the case.** Approve, edit, reject, take over, message customer — no modal stacking.
-- **State is real-time.** SSE/WebSocket updates the case detail when the agent acts.
+- **Every action is one click from the ticket.** Approve, edit, reject, take over, message customer — no modal stacking.
+- **State is real-time.** SSE/WebSocket updates the ticket detail when the agent acts.
 
 ---
 
@@ -1424,7 +1424,7 @@ For external services the platform doesn't ship a plugin for, an MCP-server brid
 
 ## 15. Example Workflows
 
-Four representative cases. Each shows the event sequence, agent decisions, tool calls, and state transitions.
+Four representative tickets. Each shows the event sequence, agent decisions, tool calls, and state transitions.
 
 ### 15.1 "Where is my order?"
 
@@ -1432,7 +1432,7 @@ Four representative cases. Each shows the event sequence, agent decisions, tool 
 
 ```
 EVENT email.received
-  └─ inbound_events row created, case #2001 created, status=new
+  └─ inbound_events row created, ticket #2001 created, status=new
   └─ EventBus → AgentRuntime
 
 TICK 1 (agent = support-triage)
@@ -1442,7 +1442,7 @@ TICK 1 (agent = support-triage)
   LLM call → decision: tool_call shopify.get_order({ orderNumber: "1045" })
     ToolExecutor → order: shipped, tracking 1ZX...
   LLM call → decision: handoff → "order-status-agent"
-    case.current_agent_id = "order-status-agent"
+    ticket.current_agent_id = "order-status-agent"
 
 TICK 2 (agent = order-status-agent)
   LLM call → decision: tool_call tracking.lookup({ carrier, number })
@@ -1458,11 +1458,11 @@ DASHBOARD
   Manager sees the proposed reply, approves with one click.
 
 EVENT approval.approved
-  case status → approved_action_running
+  ticket status → approved_action_running
   ToolExecutor re-runs conversation.reply with same input
   Reply sent. outbound_messages row created.
-  LLM call → decision: final_message "case resolved"
-  case status → resolved
+  LLM call → decision: final_message "ticket resolved"
+  ticket status → resolved
 ```
 
 Total: ~8 seconds of compute, 1 manager click (or 0 if `conversation.reply` is set to `allow` after trust is built), customer gets a useful answer within minutes.
@@ -1485,11 +1485,11 @@ missing-package-agent:
     body: "Hi, before we proceed... [questions about porch/neighbors/address]..."
   })
   PermissionService → allow (conversation.ask_customer is allow)
-  Customer prompt sent, case → waiting_for_customer
+  Customer prompt sent, ticket → waiting_for_customer
   timer scheduled for +48h (timer.expired event)
 
   Customer replies "yes still missing, checked with everyone"
-    EVENT customer.replied → case resumes
+    EVENT customer.replied → ticket resumes
     LLM call → decision: tool_call supplier.add_sheet_row({
       sheet: lost_package_log,
       values: [orderId, customerEmail, trackingNumber, claimDate]
@@ -1523,12 +1523,12 @@ damaged-product-agent:
     body: "So sorry to hear that. Could you send 2–3 photos showing the damage and
            the packaging? That helps us file with the supplier."
   })
-  Customer prompt sent. case → waiting_for_customer.
+  Customer prompt sent. ticket → waiting_for_customer.
 
   Customer replies with 3 photo attachments.
     EVENT customer.replied (with attachments)
     Edge handler stores attachments to object storage, creates evidence rows.
-    case resumes.
+    ticket resumes.
 
     LLM call → reasoning: "Photos show clear shipping damage. Item replaceable.
                             Pattern: 4th damaged complaint this month for SKU
@@ -1576,7 +1576,7 @@ refund-review-agent:
     body: "Happy to help! Two options: ... [explains both]"
   })
   → ask → approval (manager confirms tone & options).
-  Manager approves → reply sent. case → waiting_for_customer.
+  Manager approves → reply sent. ticket → waiting_for_customer.
 
   Customer picks "store credit, keep item".
     EVENT customer.replied
@@ -1612,7 +1612,7 @@ ai-support-ops/
 │  │  │  │  │  ├─ shopify.ts
 │  │  │  │  │  ├─ tracking.ts
 │  │  │  │  │  └─ slack.ts
-│  │  │  │  ├─ cases.ts
+│  │  │  │  ├─ tickets.ts
 │  │  │  │  ├─ approvals.ts
 │  │  │  │  ├─ agents.ts
 │  │  │  │  ├─ policies.ts
@@ -1641,7 +1641,7 @@ ai-support-ops/
 │     ├─ src/
 │     │  ├─ pages/
 │     │  │  ├─ index.tsx                # today view
-│     │  │  ├─ cases/[id].tsx
+│     │  │  ├─ tickets/[id].tsx
 │     │  │  ├─ approvals/index.tsx
 │     │  │  ├─ approvals/[id].tsx
 │     │  │  ├─ settings/agents.tsx
@@ -1649,7 +1649,7 @@ ai-support-ops/
 │     │  │  ├─ settings/integrations.tsx
 │     │  │  └─ audit-log.tsx
 │     │  ├─ components/
-│     │  │  ├─ CaseTimeline.tsx
+│     │  │  ├─ TicketTimeline.tsx
 │     │  │  ├─ ApprovalCard.tsx
 │     │  │  ├─ ToolCallView.tsx
 │     │  │  └─ ReasoningPanel.tsx
@@ -1680,7 +1680,7 @@ ai-support-ops/
 │  │  │  ├─ ToolExecutor.ts
 │  │  │  ├─ PermissionService.ts
 │  │  │  ├─ ApprovalService.ts
-│  │  │  ├─ CaseState.ts                # state machine + transition guards
+│  │  │  ├─ TicketState.ts                # state machine + transition guards
 │  │  │  ├─ EventBus.ts
 │  │  │  ├─ WorkflowQueue.ts
 │  │  │  ├─ defineTool.ts               # helper
@@ -1699,7 +1699,7 @@ ai-support-ops/
 │  │  │  ├─ SupplierService.ts
 │  │  │  ├─ SupplierSheetService.ts
 │  │  │  ├─ LLMService.ts               # tag (the abstraction)
-│  │  │  ├─ CaseRepository.ts
+│  │  │  ├─ TicketRepository.ts
 │  │  │  ├─ ApprovalRepository.ts
 │  │  │  ├─ AuditLogService.ts
 │  │  │  ├─ PolicyService.ts
@@ -1736,12 +1736,12 @@ ai-support-ops/
 │  │  │  │  └─ getFulfillment.ts
 │  │  │  ├─ tracking/lookup.ts
 │  │  │  ├─ supplier/
-│  │  │  │  ├─ createCase.ts
+│  │  │  │  ├─ createTicket.ts
 │  │  │  │  └─ addSheetRow.ts
 │  │  │  ├─ refund/
 │  │  │  │  ├─ recommend.ts
 │  │  │  │  └─ create.ts
-│  │  │  ├─ case/
+│  │  │  ├─ ticket/
 │  │  │  │  ├─ updateStatus.ts
 │  │  │  │  └─ markWaiting.ts
 │  │  │  └─ index.ts                    # registers all
@@ -1767,7 +1767,7 @@ ai-support-ops/
 │  │  │  └─ ...
 │  │  ├─ src/
 │  │  │  ├─ schema.ts                   # drizzle or kysely
-│  │  │  ├─ CaseRepositoryLive.ts
+│  │  │  ├─ TicketRepositoryLive.ts
 │  │  │  ├─ ApprovalRepositoryLive.ts
 │  │  │  └─ AuditLogServiceLive.ts
 │  │  └─ test/
@@ -1812,7 +1812,7 @@ The skeleton of the type system. Everything else flows from these.
 // ============================================================
 
 export type TenantId = string & { readonly _b: "TenantId" };
-export type CaseId = string & { readonly _b: "CaseId" };
+export type TicketId = string & { readonly _b: "TicketId" };
 export type CustomerId = string & { readonly _b: "CustomerId" };
 export type OrderId = string & { readonly _b: "OrderId" };
 export type ApprovalId = string & { readonly _b: "ApprovalId" };
@@ -1824,26 +1824,26 @@ export type ThreadId = string & { readonly _b: "ThreadId" };
 // Domain types
 // ============================================================
 
-export interface Case {
-  readonly id: CaseId;
+export interface Ticket {
+  readonly id: TicketId;
   readonly tenantId: TenantId;
   readonly customerId: CustomerId | null;
   readonly orderId: OrderId | null;
   readonly channel: "email" | "form" | "chat" | "api";
   readonly threadId: ThreadId | null;
   readonly category: string | null;
-  readonly status: CaseStatus;
+  readonly status: TicketStatus;
   readonly currentAgentId: AgentId;
   readonly priority: "low" | "normal" | "high" | "urgent";
   readonly summary: string | null;
   readonly subject: string | null;
-  readonly context: CaseContext;
+  readonly context: TicketContext;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly resolvedAt: Date | null;
 }
 
-export type CaseStatus =
+export type TicketStatus =
   | "new"
   | "triaging"
   | "in_progress"
@@ -1855,7 +1855,7 @@ export type CaseStatus =
   | "failed"
   | "human_takeover";
 
-export interface CaseContext {
+export interface TicketContext {
   readonly identifiedCustomerId?: CustomerId;
   readonly identifiedOrderId?: OrderId;
   readonly classification?: string;
@@ -1919,7 +1919,7 @@ export interface Tool<I, O> {
 
 export interface ToolContext {
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly agentId: AgentId;
   readonly callId: string;
   readonly attemptNumber: number;
@@ -1986,7 +1986,7 @@ export type LLMDecision =
 export interface Approval {
   readonly id: ApprovalId;
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly agentId: AgentId;
   readonly tool: string;
   readonly proposedInput: unknown;
@@ -2038,7 +2038,7 @@ export type DomainEvent =
     }
   | {
       readonly type: "customer.replied";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly payload: InboundEmail;
     }
   | {
@@ -2050,20 +2050,20 @@ export type DomainEvent =
   | {
       readonly type: "approval.approved";
       readonly approvalId: ApprovalId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
       readonly edits?: unknown;
     }
   | {
       readonly type: "approval.rejected";
       readonly approvalId: ApprovalId;
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
       readonly reason?: string;
     }
   | {
       readonly type: "supplier.updated";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly payload: SupplierUpdate;
     }
   | {
@@ -2073,17 +2073,17 @@ export type DomainEvent =
     }
   | {
       readonly type: "timer.expired";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly reason: "follow_up" | "sla" | "escalation";
     }
   | {
       readonly type: "manual.takeover";
-      readonly caseId: CaseId;
+      readonly ticketId: TicketId;
       readonly managerId: UserId;
     }
   | {
-      readonly type: "case.resumed";
-      readonly caseId: CaseId;
+      readonly type: "ticket.resumed";
+      readonly ticketId: TicketId;
       readonly trigger: string;
     };
 
@@ -2165,7 +2165,7 @@ import {
   ToolExecutor,
   PermissionService,
   ApprovalService,
-  CaseRepository,
+  TicketRepository,
   AuditLogService,
   EventBus,
 } from "@platform/agent-core";
@@ -2174,8 +2174,8 @@ import { LLMService } from "@platform/services";
 
 import type {
   DomainEvent,
-  Case,
-  CaseId,
+  Ticket,
+  TicketId,
   WorkflowResult,
   LLMDecision,
   ChatMessage,
@@ -2184,32 +2184,32 @@ import type {
 } from "@platform/agent-core";
 
 // ============================================================
-// Top-level: handle a single event for a single case
+// Top-level: handle a single event for a single ticket
 // ============================================================
 
 export const handleEvent = (
   event: DomainEvent,
 ): Effect.Effect<WorkflowResult, WorkflowError, RuntimeDeps> =>
   Effect.gen(function* () {
-    const cases = yield* CaseRepository;
+    const tickets = yield* TicketRepository;
     const audit = yield* AuditLogService;
 
-    // 1. Load or create the case, lock the row for the duration of this tick.
-    const caseRow = yield* cases.loadForUpdate(eventToCaseLookup(event));
+    // 1. Load or create the ticket, lock the row for the duration of this tick.
+    const ticketRow = yield* tickets.loadForUpdate(eventToTicketLookup(event));
 
     yield* audit.record({
-      caseId: caseRow.id,
+      ticketId: ticketRow.id,
       actor: { type: "system", id: "runtime" },
       action: "event.received",
       details: { event },
     });
 
     // 2. Run the workflow loop.
-    const result = yield* runTick(caseRow, event).pipe(
+    const result = yield* runTick(ticketRow, event).pipe(
       Effect.catchAll((err) =>
         Effect.gen(function* () {
           yield* audit.record({
-            caseId: caseRow.id,
+            ticketId: ticketRow.id,
             actor: { type: "system", id: "runtime" },
             action: "tick.error",
             details: { error: serializeError(err) },
@@ -2223,8 +2223,8 @@ export const handleEvent = (
       ),
     );
 
-    // 3. Persist the new case state. All writes in one transaction (handled by Layer).
-    yield* cases.applyTickResult(caseRow.id, result);
+    // 3. Persist the new ticket state. All writes in one transaction (handled by Layer).
+    yield* tickets.applyTickResult(ticketRow.id, result);
 
     return result;
   }).pipe(
@@ -2238,7 +2238,7 @@ export const handleEvent = (
 // ============================================================
 
 const runTick = (
-  caseRow: Case,
+  ticketRow: Ticket,
   event: DomainEvent,
 ): Effect.Effect<WorkflowResult, WorkflowError, RuntimeDeps> =>
   Effect.gen(function* () {
@@ -2250,20 +2250,20 @@ const runTick = (
     const appr = yield* ApprovalService;
     const audit = yield* AuditLogService;
 
-    let agent: AgentConfig = yield* agents.resolve(caseRow.currentAgentId);
-    let messages: ChatMessage[] = yield* buildInitialContext(caseRow, event);
+    let agent: AgentConfig = yield* agents.resolve(ticketRow.currentAgentId);
+    let messages: ChatMessage[] = yield* buildInitialContext(ticketRow, event);
 
     for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
       const decision: LLMDecision = yield* llm.runToolCalling({
         model: agent.model,
-        system: yield* renderPrompt(agent, caseRow),
+        system: yield* renderPrompt(agent, ticketRow),
         messages,
         tools: tools.schemasFor(agent.tools),
         temperature: agent.temperature,
       });
 
       yield* audit.record({
-        caseId: caseRow.id,
+        ticketId: ticketRow.id,
         actor: { type: "agent", id: agent.id },
         action: "llm.decision",
         details: { turn, decision },
@@ -2275,9 +2275,9 @@ const runTick = (
 
         case "handoff": {
           agent = yield* agents.resolve(decision.targetAgent);
-          yield* CaseRepository.pipe(
+          yield* TicketRepository.pipe(
             Effect.flatMap((cr) =>
-              cr.update(caseRow.id, { currentAgentId: decision.targetAgent }),
+              cr.update(ticketRow.id, { currentAgentId: decision.targetAgent }),
             ),
           );
           continue;
@@ -2288,15 +2288,15 @@ const runTick = (
           yield* exec.run(
             "conversation.reply",
             decision.message,
-            makeCtx(caseRow, agent),
+            makeCtx(ticketRow, agent),
           );
           return { type: "PausedWaitingForCustomer" } as const;
 
         case "escalate_supplier":
           yield* exec.run(
-            "supplier.create_case",
+            "supplier.create_ticket",
             decision.payload,
-            makeCtx(caseRow, agent),
+            makeCtx(ticketRow, agent),
           );
           return { type: "PausedWaitingForSupplier" } as const;
 
@@ -2310,7 +2310,7 @@ const runTick = (
           }
 
           const permission = yield* perms.check(
-            caseRow.tenantId,
+            ticketRow.tenantId,
             agent,
             tool,
             decision.input,
@@ -2325,8 +2325,8 @@ const runTick = (
 
           if (permission === "ask") {
             const approval = yield* appr.create({
-              tenantId: caseRow.tenantId,
-              caseId: caseRow.id,
+              tenantId: ticketRow.tenantId,
+              ticketId: ticketRow.id,
               agentId: agent.id,
               tool: tool.name,
               proposedInput: decision.input,
@@ -2342,7 +2342,7 @@ const runTick = (
 
           // allow → execute
           const result = yield* exec
-            .run(tool.name, decision.input, makeCtx(caseRow, agent))
+            .run(tool.name, decision.input, makeCtx(ticketRow, agent))
             .pipe(
               Effect.either, // surface errors back to the model rather than crashing the tick
             );
@@ -2377,33 +2377,33 @@ export const handleApprovalApproved = (
   Effect.gen(function* () {
     const appr = yield* ApprovalService;
     const exec = yield* ToolExecutor;
-    const cases = yield* CaseRepository;
+    const tickets = yield* TicketRepository;
 
     const approval = yield* appr.markApproved(
       event.approvalId,
       event.managerId,
       event.edits,
     );
-    const caseRow = yield* cases.loadForUpdate({ caseId: event.caseId });
-    const agent = yield* (yield* AgentRegistry).resolve(caseRow.currentAgentId);
+    const ticketRow = yield* tickets.loadForUpdate({ ticketId: event.ticketId });
+    const agent = yield* (yield* AgentRegistry).resolve(ticketRow.currentAgentId);
 
     // Use edited input if provided, else original.
     const input = approval.approvedInput ?? approval.proposedInput;
 
-    yield* cases.update(caseRow.id, { status: "approved_action_running" });
+    yield* tickets.update(ticketRow.id, { status: "approved_action_running" });
 
     const result = yield* exec.run(
       approval.tool,
       input,
-      makeCtx(caseRow, agent),
+      makeCtx(ticketRow, agent),
     );
 
     // Now re-enter the normal tick to continue.
     return yield* runTick(
-      { ...caseRow, status: "in_progress" },
+      { ...ticketRow, status: "in_progress" },
       {
-        type: "case.resumed",
-        caseId: caseRow.id,
+        type: "ticket.resumed",
+        ticketId: ticketRow.id,
         trigger: "approval.approved",
       },
     );
@@ -2420,12 +2420,12 @@ export type RuntimeDeps =
   | AgentRegistry
   | PermissionService
   | ApprovalService
-  | CaseRepository
+  | TicketRepository
   | AuditLogService
   | EventBus;
 
 export const RuntimeLayerLive = Layer.mergeAll(
-  CaseRepositoryLive,
+  TicketRepositoryLive,
   AuditLogServiceLive,
   AgentRegistryLive,
   ToolRegistryLive,
@@ -2447,9 +2447,9 @@ A few things worth highlighting:
 
 - The tick loop is a `for` with a hard bound; no `while(true)` anywhere.
 - Errors from tools become messages back to the LLM — failures _inform_ the model rather than crashing the tick.
-- Approvals return early and persist the case state; the worker is free to do other work.
-- Every action is wrapped in `Effect.withSpan` and audited in the same transaction as the case write (handled inside the repository Layer).
-- The same `runTick` function handles fresh events, customer replies, approval results, and timer expirations — they all become "the case is in some state, run the agent's next decision."
+- Approvals return early and persist the ticket state; the worker is free to do other work.
+- Every action is wrapped in `Effect.withSpan` and audited in the same transaction as the ticket write (handled inside the repository Layer).
+- The same `runTick` function handles fresh events, customer replies, approval results, and timer expirations — they all become "the ticket is in some state, run the agent's next decision."
 
 ---
 
@@ -2466,7 +2466,7 @@ The agent has more power than a chatbot. The threat model must match.
 - **Permission policy in the runtime, not the prompt.** No prompt-only safeguard for money or customer-facing messages. Default policy is `ask` for `conversation.reply` and any financial tool.
 - **Conditional rules for money.** `refund.create` with `amount > $25 → ask`; `refund.create` cumulative-per-day-per-customer above a threshold → `ask`; over $200 → `deny` until manager approval.
 - **Tool output validation.** A malicious "tool result" injected via a hijacked dependency still has to satisfy the output schema.
-- **Limited context.** The model sees only what the runtime gives it: the case timeline, customer info, order info. It does _not_ see other customers' data, the database password, or internal staff emails.
+- **Limited context.** The model sees only what the runtime gives it: the ticket timeline, customer info, order info. It does _not_ see other customers' data, the database password, or internal staff emails.
 
 ### 19.2 Prompt injection
 
@@ -2485,19 +2485,19 @@ The agent has more power than a chatbot. The threat model must match.
 
 **Mitigations:**
 
-- **The model's `final_message` is verified against the tool call ledger.** If the message says "your order shipped yesterday" but no `shopify.get_order` call occurred this case, the message is held for manager review.
+- **The model's `final_message` is verified against the tool call ledger.** If the message says "your order shipped yesterday" but no `shopify.get_order` call occurred this ticket, the message is held for manager review.
 - **Structured output preferred over freeform.** Customer replies are drafted via a structured intermediate (`OutboundEmailDraft` schema) where claims are tied to tool-call IDs.
 
 ### 19.4 Cost runaway
 
-**Risk:** a stuck case loops, an attacker triggers thousands of events, a model upgrade 10×s cost overnight.
+**Risk:** a stuck ticket loops, an attacker triggers thousands of events, a model upgrade 10×s cost overnight.
 
 **Mitigations:**
 
 - **Hard turn budget per tick** (default 8).
-- **Per-case LLM cost budget** with a circuit breaker.
+- **Per-ticket LLM cost budget** with a circuit breaker.
 - **Per-tenant rate limits** on inbound event ingestion.
-- **Routing.** Cheap model for triage; premium model only for nuanced cases.
+- **Routing.** Cheap model for triage; premium model only for nuanced tickets.
 - **Live cost dashboard** with per-tenant, per-agent breakdown.
 
 ### 19.5 PII handling
@@ -2535,15 +2535,15 @@ The agent has more power than a chatbot. The threat model must match.
 - **Tone tests in CI.** Every agent has a battery of fixtures whose draft outputs are graded by a judge LLM against the brand voice spec; regressions fail CI.
 - **Per-tenant prompt overrides.** Merchant supplies brand voice notes that override agent defaults.
 
-### 19.8 Race conditions on the same case
+### 19.8 Race conditions on the same ticket
 
-**Risk:** two events arrive simultaneously (e.g. customer reply + supplier update); both workers try to advance the case.
+**Risk:** two events arrive simultaneously (e.g. customer reply + supplier update); both workers try to advance the ticket.
 
 **Mitigations:**
 
-- **Row-level lock** (`SELECT ... FOR UPDATE`) on the case at the start of every tick.
+- **Row-level lock** (`SELECT ... FOR UPDATE`) on the ticket at the start of every tick.
 - **Optimistic version column** as a second line of defense.
-- **Events are queued per-case-key.** The workflow queue (e.g. BullMQ with named groups, or pg-boss with `singleton_key`) serializes per-case work.
+- **Events are queued per-ticket-key.** The workflow queue (e.g. BullMQ with named groups, or pg-boss with `singleton_key`) serializes per-ticket work.
 
 ### 19.9 Bad migrations / agent config rollouts
 
@@ -2551,13 +2551,13 @@ The agent has more power than a chatbot. The threat model must match.
 
 **Mitigations:**
 
-- **Agent configs are versioned and previewable.** Dashboard supports "test this config against last 50 cases" replay (read-only, no tools executed) before going live.
-- **Canary rollout.** A new agent version handles 10% of cases for 24h before full rollout.
+- **Agent configs are versioned and previewable.** Dashboard supports "test this config against last 50 tickets" replay (read-only, no tools executed) before going live.
+- **Canary rollout.** A new agent version handles 10% of tickets for 24h before full rollout.
 - **One-click rollback.** Versions live in `agent_configs`; rolling back is changing the active pointer.
 
 ### 19.10 Supplier escalation abuse
 
-**Risk:** an attacker repeatedly opens damaged-product cases against a competitor's supplier to flood their sheet.
+**Risk:** an attacker repeatedly opens damaged-product tickets against a competitor's supplier to flood their sheet.
 
 **Mitigations:**
 
@@ -2573,9 +2573,9 @@ The agent has more power than a chatbot. The threat model must match.
 
 - **Append-only audit log** with full chain: event → LLM reasoning → tool call → result → approval → outcome.
 - **All approvals carry manager identity, timestamp, IP, and any edits diffed against the agent proposal.**
-- **Retention policy.** Resolved cases stay parked as `resolved` for 30 days,
+- **Retention policy.** Resolved tickets stay parked as `resolved` for 30 days,
   then the retention sweep transitions them to `archived` with an audit row.
-  Archived cases are deleted after 12 months archived, including their
+  Archived tickets are deleted after 12 months archived, including their
   approvals, audit rows, and state transitions. Account/shop/customer redaction
   remains a separate privileged deletion path with surviving admin audit.
 
@@ -2594,15 +2594,15 @@ Deliverable: empty platform that compiles and tests.
 - Postgres + migrations runner (`drizzle-kit` or `node-pg-migrate`).
 - BullMQ or pg-boss for the workflow queue.
 - OpenTelemetry wiring with a local Tempo/Jaeger.
-- Core types in `agent-core` (`Case`, `Tool`, `AgentConfig`, errors).
+- Core types in `agent-core` (`Ticket`, `Tool`, `AgentConfig`, errors).
 - Empty Live + Test layers for every service.
 - Auth scaffold (OIDC for dashboard, HMAC for webhooks).
 
 ### Phase 1 — The runtime spine (Weeks 3–4)
 
-Deliverable: a workflow can move a case through states.
+Deliverable: a workflow can move a ticket through states.
 
-- `CaseRepository` Live (Postgres) + Test (in-memory).
+- `TicketRepository` Live (Postgres) + Test (in-memory).
 - `AuditLogService` Live.
 - `EventBus` + `WorkflowQueue`.
 - `AgentRegistry` (loads YAML/TS configs).
@@ -2610,9 +2610,9 @@ Deliverable: a workflow can move a case through states.
 - `PermissionService` (static rules first; conditional rules in phase 4).
 - `ApprovalService` (create, resolve, expire).
 - `AgentRuntime.handleEvent` (the tick loop from §18).
-- Two trivial tools: `case.update_status`, `case.update_context`.
+- Two trivial tools: `ticket.update_status`, `ticket.update_context`.
 - One trivial agent: `support-triage` that just classifies and updates context.
-- End-to-end test: synthetic event → case → audit entries → resolved.
+- End-to-end test: synthetic event → ticket → audit entries → resolved.
 
 ### Phase 2 — First real integration (Weeks 5–6)
 
@@ -2630,16 +2630,16 @@ Deliverable: the agent can answer "where is my order?"
 - Agents: `support-triage`, `order-status-agent`.
 - Webhook: `POST /webhooks/conversations/:provider/:tenantId` → normalized message event (`email.received` for now, `message.received` if/when the event model is widened).
 - Mandatory Shopify compliance webhooks for managed distribution: `customers/data_request`, `customers/redact`, `shop/redact`, with HMAC verification and redaction/access workflows.
-- Manual happy path: receive a customer message through the first conversation connector, reply through that connector, and see the case resolve.
+- Manual happy path: receive a customer message through the first conversation connector, reply through that connector, and see the ticket resolve.
 
 ### Phase 3 — The dashboard (Weeks 7–8)
 
-Deliverable: a manager can see and act on cases.
+Deliverable: a manager can see and act on tickets.
 
 - Next.js dashboard with auth.
-- Today view, case list, case detail with timeline.
+- Today view, ticket list, ticket detail with timeline.
 - Approval list + approval detail with Approve / Edit & Approve / Reject / Take Over.
-- SSE for live updates on case detail.
+- SSE for live updates on ticket detail.
 - Separate `apps/admin` Next app for platform operators: tenant management, credential/provisioning records, pilot-variant Shopify custom app provisioning (`shopify_app_provisioning`), connector health, credential revoke/rotate, and platform-admin audit. **The first version landed 2026-06-05:** `apps/admin` (Next, shared-password auth) with a tenant list + per-tenant detail (Shopify provisioning form, read-only connector health, account-deletion danger zone), over admin-authed api endpoints (`GET /admin/tenants`, `GET /admin/tenants/:id`, `PUT/GET/DELETE /admin/tenants/:id/shopify-app`, `POST /admin/tenants/:id/delete`).
 - All command endpoints (`/approvals/:id/approve`, etc.) wired.
 - Manual happy path: agent proposes `conversation.reply` (ask), manager approves in dashboard, reply goes out through the tenant's configured connector.
@@ -2653,7 +2653,7 @@ Deliverable: policy is real, not theoretical.
 - Slack approval channel (interactive buttons).
 - Signed email approval links.
 - PII redaction in audit log and traces.
-- Cost tracking per case / agent / tenant.
+- Cost tracking per ticket / agent / tenant.
 - Hard turn budget enforcement; "max_turns_exceeded → human_takeover" path tested.
 
 ### Phase 5 — More categories (Weeks 11–12)
@@ -2664,7 +2664,7 @@ Deliverable: the agent handles three real categories end-to-end.
 - Tools: `supplier.add_sheet_row` (Google Sheets first-party plugin), `refund.recommend`, `refund.create`, `tracking.lookup`.
 - Evidence upload (object storage), photo handling in customer replies.
 - Timer service for follow-ups (`timer.expired` event).
-- Replay/test mode for agents against historical cases.
+- Replay/test mode for agents against historical tickets.
 
 #### TrackingService — design notes (locked in)
 
@@ -2687,7 +2687,7 @@ The `no_provider` branch is the **graceful degrade** path: when no upstream trac
 
 Two providers are envisioned, with very different deployment models:
 
-- **17track** — v1 Live impl. **Platform-managed credentials**: a single 17track API key held in env (`SEVENTEENTRACK_API_KEY`) and built into the Layer once at worker bootstrap. The merchant does NOT bring their own key, has no install flow, no `connector_connections` row, no `/settings/integrations` card. Cost rolls up against the platform's 17track subscription, not per-tenant billing. **Lookup-only — no webhook ingestion.** When `SEVENTEENTRACK_API_KEY` is unset, the worker boots with a fallback impl that returns `kind: "no_provider"` for every call — no env-var is *required* for the worker to start or for tests to pass. Proactive workflows (case wakes up on delivery / exception push) are deferred until there's an agent that consumes a `tracking.changed` event.
+- **17track** — v1 Live impl. **Platform-managed credentials**: a single 17track API key held in env (`SEVENTEENTRACK_API_KEY`) and built into the Layer once at worker bootstrap. The merchant does NOT bring their own key, has no install flow, no `connector_connections` row, no `/settings/integrations` card. Cost rolls up against the platform's 17track subscription, not per-tenant billing. **Lookup-only — no webhook ingestion.** When `SEVENTEENTRACK_API_KEY` is unset, the worker boots with a fallback impl that returns `kind: "no_provider"` for every call — no env-var is *required* for the worker to start or for tests to pass. Proactive workflows (ticket wakes up on delivery / exception push) are deferred until there's an agent that consumes a `tracking.changed` event.
 - **Aftership / EasyPost** — later, per-tenant BYO credentials (new provider variant in `connector_connections`), `POST /webhooks/tracking/:tenantId` for proactive scan-event ingestion → `tracking.changed` domain event. The webhook path is reserved in §11 routing but stays dead until a proactive agent ships. Routing between 17track and Aftership/EasyPost is per-tenant policy: 17track is the default for every tenant; merchants on enterprise plans can opt into BYO Aftership/EasyPost for direct carrier data.
 
 This split is intentional: the no-onboarding-friction of platform-shared credentials matters more than carrier-direct data for the first tracking-heavy use case (where-is-my-order + missing-package). Master-plan §11 carries the webhook entry only on the Aftership/EasyPost row; the 17track integration has no inbound webhook route.
@@ -2715,7 +2715,7 @@ Deliverable: an external plugin can extend the platform.
 
 Deliverable: ready for first paying merchant.
 
-- Load testing (10k cases/day per tenant).
+- Load testing (10k tickets/day per tenant).
 - Chaos testing (provider down, DB failover, queue lag).
 - SOC 2 audit trail polish.
 - Incident playbooks.

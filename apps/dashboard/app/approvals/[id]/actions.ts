@@ -22,7 +22,7 @@ const loadProposedInput = async (
 // is rendered as a hidden field by the page and read back here.
 //
 // Successful actions revalidate the approvals list (so the row drops
-// off the "pending" view) and the case detail (so the timeline
+// off the "pending" view) and the ticket detail (so the timeline
 // reflects the new state if/when the worker picks up the event).
 // Then we redirect — `redirect()` throws, so anything below it is
 // unreachable.
@@ -37,7 +37,7 @@ const approvalIdOf = (formData: FormData): string => {
 
 // Optional `returnTo` form field lets a caller redirect back to a
 // page other than /approvals after the decision — e.g. the inline
-// approval card on the case detail page wants to stay on the case.
+// approval card on the ticket detail page wants to stay on the ticket.
 // We only honor in-app absolute paths (starting with "/") to avoid
 // turning this into an open redirect.
 const returnToOf = (formData: FormData): string | null => {
@@ -109,29 +109,29 @@ export const rejectAction = async (formData: FormData): Promise<void> => {
 };
 
 // ---- Bundle decisions (autonomous loop) ----
-// The scenario agent queues several gated actions on one case; these decide the
-// WHOLE pending bundle in one click via the case-scoped endpoint (the api
+// The scenario agent queues several gated actions on one ticket; these decide the
+// WHOLE pending bundle in one click via the ticket-scoped endpoint (the api
 // approves/rejects every row, then publishes ONE event so the runtime runs the
-// bundle in order). The case page renders the Approve-all / Reject-all controls.
+// bundle in order). The ticket page renders the Approve-all / Reject-all controls.
 
-const caseIdOf = (formData: FormData): string => {
-  const id = formData.get("caseId");
+const ticketIdOf = (formData: FormData): string => {
+  const id = formData.get("ticketId");
   if (typeof id !== "string" || id.length === 0) {
-    throw new Error("caseId missing from form data");
+    throw new Error("ticketId missing from form data");
   }
   return id;
 };
 
 const bundleBanneredPath = (
-  caseId: string,
+  ticketId: string,
   action: "approve" | "reject",
   kind: string,
-): string => `/cases/${caseId}?decided=bundle&action=${action}&kind=${kind}`;
+): string => `/tickets/${ticketId}?decided=bundle&action=${action}&kind=${kind}`;
 
 export const approveBundleAction = async (
   formData: FormData,
 ): Promise<void> => {
-  const caseId = caseIdOf(formData);
+  const ticketId = ticketIdOf(formData);
   const ctx = await getDashboardContext();
 
   // Edit-and-Approve for the bundle's single customer reply: when the form
@@ -151,17 +151,17 @@ export const approveBundleAction = async (
     }
   }
 
-  const result = await api.approveCaseBundle(ctx, caseId, edits);
+  const result = await api.approveTicketBundle(ctx, ticketId, edits);
   revalidatePath("/approvals");
-  revalidatePath(`/cases/${caseId}`);
-  redirect(bundleBanneredPath(caseId, "approve", result.kind));
+  revalidatePath(`/tickets/${ticketId}`);
+  redirect(bundleBanneredPath(ticketId, "approve", result.kind));
 };
 
 export const rejectBundleAction = async (formData: FormData): Promise<void> => {
-  const caseId = caseIdOf(formData);
+  const ticketId = ticketIdOf(formData);
   const ctx = await getDashboardContext();
-  const result = await api.rejectCaseBundle(ctx, caseId);
+  const result = await api.rejectTicketBundle(ctx, ticketId);
   revalidatePath("/approvals");
-  revalidatePath(`/cases/${caseId}`);
-  redirect(bundleBanneredPath(caseId, "reject", result.kind));
+  revalidatePath(`/tickets/${ticketId}`);
+  redirect(bundleBanneredPath(ticketId, "reject", result.kind));
 };

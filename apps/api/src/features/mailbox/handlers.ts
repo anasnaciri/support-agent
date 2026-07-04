@@ -188,7 +188,7 @@ export const rejectWhenMailboxConnected = async (
  *      notifications to our Pub/Sub topic. Store the returned `historyId`
  *      + lease expiry in the connector's metadata blob.
  *   6. For Gmail only, backfill existing unread INBOX messages so customer
- *      replies that predate the install can resume existing cases.
+ *      replies that predate the install can resume existing tickets.
  *
  * If steps 1-4 succeed but 5 fails, we still 200 — the credentials are
  * saved and a re-install (or a scheduled watch-refresh) can recover.

@@ -1,5 +1,5 @@
 // Pure failure-streak logic for the live-updates poller (U11). Framework-free
-// so it's unit-testable; CaseLiveBoundary.tsx is thin glue around it.
+// so it's unit-testable; TicketLiveBoundary.tsx is thin glue around it.
 
 /**
  * Consecutive poll failures before the boundary surfaces visible

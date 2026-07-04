@@ -22,8 +22,8 @@ export class TransactionRunner extends Context.Tag("TransactionRunner")<
      * Run `eff` while holding a cluster-wide exclusive lock on `key`
      * (audit L2). The Live impl takes a Postgres advisory lock on a
      * dedicated connection, so two workers — or two pg-boss jobs whose
-     * queue keys differ (thread-keyed message vs case-keyed approval) —
-     * can never tick the same case concurrently. Released on success,
+     * queue keys differ (thread-keyed message vs ticket-keyed approval) —
+     * can never tick the same ticket concurrently. Released on success,
      * failure, or interruption.
      */
     readonly withLock: <A, E, R>(

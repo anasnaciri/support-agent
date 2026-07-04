@@ -8,13 +8,13 @@ type RawSql = ReturnType<typeof makeDbClient>["sql"];
  * (see `vitest.global-teardown.ts`) calls this after the whole run so the DB is
  * left exactly as the suite found it.
  *
- * Ordering matters: `cases.tenant_id` and `approvals.{tenant_id,case_id}` are
+ * Ordering matters: `tickets.tenant_id` and `approvals.{tenant_id,ticket_id}` are
  * `ON DELETE NO ACTION` (intentional — the schema refuses to silently wipe a
- * tenant that still owns cases). So a bare `DELETE FROM tenants` is blocked by
- * any leftover case, and a `DELETE FROM cases` is blocked by any leftover
+ * tenant that still owns tickets). So a bare `DELETE FROM tenants` is blocked by
+ * any leftover ticket, and a `DELETE FROM tickets` is blocked by any leftover
  * approval. We therefore delete in dependency order — the same order
- * `redactShop` uses in production: approvals → cases → audit_log → tenants.
- * Everything else under a tenant (`case_state_transitions`, `case_message_ids`,
+ * `redactShop` uses in production: approvals → tickets → audit_log → tenants.
+ * Everything else under a tenant (`ticket_state_transitions`, `ticket_message_ids`,
  * `connector_connections`, knowledge docs, agent overrides, roles, …) is
  * `ON DELETE CASCADE`, so the tenant delete carries it.
  *
@@ -32,11 +32,19 @@ export const purgeLeakedTenants = async (
   keepTenantIds: readonly string[],
 ): Promise<string[]> => {
   const keep = keepTenantIds as string[];
-  // 1. approvals — FK to BOTH cases and tenants (NO ACTION); nuke by tenant.
-  await sql`DELETE FROM approvals WHERE tenant_id <> ALL(${keep}::uuid[])`;
-  // 2. cases — FK to tenants (NO ACTION); cascades case_state_transitions,
-  //    case_message_ids, reply_deliveries, case_supplier_escalations, …
-  await sql`DELETE FROM cases WHERE tenant_id <> ALL(${keep}::uuid[])`;
+  // 1. approvals — FK to BOTH tickets and tenants (NO ACTION); nuke by tenant
+  //    and by any ticket that is about to be deleted. The second predicate
+  //    handles partial/corrupt test leftovers where tenant_id was not enough.
+  await sql`
+    DELETE FROM approvals
+    WHERE tenant_id <> ALL(${keep}::uuid[])
+       OR ticket_id IN (
+         SELECT id FROM tickets WHERE tenant_id <> ALL(${keep}::uuid[])
+       )
+  `;
+  // 2. tickets — FK to tenants (NO ACTION); cascades ticket_state_transitions,
+  //    ticket_message_ids, reply_deliveries, ticket_supplier_escalations, …
+  await sql`DELETE FROM tickets WHERE tenant_id <> ALL(${keep}::uuid[])`;
   // 3. audit_log — no FK; would orphan tenant-scoped rows otherwise.
   await sql`DELETE FROM audit_log WHERE tenant_id <> ALL(${keep}::uuid[])`;
   // 4. tenants — everything still attached cascades from here.

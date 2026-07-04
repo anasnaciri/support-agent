@@ -37,7 +37,7 @@ const isLlmProvider = (p: string): p is LLMProvider =>
  *
  * If the row is `status='revoked'` we surface `LLMCredentialRevoked` so the
  * audit log can name the provider that was disconnected — even though the
- * runtime treats it the same as `LLMCredentialMissing` (case →
+ * runtime treats it the same as `LLMCredentialMissing` (ticket →
  * `human_takeover`).
  */
 export const LLMCredentialResolverLive = Layer.effect(

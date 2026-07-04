@@ -17,21 +17,33 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
-- [x] Concurrent wait states: a case can wait on approval AND a supplier at
+- [x] Concurrent wait states: a ticket can wait on approval AND a supplier at
       once. Status stays the single `primaryWaitStatus` pointer (approval wins);
       both waits are row-derived and shown as chips; a supplier update on a
-      waiting-for-approval case redrafts (supersedes pending approvals + resumes).
+      waiting-for-approval ticket redrafts (supersedes pending approvals + resumes).
+- [ ] SPA port gap (user-reported 2026-07-04): the settings OVERVIEW is still
+      not ported/reachable. Code-wise `SettingsPage` (9-tile grid) exists and
+      is routed at `/settings` (router.tsx `settingsRoute`), so reproduce in
+      the browser first: check what the rail's Settings cog and the
+      settings-nav "Overview" item actually render — suspects are the
+      `hasAnySettingsAccess` gate hiding the cog, a landing redirect skipping
+      `/settings`, or the `/settings/$` splat/Placeholder winning the match.
+      Compare against apps/dashboard `/settings` and port whatever differs.
+- [ ] Re-sweep apps/dashboard → dashboard-spa for any other unported pages
+      after the above (2026-07-04 sweep found + fixed: /sign-up,
+      /workspaces/new, dead View-notice URL; rest verified route-registered).
 - [ ] Remove `waiting_for_approval` / `waiting_for_supplier` from the
-      agent-settable `case.update_status` enum (`packages/tools/src/case/update-status.ts`)
+      agent-settable `ticket.update_status` enum (`packages/tools/src/ticket/update-status.ts`)
       — those are runtime-owned parks, not agent-settable; agent-visible schema
       change, own slice.
-- [ ] Decide and execute a deliberate Case -> Ticket domain vocabulary
-      migration if the product term is changing: update `master-plan.md`, code
-      symbols, UI copy, routes/API compatibility, tool/audit names, DB schema
-      and migrations with tests/build green. Avoid a blind repo-wide
-      search-replace because persisted identifiers and compatibility surfaces
-      need explicit handling.
-- [ ] Finish case-recovery hardening follow-ups: non-Gmail send dedup where
+- [x] Completed the deliberate ticket domain vocabulary migration: product
+      docs, code symbols, UI copy, routes/RBAC, tool/audit names, DB
+      tables/columns, and new migration now use ticket terminology. Verified
+      with the codemod dry-run, targeted old-identifier sweeps, full Vitest
+      run, DB-gated suites, and `pnpm build`; historical migrations keep prior
+      names as migration history. Post-review cleanup removed stale duplicate
+      route-alias tests after the old aliases were dropped.
+- [ ] Finish ticket-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
       customer replies.
@@ -40,36 +52,39 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Tighten API rate-limit keying so limits are per actor, not per proxy or
       server egress IP.
 - [ ] Ensure CI runs DB-gated integration suites, especially Drizzle seam tests.
+- [ ] Isolate DB-gated integration test data so the full Vitest suite can run
+      with file parallelism; 2026-07-04 ticket-migration verification needed
+      `--fileParallelism=false` because teardown tests mutate shared DB state.
 - [ ] Add LLM fallback chains and cost dashboards.
 
 ---
 
 ## Implemented Feature Ledger
 
-### Runtime And Case Lifecycle
+### Runtime And Ticket Lifecycle
 
-- [x] Effect runtime spine with typed services, state-machine guarded case
+- [x] Effect runtime spine with typed services, state-machine guarded ticket
       transitions, audit logging, approvals, and pg-boss workflow queue.
 - [x] Permission service is enforced for tool execution, including refund and
       customer-reply approval gates.
-- [x] Case lifecycle writes centralized through `CaseLifecycleWriter` for
-      runtime, dashboard, worker recovery, and manual case actions.
+- [x] Ticket lifecycle writes centralized through `TicketLifecycleWriter` for
+      runtime, dashboard, worker recovery, and manual ticket actions.
 - [x] Dashboard manual status changes, take-over, resume, retry last step, and
       restart-from-triage.
-- [x] Manual escalate-to-supplier from the case page (⋮ menu → dialog):
-      `POST /dashboard/cases/:id/escalate-supplier` writes the escalation row
+- [x] Manual escalate-to-supplier from the ticket page (⋮ menu → dialog):
+      `POST /dashboard/tickets/:id/escalate-supplier` writes the escalation row
       (the notify outbox) and parks via `parkWaitingForSupplierManually` —
       bridges from `human_takeover`, keeps `waiting_for_approval` primary.
-- [x] Case-header actions rework: Refund is a text button, Resolve carries its
+- [x] Ticket-header actions rework: Refund is a text button, Resolve carries its
       label, retries live in a dedicated ↺ dropdown ("Retry last step" /
-      "Retry case"), ⋮ menu holds status changes + supplier escalation.
+      "Retry ticket"), ⋮ menu holds status changes + supplier escalation.
 - [x] Restart-from-triage rebinds to triage, clears stale classification, and
       cancels pending approvals from the abandoned route.
-- [x] Resumed cases can replay the full conversation thread so triage and
+- [x] Resumed tickets can replay the full conversation thread so triage and
       specialists re-orient from actual messages.
 - [x] Human-takeover guard prevents autonomous handling until a manager resumes
-      the case.
-- [x] Failed customer-reply delivery parks the case, persists a retryable
+      the ticket.
+- [x] Failed customer-reply delivery parks the ticket, persists a retryable
       delivery row, and exposes manual retry.
 - [x] Approved-but-not-sent replies are detected and can be resent from the
       dashboard without leaving human takeover.
@@ -79,8 +94,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       only on first notification.
 - [x] Approval row age no longer blocks dashboard decisions; stale drafts show
       a non-blocking warning.
-- [x] Workflow consumer runs multiple case keys concurrently while preserving
-      per-case ordering.
+- [x] Workflow consumer runs multiple ticket keys concurrently while preserving
+      per-ticket ordering.
 - [x] Workflow ticks, LLM calls, tool calls, and Shopify HTTP calls have bounded
       timeouts.
 - [x] Out-of-credits LLM failures map to terminal human takeover instead of
@@ -89,7 +104,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       deduping another distinct customer message.
 - [x] `deliveryScopeFor` falls back to non-bare keys so legacy markers cannot
       collide with malformed events.
-- [x] Case recovery hardening added approval epochs, resumed markers,
+- [x] Ticket recovery hardening added approval epochs, resumed markers,
       event-level dedup, Gmail deterministic Message-ID dedup, and stale
       approval-event handling.
 - [x] Order identity mismatch cannot auto-resolve on a bare final message; the
@@ -101,14 +116,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - [x] Provider-neutral conversation/mailbox service with Gmail, Outlook, and
       IMAP/SMTP connector paths.
-- [x] Cases record the exact provider and mailbox, and thread lookup is scoped
+- [x] Tickets record the exact provider and mailbox, and thread lookup is scoped
       by tenant/provider/mailbox/thread.
 - [x] Gmail and Outlook OAuth flows use verified dashboard identity where
       required and avoid account-prefill mistakes for support mailboxes.
 - [x] `Reply-To` is honored so replies to Shopify contact-form mail go to the
       real customer instead of the relay address.
 - [x] IMAP replies correlate through an indexed message-id table before minting
-      a new case.
+      a new ticket.
 - [x] Outlook fetches sanitized HTML email bodies and derives clean plain text
       for the agent.
 - [x] Sanitized email HTML keeps safe inline formatting, table layout attrs, and
@@ -123,17 +138,17 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - [x] Shopify service covers customer, order, fulfillment, refund, cancellation,
       policy import, and store-info paths.
-- [x] Order lookup binds one canonical Shopify order id on the case and stores
+- [x] Order lookup binds one canonical Shopify order id on the ticket and stores
       fuzzy customer-provided refs separately.
 - [x] Customer resolution falls back through email, labelled phone, and display
-      name; manual case-detail edit can override customer and order metadata.
+      name; manual ticket-detail edit can override customer and order metadata.
 - [x] Verified order email is runtime-stamped and surfaced on identity-mismatch
-      cases.
+      tickets.
 - [x] Order/customer mismatch checks compare the resolved customer id as well as
       the order email for read-only disclosure.
 - [x] Refund modal supports line items, restock options, shipping refund, reason,
       and maximum-refundable validation.
-- [x] Agent-recommended refunds can be issued from the case page.
+- [x] Agent-recommended refunds can be issued from the ticket page.
 - [x] Shopify `refundCreate` no longer queries invalid `code` on `UserError`.
 - [x] Shopify `refundCreate` uses the required `@idempotent` directive with a
       deterministic idempotency key.
@@ -145,19 +160,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       coupons through tenant discount policy.
 - [x] 17track lookup-only `TrackingService` enriches order-status flows and
       gracefully returns public tracking URLs when no provider is configured.
-- [x] Live case tracking card fetches fresh tracking data when a case has a
+- [x] Live ticket tracking card fetches fresh tracking data when a ticket has a
       tracking number.
 - [x] Shopify integration capability grid distinguishes scopeless tools from
       real missing scopes and shows platform capabilities.
 
 ### Suppliers
 
-- [x] Supplier portal closes the escalation loop: agent escalates, case waits,
+- [x] Supplier portal closes the escalation loop: agent escalates, ticket waits,
       supplier posts an update, and the agent drafts the customer reply.
 - [x] Supplier notification uses a durable outbox ledger rather than
       best-effort send.
 - [x] Supplier updates re-engage the agent from all allowed resting states a
-      person can leave the case in.
+      person can leave the ticket in.
 - [x] Supplier update payloads carry escalation ids so repeat escalations do not
       cross-dedup.
 - [x] Suppliers can be bound to many merchant workspaces through an
@@ -168,7 +183,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       customer thread data.
 - [x] Suppliers can fix the order's tracking number from the escalation page
       (a reship went out under a new number): `POST
-      /dashboard/supplier/cases/:id/tracking` → unit-tested
+      /dashboard/supplier/tickets/:id/tracking` → unit-tested
       `updateSupplierTracking` core → `ShopifyService.updateFulfillmentTracking`
       (Shopify `fulfillmentTrackingInfoUpdate`, `notifyCustomer: false` — the
       customer hears it from the agent, never a store email). Open escalations
@@ -179,37 +194,37 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `context.liveTrackingStatus` cache dropped + `supplier.tracking_updated`
       audit row. Does NOT resolve the escalation — the supplier's posted
       update stays the thing that re-engages the agent.
-- [x] Concurrent wait states: a case can hold a pending approval AND an open
-      supplier escalation at once. `cases.status` stays the single
+- [x] Concurrent wait states: a ticket can hold a pending approval AND an open
+      supplier escalation at once. `tickets.status` stays the single
       `primaryWaitStatus` pointer (approval wins); both waits are row-derived
       (pending approvals / open escalations) and surfaced as `waitingOn` chips.
       The tick that queues an ask-gated reply then escalates parks the bundle
       (`waiting_for_approval`), the supplier notify outbox keys on the open
       escalation row (not status), an approval resume parks on the supplier
       while an escalation is open, and a supplier update on a
-      waiting-for-approval case redrafts (supersedes pending approvals + resumes
+      waiting-for-approval ticket redrafts (supersedes pending approvals + resumes
       so the agent drafts fresh).
 
 ### Dashboard And SPA
 
-- [x] Merchant dashboard includes Today, case list, case detail, approvals,
+- [x] Merchant dashboard includes Today, ticket list, ticket detail, approvals,
       audit, settings, members, integrations, policies, knowledge, and supplier
       surfaces.
-- [x] Case detail page uses the inbox-style layout with left case navigation,
+- [x] Ticket detail page uses the inbox-style layout with left ticket navigation,
       center conversation, and right/floating context panels.
 - [x] Manual reply composer supports approve/reject flows, direct replies,
       rephrase-with-AI, model picker, and locked agent-owned state.
-- [x] Cases list has richer rows, reference-style tabs, status filtering,
+- [x] Tickets list has richer rows, reference-style tabs, status filtering,
       search, priority/status/order metadata, and subject fallbacks.
-- [x] Case tracking checkpoint rail renders as a continuous timeline in both
+- [x] Ticket tracking checkpoint rail renders as a continuous timeline in both
       dashboard surfaces.
-- [x] Case context renders friendly labelled rows instead of raw JSON.
+- [x] Ticket context renders friendly labelled rows instead of raw JSON.
 - [x] Floating context card is trimmed to non-duplicated facts (customer ask,
       return reason, photo evidence, risk flags, notes) plus a quoted-vs-bound
       order mis-quote heads-up; card and toggle hide when there is nothing to
       show.
 - [x] Dark-mode palette and theme switch landed for the SPA.
-- [x] Case-detail inbox compacts on small laptop screens (sub-`2xl`): narrower
+- [x] Ticket-detail inbox compacts on small laptop screens (sub-`2xl`): narrower
       details column (`lg:w-72 xl:w-80 2xl:w-96`), tighter card/panel padding,
       and the floating context card starts closed below 1536px viewport width
       (header toggle unchanged). `2xl+` keeps the previous layout.
@@ -220,7 +235,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `text-[0.8125rem]`), never `text-[13px]`.
 - [x] SPA port uses Vite, TanStack Router, TanStack Query, cookie BFF auth,
       workspace context, and route-level read/write pages.
-- [x] SPA case page supports mutations, approval decisions, refund modal,
+- [x] SPA ticket page supports mutations, approval decisions, refund modal,
       supplier update form, live refetch boundary, and settings forms.
 - [x] SPA onboarding self-heals org-less sessions and avoids redirect loops
       when the current user has no accessible workspace.
@@ -295,25 +310,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Credential encryption supports primary and previous keys for rotation.
 - [x] Shopify PCD handling, legal/DPA acceptance, retention sweep, and audit PII
       redaction are implemented at the documented level.
-- [x] Case retention is two-stage: resolved cases archive after 30 days, and
-      archived cases delete after 12 months with audit/approval cleanup.
-- [x] Case retention sweep re-checks status/cutoff predicates under row locks
-      before archive/delete, so reopened cases are not archived or purged by a
+- [x] Ticket retention is two-stage: resolved tickets archive after 30 days, and
+      archived tickets delete after 12 months with audit/approval cleanup.
+- [x] Ticket retention sweep re-checks status/cutoff predicates under row locks
+      before archive/delete, so reopened tickets are not archived or purged by a
       stale sweep selection.
 - [x] Test teardown purges leaked tenants in dependency order.
 - [x] API feature modules replaced the old large composition file.
 - [x] Agent runtime was decomposed into named phases while keeping stateful
       runtime behavior in one module.
-- [x] Manager can fix the order's shipping address from the case page (SPA):
+- [x] Manager can fix the order's shipping address from the ticket page (SPA):
       Ship-to pencil on the Order card → `POST
-      /dashboard/cases/:id/shipping-address` →
+      /dashboard/tickets/:id/shipping-address` →
       `ShopifyService.updateOrderShippingAddress` (Shopify `orderUpdate`, a
       REAL store write under operator authority). Fields are three-state
       (absent = keep, blank = clear, text = set — the pencil posts the whole
       prefilled form, so blanking a field removes it); records a
-      `case.shipping_address_updated` audit row; gated on the dedicated
-      `orders.edit` RBAC permission (implies `cases.view`, granted separately
-      from `cases.set_status`, like `refunds.issue` is for money).
+      `ticket.shipping_address_updated` audit row; gated on the dedicated
+      `orders.edit` RBAC permission (implies `tickets.view`, granted separately
+      from `tickets.set_status`, like `refunds.issue` is for money).
 - [x] SPA CustomerPanel shows the edit-customer pencil in the
       matched-customer state again (it was dropped there, so the pencil
       vanished exactly when a Shopify customer resolved — the Next dashboard
@@ -327,38 +342,38 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - [x] Add replay/resume behavior for held `supplier.updated` events after
       approval decisions. (Redraft: a supplier update on a
-      waiting-for-approval case supersedes the pending approvals and resumes;
+      waiting-for-approval ticket supersedes the pending approvals and resumes;
       the event is no longer held.)
 - [ ] Add merchant-facing recovery when supplier notification attempts exhaust
-      and the case is still waiting for supplier.
+      and the ticket is still waiting for supplier.
 - [ ] `escalateSupplierNotifyFailure` keeps `onlyFromStatus:
-      "waiting_for_supplier"`, so a waiting-for-approval case with an open
+      "waiting_for_supplier"`, so a waiting-for-approval ticket with an open
       escalation that exhausts supplier-notify attempts no-ops instead of
       escalating to a human. Acceptable for now (the merchant is already engaged
       via the approval), but revisit if suppliers go unreachable under
       concurrent waits.
 - [ ] `supplier_unreachable` risk flag is not stamped on waiting-for-approval
-      cases (same `onlyFromStatus` gate as above).
+      tickets (same `onlyFromStatus` gate as above).
 - [ ] Multi-escalation supplier note history is audit-trail only:
       `context.supplierUpdate` is last-write-wins, so a second escalation's note
       overwrites the first in context (the audit log preserves both).
 - [ ] Allow a supplier correction or second update to the same escalation, or
       make the required new escalation flow explicit in the UI.
 - [ ] Add epoch handling to timer and supplier events, building on
-      `cases.epoch`.
+      `tickets.epoch`.
 - [ ] Evaluate IMAP/SMTP pre-send dedup scan; Graph cannot rely on custom
       Message-ID.
-- [ ] Dedup approval-maintenance republish by case key when a job is already
+- [ ] Dedup approval-maintenance republish by ticket key when a job is already
       pending or active.
 - [ ] Stop the scenario-resolution `get_order -> OrderNotFound` retry loop and
       review its max-turn budget.
 - [ ] Consider prioritizing approval events over message-received events.
-- [ ] Enrich `timer.expired` ticks with thread/context like `case.resumed`.
-- [ ] Make failed reply-delivery capture atomic with case park and audit writes,
+- [ ] Enrich `timer.expired` ticks with thread/context like `ticket.resumed`.
+- [ ] Make failed reply-delivery capture atomic with ticket park and audit writes,
       or document the intentional best-effort boundary.
 - [ ] Add immediate sweep after manual reply-delivery retry instead of waiting
       for the scheduled pass.
-- [ ] Add cumulative discount aggregation by case.
+- [ ] Add cumulative discount aggregation by ticket.
 - [ ] Prototype bounded `agent.delegate` / structured-report subagents on one
       narrow read-only flow.
 
@@ -370,9 +385,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       no-reply, bounce, or automated addresses.
 - [ ] Preserve automated-mail headers across Gmail, Outlook, and IMAP inbound
       payloads where connectors expose them.
-- [ ] Stamp connector health as broken when case-thread load or manual reply
+- [ ] Stamp connector health as broken when ticket-thread load or manual reply
       sees auth failure.
-- [ ] Explain old revoked-IMAP cases clearly when the active mailbox is now
+- [ ] Explain old revoked-IMAP tickets clearly when the active mailbox is now
       Gmail and cannot fetch old provider thread ids.
 - [ ] Deepen IMAP thread view to use indexed message ids instead of a single
       root-only `fetchThread` lookup.
@@ -398,7 +413,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 ### Suppliers
 
 - [x] Manual escalate-to-supplier auto-fills the order projection (`orderRef`,
-      ship city/country, newest tracking number) server-side from the case's
+      ship city/country, newest tracking number) server-side from the ticket's
       canonically-bound order (`identifiedOrderId` GID only — never the
       customer's quoted ref; wrong-order data must not reach a supplier).
       Best-effort: an unreachable Shopify degrades to nulls, never blocks the
@@ -421,7 +436,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Context card no longer flashes the "Customer-quoted order" heads-up on
       mount: `buildContextCardRows` order arg is tri-state (`"loading"` while
       the Shopify fetch is pending renders the slot as a skeleton row; `null` =
-      settled-without-order keeps the unprovable-match heads-up). Case page
+      settled-without-order keeps the unprovable-match heads-up). Ticket page
       passes `shopifyQuery.isPending ? "loading" : …`. Size changes animate:
       card body wrapped in `AnimateHeight` (ResizeObserver → px height →
       transition, `components/ui/animate-height.tsx`), and the aside stays
@@ -429,25 +444,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       transition instead of unmounting with a pop.
 - [x] Context card shows the supplier's answer: `context.supplierUpdate`
       (stamped by `recordSupplierUpdate`) renders as bespoke "Supplier note" /
-      "Supplier suggests" multiline rows in `lib/case-context.ts` instead of
+      "Supplier suggests" multiline rows in `lib/ticket-context.ts` instead of
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
 - [ ] `apps/dashboard` (Next) has no Ship-to pencil — the shipping-address
       edit landed SPA-only (the api endpoint is shared, so porting is just the
       popover + action).
-- [ ] `apps/dashboard` (Next) still has the old case-header layout (icon-only
+- [ ] `apps/dashboard` (Next) still has the old ticket-header layout (icon-only
       refund, retries in the ⋮ menu, no manual supplier escalation) — port the
       SPA's rework only if that app stays user-facing.
-- [ ] Fix legacy relay cases where corrected `customerEmail` updates display but
+- [ ] Fix legacy relay tickets where corrected `customerEmail` updates display but
       connector replies still target original thread recipients.
 - [ ] Mirror dark-mode or email-rendering improvements between dashboard apps
       only for the app that remains user-facing.
 - [ ] Add optional polish: AI-suggest reply chips, bubble avatars, status/priority
-      pill audit, and order/case timeline rail.
-- [x] Micro-interaction polish pass on the case-page actions + dialogs (169df73):
+      pill audit, and order/ticket timeline rail.
+- [x] Micro-interaction polish pass on the ticket-page actions + dialogs (169df73):
       scale-on-press + property-scoped transitions baked into the shared
-      `Button`, cross-faded pending spinners in `CaseHeaderActions`, 40px hit
+      `Button`, cross-faded pending spinners in `TicketHeaderActions`, 40px hit
       areas on icon triggers/checkboxes, dropdown enter animation, tabular-nums
       on live refund amounts, `text-balance`/`text-pretty` on dialog copy.
       Extend the same treatment to other screens opportunistically.
@@ -475,13 +490,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 ### Policy, Agents, Models, And Cost
 
 - [ ] Implement LLM fallback chains.
-- [ ] Add cost dashboards by model, provider, agent, case, and tenant.
+- [ ] Add cost dashboards by model, provider, agent, ticket, and tenant.
 - [ ] Add platform vs tenant-billed LLM cost reporting for 17track and future
       shared services.
 - [ ] Remove hardcoded specialist prompt paths only after the scenario agent
       proves equivalent behavior on the target flows.
 - [ ] Add tone/brand tests for customer-facing replies.
-- [ ] Add replay/test mode for agents against historical cases.
+- [ ] Add replay/test mode for agents against historical tickets.
 
 ### Security, Compliance, And Operations Hardening
 
@@ -490,7 +505,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       egress.
 - [ ] Ensure CI sets `DATABASE_URL` for real Drizzle integration tests.
 - [ ] Finish OTel trace redaction follow-up from Shopify PCD review.
-- [ ] Add load testing for 10k cases/day per tenant.
+- [ ] Add load testing for 10k tickets/day per tenant.
 - [ ] Add chaos tests for provider failure, DB failover, and queue lag.
 - [ ] Polish SOC 2 audit-trail reporting.
 - [ ] Write incident playbooks and on-call runbook.
@@ -521,13 +536,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       workspaces, superseding the old one-supplier-one-workspace decision.
 - [x] Approval rows do not expire by age; email approval links remain bounded,
       and stale drafts are warned rather than blocked.
-- [x] Case retention archives resolved cases after 30 days and deletes archived
-      cases after 12 months; `archived` is runtime-owned and can reopen on a
+- [x] Ticket retention archives resolved tickets after 30 days and deletes archived
+      tickets after 12 months; `archived` is runtime-owned and can reopen on a
       customer reply before deletion.
-- [x] "Archive now" is merchant-settable from the case-page status menu, but
-      ONLY on `resolved` cases: `archived` is entry-restricted in the §10
+- [x] "Archive now" is merchant-settable from the ticket-page status menu, but
+      ONLY on `resolved` tickets: `archived` is entry-restricted in the §10
       matrix (`to === "archived"` requires `from === "resolved"`), so neither
-      the menu nor any code path can archive a live case early.
+      the menu nor any code path can archive a live ticket early.
 - [x] Member RBAC uses plain dashboard DB functions, not an Effect service tag,
       because agents do not consult human RBAC.
 - [x] Scenario-resolution agent was added beside legacy specialists behind a
@@ -536,7 +551,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       contact primitive.
 - [x] SPA keeps the existing flat dashboard package layout instead of moving
       code under `src/`.
-- [x] Concurrent wait states do NOT make `cases.status` a set. Status stays the
+- [x] Concurrent wait states do NOT make `tickets.status` a set. Status stays the
       single "who acts next" pointer; both wait facts are derived from rows
       (pending approvals / open escalations). Precedence is encoded once in
       `primaryWaitStatus` (agent-core) — approval wins, because the merchant is
@@ -544,9 +559,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       escalation row + notify outbox). This preserves the CHECK constraint, the
       `(tenant,status)` index, `groupBy` rollups, list filters, and the cron
       mutex-guards.
-- [x] A supplier update on a case parked `waiting_for_approval` REDRAFTS: it
+- [x] A supplier update on a ticket parked `waiting_for_approval` REDRAFTS: it
       supersedes every pending approval (they may be stale in light of the
-      supplier's note) and resumes the case so the agent drafts fresh, rather
+      supplier's note) and resumes the ticket so the agent drafts fresh, rather
       than holding the event. No epoch bump — stale approve links are inert
       (`already_decided` → 409), and the bundle filter/reminder sweep read
       pending only.
@@ -557,20 +572,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - `agent-core` imports nothing from `services`, `tools`, `db`, or `providers`.
 - `PermissionService` is consulted before every tool execution.
-- Audit-log writes share the transaction with case state changes.
-- Case state machine guards every status transition.
+- Audit-log writes share the transaction with ticket state changes.
+- Ticket state machine guards every status transition.
 - Effect service tags stay abstract in `packages/services`; live impls live in
   `packages/db`, `packages/providers`, or feature packages.
 - Customer-facing replies and money actions stay approval-gated unless tenant
   policy explicitly allows the exact action.
-- A case in `human_takeover` never runs the agent until an explicit resume.
-- Failed customer-reply delivery must never resolve the case.
+- A ticket in `human_takeover` never runs the agent until an explicit resume.
+- Failed customer-reply delivery must never resolve the ticket.
 - Delivery-scoped side-effect markers must not dedup distinct inbound messages.
 - Supplier portal access is by supplier binding, never by WorkOS org membership.
-- Concurrent wait states: `cases.status` is the single `primaryWaitStatus`
+- Concurrent wait states: `tickets.status` is the single `primaryWaitStatus`
   pointer (approval wins); both wait facts are row-derived (pending approvals /
   open escalations), never a status set. The supplier notify outbox keys on the
-  open escalation row, not on `cases.status`.
+  open escalation row, not on `tickets.status`.
 - Path-B dashboard data arrives over JSON; Date-typed API fields must be coerced
   before calling Date methods.
 - `pnpm build` must be green before stopping.

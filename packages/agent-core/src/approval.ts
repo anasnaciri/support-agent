@@ -1,7 +1,7 @@
 import type {
   AgentId,
   ApprovalId,
-  CaseId,
+  TicketId,
   TenantId,
   UserId,
 } from "./ids.js";
@@ -18,7 +18,7 @@ export type ApprovalRiskLevel = "low" | "medium" | "high" | "critical";
 export interface Approval {
   readonly id: ApprovalId;
   readonly tenantId: TenantId;
-  readonly caseId: CaseId;
+  readonly ticketId: TicketId;
   readonly agentId: AgentId;
   readonly tool: string;
   readonly proposedInput: unknown;
@@ -31,7 +31,7 @@ export interface Approval {
   readonly decisionReason: string | null;
   readonly expiresAt: Date;
   readonly createdAt: Date;
-  /** The case round (`Case.epoch`) this approval was created in (defaults 0). */
+  /** The ticket round (`Ticket.epoch`) this approval was created in (defaults 0). */
   readonly epoch?: number;
   /**
    * Set once the decision has been ACTED ON — executed, deduped, or skipped.

@@ -67,7 +67,7 @@ export type DeleteAccountResult =
   | {
       readonly kind: "deleted";
       readonly tenantId: string;
-      readonly deletedCases: number;
+      readonly deletedTickets: number;
       readonly deletedAuditRows: number;
       readonly deletedConnectorRows: number;
       readonly workosOrganizationId: string | null;
@@ -212,7 +212,7 @@ export const deleteTenantAccount = async (
   return {
     kind: "deleted",
     tenantId,
-    deletedCases: wipe.deletedCases,
+    deletedTickets: wipe.deletedTickets,
     deletedAuditRows: wipe.deletedAuditRows,
     deletedConnectorRows: wipe.deletedConnectorRows,
     // The org the cleanup job will actually delete (null when suppressed —
@@ -259,7 +259,7 @@ export const handleDashboardAccountDelete = async (
   const order = [...workspaces].reverse(); // default (oldest) last
   let deletedWorkspaces = 0;
   const totals = {
-    deletedCases: 0,
+    deletedTickets: 0,
     deletedAuditRows: 0,
     deletedConnectorRows: 0,
   };
@@ -279,7 +279,7 @@ export const handleDashboardAccountDelete = async (
       });
     }
     deletedWorkspaces += 1;
-    totals.deletedCases += result.deletedCases;
+    totals.deletedTickets += result.deletedTickets;
     totals.deletedAuditRows += result.deletedAuditRows;
     totals.deletedConnectorRows += result.deletedConnectorRows;
     last = result;

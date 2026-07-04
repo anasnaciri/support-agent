@@ -57,7 +57,7 @@ describe("resolveOrderForContext", () => {
   });
 
   it("falls back to the customer's quotedOrderRef before the order has resolved", async () => {
-    // In-flight case: no canonical GID yet, but triage recorded what the
+    // In-flight ticket: no canonical GID yet, but triage recorded what the
     // customer quoted — show that so the panel isn't blank pre-resolution.
     const order = buildOrder("gid://shopify/Order/12345");
     const env = ShopifyServiceTest({
@@ -123,11 +123,11 @@ describe("resolveCustomerForContext (single source of truth, with fallbacks)", (
     expect(result?.id).toBe("gid://shopify/Customer/777");
   });
 
-  it("falls back to the bound order's customer when the sender email doesn't match (typo case)", async () => {
+  it("falls back to the bound order's customer when the sender email doesn't match (typo ticket)", async () => {
     // The customer typo'd their email at checkout: searchByEmail on the sender
     // address finds nothing and the runtime never stamped shopifyCustomerId —
     // but the resolved order still carries the customer. This is the fix for
-    // the "No matching Shopify customer" panel on a typo'd-email case.
+    // the "No matching Shopify customer" panel on a typo'd-email ticket.
     const cust = buildCustomer(
       "gid://shopify/Customer/777",
       "sue.typo@example.com",

@@ -17,7 +17,7 @@
 //     handler's bespoke 400 / 401 / 409 body.
 //   • Response schemas declare known fields but stay
 //     `additionalProperties: true`, so route-specific extras (`shop`,
-//     `detail`, `missing`, `matchedCases`, …) serialize through unchanged
+//     `detail`, `missing`, `matchedTickets`, …) serialize through unchanged
 //     instead of being stripped by fast-json-stringify.
 //
 // Routes whose success body is HTML or plain text (`/installed`,

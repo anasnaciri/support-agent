@@ -84,7 +84,7 @@ describe("LLMServiceFromFn", () => {
               ? {
                   type: "tool_call",
                   callId: "c0",
-                  tool: "case.update_context",
+                  tool: "ticket.update_context",
                   input: {},
                 }
               : { type: "final_message", text: "done" },

@@ -42,7 +42,7 @@ export const timerExpiredEventFor = (
   timer: TimerRecord,
 ): Extract<DomainEvent, { readonly type: "timer.expired" }> => ({
   type: "timer.expired",
-  caseId: timer.caseId,
+  ticketId: timer.ticketId,
   timerId: timer.id,
   reason: timer.reason,
 });
@@ -51,7 +51,7 @@ export const timerExpiredEventOptions = (
   timer: TimerRecord,
 ): WorkflowEnqueueOptions => ({
   eventId: timer.id,
-  key: `case:${timer.caseId}`,
+  key: `ticket:${timer.ticketId}`,
 });
 
 export const fireDueTimersOnce = (
@@ -66,7 +66,7 @@ export const fireDueTimersOnce = (
     // silently dropped the wake-up forever. A timer whose enqueue fails
     // stays unmarked and the next sweep pass retries it; a crash between
     // enqueue and mark yields a duplicate timer.expired, which the
-    // case-keyed FIFO + runtime guards absorb.
+    // ticket-keyed FIFO + runtime guards absorb.
     const due = yield* timers.listDue(now, limit);
     let fired = 0;
     for (const timer of due) {

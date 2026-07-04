@@ -24,8 +24,8 @@ From master-plan §16 (dependency rule) and §20 (never moves earlier):
 
 - `agent-core` imports nothing from `services`, `tools`, `db`, or `providers`
 - `PermissionService` is consulted before every tool execution (§9). Until it exists, no tool may execute autonomously.
-- Audit-log writes share the transaction with case state changes (§4 outbox)
-- Case state machine guards every status transition (§10)
+- Audit-log writes share the transaction with ticket state changes (§4 outbox)
+- Ticket state machine guards every status transition (§10)
 - Effect Service / Layer separation: Tags abstract in `services`; Live impls in `db` / `providers` / feature packages
 - `pnpm build` is green before you stop
 

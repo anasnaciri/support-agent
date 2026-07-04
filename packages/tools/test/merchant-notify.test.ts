@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
-  CaseId,
+  TicketId,
   TenantId,
   type ToolContext,
 } from "@support-agent/agent-core";
@@ -11,7 +11,7 @@ import { ALL_TOOLS, merchantNotify } from "../src/index.js";
 
 const ctx: ToolContext = {
   tenantId: TenantId("t1"),
-  caseId: CaseId("c1"),
+  ticketId: TicketId("c1"),
   agentId: AgentId("refund-review-agent"),
   callId: "call_1",
   attemptNumber: 1,
@@ -24,7 +24,7 @@ const input = {
 };
 
 describe("merchant.notify tool", () => {
-  it("pushes an agent_note carrying the case id and reports delivery", async () => {
+  it("pushes an agent_note carrying the ticket id and reports delivery", async () => {
     const { layer, handle } = makeMerchantNotificationServiceTest();
     const out = await Effect.runPromise(
       Effect.provide(merchantNotify.execute(input, ctx), layer),
@@ -36,7 +36,7 @@ describe("merchant.notify tool", () => {
     expect(sent.notification.kind).toBe("agent_note");
     expect(sent.notification.title).toBe(input.title);
     expect(sent.notification.body).toBe(input.message);
-    expect(sent.notification.caseId).toBe(ctx.caseId);
+    expect(sent.notification.ticketId).toBe(ctx.ticketId);
   });
 
   it("returns delivered:false when the merchant has no channel connected", async () => {

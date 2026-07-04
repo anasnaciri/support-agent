@@ -253,6 +253,13 @@
       "when": 1782911400000,
       "tag": "0035_case_archival_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1783180800000,
+      "tag": "0036_ticket_physical_rename",
+      "breakpoints": true
     }
   ]
 }

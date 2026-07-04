@@ -3,7 +3,7 @@ import { defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
 import { SupplierEscalationService } from "@support-agent/services";
 
 // The agent supplies the privacy projection itself (from its prior
-// shopify.get_order), so the supplier query never has to join back to the case
+// shopify.get_order), so the supplier query never has to join back to the ticket
 // or customer tables. `problem` MUST be a rewritten, customer-PII-free summary.
 const Input = Schema.Struct({
   problem: Schema.String,
@@ -13,7 +13,7 @@ const Input = Schema.Struct({
   trackingNumber: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
-// `escalated: true` → a supplier was found and the case is now parked for them.
+// `escalated: true` → a supplier was found and the ticket is now parked for them.
 // `escalated: false` (reason "no_supplier") → the workspace has no supplier
 // configured; the agent should NOT retry and should fall back to a direct reply.
 const Output = Schema.Struct({
@@ -26,14 +26,14 @@ const Output = Schema.Struct({
 export const supplierEscalate = defineTool({
   name: "supplier.escalate",
   description:
-    "Escalate this case to the warehouse / supplier when you cannot resolve it yourself and need them to act (chase the carrier, reship, confirm a delay) — e.g. an order is past its delivery window and stuck in transit. Returns `{ escalated: true }` when a supplier was found — the case is then PARKED for the supplier, so you are done this turn and must NOT send a customer reply (you'll be re-engaged when they respond). Returns `{ escalated: false, reason: \"no_supplier\" }` when the store has no supplier configured — do NOT retry; fall back to replying to the customer yourself. A thrown error is transient — retry once. `problem` must be a concise, rewritten statement of what you need the supplier to do — NEVER include the customer's email, full address, or message text. Include `orderRef`, `shipCity`, `shipCountry`, and `trackingNumber` from the order so the warehouse can act. Permission policy: defaultPermission is `ask`; a merchant may set this agent to `auto` to let escalations through without approval.",
+    "Escalate this ticket to the warehouse / supplier when you cannot resolve it yourself and need them to act (chase the carrier, reship, confirm a delay) — e.g. an order is past its delivery window and stuck in transit. Returns `{ escalated: true }` when a supplier was found — the ticket is then PARKED for the supplier, so you are done this turn and must NOT send a customer reply (you'll be re-engaged when they respond). Returns `{ escalated: false, reason: \"no_supplier\" }` when the store has no supplier configured — do NOT retry; fall back to replying to the customer yourself. A thrown error is transient — retry once. `problem` must be a concise, rewritten statement of what you need the supplier to do — NEVER include the customer's email, full address, or message text. Include `orderRef`, `shipCity`, `shipCountry`, and `trackingNumber` from the order so the warehouse can act. Permission policy: defaultPermission is `ask`; a merchant may set this agent to `auto` to let escalations through without approval.",
   displayName: "Escalate to supplier",
   displayDescription:
-    "The agent hands a case it can't resolve to your warehouse/supplier and waits for their update before replying to the customer.",
+    "The agent hands a ticket it can't resolve to your warehouse/supplier and waits for their update before replying to the customer.",
   tenantControl: "permission-toggle",
   inputSchema: Input,
   outputSchema: Output,
-  // An internal state change (records the escalation + parks the case) that also
+  // An internal state change (records the escalation + parks the ticket) that also
   // triggers an out-of-band supplier notification — closest to a write with an
   // external side effect, not a customer-facing message and not financial.
   risk: "write",
@@ -51,7 +51,7 @@ export const supplierEscalate = defineTool({
       const result = yield* svc
         .escalate({
           tenantId: ctx.tenantId,
-          caseId: ctx.caseId,
+          ticketId: ctx.ticketId,
           problem: input.problem,
           orderRef: input.orderRef ?? null,
           shipCity: input.shipCity ?? null,

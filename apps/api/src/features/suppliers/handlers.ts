@@ -1,14 +1,14 @@
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { CaseId, TenantId, type DomainEvent } from "@support-agent/agent-core";
+import { TicketId, TenantId, type DomainEvent } from "@support-agent/agent-core";
 import {
   ShopifyService,
   makeEnqueuedWorkflowEvent,
 } from "@support-agent/services";
 import {
   bindSupplierUserAllTenants,
-  caseContextForTenant,
+  ticketContextForTenant,
   createInvitation,
   createSupplier,
   ensureActingOwnerInOpenMode,
@@ -46,9 +46,9 @@ const WORKFLOW_QUEUE = "workflow.events";
 /**
  * Publish a supplier.updated event onto the workflow queue so the worker
  * re-engages the agent. Mirrors the approval publisher. By the time this runs
- * the case has already been flipped off waiting_for_supplier (recordSupplierUpdate),
+ * the ticket has already been flipped off waiting_for_supplier (recordSupplierUpdate),
  * so the park guard never holds the very event we mint (flip-then-publish, like
- * retryCaseNow).
+ * retryTicketNow).
  */
 const publishSupplierUpdate = async (
   databaseUrl: string,
@@ -68,11 +68,11 @@ const publishSupplierUpdate = async (
   );
 };
 
-// GET /dashboard/supplier/cases — open escalations for the logged-in supplier
+// GET /dashboard/supplier/tickets — open escalations for the logged-in supplier
 // (minimal privacy projection). Auth is binding-anchored (authenticateSupplier):
 // a user with no supplier binding for x-workspace-id is already 404'd, so the
 // empty-list branch below only guards a redundant re-lookup.
-export const handleSupplierCases = async (
+export const handleSupplierTickets = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -82,17 +82,17 @@ export const handleSupplierCases = async (
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
   const userId = auth.userId;
-  const cases = await runWithDb(layer, async (db) => {
+  const tickets = await runWithDb(layer, async (db) => {
     const supplier = await getSupplierForUser(db, auth.tenantId, userId);
     if (!supplier) return [];
     return listOpenEscalationsForSupplier(db, supplier.id);
   });
-  return sendJson(res, 200, { cases });
+  return sendJson(res, 200, { tickets });
 };
 
-// GET /dashboard/supplier/cases/:id — one escalation, minimal projection. 404
+// GET /dashboard/supplier/tickets/:id — one escalation, minimal projection. 404
 // (never 403) when it isn't this supplier's — don't disclose existence.
-export const handleSupplierCase = async (
+export const handleSupplierTicket = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -112,8 +112,8 @@ export const handleSupplierCase = async (
   return sendJson(res, 200, detail);
 };
 
-// POST /dashboard/supplier/cases/:id/update — the closed loop. Record the
-// supplier's reply, resolve the escalation, flip the case off
+// POST /dashboard/supplier/tickets/:id/update — the closed loop. Record the
+// supplier's reply, resolve the escalation, flip the ticket off
 // waiting_for_supplier + audit in ONE tx, then publish supplier.updated.
 export const handleSupplierUpdate = async (
   cfg: ApiConfig,
@@ -156,16 +156,16 @@ export const handleSupplierUpdate = async (
   }
 
   // ALWAYS publish, not just when the status flipped: a supplier's answer must
-  // re-engage the agent even on a case that escaped waiting_for_supplier (a
+  // re-engage the agent even on a ticket that escaped waiting_for_supplier (a
   // human resolved / took it over — recordSupplierUpdate flipped it back) or is
-  // actively in_progress (no flip needed). A case parked waiting_for_approval
+  // actively in_progress (no flip needed). A ticket parked waiting_for_approval
   // with an open escalation now REDRAFTS: recordSupplierUpdate supersedes the
   // pending approvals and flips it to in_progress, so the event re-runs the
   // agent (which produces a fresh draft) rather than being held.
   try {
     await publishSupplierUpdate(cfg.databaseUrl, {
       type: "supplier.updated",
-      caseId: CaseId(result.caseId),
+      ticketId: TicketId(result.ticketId),
       payload: {
         supplierId: outcome.supplierId,
         note,
@@ -177,8 +177,8 @@ export const handleSupplierUpdate = async (
     // The update is durably recorded (and any flip committed); a lost publish
     // just means the agent re-engages on the next event. Log loudly, don't
     // fail the request.
-    console.error("[supplier update] publish failed; case updated without tick", {
-      caseId: result.caseId,
+    console.error("[supplier update] publish failed; ticket updated without tick", {
+      ticketId: result.ticketId,
       cause,
     });
     return sendJson(res, 200, {
@@ -194,10 +194,10 @@ export const handleSupplierUpdate = async (
   });
 };
 
-// POST /dashboard/supplier/cases/:id/tracking — the supplier fixes the order's
+// POST /dashboard/supplier/tickets/:id/tracking — the supplier fixes the order's
 // tracking number (a reship went out under a new number, or the carrier
 // re-labelled the parcel). Unlike the free-text update, this WRITES TO THE
-// STORE: the case's resolved order gets its fulfillment tracking replaced via
+// STORE: the ticket's resolved order gets its fulfillment tracking replaced via
 // Shopify's `fulfillmentTrackingInfoUpdate`, under the authenticated
 // supplier's authority. It does NOT resolve the escalation — the supplier
 // still posts their update, which is what re-engages the agent. The
@@ -226,15 +226,15 @@ export const handleSupplierTracking = async (
     if (!supplier) return null;
     const escalation = await getEscalationForSupplier(db, supplier.id, id);
     if (!escalation) return null;
-    const caseRow = await caseContextForTenant(
+    const ticketRow = await ticketContextForTenant(
       db,
       auth.tenantId,
-      escalation.caseId,
+      escalation.ticketId,
     );
     return {
       supplierId: supplier.id,
       escalation,
-      context: (caseRow?.context ?? {}) as Record<string, unknown>,
+      context: (ticketRow?.context ?? {}) as Record<string, unknown>,
     };
   });
   if (!pre) return sendJson(res, 404, { error: "not_found" });
@@ -343,7 +343,7 @@ export const handleSupplierTracking = async (
 // next load regardless of which org's session they signed into. GET-that-writes,
 // mirroring the /dashboard/me/session reconcile precedent; the write is
 // idempotent. The email is resolved from WorkOS by the verified `sub` (never the
-// spoofable x-user-email header) — a bind grants case visibility.
+// spoofable x-user-email header) — a bind grants ticket visibility.
 export const handleSupplierWorkspaces = async (
   _cfg: ApiConfig,
   layer: ApiLayer,

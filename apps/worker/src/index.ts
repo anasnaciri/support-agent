@@ -77,7 +77,7 @@ const main = async (): Promise<void> => {
   // Concurrent pg-boss consumer. Deliberately a raw work() (bypasses
   // WorkflowQueuePgBossLive on the consumer side — the Layer-composed consumer
   // has a known flake where the poll loop never starts). `key_strict_fifo`
-  // keeps same-case events strictly ordered while distinct cases/threads run in
+  // keeps same-ticket events strictly ordered while distinct tickets/threads run in
   // parallel; the old SINGLE serial worker threw that away and let one slow
   // message.received run starve every approval behind it. See
   // ./workflow-consumer.ts.
@@ -131,9 +131,9 @@ const main = async (): Promise<void> => {
                 : r.type === "PausedWaitingForApproval"
                   ? ` (approvalId: ${r.approvalId})`
                   : r.type === "PausedForHumanTakeover"
-                    ? ` (held — case under human takeover)`
+                    ? ` (held — ticket under human takeover)`
                     : r.type === "PausedArchived"
-                      ? ` (held — case archived)`
+                      ? ` (held — ticket archived)`
                       : ""),
         );
         return;
@@ -141,7 +141,7 @@ const main = async (): Promise<void> => {
       // Retryable failures (incl. a tick that blew its wall-clock budget) must
       // throw so pg-boss applies its retry policy; acking here would drop the
       // event forever (audit C1). Exhausted retries land on the dead-letter
-      // queue, whose consumer parks the case for a human.
+      // queue, whose consumer parks the ticket for a human.
       if (settlement.kind === "retry") {
         throw new Error(`retryable workflow failure: ${settlement.reason}`);
       }
@@ -156,7 +156,7 @@ const main = async (): Promise<void> => {
       `concurrency=${consumerConfig.concurrency} tickTimeoutMs=${consumerConfig.tickTimeoutMs}`,
   );
 
-  // Dead-letter consumer: parks the case behind any workflow event that
+  // Dead-letter consumer: parks the ticket behind any workflow event that
   // exhausted its retries in human_takeover so the failure is visible on
   // the dashboard instead of silently dropped (audit C1/L11).
   const deadLetterWorkerId = await registerWorkflowDeadLetterConsumer({
@@ -199,8 +199,8 @@ const main = async (): Promise<void> => {
     console.log(`[worker] scheduled imap-poll cron on queue=${IMAP_POLL_QUEUE}`);
   }
 
-  // Daily retention sweep: archives cases after 30 resolved days, then deletes
-  // archived cases (and their audit / approval rows) after 12 months archived.
+  // Daily retention sweep: archives tickets after 30 resolved days, then deletes
+  // archived tickets (and their audit / approval rows) after 12 months archived.
   // Always registered — every tenant benefits regardless of which
   // connectors are wired up.
   await registerRetentionSweep({ boss, runtimeLayer });
@@ -226,7 +226,7 @@ const main = async (): Promise<void> => {
   );
 
   // Approvals maintenance: expires overdue pendings (escalating their
-  // case to a human) and re-publishes decision events that were lost
+  // ticket to a human) and re-publishes decision events that were lost
   // between the decision commit and the pg-boss publish.
   await registerApprovalMaintenance({ boss, runtimeLayer });
   console.log(
@@ -259,7 +259,7 @@ const main = async (): Promise<void> => {
   );
 
   // Reply-delivery retry sweep: re-sends customer replies whose send failed
-  // (the reply_deliveries outbox), auto-resolving the case on success and
+  // (the reply_deliveries outbox), auto-resolving the ticket on success and
   // abandoning to human_takeover at the attempt cap.
   await registerReplyDeliveryRetrySweep({ boss, runtimeLayer });
   console.log(

@@ -70,12 +70,12 @@ export default async function ApprovalDetailPage({ params }: Params) {
           </span>
           <span>·</span>
           <span>
-            case:{" "}
+            ticket:{" "}
             <Link
-              href={`/cases/${row.caseId}`}
+              href={`/tickets/${row.ticketId}`}
               className="font-mono text-primary hover:underline"
             >
-              {row.caseId.slice(0, 8)}…
+              {row.ticketId.slice(0, 8)}…
             </Link>
           </span>
         </div>
@@ -161,7 +161,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
               <input type="hidden" name="approvalId" value={row.id} />
               <ConfirmSubmitButton
                 title="Reject this approval?"
-                description="No customer reply goes out, and the case escalates to human takeover — you'll handle it manually from there."
+                description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
                 confirmLabel="Reject & take over"
               >
                 Reject
@@ -171,7 +171,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
             <p className="text-sm text-muted-foreground">
               Approving sends the reply — with any edits you made — to the
               customer from your connected mailbox. Rejecting sends nothing
-              and hands the case over to you.
+              and hands the ticket over to you.
             </p>
           </CardContent>
         </Card>

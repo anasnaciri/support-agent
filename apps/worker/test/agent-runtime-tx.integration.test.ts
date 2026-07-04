@@ -12,8 +12,8 @@ import {
 import { supportTriage } from "@support-agent/agents";
 import {
   agentHandoff,
-  caseUpdateContext,
-  caseUpdateStatus,
+  ticketUpdateContext,
+  ticketUpdateStatus,
 } from "@support-agent/tools";
 import {
   AgentRuntime,
@@ -29,14 +29,14 @@ import {
 import {
   ApprovalServiceLive,
   AuditLogServiceLive,
-  CaseRepositoryLive,
+  TicketRepositoryLive,
   DbClient,
   DbClientLive,
   TenantRepositoryLive,
   TransactionRunnerLive,
   auditLog,
-  cases,
-  caseStateTransitions,
+  tickets,
+  ticketStateTransitions,
   makeDbClient,
   tenants,
 } from "@support-agent/db";
@@ -55,7 +55,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
   // Compose every Live impl onto a real DB.
   const dbLayer = DbClientLive({ databaseUrl: databaseUrl! });
   const repos = Layer.mergeAll(
-    CaseRepositoryLive,
+    TicketRepositoryLive,
     AuditLogServiceLive,
     ApprovalServiceLive,
     TransactionRunnerLive,
@@ -64,8 +64,8 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     repos,
     AgentResolverTest([terminalSupportTriage]),
     ToolRegistryWith([
-      caseUpdateContext as never,
-      caseUpdateStatus as never,
+      ticketUpdateContext as never,
+      ticketUpdateStatus as never,
       // supportTriage now declares `agent.handoff` in its tool list;
       // ToolRegistry.schemasFor would fail with UnknownTool otherwise.
       agentHandoff as never,
@@ -74,13 +74,13 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     // Script that returns ONE tool call then a final_message. This fixture
     // registers support-triage as a terminal agent (handoffs: []) so the
     // runtime's final_message branch transitions to "resolved" + writes
-    // case.resolved audit — all under one tx, atomic with the final state
+    // ticket.resolved audit — all under one tx, atomic with the final state
     // change.
     LLMServiceScripted([
       {
         type: "tool_call" as const,
         callId: "c0",
-        tool: "case.update_context",
+        tool: "ticket.update_context",
         input: { classification: "where_is_order" },
       },
       { type: "final_message" as const, text: "done" },
@@ -96,8 +96,8 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     }),
   );
   // Build dbLayer → satisfy env's DbClient dep → that's `envWithDb`, which
-  // both AgentRuntime depends on AND tools yield from (case.update_status /
-  // case.update_context yield CaseRepository inside `execute`). So we
+  // both AgentRuntime depends on AND tools yield from (ticket.update_status /
+  // ticket.update_context yield TicketRepository inside `execute`). So we
   // expose `envWithDb` (not just the AgentRuntime layer) to the outer
   // fiber via `Layer.merge`, and merge in dbLayer so tests can use it too.
   const envWithDb = env.pipe(Layer.provide(dbLayer));
@@ -120,12 +120,12 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     await raw.db
       .delete(auditLog)
       .where(sql`${auditLog.tenantId} = ${tenantId}`);
-    await raw.db.delete(cases).where(sql`${cases.tenantId} = ${tenantId}`);
+    await raw.db.delete(tickets).where(sql`${tickets.tenantId} = ${tenantId}`);
     await raw.db.delete(tenants).where(sql`${tenants.id} = ${tenantId}`);
     await raw.close();
   });
 
-  it("end-to-end happy path commits case + audit + transitions atomically", async () => {
+  it("end-to-end happy path commits ticket + audit + transitions atomically", async () => {
     const event: DomainEvent = {
       type: "ticket.created",
       tenantId: TenantId(tenantId),
@@ -147,30 +147,30 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
     expect(result.type).toBe("Completed");
 
     // Pull all the persisted state for this tenant.
-    const caseRows = await raw!.db
+    const ticketRows = await raw!.db
       .select()
-      .from(cases)
-      .where(sql`${cases.tenantId} = ${tenantId}`);
-    expect(caseRows).toHaveLength(1);
-    expect(caseRows[0]?.status).toBe("resolved");
-    expect(caseRows[0]?.resolvedAt).not.toBeNull();
+      .from(tickets)
+      .where(sql`${tickets.tenantId} = ${tenantId}`);
+    expect(ticketRows).toHaveLength(1);
+    expect(ticketRows[0]?.status).toBe("resolved");
+    expect(ticketRows[0]?.resolvedAt).not.toBeNull();
 
-    const caseId = caseRows[0]!.id;
+    const ticketId = ticketRows[0]!.id;
 
     const auditRows = await raw!.db
       .select()
       .from(auditLog)
-      .where(sql`${auditLog.caseId} = ${caseId}`);
+      .where(sql`${auditLog.ticketId} = ${ticketId}`);
     const actions = auditRows.map((r) => r.action);
-    // event.received + 2 llm.decision + 1 tool.invoked + case.resolved
+    // event.received + 2 llm.decision + 1 tool.invoked + ticket.resolved
     expect(actions).toContain("event.received");
     expect(actions).toContain("tool.invoked");
-    expect(actions).toContain("case.resolved");
+    expect(actions).toContain("ticket.resolved");
 
     const transitionRows = await raw!.db
       .select()
-      .from(caseStateTransitions)
-      .where(sql`${caseStateTransitions.caseId} = ${caseId}`);
+      .from(ticketStateTransitions)
+      .where(sql`${ticketStateTransitions.ticketId} = ${ticketId}`);
     // new → resolved (single transition through the final_message branch)
     expect(transitionRows.length).toBeGreaterThanOrEqual(1);
     expect(transitionRows.some((r) => r.toStatus === "resolved")).toBe(true);

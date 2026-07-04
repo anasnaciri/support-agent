@@ -38,7 +38,7 @@ export function SuppliersPage() {
         return;
       }
       toast.success(
-        "Invitation sent. They'll see escalated cases after they sign in.",
+        "Invitation sent. They'll see escalated tickets after they sign in.",
       );
       // A supplier binding + pending invitation was created; keep the members
       // view fresh (revalidatePath("/settings/suppliers") had no on-page read).
@@ -72,7 +72,7 @@ export function SuppliersPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Suppliers</h1>
         <p className="pt-1 text-sm text-muted-foreground">
           Invite a warehouse or supplier contact. They get a sign-in link and a
-          portal showing only the cases your agent escalates to them — the
+          portal showing only the tickets your agent escalates to them — the
           problem, order reference, ship-to, and tracking, never your customers&apos;
           details.
         </p>

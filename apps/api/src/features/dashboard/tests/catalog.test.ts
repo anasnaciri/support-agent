@@ -30,11 +30,11 @@ describe("buildCatalogResponse", () => {
   });
 
   it("surfaces requiredConnectorScopes only when declared", () => {
-    // refund.create declares write_orders; case.update_context declares none.
+    // refund.create declares write_orders; ticket.update_context declares none.
     const refund = catalog.tools.find((t) => t.name === "refund.create");
     expect(refund?.requiredConnectorScopes?.provider).toBe("shopify");
     const updateCtx = catalog.tools.find(
-      (t) => t.name === "case.update_context",
+      (t) => t.name === "ticket.update_context",
     );
     expect(updateCtx).toBeDefined();
     expect("requiredConnectorScopes" in updateCtx!).toBe(false);
@@ -51,7 +51,7 @@ describe("buildCatalogResponse", () => {
 
     // Internal tools stay unlabelled so the dashboard never surfaces them.
     const updateCtx = catalog.tools.find(
-      (t) => t.name === "case.update_context",
+      (t) => t.name === "ticket.update_context",
     );
     expect("tenantControl" in updateCtx!).toBe(false);
     expect("displayName" in updateCtx!).toBe(false);

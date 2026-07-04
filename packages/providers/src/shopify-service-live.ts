@@ -739,7 +739,7 @@ const LIST_ORDERS_BY_EMAIL_QUERY = `
 `;
 
 // Orders belonging to ONE customer account, newest first — the identity-safe
-// "which orders does this customer have?" lookup once a case has resolved the
+// "which orders does this customer have?" lookup once a ticket has resolved the
 // customer. Uses the customer node's orders connection (not a `customer_id:`
 // filter) so it's exactly the account's orders.
 const LIST_ORDERS_BY_CUSTOMER_QUERY = `
@@ -1228,7 +1228,7 @@ type DiscountCreatePayload = {
 /**
  * Derive a deterministic RFC-4122 v5-shaped UUID from an arbitrary seed
  * string. Shopify's `@idempotent` directive wants a UUID; callers hand us
- * varied keys (`dash-refund:<case>:<order>:<amount>:<currency>`, a tool
+ * varied keys (`dash-refund:<ticket>:<order>:<amount>:<currency>`, a tool
  * `callId`), so we hash the seed into a stable UUID. Deterministic on purpose:
  * retrying the exact same refund yields the same key, so Shopify returns the
  * original result instead of issuing a second refund. Changing any parameter
@@ -1805,7 +1805,7 @@ export const ShopifyServiceLive = Layer.effect(
             // Step 3: map the result. `userErrors` is Shopify's
             // structured rejection channel — if present we map to
             // RefundFailed regardless of HTTP status. A null `refund`
-            // with empty userErrors is a defensive case (shouldn't
+            // with empty userErrors is a defensive ticket (shouldn't
             // happen but covers the schema): treat as a refundFailed
             // with a generic message.
             const payload = refundData.refundCreate;

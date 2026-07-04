@@ -25,7 +25,7 @@ const Output = Schema.Struct({
 export const agentHandoff = defineTool({
   name: "agent.handoff",
   description:
-    "Hand off the case to a specialized agent. `targetAgent` must be one of the agents listed as a valid handoff target for the current agent. Use this when the user's request is fully classified and a downstream specialist should answer it.",
+    "Hand off the ticket to a specialized agent. `targetAgent` must be one of the agents listed as a valid handoff target for the current agent. Use this when the user's request is fully classified and a downstream specialist should answer it.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

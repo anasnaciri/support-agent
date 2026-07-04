@@ -104,7 +104,7 @@ describeIfDb("apps/api — dashboard BFF (cookie session) integration", () => {
 
   it("login → callback mints a session cookie; whoami returns the identity", async () => {
     // Login: 302 to WorkOS with a signed state + a state-nonce cookie.
-    const login = await fetch(`${base}/dashboard/auth/login?returnTo=/cases/7`, {
+    const login = await fetch(`${base}/dashboard/auth/login?returnTo=/tickets/7`, {
       redirect: "manual",
     });
     expect(login.status).toBe(302);
@@ -121,7 +121,7 @@ describeIfDb("apps/api — dashboard BFF (cookie session) integration", () => {
       { redirect: "manual", headers: { cookie: `sa-oauth-state=${nonce}` } },
     );
     expect(cb.status).toBe(302);
-    expect(cb.headers.get("location")).toBe(`${SPA_ORIGIN}/cases/7`);
+    expect(cb.headers.get("location")).toBe(`${SPA_ORIGIN}/tickets/7`);
     const session = setCookieValue(cb.headers, "sa-dash-session")!;
     expect(session).toBeTruthy();
 

@@ -28,7 +28,7 @@ import {
   ModelCombobox,
   type ModelOption,
 } from "@/components/ui/model-combobox";
-import { ConfirmButton } from "@/features/cases/ConfirmButton";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
 
 export const DEFAULT_MODEL = "google/gemini-3.5-flash";
@@ -262,7 +262,7 @@ export const AgentForm = ({
 
             <Field
               label="Can hand off to"
-              hint="Other agents this one may pass a case to when it's out of scope."
+              hint="Other agents this one may pass a ticket to when it's out of scope."
             >
               <MultiSelect
                 name="handoffs"
@@ -281,7 +281,7 @@ export const AgentForm = ({
           <CardContent className="space-y-4">
             <Field
               label="Reachable from"
-              hint="Agents that can hand a case to this one. Usually Support Triage — the agent that sorts new messages."
+              hint="Agents that can hand a ticket to this one. Usually Support Triage — the agent that sorts new messages."
             >
               <MultiSelect
                 name="callableFrom"
@@ -324,7 +324,7 @@ export const AgentForm = ({
             {mode === "edit" ? (
               <Field
                 label="Status"
-                hint="Disabled agents stay saved but stop handling cases."
+                hint="Disabled agents stay saved but stop handling tickets."
               >
                 <NativeSelect
                   name="status"
@@ -358,12 +358,12 @@ export const AgentForm = ({
           </CardHeader>
           <CardContent>
             <p className="mb-3 text-sm text-muted-foreground">
-              Permanently delete this agent. Cases currently handled by it will
+              Permanently delete this agent. Tickets currently handled by it will
               be handed to you.
             </p>
             <ConfirmButton
               title="Delete this agent?"
-              description="This can't be undone. Any case currently on this agent will be handed to you for review."
+              description="This can't be undone. Any ticket currently on this agent will be handed to you for review."
               confirmLabel="Delete agent"
               size="sm"
               pending={deletePending ?? false}

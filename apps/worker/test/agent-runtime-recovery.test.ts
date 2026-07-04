@@ -15,7 +15,7 @@ import {
   type DomainEvent,
   type LLMDecision,
 } from "@support-agent/agent-core";
-import { caseUpdateContext } from "@support-agent/tools";
+import { ticketUpdateContext } from "@support-agent/tools";
 import {
   AgentRuntime,
   AgentRuntimeDefault,
@@ -24,8 +24,8 @@ import {
   ApprovalServiceTest,
   AuditLogService,
   AuditLogServiceTest,
-  CaseRepository,
-  CaseRepositoryTest,
+  TicketRepository,
+  TicketRepositoryTest,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   DEFAULT_RETENTION_DAYS,
@@ -47,8 +47,8 @@ import {
 // Recovery / failure-path behavior for the runtime (audit C1, L4,
 // L7, L8, L10, L13). Each test pins one rule:
 //   - transient LLM errors → Failed retryable:true (worker retries)
-//   - deterministic LLM errors → case parked in human_takeover
-//   - max_turns / approved-tool-failed → case parked, not dangling
+//   - deterministic LLM errors → ticket parked in human_takeover
+//   - max_turns / approved-tool-failed → ticket parked, not dangling
 //   - approval resume: expiry, schema validation, policy deny,
 //     duplicate-delivery short-circuit
 //   - in-loop tool input validation (invalid_input pushed back)
@@ -113,7 +113,7 @@ const recoveryAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
   id: AgentId("recovery-test-agent"),
   promptTemplate: "Recovery test agent.",
   model: "test/model",
-  tools: ["case.update_context", "test.counted_action", "test.failing_action"],
+  tools: ["ticket.update_context", "test.counted_action", "test.failing_action"],
   handoffs: [],
   permissionOverrides: {},
   maxTurnsPerTick: 2,
@@ -126,7 +126,7 @@ const buildLayer = (
   toolList: ReadonlyArray<unknown>,
 ) => {
   const env = Layer.mergeAll(
-    CaseRepositoryTest,
+    TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
     AgentResolverTest(agents as never),
@@ -145,9 +145,9 @@ const buildLayer = (
   return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
 };
 
-const customerReplied = (caseId: string): DomainEvent => ({
+const customerReplied = (ticketId: string): DomainEvent => ({
   type: "customer.replied",
-  caseId: caseId as never,
+  ticketId: ticketId as never,
   payload: {
     threadId: "thread-recovery" as never,
     messageId: "msg-r1",
@@ -161,14 +161,14 @@ const customerReplied = (caseId: string): DomainEvent => ({
   },
 });
 
-const runWithCase = <A>(
+const runWithTicket = <A>(
   layer: Layer.Layer<never, never, never>,
-  program: (caseId: string) => Effect.Effect<A, unknown, never>,
+  program: (ticketId: string) => Effect.Effect<A, unknown, never>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const created = yield* repo.create({
           tenantId: TenantId("tenant-acme"),
           channel: "email",
@@ -182,22 +182,22 @@ const runWithCase = <A>(
   );
 
 describe("AgentRuntime — LLM failure classification (C1)", () => {
-  it("returns Failed retryable:true on a transient provider error and does not move the case", async () => {
+  it("returns Failed retryable:true on a transient provider error and does not move the ticket", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceFromFn(() =>
         Effect.fail(new ProviderUnavailable({ provider: "openrouter" as never })),
       ) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
+        const repo = yield* TicketRepository;
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -206,7 +206,7 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
     if (out.result.type === "Failed") {
       expect(out.result.retryable).toBe(true);
     }
-    // The case must stay where it was — a retry will pick it up.
+    // The ticket must stay where it was — a retry will pick it up.
     expect(out.fetched.status).toBe("new");
   });
 
@@ -217,17 +217,17 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
         Effect.fail(new ContextTooLarge({ tokens: 1_000_000, limit: 200_000 })),
       ) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -235,7 +235,7 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.entries.map((e) => e.action)).toContain(
-      "case.escalated_to_human",
+      "ticket.escalated_to_human",
     );
   });
 
@@ -246,17 +246,17 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
         Effect.fail(new InsufficientCredits({ provider: "openrouter" as never })),
       ) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -269,13 +269,13 @@ describe("AgentRuntime — LLM failure classification (C1)", () => {
     }
     expect(out.fetched.status).toBe("human_takeover");
     const escalation = out.entries.find(
-      (e) => e.action === "case.escalated_to_human",
+      (e) => e.action === "ticket.escalated_to_human",
     );
     expect(escalation?.details["reason"]).toBe("llm_insufficient_credits");
   });
 });
 
-describe("AgentRuntime — dashboard retry (case.resumed)", () => {
+describe("AgentRuntime — dashboard retry (ticket.resumed)", () => {
   it("runs a tick with the thread id and prior context so a retried agent can act", async () => {
     const counter = { count: 0 };
     const seen: Array<unknown> = [];
@@ -288,13 +288,13 @@ describe("AgentRuntime — dashboard retry (case.resumed)", () => {
         } as const);
       }) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
     const out = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const runtime = yield* AgentRuntime;
           const created = yield* repo.create({
             tenantId: TenantId("tenant-acme"),
@@ -305,8 +305,8 @@ describe("AgentRuntime — dashboard retry (case.resumed)", () => {
             context: { identifiedOrderId: "#1001" },
           });
           const result = yield* runtime.handleEvent({
-            type: "case.resumed",
-            caseId: created.id,
+            type: "ticket.resumed",
+            ticketId: created.id,
             trigger: "dashboard_retry",
           });
           const fetched = yield* repo.getById(created.id);
@@ -320,7 +320,7 @@ describe("AgentRuntime — dashboard retry (case.resumed)", () => {
       >,
     );
 
-    // The tick ran to completion and resolved the case.
+    // The tick ran to completion and resolved the ticket.
     expect(out.result.type).toBe("Completed");
     expect(out.fetched.status).toBe("resolved");
     // The agent was handed everything it needs to re-orient: the thread
@@ -337,33 +337,33 @@ describe("AgentRuntime — dashboard retry (case.resumed)", () => {
 });
 
 describe("AgentRuntime — dangling HumanTakeoverRequired paths (L4)", () => {
-  it("transitions the case to human_takeover when max turns are exhausted", async () => {
+  it("transitions the ticket to human_takeover when max turns are exhausted", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([
         {
           type: "tool_call",
           callId: "t0",
-          tool: "case.update_context",
+          tool: "ticket.update_context",
           input: { notes: "turn 0" },
         },
         {
           type: "tool_call",
           callId: "t1",
-          tool: "case.update_context",
+          tool: "ticket.update_context",
           input: { notes: "turn 1" },
         },
       ]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
+        const repo = yield* TicketRepository;
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -372,22 +372,22 @@ describe("AgentRuntime — dangling HumanTakeoverRequired paths (L4)", () => {
     expect(out.fetched.status).toBe("human_takeover");
   });
 
-  it("transitions the case to human_takeover when an approved tool fails", async () => {
+  it("transitions the ticket to human_takeover when an approved tool fails", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.failing_action",
           proposedInput: { note: "will fail" },
@@ -398,10 +398,10 @@ describe("AgentRuntime — dangling HumanTakeoverRequired paths (L4)", () => {
         const result = yield* runtime.handleEvent({
           type: "approval.approved",
           approvalId: approval.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("manager-1"),
         });
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -414,11 +414,11 @@ describe("AgentRuntime — dangling HumanTakeoverRequired paths (L4)", () => {
 describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
   const approvedEvent = (
     approvalId: string,
-    caseId: string,
+    ticketId: string,
   ): DomainEvent => ({
     type: "approval.approved",
     approvalId: approvalId as never,
-    caseId: caseId as never,
+    ticketId: ticketId as never,
     managerId: UserId("manager-1"),
   });
 
@@ -427,17 +427,17 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -448,9 +448,9 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           expiresAt: new Date(Date.now() - 60_000),
         });
         const result = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -465,18 +465,18 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeFailingTool()],
+      [ticketUpdateContext, makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -484,15 +484,15 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           riskLevel: "medium",
           expiresAt: new Date(Date.now() + 60_000),
         });
-        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+        yield* repo.transitionStatus(ticketId as never, "waiting_for_approval", {
           reason: "test",
           tenantId: TenantId("tenant-acme"),
         });
         const result = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, entries };
       }),
     );
@@ -501,7 +501,7 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
     const escalation = out.entries.find(
-      (entry) => entry.action === "case.escalated_to_human",
+      (entry) => entry.action === "ticket.escalated_to_human",
     );
     expect(escalation?.details["reason"]).toBe("approved_tool_unavailable");
   });
@@ -511,17 +511,17 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           // amount must be a number — this must be rejected at resume.
@@ -531,9 +531,9 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           expiresAt: new Date(Date.now() + 60_000),
         });
         const result = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -552,17 +552,17 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           permissionOverrides: { "test.counted_action": "deny" },
         }),
       ],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -571,9 +571,9 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           expiresAt: new Date(Date.now() + 60_000),
         });
         const result = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -588,18 +588,18 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -607,16 +607,16 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           riskLevel: "medium",
           expiresAt: new Date(Date.now() + 60_000),
         });
-        yield* repo.transitionStatus(caseId as never, "human_takeover", {
+        yield* repo.transitionStatus(ticketId as never, "human_takeover", {
           reason: "manager takeover",
           tenantId: TenantId("tenant-acme"),
         });
-        const before = yield* repo.getById(caseId as never);
+        const before = yield* repo.getById(ticketId as never);
         const result = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { before, result, fetched, entries };
       }),
     );
@@ -632,22 +632,22 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
     ).toBe(true);
   });
 
-  it("short-circuits a duplicate approval.approved delivery on an already-resolved case", async () => {
+  it("short-circuits a duplicate approval.approved delivery on an already-resolved ticket", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -655,16 +655,16 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
           riskLevel: "medium",
           expiresAt: new Date(Date.now() + 60_000),
         });
-        // First delivery executes and resolves the case.
+        // First delivery executes and resolves the ticket.
         const first = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
         const afterFirst = counter.count;
         // Re-delivery of the same job (pg-boss at-least-once).
         const second = yield* runtime.handleEvent(
-          approvedEvent(approval.id, caseId),
+          approvedEvent(approval.id, ticketId),
         );
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { first, second, afterFirst, fetched };
       }),
     );
@@ -679,7 +679,7 @@ describe("AgentRuntime — approval resume guards (L7/L8/C2)", () => {
 });
 
 describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
-  it("skips the gated tool when an execution marker exists, but still resolves the case", async () => {
+  it("skips the gated tool when an execution marker exists, but still resolves the ticket", async () => {
     // Simulates the crash window: the tool tx committed (refund issued,
     // marker recorded) but the worker died before the resolve tx — the
     // re-delivered approval.approved must NOT re-execute the tool, yet
@@ -688,18 +688,18 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         const executions = yield* ToolExecutionStore;
         const approval = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -711,7 +711,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
         // scoped to THIS approval delivery — `appr:<approvalId>`).
         yield* executions.record({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           callId: `appr:${approval.id}:test.counted_action:counted-5`,
           tool: "test.counted_action",
           resultOk: true,
@@ -719,10 +719,10 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
         const result = yield* runtime.handleEvent({
           type: "approval.approved",
           approvalId: approval.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("manager-1"),
         });
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
@@ -735,14 +735,14 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
   it("deduplicates a redelivered message.received tick", async () => {
     const counter = { count: 0 };
     // Exactly enough script for ONE tick; a second loop run would
-    // exhaust the script and die. A fresh case created from
+    // exhaust the script and die. A fresh ticket created from
     // message.received routes to support-triage, so register one.
     const layer = buildLayer(
       LLMServiceScripted([
         { type: "final_message", text: "handled" },
       ]) as never,
       [recoveryAgent(), recoveryAgent({ id: AgentId("support-triage") })],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
     const inbound: DomainEvent = {
@@ -766,7 +766,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const first = yield* runtime.handleEvent(inbound);
           const second = yield* runtime.handleEvent(inbound);
@@ -774,7 +774,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
             TenantId("tenant-acme"),
             "outlook:thread-c3" as never,
           );
-          const entries = row ? yield* audit.forCase(row.id) : [];
+          const entries = row ? yield* audit.forTicket(row.id) : [];
           return { first, second, row, entries };
         }),
         layer as never,
@@ -817,10 +817,10 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
           permissionOverrides: { "test.counted_action": "allow" },
         }),
       ],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
         const executions = yield* ToolExecutionStore;
@@ -829,12 +829,12 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
         // is scoped to its message id (`msg:msg-r1`).
         yield* executions.record({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           callId: "msg:msg-r1:test.counted_action:counted-5",
           tool: "test.counted_action",
           resultOk: true,
         });
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
         return { result };
       }),
     );
@@ -844,9 +844,9 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
   });
 
   it("re-runs a side-effecting tool on a SECOND inbound message even when its idempotency key matches the first (no cross-delivery dedup)", async () => {
-    // Regression for the resolved-case silent-drop bug: a customer replied
+    // Regression for the resolved-ticket silent-drop bug: a customer replied
     // on a thread the agent had already answered, the agent re-drafted the
-    // reply with the SAME idempotency key (draftId), and the case-scoped C2
+    // reply with the SAME idempotency key (draftId), and the ticket-scoped C2
     // marker from the first send wrongly deduped it — so nothing went out.
     // Two DISTINCT inbound messages (different messageId) must both run the
     // action; only a redelivery of the SAME message dedups.
@@ -861,7 +861,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
           input: { amount: 5 },
         },
         { type: "final_message", text: "done 1" },
-        // Tick 2 (message msg-2, same thread, case now resolved) → run the
+        // Tick 2 (message msg-2, same thread, ticket now resolved) → run the
         // SAME action (same idempotency key) again, resolve.
         {
           type: "tool_call",
@@ -877,7 +877,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
           permissionOverrides: { "test.counted_action": "allow" },
         }),
       ],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
     const inbound = (messageId: string): DomainEvent => ({
@@ -901,7 +901,7 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const first = yield* runtime.handleEvent(inbound("msg-1"));
           const firstRow = yield* repo.findByThreadId(
             TenantId("tenant-acme"),
@@ -946,26 +946,26 @@ describe("AgentRuntime — at-least-once idempotency (audit C2/C3)", () => {
 describe("AgentRuntime — round fencing (recovery hardening)", () => {
   it("does not execute a prior-round approved leftover when a new round's approval is approved (double-send guard)", async () => {
     // The production double-send: round 0 approved a reply that was skipped
-    // (case taken over), leaving a zombie `approved` row; a later round drafted
+    // (ticket taken over), leaving a zombie `approved` row; a later round drafted
     // + approved a fresh reply; the bundle swept BOTH → the customer got two
     // emails. Fencing by epoch makes only the current round's reply go out.
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
         // Round 0: an approved-but-never-delivered reply (distinct idempotency
         // key so C2 can't be what saves us — only epoch fencing can).
         const zombie = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -975,12 +975,12 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
           epoch: 0,
         });
         yield* approvals.approve({ id: zombie.id, decidedBy: UserId("m") });
-        // The case advanced to round 1 (a resume bumped it).
-        yield* repo.update(caseId as never, { epoch: 1 }, TenantId("tenant-acme"));
+        // The ticket advanced to round 1 (a resume bumped it).
+        yield* repo.update(ticketId as never, { epoch: 1 }, TenantId("tenant-acme"));
         // Round 1: fresh reply, approved.
         const current = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 7 },
@@ -993,10 +993,10 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
         const result = yield* runtime.handleEvent({
           type: "approval.approved",
           approvalId: current.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("m"),
         });
-        const fetched = yield* repo.getById(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched, count: counter.count };
       }),
     );
@@ -1009,25 +1009,25 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
 
   it("ignores a rejection for a prior-round approval instead of forcing human_takeover (stale-reject storm guard)", async () => {
     // The production non-send: replayed rejections of OLD approvals slammed a
-    // case that had moved on into human_takeover, which then blocked its
+    // ticket that had moved on into human_takeover, which then blocked its
     // already-approved reply from ever sending.
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
         const approvals = yield* ApprovalService;
         // Round 0: an approval that was rejected long ago.
         const old = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -1037,11 +1037,11 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
           epoch: 0,
         });
         yield* approvals.reject({ id: old.id, decidedBy: UserId("m") });
-        // The case advanced to round 1 and now waits on a fresh approval.
-        yield* repo.update(caseId as never, { epoch: 1 }, TenantId("tenant-acme"));
+        // The ticket advanced to round 1 and now waits on a fresh approval.
+        yield* repo.update(ticketId as never, { epoch: 1 }, TenantId("tenant-acme"));
         const current = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 7 },
@@ -1050,7 +1050,7 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
           expiresAt: new Date(Date.now() + 60_000),
           epoch: 1,
         });
-        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+        yield* repo.transitionStatus(ticketId as never, "waiting_for_approval", {
           reason: "round 1 pending",
           tenantId: TenantId("tenant-acme"),
         });
@@ -1058,11 +1058,11 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
         const result = yield* runtime.handleEvent({
           type: "approval.rejected",
           approvalId: old.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("m"),
         });
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         const currentAfter = yield* approvals.getById(
           current.id,
           TenantId("tenant-acme"),
@@ -1076,11 +1076,11 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
       }),
     );
 
-    // The stale reject is a no-op: the case stays parked on its live approval.
+    // The stale reject is a no-op: the ticket stays parked on its live approval.
     expect(out.result.type).toBe("Completed");
     expect(out.fetched.status).toBe("waiting_for_approval");
     expect(out.actions).toContain("approval.ignored_stale");
-    expect(out.actions).not.toContain("case.escalated_to_human");
+    expect(out.actions).not.toContain("ticket.escalated_to_human");
     expect(out.currentStatus).toBe("pending");
   });
 
@@ -1090,18 +1090,18 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
     const layer = buildLayer(
       LLMServiceScripted([]) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         const audit = yield* AuditLogService;
         const approvals = yield* ApprovalService;
         const current = yield* approvals.create({
           tenantId: TenantId("tenant-acme"),
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           agentId: AgentId("recovery-test-agent"),
           tool: "test.counted_action",
           proposedInput: { amount: 5 },
@@ -1109,30 +1109,30 @@ describe("AgentRuntime — round fencing (recovery hardening)", () => {
           riskLevel: "medium",
           expiresAt: new Date(Date.now() + 60_000),
         });
-        yield* repo.transitionStatus(caseId as never, "waiting_for_approval", {
+        yield* repo.transitionStatus(ticketId as never, "waiting_for_approval", {
           reason: "pending",
           tenantId: TenantId("tenant-acme"),
         });
         const result = yield* runtime.handleEvent({
           type: "approval.rejected",
           approvalId: current.id,
-          caseId: caseId as never,
+          ticketId: ticketId as never,
           managerId: UserId("m"),
         });
-        const fetched = yield* repo.getById(caseId as never);
-        const entries = yield* audit.forCase(caseId as never);
+        const fetched = yield* repo.getById(ticketId as never);
+        const entries = yield* audit.forTicket(ticketId as never);
         return { result, fetched, actions: entries.map((e) => e.action) };
       }),
     );
 
     expect(out.result.type).toBe("HumanTakeoverRequired");
     expect(out.fetched.status).toBe("human_takeover");
-    expect(out.actions).toContain("case.escalated_to_human");
+    expect(out.actions).toContain("ticket.escalated_to_human");
   });
 });
 
 describe("AgentRuntime — reopen on customer reply (resolved → in_progress)", () => {
-  it("reopens a resolved case and audits case.reopened when the customer replies", async () => {
+  it("reopens a resolved ticket and audits ticket.reopened when the customer replies", async () => {
     const counter = { count: 0 };
     const layer = buildLayer(
       LLMServiceScripted([
@@ -1140,7 +1140,7 @@ describe("AgentRuntime — reopen on customer reply (resolved → in_progress)",
         { type: "final_message", text: "re-engaged" },
       ]) as never,
       [recoveryAgent({ id: AgentId("support-triage") })],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
     const inbound = (messageId: string): DomainEvent => ({
@@ -1164,7 +1164,7 @@ describe("AgentRuntime — reopen on customer reply (resolved → in_progress)",
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           yield* runtime.handleEvent(inbound("msg-1"));
           const afterFirst = yield* repo.findByThreadId(
@@ -1172,7 +1172,7 @@ describe("AgentRuntime — reopen on customer reply (resolved → in_progress)",
             "gmail:thread-reopen-2" as never,
           );
           yield* runtime.handleEvent(inbound("msg-2"));
-          const entries = afterFirst ? yield* audit.forCase(afterFirst.id) : [];
+          const entries = afterFirst ? yield* audit.forTicket(afterFirst.id) : [];
           return {
             firstStatus: afterFirst?.status,
             actions: entries.map((e) => e.action),
@@ -1187,9 +1187,9 @@ describe("AgentRuntime — reopen on customer reply (resolved → in_progress)",
     );
 
     expect(out.firstStatus).toBe("resolved");
-    // The second inbound flips the resolved case back to in_progress with a
+    // The second inbound flips the resolved ticket back to in_progress with a
     // visible reopen marker before the agent re-runs.
-    expect(out.actions.filter((a) => a === "case.reopened")).toHaveLength(1);
+    expect(out.actions.filter((a) => a === "ticket.reopened")).toHaveLength(1);
   });
 });
 
@@ -1211,13 +1211,13 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
           permissionOverrides: { "test.counted_action": "allow" },
         }),
       ],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
         return { result };
       }),
     );
@@ -1226,11 +1226,11 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
     expect(out.result.type).toBe("Completed");
   });
 
-  it("does not resolve a case a manager took over mid-tick (audit L1)", async () => {
-    // The race: guard 2.95 passed (case was active at tick start), the
+  it("does not resolve a ticket a manager took over mid-tick (audit L1)", async () => {
+    // The race: guard 2.95 passed (ticket was active at tick start), the
     // manager clicks Take over while the LLM call is in flight, and the
     // loop's final_message branch then writes human_takeover → resolved
-    // from its stale in-memory status — un-parking the case the manager
+    // from its stale in-memory status — un-parking the ticket the manager
     // just claimed. The transition matrix must block it.
     const counter = { count: 0 };
     let repoHandle: {
@@ -1240,15 +1240,15 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
         opts: { reason: string },
       ) => Effect.Effect<unknown, unknown>;
     } | null = null;
-    let takeoverCaseId: string | null = null;
+    let takeoverTicketId: string | null = null;
     const layer = buildLayer(
       LLMServiceFromFn(() =>
         Effect.promise(async () => {
           // Simulate the dashboard takeover landing mid-LLM-call.
-          if (repoHandle && takeoverCaseId) {
+          if (repoHandle && takeoverTicketId) {
             await Effect.runPromise(
               repoHandle.transitionStatus(
-                takeoverCaseId as never,
+                takeoverTicketId as never,
                 "human_takeover",
                 { reason: "manager takeover (test)" },
               ) as Effect.Effect<unknown, never, never>,
@@ -1258,22 +1258,22 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
         }),
       ) as never,
       [recoveryAgent()],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
+        const repo = yield* TicketRepository;
         repoHandle = repo as never;
-        takeoverCaseId = caseId;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
+        takeoverTicketId = ticketId;
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
 
-    // The manager keeps the case.
+    // The manager keeps the ticket.
     expect(out.fetched.status).toBe("human_takeover");
     expect(out.result.type).toBe("PausedForHumanTakeover");
   });
@@ -1292,41 +1292,41 @@ describe("AgentRuntime — in-loop guards (L10/L13)", () => {
     const layer = buildLayer(
       LLMServiceScripted(decisions) as never,
       [recoveryAgent(), otherAgent],
-      [caseUpdateContext, makeCountedTool(counter), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool(counter), makeFailingTool()],
     );
 
-    const out = await runWithCase(layer as never, (caseId) =>
+    const out = await runWithTicket(layer as never, (ticketId) =>
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const repo = yield* CaseRepository;
-        const result = yield* runtime.handleEvent(customerReplied(caseId));
-        const fetched = yield* repo.getById(caseId as never);
+        const repo = yield* TicketRepository;
+        const result = yield* runtime.handleEvent(customerReplied(ticketId));
+        const fetched = yield* repo.getById(ticketId as never);
         return { result, fetched };
       }),
     );
 
     expect(out.result.type).toBe("Completed");
-    // The case must still belong to the original agent.
+    // The ticket must still belong to the original agent.
     expect(out.fetched.currentAgentId).toBe("recovery-test-agent");
   });
 });
 
 describe("AgentRuntime — IMAP reply thread correlation (message-id index)", () => {
-  it("correlates a reply to its existing case via the message-id index when the derived thread-root differs", async () => {
-    // Regression for the IMAP "RE:" duplicate-case bug: a customer reply whose
+  it("correlates a reply to its existing ticket via the message-id index when the derived thread-root differs", async () => {
+    // Regression for the IMAP "RE:" duplicate-ticket bug: a customer reply whose
     // mail client reordered / truncated the `References` chain derives a
-    // DIFFERENT `imap:<root>` thread-id than the case was created with, so the
+    // DIFFERENT `imap:<root>` thread-id than the ticket was created with, so the
     // exact `findByThreadId` lookup misses and (before this fix) a duplicate
-    // case was minted per reply. The reply's In-Reply-To still cites the first
+    // ticket was minted per reply. The reply's In-Reply-To still cites the first
     // inbound message, which the runtime recorded in the message-id index on
-    // accept — so it must resolve back to the original case.
+    // accept — so it must resolve back to the original ticket.
     const layer = buildLayer(
       LLMServiceScripted([
         { type: "final_message", text: "answered 1" },
         { type: "final_message", text: "answered 2" },
       ]) as never,
       [recoveryAgent({ id: AgentId("support-triage") })],
-      [caseUpdateContext, makeCountedTool({ count: 0 }), makeFailingTool()],
+      [ticketUpdateContext, makeCountedTool({ count: 0 }), makeFailingTool()],
     );
 
     // First inbound: thread-root "root-1", own Message-ID "m1".
@@ -1372,10 +1372,10 @@ describe("AgentRuntime — IMAP reply thread correlation (message-id index)", ()
       Effect.provide(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const repo = yield* CaseRepository;
+          const repo = yield* TicketRepository;
           const audit = yield* AuditLogService;
           const r1 = yield* runtime.handleEvent(first);
-          const caseA = yield* repo.findByThreadId(
+          const ticketA = yield* repo.findByThreadId(
             TenantId("tenant-acme"),
             "imap:root-1" as never,
           );
@@ -1392,11 +1392,11 @@ describe("AgentRuntime — IMAP reply thread correlation (message-id index)", ()
             TenantId("tenant-acme"),
             ["m2"],
           );
-          const entries = caseA ? yield* audit.forCase(caseA.id) : [];
+          const entries = ticketA ? yield* audit.forTicket(ticketA.id) : [];
           return {
             r1,
             r2,
-            caseAId: caseA?.id,
+            ticketAId: ticketA?.id,
             byRoot1Id: byRoot1?.id,
             byRoot2,
             byReplyId: byReplyId?.id,
@@ -1408,7 +1408,7 @@ describe("AgentRuntime — IMAP reply thread correlation (message-id index)", ()
         {
           r1: { type: string };
           r2: { type: string };
-          caseAId: string | undefined;
+          ticketAId: string | undefined;
           byRoot1Id: string | undefined;
           byRoot2: { id: string } | null;
           byReplyId: string | undefined;
@@ -1421,12 +1421,12 @@ describe("AgentRuntime — IMAP reply thread correlation (message-id index)", ()
 
     expect(out.r1.type).toBe("Completed");
     expect(out.r2.type).toBe("Completed");
-    // No duplicate case was created for the reply's derived root.
+    // No duplicate ticket was created for the reply's derived root.
     expect(out.byRoot2).toBeNull();
-    // Both messages landed on the SAME original case.
-    expect(out.byRoot1Id).toBe(out.caseAId);
-    expect(out.byReplyId).toBe(out.caseAId);
-    // The original case saw two inbound events (original + reply).
+    // Both messages landed on the SAME original ticket.
+    expect(out.byRoot1Id).toBe(out.ticketAId);
+    expect(out.byReplyId).toBe(out.ticketAId);
+    // The original ticket saw two inbound events (original + reply).
     expect(out.received).toBe(2);
   });
 });

@@ -62,7 +62,7 @@ export const registerRetentionSweep = async (
         );
 
         let totalArchived = 0;
-        let totalDeletedCases = 0;
+        let totalDeletedTickets = 0;
         let totalAudit = 0;
         let totalApprovals = 0;
         let okCount = 0;
@@ -70,8 +70,8 @@ export const registerRetentionSweep = async (
         for (const r of results) {
           if (r.kind === "ok") {
             okCount += 1;
-            totalArchived += r.archivedCases;
-            totalDeletedCases += r.deletedCases;
+            totalArchived += r.archivedTickets;
+            totalDeletedTickets += r.deletedTickets;
             totalAudit += r.deletedAuditRows;
             totalApprovals += r.deletedApprovals;
           } else {
@@ -80,7 +80,7 @@ export const registerRetentionSweep = async (
         }
         // eslint-disable-next-line no-console
         console.log(
-          `[retention-sweep] pass complete: tenants=${okCount} archived=${totalArchived} deleted_cases=${totalDeletedCases} audit=${totalAudit} approvals=${totalApprovals} failed_tenants=${failures.length}`,
+          `[retention-sweep] pass complete: tenants=${okCount} archived=${totalArchived} deleted_tickets=${totalDeletedTickets} audit=${totalAudit} approvals=${totalApprovals} failed_tenants=${failures.length}`,
         );
         for (const f of failures) {
           // eslint-disable-next-line no-console

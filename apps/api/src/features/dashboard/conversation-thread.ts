@@ -5,7 +5,7 @@ import type {
   ConversationThread,
 } from "@support-agent/agent-core";
 import type {
-  CaseConversationThreadUnavailableReason,
+  TicketConversationThreadUnavailableReason,
   DashboardConversationThread,
 } from "@support-agent/dashboard-contracts";
 import type {
@@ -223,7 +223,7 @@ export const projectConversationThread = (
 
 export const conversationUnavailableReason = (
   error: ConversationError,
-): Exclude<CaseConversationThreadUnavailableReason, "no_thread"> => {
+): Exclude<TicketConversationThreadUnavailableReason, "no_thread"> => {
   switch (error._tag) {
     case "ThreadNotFound":
       return "thread_not_found";
@@ -236,8 +236,8 @@ export const conversationUnavailableReason = (
   }
 };
 
-export const resolveCaseConversationMailbox = (
-  caseMailbox: string | null,
+export const resolveTicketConversationMailbox = (
+  ticketMailbox: string | null,
   provider: ConversationProviderId,
   connections: ReadonlyArray<ConnectorConnection>,
 ):
@@ -246,7 +246,7 @@ export const resolveCaseConversationMailbox = (
       readonly ok: false;
       readonly reason: "auth_required" | "mailbox_ambiguous";
     } => {
-  if (caseMailbox) return { ok: true, mailbox: caseMailbox };
+  if (ticketMailbox) return { ok: true, mailbox: ticketMailbox };
   const candidates = connections.filter(
     (connection) =>
       connection.provider === provider && connection.status === "active",
@@ -260,8 +260,8 @@ export const resolveCaseConversationMailbox = (
   };
 };
 
-export const resolveCaseConversationThread = (
-  caseMailbox: string | null,
+export const resolveTicketConversationThread = (
+  ticketMailbox: string | null,
   provider: ConversationProviderId | null,
   connections: ReadonlyArray<ConnectorConnection>,
   fetchThread: (
@@ -323,8 +323,8 @@ export const resolveCaseConversationThread = (
           )
         : [provider];
 
-    if (caseMailbox && provider !== null) {
-      const result = yield* probe(provider, caseMailbox);
+    if (ticketMailbox && provider !== null) {
+      const result = yield* probe(provider, ticketMailbox);
       if (result?.ok) return result;
       if (result?.reason === "auth_required") return result;
     }

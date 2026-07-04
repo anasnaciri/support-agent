@@ -16,7 +16,7 @@ const hrefs = (
 
 const ALL_ITEMS = SETTINGS_NAV_GROUPS.flatMap((g) => g.items);
 
-const CASES: ReadonlyArray<readonly [string, string]> = [
+const TICKETS: ReadonlyArray<readonly [string, string]> = [
   ["/settings", "/settings"],
   ["/settings/agents", "/settings/agents"],
   ["/settings/agents/refund-review-agent", "/settings/agents"],
@@ -38,12 +38,12 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 describe("settings nav active matching", () => {
-  it.each(CASES)("highlights the right item for %s", (pathname, expectedHref) => {
+  it.each(TICKETS)("highlights the right item for %s", (pathname, expectedHref) => {
     expect(activeSettingsHref(pathname)).toBe(expectedHref);
   });
 
   it("highlights exactly one item per known route", () => {
-    for (const [pathname] of CASES) {
+    for (const [pathname] of TICKETS) {
       const matched = ALL_ITEMS.filter((item) => item.match(pathname));
       expect(matched).toHaveLength(1);
     }
@@ -68,13 +68,13 @@ describe("settings nav active matching", () => {
   });
 
   it("returns null for a non-settings path", () => {
-    expect(activeSettingsHref("/cases")).toBeNull();
+    expect(activeSettingsHref("/tickets")).toBeNull();
   });
 });
 
 describe("settings nav permission gating", () => {
-  it("shows a cases-only member just the ungated items (Overview, Legal)", () => {
-    const visible = hrefs(visibleSettingsGroups(perms("cases.view")));
+  it("shows a tickets-only member just the ungated items (Overview, Legal)", () => {
+    const visible = hrefs(visibleSettingsGroups(perms("tickets.view")));
     expect(visible).toContain("/settings");
     expect(visible).toContain("/settings/legal");
     expect(visible).not.toContain("/settings/llm");
@@ -86,7 +86,7 @@ describe("settings nav permission gating", () => {
     expect(hrefs(visibleSettingsGroups(perms("settings.llm")))).toContain(
       "/settings/llm",
     );
-    expect(hrefs(visibleSettingsGroups(perms("cases.view")))).not.toContain(
+    expect(hrefs(visibleSettingsGroups(perms("tickets.view")))).not.toContain(
       "/settings/llm",
     );
   });
@@ -98,13 +98,13 @@ describe("settings nav permission gating", () => {
   });
 
   it("drops a group when all its items are hidden", () => {
-    // cases.view grants nothing in the Connections group → that group vanishes.
-    const groups = visibleSettingsGroups(perms("cases.view"));
+    // tickets.view grants nothing in the Connections group → that group vanishes.
+    const groups = visibleSettingsGroups(perms("tickets.view"));
     expect(groups.find((g) => g.label === "Connections")).toBeUndefined();
   });
 
-  it("hasAnySettingsAccess: false for cases-only, true for any gated perm", () => {
-    expect(hasAnySettingsAccess(perms("cases.view"))).toBe(false);
+  it("hasAnySettingsAccess: false for tickets-only, true for any gated perm", () => {
+    expect(hasAnySettingsAccess(perms("tickets.view"))).toBe(false);
     expect(hasAnySettingsAccess(perms("approvals.decide"))).toBe(false);
     expect(hasAnySettingsAccess(perms("settings.integrations"))).toBe(true);
     expect(hasAnySettingsAccess(perms("members.manage"))).toBe(true);

@@ -46,7 +46,7 @@ export const DbClientLive = (opts: DbClientOptions) =>
  * `DbClient`.
  *
  * Use this to enforce the master-plan §4 audit-in-transaction invariant:
- * compose `CaseRepository.transitionStatus(...)` and
+ * compose `TicketRepository.transitionStatus(...)` and
  * `AuditLogService.record(...)` inside one `withTransaction(...)` and
  * they share one SQL transaction. Effect failure → Postgres rollback.
  */

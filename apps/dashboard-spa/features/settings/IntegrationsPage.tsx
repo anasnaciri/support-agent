@@ -33,7 +33,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FeedbackToaster } from "@/components/ui/feedback-toaster";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
 import { Link } from "@/components/ui/link";
-import { ConfirmButton } from "@/features/cases/ConfirmButton";
+import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 
 import gmailLogo from "./logos/gmail.svg";
 import googleSheetsLogo from "./logos/google-sheets.svg";
@@ -123,7 +123,7 @@ export const PROVIDER_ICONS = {
 
 // The api origin the SPA talks to. Always present in a working deployment (the
 // api-client throws without it), but we mirror the Next "Connect buttons
-// disabled" alert for the misconfigured case.
+// disabled" alert for the misconfigured ticket.
 const apiBaseUrl: string | null = ((): string | null => {
   const raw = import.meta.env.VITE_API_BASE_URL;
   if (!raw || raw.trim().length === 0) return null;
@@ -219,7 +219,7 @@ function DisconnectButton({
       ? "The agent loses order, customer, and refund access for this store until you reconnect."
       : provider === "google_sheets"
         ? "Sheets-backed workflows (like supplier escalation) stop working until you reconnect."
-        : "The agent stops reading and replying to this mailbox immediately. Open cases can't send replies until you reconnect.";
+        : "The agent stops reading and replying to this mailbox immediately. Open tickets can't send replies until you reconnect.";
   return (
     <ConfirmButton
       variant="destructive"

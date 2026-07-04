@@ -10,7 +10,7 @@ describe("refund-review-agent config", () => {
   it("has the expected shape", () => {
     expect(refundReviewAgent.id).toBe("refund-review-agent");
     expect(refundReviewAgent.mode).toBe("subagent");
-    expect(refundReviewAgent.tools).toContain("case.update_context");
+    expect(refundReviewAgent.tools).toContain("ticket.update_context");
     expect(refundReviewAgent.tools).toContain("refund.create");
     expect(refundReviewAgent.tools).toContain("conversation.reply");
     expect(refundReviewAgent.tools).toContain("merchant.notify");

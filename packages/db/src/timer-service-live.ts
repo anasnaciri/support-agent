@@ -11,19 +11,19 @@ import {
   type TimerServiceError,
 } from "@support-agent/services";
 import {
-  CaseId as makeCaseId,
-  type CaseId,
+  TicketId as makeTicketId,
+  type TicketId,
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import type { DrizzleDb } from "./client.js";
-import { cases, timers, type TimerRow } from "./schema.js";
+import { tickets, timers, type TimerRow } from "./schema.js";
 
 const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
 
 const rowToTimer = (row: TimerRow): TimerRecord => ({
   id: row.id,
-  caseId: makeCaseId(row.caseId),
+  ticketId: makeTicketId(row.ticketId),
   fireAt: row.fireAt,
   reason: row.reason as TimerReason,
   firedAt: row.firedAt,
@@ -45,9 +45,9 @@ export const TimerServiceLive = Layer.effect(
     const defaultDb = yield* DbClient;
 
     // D9: timers carry no tenant column — tenancy is checked through the
-    // case row. A case outside the given tenant reads as missing.
-    const caseInTenant = (caseId: CaseId, tenantId: string) =>
-      sql`EXISTS (SELECT 1 FROM ${cases} WHERE ${cases.id} = ${caseId} AND ${cases.tenantId} = ${tenantId})`;
+    // ticket row. A ticket outside the given tenant reads as missing.
+    const ticketInTenant = (ticketId: TicketId, tenantId: string) =>
+      sql`EXISTS (SELECT 1 FROM ${tickets} WHERE ${tickets.id} = ${ticketId} AND ${tickets.tenantId} = ${tenantId})`;
 
     const schedule = (
       input: ScheduleTimerInput,
@@ -58,12 +58,12 @@ export const TimerServiceLive = Layer.effect(
           const owned = yield* wrap(
             "schedule",
             db
-              .select({ id: cases.id })
-              .from(cases)
+              .select({ id: tickets.id })
+              .from(tickets)
               .where(
                 and(
-                  eq(cases.id, input.caseId),
-                  eq(cases.tenantId, input.tenantId),
+                  eq(tickets.id, input.ticketId),
+                  eq(tickets.tenantId, input.tenantId),
                 ),
               )
               .limit(1),
@@ -72,7 +72,7 @@ export const TimerServiceLive = Layer.effect(
             return yield* Effect.fail(
               new TimerServiceDbError({
                 operation: "schedule",
-                cause: `case ${input.caseId} not found in tenant ${input.tenantId}`,
+                cause: `ticket ${input.ticketId} not found in tenant ${input.tenantId}`,
               }),
             );
           }
@@ -83,7 +83,7 @@ export const TimerServiceLive = Layer.effect(
             .insert(timers)
             .values({
               id: randomUUID(),
-              caseId: input.caseId,
+              ticketId: input.ticketId,
               fireAt: input.fireAt,
               reason: input.reason,
             })
@@ -92,24 +92,24 @@ export const TimerServiceLive = Layer.effect(
         return rowToTimer(rows[0]!);
       });
 
-    const cancelOpenForCase = (
-      caseId: CaseId,
+    const cancelOpenForTicket = (
+      ticketId: TicketId,
       opts: CancelTimersOptions = {},
     ): Effect.Effect<number, TimerServiceError> =>
       Effect.gen(function* () {
         const db = yield* useDb(defaultDb);
         const now = opts?.now ?? new Date();
         const where = and(
-          eq(timers.caseId, caseId),
+          eq(timers.ticketId, ticketId),
           isNull(timers.firedAt),
           isNull(timers.cancelledAt),
           ...(opts?.reason ? [eq(timers.reason, opts.reason)] : []),
           ...(opts?.tenantId !== undefined
-            ? [caseInTenant(caseId, opts.tenantId)]
+            ? [ticketInTenant(ticketId, opts.tenantId)]
             : []),
         );
         const rows = yield* wrap(
-          "cancelOpenForCase",
+          "cancelOpenForTicket",
           db
             .update(timers)
             .set({ cancelledAt: now })
@@ -121,7 +121,7 @@ export const TimerServiceLive = Layer.effect(
 
     // Audit L3a: list-then-mark instead of claim-and-mark. The sweep
     // enqueues each timer's event before `markFired`; duplicates across
-    // racing sweep passes are absorbed downstream (case-keyed FIFO + the
+    // racing sweep passes are absorbed downstream (ticket-keyed FIFO + the
     // runtime's guards), while a lost wake-up never recovers.
     const listDue = (
       now: Date,
@@ -164,6 +164,6 @@ export const TimerServiceLive = Layer.effect(
         );
       });
 
-    return TimerService.of({ schedule, cancelOpenForCase, listDue, markFired });
+    return TimerService.of({ schedule, cancelOpenForTicket, listDue, markFired });
   }),
 );

@@ -48,7 +48,7 @@ interface CustomCard {
 }
 
 /**
- * On/off switch for routing new cases to the resolution agent. Fires the toggle
+ * On/off switch for routing new tickets to the resolution agent. Fires the toggle
  * mutation on change (no Save button); the page's resolution-policy query
  * invalidates so the status help text refreshes in place.
  */
@@ -85,7 +85,7 @@ function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }) {
         className="size-4 rounded border-input accent-primary"
       />
       <span className="text-sm font-medium">
-        Route new cases to the resolution agent
+        Route new tickets to the resolution agent
       </span>
     </label>
   );
@@ -436,8 +436,8 @@ export function ResolutionPolicyPage() {
           Resolution agent
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          A single agent that resolves cases end-to-end, steered by the
-          scenarios below. When it&apos;s on, triage routes a matching case to
+          A single agent that resolves tickets end-to-end, steered by the
+          scenarios below. When it&apos;s on, triage routes a matching ticket to
           it; it gathers what it needs, takes the actions you&apos;ve allowed,
           and drafts the customer reply — pausing for your approval on anything
           you marked <em>Ask me first</em>. Leave it off to keep today&apos;s
@@ -456,8 +456,8 @@ export function ResolutionPolicyPage() {
           <ResolutionAgentToggle enabled={policy.resolutionAgentEnabled} />
           <p className="mt-2 text-xs text-muted-foreground">
             {policy.resolutionAgentEnabled
-              ? "On — new matching cases go to the resolution agent."
-              : "Off — cases route to the built-in specialists as before."}
+              ? "On — new matching tickets go to the resolution agent."
+              : "Off — tickets route to the built-in specialists as before."}
           </p>
         </CardContent>
       </Card>
@@ -467,7 +467,7 @@ export function ResolutionPolicyPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           For each situation, choose what the agent may do and whether it acts
           automatically or asks you first. The built-in scenarios cover the
-          common cases; add your own for anything specific to your store —
+          common tickets; add your own for anything specific to your store —
           describe when it applies and the agent will route matching messages to
           it.
         </p>
