@@ -34,13 +34,17 @@ const settings = (
     notificationEmail: "ops@example.com",
     refundPolicy: defaultRefundPolicy,
     discountPolicy: defaultDiscountPolicy,
-    retentionDays: 730,
+    retentionDays: 365,
     supplierEscalationSheet: null,
     legalAcceptance: null,
     ...overrides,
   });
 
 describe("TenantRepositoryTest", () => {
+  it("uses a new data-processing notice version for the retention policy change", () => {
+    expect(DATA_PROCESSING_NOTICE_VERSION).toBe("2026-07-04");
+  });
+
   it("returns the configured settings on getSettings", async () => {
     const initial = settings({ legalAcceptance: currentLegalAcceptance });
     const layer = TenantRepositoryTest({

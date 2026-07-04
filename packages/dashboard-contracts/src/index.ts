@@ -839,7 +839,6 @@ export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
   readonly discountPolicy: DiscountPolicyView;
-  readonly retentionDays: number;
   readonly supplierEscalationSheet: SupplierEscalationSheetView | null;
   readonly legalAcceptance: LegalAcceptanceView | null;
   /**

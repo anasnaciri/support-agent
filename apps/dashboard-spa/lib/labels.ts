@@ -18,6 +18,7 @@ const CASE_STATUS_LABELS: Readonly<Record<string, string>> = {
   waiting_for_approval: "Needs approval",
   approved_action_running: "Finishing approved action",
   resolved: "Resolved",
+  archived: "Archived",
   failed: "Failed",
   human_takeover: "With you",
 };

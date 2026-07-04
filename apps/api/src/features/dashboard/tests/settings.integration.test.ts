@@ -246,7 +246,6 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
         denyAboveMinorUnits: number;
         mode: string;
       };
-      retentionDays: number;
       supplierEscalationSheet: unknown;
       notificationEmail: unknown;
       legalAcceptance: unknown;
@@ -254,7 +253,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.refundPolicy.currencyCode).toBe("USD");
     expect(body.refundPolicy.denyAboveMinorUnits).toBe(50000);
     expect(body.refundPolicy.mode).toBe("thresholds");
-    expect(body.retentionDays).toBe(730);
+    expect(body).not.toHaveProperty("retentionDays");
     expect(body.supplierEscalationSheet).toBeNull();
     expect(body.legalAcceptance).toBeNull();
   });

@@ -728,7 +728,7 @@ const AgentRuntimeLayer = Layer.effect(
             // A re-delivered `approval.approved` for a case that already ran
             // to completion must NOT execute the gated tool(s) a second time —
             // that's a double refund / double customer email.
-            if (working.status === "resolved") {
+            if (working.status === "resolved" || working.status === "archived") {
               yield* tx.run(
                 audit.record({
                   tenantId: working.tenantId,
@@ -1216,6 +1216,23 @@ const AgentRuntimeLayer = Layer.effect(
             return { type: "PausedForHumanTakeover" } as const;
           }
 
+          if (working.status === "archived") {
+            const shouldReopen =
+              event.type === "message.received" || event.type === "customer.replied";
+            if (!shouldReopen) {
+              yield* tx.run(
+                audit.record({
+                  tenantId: working.tenantId,
+                  caseId: working.id,
+                  actor: { type: "system", id: "runtime" },
+                  action: "event.held_archived",
+                  details: { eventType: event.type },
+                }),
+              );
+              return { type: "PausedArchived" } as const;
+            }
+          }
+
           // 2.96. Hold events while the case is parked on the supplier. A case in
           // `waiting_for_supplier` belongs to the warehouse until they respond, so
           // a stray customer reply or follow-up timer must NOT re-enter the agent
@@ -1246,10 +1263,11 @@ const AgentRuntimeLayer = Layer.effect(
         });
 
         const maybeReopen = Effect.gen(function* () {
-          // 2.97. Reopen a resolved case when the customer writes back on the
-          // thread. The state machine permits `resolved → in_progress` (a reply
-          // re-enters the loop) but nothing performed the transition: the case
-          // stayed visually `resolved` while the agent re-ran, and a closing
+          // 2.97. Reopen a resolved/archived case when the customer writes back
+          // on the thread. The state machine permits `resolved|archived →
+          // in_progress` (a reply re-enters the loop) but nothing performed the
+          // transition: the case stayed visually `resolved` while the agent
+          // re-ran, and a closing
           // `final_message` then short-circuited (status already resolved) so a
           // genuine re-engagement could finish invisibly. Transitioning here
           // surfaces the reopen on the timeline and lets the normal
@@ -1259,7 +1277,7 @@ const AgentRuntimeLayer = Layer.effect(
           if (
             (event.type === "message.received" ||
               event.type === "customer.replied") &&
-            working.status === "resolved"
+            (working.status === "resolved" || working.status === "archived")
           ) {
             working = yield* lifecycle.reopenForCustomerReply({
               caseId: working.id,
@@ -2330,7 +2348,7 @@ const AgentRuntimeLayer = Layer.effect(
             });
 
             if (decision.type === "final_message") {
-              if (current.status !== "resolved") {
+              if (current.status !== "resolved" && current.status !== "archived") {
                 // Autonomous loop (slice 4c): the agent stopped with queued gated
                 // actions. Park the whole bundle for one merchant approval rather
                 // than resolving. Checked FIRST so a run that proposed remedies +
@@ -2427,7 +2445,7 @@ const AgentRuntimeLayer = Layer.effect(
                 // it does, the case did not resolve — report the takeover, not
                 // Completed, so the outer classifier doesn't treat the tick as a
                 // clean close.
-                if (current.status !== "resolved") {
+                if (current.status !== "resolved" && current.status !== "archived") {
                   return {
                     type: "HumanTakeoverRequired",
                     reason: "resolve blocked: case parked for a human",
@@ -2558,6 +2576,7 @@ const AgentRuntimeLayer = Layer.effect(
             agent.autonomousLoop &&
             queuedApprovals.length > 0 &&
             current.status !== "resolved" &&
+            current.status !== "archived" &&
             current.status !== "human_takeover" &&
             current.status !== "waiting_for_approval"
           ) {
@@ -2569,6 +2588,7 @@ const AgentRuntimeLayer = Layer.effect(
           }
           if (
             current.status !== "resolved" &&
+            current.status !== "archived" &&
             current.status !== "human_takeover"
           ) {
             yield* escalateToHuman(current.id, "max_turns_exceeded", {

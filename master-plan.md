@@ -2573,7 +2573,11 @@ The agent has more power than a chatbot. The threat model must match.
 
 - **Append-only audit log** with full chain: event → LLM reasoning → tool call → result → approval → outcome.
 - **All approvals carry manager identity, timestamp, IP, and any edits diffed against the agent proposal.**
-- **Retention policy per tenant** (e.g. 7y for financial records; 2y for general support); deletion is a privileged operation with its own audit.
+- **Retention policy.** Resolved cases stay parked as `resolved` for 30 days,
+  then the retention sweep transitions them to `archived` with an audit row.
+  Archived cases are deleted after 12 months archived, including their
+  approvals, audit rows, and state transitions. Account/shop/customer redaction
+  remains a separate privileged deletion path with surviving admin audit.
 
 ---
 

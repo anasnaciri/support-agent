@@ -110,7 +110,11 @@ export const escalateDeadLetteredEvent = (
       );
       return;
     }
-    if (row.status === "human_takeover" || row.status === "resolved") {
+    if (
+      row.status === "human_takeover" ||
+      row.status === "resolved" ||
+      row.status === "archived"
+    ) {
       return;
     }
 

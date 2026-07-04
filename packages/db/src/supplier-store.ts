@@ -467,6 +467,7 @@ const SUPPLIER_RESUMABLE_STATUSES: ReadonlySet<string> = new Set([
   "waiting_for_customer",
   "waiting_for_approval",
   "resolved",
+  "archived",
   "failed",
   "human_takeover",
 ]);
@@ -662,7 +663,12 @@ export const listUnsentSupplierEscalations = async (
         sql`${caseSupplierEscalations.notifiedAt} IS NULL`,
         sql`${caseSupplierEscalations.notifyAttempts} < ${maxAttempts}`,
         eq(caseSupplierEscalations.status, "open"),
-        notInArray(cases.status, ["resolved", "failed", "human_takeover"]),
+        notInArray(cases.status, [
+          "resolved",
+          "archived",
+          "failed",
+          "human_takeover",
+        ]),
       ),
     )
     .orderBy(asc(caseSupplierEscalations.createdAt))

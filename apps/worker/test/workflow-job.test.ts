@@ -54,6 +54,7 @@ describe("settleWorkflowResult", () => {
       { type: "Completed" },
       { type: "PausedWaitingForCustomer" },
       { type: "PausedForHumanTakeover" },
+      { type: "PausedArchived" },
       { type: "HumanTakeoverRequired", reason: "max_turns_exceeded" },
     ];
     for (const r of results) {

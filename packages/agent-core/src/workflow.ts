@@ -14,6 +14,7 @@ export type WorkflowResult =
   // `human_takeover`). Distinct from `HumanTakeoverRequired`, which is the
   // runtime *escalating* a case it could not finish.
   | { readonly type: "PausedForHumanTakeover" }
+  | { readonly type: "PausedArchived" }
   | {
       readonly type: "Failed";
       readonly reason: string;

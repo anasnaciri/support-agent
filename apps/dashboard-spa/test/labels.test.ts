@@ -37,6 +37,7 @@ describe("caseStatusLabel", () => {
       "waiting_for_approval",
       "approved_action_running",
       "resolved",
+      "archived",
       "failed",
       "human_takeover",
     ];

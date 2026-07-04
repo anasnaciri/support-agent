@@ -116,7 +116,7 @@ Customers can request human-only handling at any time, transitioning their case 
 
 **Answer:** Yes (target).
 
-Default retention is 24 months from case resolution; merchants will be able to configure shorter retention per data category. Retention is enforced via a daily sweep cron that deletes resolved cases, their `case_state_transitions` rows, and their `audit_log` entries past the configured window.
+Resolved cases are archived after 30 days. Archived cases are retained for 12 months, then deleted by a daily sweep cron together with their `case_state_transitions` rows, approval rows, and `audit_log` entries.
 
 **Status:** Implemented 2026-05-25 via the worker retention sweep cron.
 
@@ -189,7 +189,7 @@ The original three code gaps from this record are now closed:
 
 1. **Privacy / data processing notice** — implemented at `/legal/data-processing` and linked from onboarding / Settings -> Legal.
 2. **Data Processing Agreement (DPA) template + acceptance** — implemented in the same public legal document; acceptance is stored in `tenants.settings.legalAcceptance` and connector writes are blocked until current versions are accepted.
-3. **Retention sweep cron** — implemented in the worker and runs daily for resolved cases past the tenant retention window.
+3. **Retention sweep cron** — implemented in the worker and runs daily: resolved cases archive after 30 days, and archived cases delete after 12 months.
 
 Operational production readiness still depends on deployment evidence (TLS, encrypted backups, access control, incident response, and real provider configuration), which is tracked separately in `todo.md`.
 

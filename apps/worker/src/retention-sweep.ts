@@ -1,24 +1,22 @@
 // ============================================================
-// Resolved-case retention sweep
+// Case retention sweep
 // ============================================================
 //
-// Daily cron that deletes resolved cases (and their cascaded rows)
-// past each tenant's configured retention window. Required for the
-// privacy-policy commitment in `docs/shopify-pcd.md` §7 — "personal
-// data isn't kept longer than needed" — and unlocks onboarding paying
-// merchants subject to GDPR/CCPA-style minimum-retention rules.
+// Daily cron that stages case retention:
+//   1. `resolved` cases older than 30 days are moved to `archived`.
+//   2. `archived` cases older than 12 months are deleted with their
+//      cascaded rows.
 //
 // The deletion uses the same FK ordering as the Shopify compliance
 // `customers/redact` webhook (see `apps/api/src/compliance-redaction.ts`):
 //   approvals (FK to cases) → audit_log (no FK cascade) →
 //   cases (CASCADE to case_state_transitions)
 //
-// Per-tenant scoping happens INSIDE the SELECT for matched case ids,
-// so a misconfigured tenant can't accidentally wipe another tenant's
-// data. The cron walks tenants one at a time — sequential rather than
-// concurrent because a misbehaving tenant deletion shouldn't slow
-// every other tenant down, and the operation is rare enough that
-// total throughput doesn't matter.
+// Per-tenant scoping happens INSIDE each SELECT for matched case ids, so a
+// misconfigured tenant can't accidentally wipe another tenant's data. The cron
+// walks tenants one at a time — sequential rather than concurrent because a
+// misbehaving tenant deletion shouldn't slow every other tenant down, and the
+// operation is rare enough that total throughput doesn't matter.
 
 import { Effect } from "effect";
 import { and, eq, inArray, lt } from "drizzle-orm";
@@ -26,20 +24,20 @@ import {
   approvals,
   auditLog,
   cases,
+  caseStateTransitions,
   DbClient,
   tenants,
 } from "@support-agent/db";
-import {
-  DEFAULT_RETENTION_DAYS,
-  TenantRepository,
-} from "@support-agent/services";
-import { TenantId } from "@support-agent/agent-core";
+
+export const RESOLVED_CASE_ARCHIVE_AFTER_DAYS = 30;
+export const ARCHIVED_CASE_DELETE_AFTER_MONTHS = 12;
 
 export interface SweepTenantResult {
   readonly kind: "ok";
   readonly tenantId: string;
-  readonly retentionDays: number;
-  readonly cutoff: Date;
+  readonly archiveCutoff: Date;
+  readonly deleteCutoff: Date;
+  readonly archivedCases: number;
   readonly deletedCases: number;
   readonly deletedAuditRows: number;
   readonly deletedApprovals: number;
@@ -54,74 +52,153 @@ export interface SweepTenantFailure {
 export type SweepResult = SweepTenantResult | SweepTenantFailure;
 
 /**
- * Compute the cutoff timestamp from a reference time and a retention
- * window in days. Pure — exported so the cron schedule + tests share
- * the same calc. `retentionDays` MUST be a positive integer; the caller
- * (or the TenantRepository decode) already enforces this.
+ * Compute the cutoff timestamp for archiving resolved cases. Pure — exported
+ * so the cron schedule + tests share the same calc.
  */
-export const computeCutoff = (now: Date, retentionDays: number): Date =>
-  new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+export const computeResolvedArchiveCutoff = (now: Date): Date =>
+  new Date(
+    now.getTime() - RESOLVED_CASE_ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000,
+  );
+
+const utcDaysInMonth = (year: number, month: number): number =>
+  new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+
+const subtractUtcMonths = (now: Date, months: number): Date => {
+  const targetMonthIndex = now.getUTCMonth() - months;
+  const firstOfTarget = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      targetMonthIndex,
+      1,
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+      now.getUTCMilliseconds(),
+    ),
+  );
+  const day = Math.min(
+    now.getUTCDate(),
+    utcDaysInMonth(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth()),
+  );
+  firstOfTarget.setUTCDate(day);
+  return firstOfTarget;
+};
+
+/** Compute the cutoff timestamp for deleting archived cases. */
+export const computeArchivedDeleteCutoff = (now: Date): Date =>
+  subtractUtcMonths(now, ARCHIVED_CASE_DELETE_AFTER_MONTHS);
 
 /**
- * Delete every resolved case for one tenant whose `resolved_at` is
- * older than the cutoff. Returns counts so the cron can log them.
- * Skips cases that aren't `resolved` — `human_takeover` / `failed`
- * stay forever (today; we may add separate retention for those later).
+ * Archive resolved cases past the 30-day window, then delete archived cases
+ * past the 12-month window. Returns counts so the cron can log them. Skips
+ * cases that aren't `resolved`/`archived` — `human_takeover` / `failed` stay
+ * parked unless a separate explicit deletion/redaction path handles them.
  */
 export const sweepTenant = (
   tenantId: string,
-  retentionDays: number,
   now: Date,
 ): Effect.Effect<SweepTenantResult, Error, DbClient> =>
   Effect.gen(function* () {
     const db = yield* DbClient;
-    const cutoff = computeCutoff(now, retentionDays);
+    const archiveCutoff = computeResolvedArchiveCutoff(now);
+    const deleteCutoff = computeArchivedDeleteCutoff(now);
     return yield* Effect.tryPromise({
       try: () =>
         db.transaction(async (tx) => {
-          // 1. find the cases to purge — scoped to this tenant only.
-          const matched = await tx
+          // 1. Archive resolved cases in the mutation itself. The status +
+          // cutoff predicates are repeated here so a case that reopens while
+          // the sweep waits on its row lock is not force-archived.
+          const archivedRows = await tx
+            .update(cases)
+            .set({ status: "archived", updatedAt: now, archivedAt: now })
+            .where(
+              and(
+                eq(cases.tenantId, tenantId),
+                eq(cases.status, "resolved"),
+                lt(cases.resolvedAt, archiveCutoff),
+              ),
+            )
+            .returning({ id: cases.id });
+          const archiveIds = archivedRows.map((r) => r.id);
+          if (archiveIds.length > 0) {
+            await tx.insert(caseStateTransitions).values(
+              archiveIds.map((caseId) => ({
+                caseId,
+                fromStatus: "resolved",
+                toStatus: "archived",
+                reason: "retention archive after 30 days resolved",
+              })),
+            );
+            await tx.insert(auditLog).values(
+              archiveIds.map((caseId) => ({
+                tenantId,
+                caseId,
+                actorType: "system",
+                actorId: "retention-sweep",
+                action: "case.archived",
+                details: {
+                  archiveCutoff: archiveCutoff.toISOString(),
+                  archivedAt: now.toISOString(),
+                },
+              })),
+            );
+          }
+
+          // 2. Lock archived cases before deleting dependent rows. With
+          // READ COMMITTED, SELECT ... FOR UPDATE rechecks the predicate after
+          // a concurrent reopen commits, so live cases keep their audit trail.
+          const deleteMatched = await tx
             .select({ id: cases.id })
             .from(cases)
             .where(
               and(
                 eq(cases.tenantId, tenantId),
-                eq(cases.status, "resolved"),
-                lt(cases.resolvedAt, cutoff),
+                eq(cases.status, "archived"),
+                lt(cases.archivedAt, deleteCutoff),
               ),
-            );
-          const ids = matched.map((r) => r.id);
-          if (ids.length === 0) {
+            )
+            .for("update");
+          const deleteIds = deleteMatched.map((r) => r.id);
+          if (deleteIds.length === 0) {
             return {
               kind: "ok",
               tenantId,
-              retentionDays,
-              cutoff,
+              archiveCutoff,
+              deleteCutoff,
+              archivedCases: archiveIds.length,
               deletedCases: 0,
               deletedAuditRows: 0,
               deletedApprovals: 0,
             } satisfies SweepTenantResult;
           }
 
-          // 2. cascaded delete in FK-safe order.
+          // 3. Cascaded delete in FK-safe order.
           const deletedApprovals = await tx
             .delete(approvals)
-            .where(inArray(approvals.caseId, ids))
+            .where(inArray(approvals.caseId, deleteIds))
             .returning({ id: approvals.id });
           const deletedAudit = await tx
             .delete(auditLog)
-            .where(inArray(auditLog.caseId, ids))
+            .where(inArray(auditLog.caseId, deleteIds))
             .returning({ id: auditLog.id });
           const deletedCases = await tx
             .delete(cases)
-            .where(inArray(cases.id, ids))
+            .where(
+              and(
+                inArray(cases.id, deleteIds),
+                eq(cases.tenantId, tenantId),
+                eq(cases.status, "archived"),
+                lt(cases.archivedAt, deleteCutoff),
+              ),
+            )
             .returning({ id: cases.id });
 
           return {
             kind: "ok",
             tenantId,
-            retentionDays,
-            cutoff,
+            archiveCutoff,
+            deleteCutoff,
+            archivedCases: archiveIds.length,
             deletedCases: deletedCases.length,
             deletedAuditRows: deletedAudit.length,
             deletedApprovals: deletedApprovals.length,
@@ -145,10 +222,9 @@ export interface SweepAllTenantsOptions {
  */
 export const sweepAllTenants = (
   opts: SweepAllTenantsOptions = {},
-): Effect.Effect<ReadonlyArray<SweepResult>, never, DbClient | TenantRepository> =>
+): Effect.Effect<ReadonlyArray<SweepResult>, never, DbClient> =>
   Effect.gen(function* () {
     const db = yield* DbClient;
-    const repo = yield* TenantRepository;
     const now = (opts.now ?? (() => new Date()))();
 
     // Stream tenants — even a few thousand rows is fine to fetch in one
@@ -169,14 +245,7 @@ export const sweepAllTenants = (
     const out: Array<SweepResult> = [];
     for (const row of rows) {
       const tenantId = row.id;
-      const settings = yield* repo.getSettings(TenantId(tenantId)).pipe(
-        Effect.either,
-      );
-      const retentionDays =
-        settings._tag === "Right"
-          ? settings.right.retentionDays
-          : DEFAULT_RETENTION_DAYS;
-      const result = yield* sweepTenant(tenantId, retentionDays, now).pipe(
+      const result = yield* sweepTenant(tenantId, now).pipe(
         Effect.either,
       );
       if (result._tag === "Right") {

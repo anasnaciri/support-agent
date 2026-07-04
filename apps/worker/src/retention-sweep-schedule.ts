@@ -15,8 +15,8 @@ export const RETENTION_SWEEP_QUEUE = "retention.sweep";
 
 /**
  * Cron expression: daily at 03:00 UTC. Off-peak for most regions; one
- * pass per day is more than enough — retention is measured in months,
- * not hours. A missed run delays cleanup by up to 24h, which is well
+ * pass per day is enough — archiving/deletion windows are measured in days and
+ * months, not hours. A missed run delays cleanup by up to 24h, which is well
  * inside any regulatory tolerance.
  */
 const SWEEP_CRON = "0 3 * * *";
@@ -61,7 +61,8 @@ export const registerRetentionSweep = async (
           ),
         );
 
-        let totalCases = 0;
+        let totalArchived = 0;
+        let totalDeletedCases = 0;
         let totalAudit = 0;
         let totalApprovals = 0;
         let okCount = 0;
@@ -69,7 +70,8 @@ export const registerRetentionSweep = async (
         for (const r of results) {
           if (r.kind === "ok") {
             okCount += 1;
-            totalCases += r.deletedCases;
+            totalArchived += r.archivedCases;
+            totalDeletedCases += r.deletedCases;
             totalAudit += r.deletedAuditRows;
             totalApprovals += r.deletedApprovals;
           } else {
@@ -78,7 +80,7 @@ export const registerRetentionSweep = async (
         }
         // eslint-disable-next-line no-console
         console.log(
-          `[retention-sweep] pass complete: tenants=${okCount} cases=${totalCases} audit=${totalAudit} approvals=${totalApprovals} failed_tenants=${failures.length}`,
+          `[retention-sweep] pass complete: tenants=${okCount} archived=${totalArchived} deleted_cases=${totalDeletedCases} audit=${totalAudit} approvals=${totalApprovals} failed_tenants=${failures.length}`,
         );
         for (const f of failures) {
           // eslint-disable-next-line no-console

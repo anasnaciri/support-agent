@@ -132,7 +132,9 @@ const main = async (): Promise<void> => {
                   ? ` (approvalId: ${r.approvalId})`
                   : r.type === "PausedForHumanTakeover"
                     ? ` (held — case under human takeover)`
-                    : ""),
+                    : r.type === "PausedArchived"
+                      ? ` (held — case archived)`
+                      : ""),
         );
         return;
       }
@@ -197,8 +199,8 @@ const main = async (): Promise<void> => {
     console.log(`[worker] scheduled imap-poll cron on queue=${IMAP_POLL_QUEUE}`);
   }
 
-  // Daily retention sweep: deletes resolved cases (and their audit /
-  // approval rows) past each tenant's configured retention window.
+  // Daily retention sweep: archives cases after 30 resolved days, then deletes
+  // archived cases (and their audit / approval rows) after 12 months archived.
   // Always registered — every tenant benefits regardless of which
   // connectors are wired up.
   await registerRetentionSweep({ boss, runtimeLayer });

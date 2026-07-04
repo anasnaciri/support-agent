@@ -240,6 +240,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Credential encryption supports primary and previous keys for rotation.
 - [x] Shopify PCD handling, legal/DPA acceptance, retention sweep, and audit PII
       redaction are implemented at the documented level.
+- [x] Case retention is two-stage: resolved cases archive after 30 days, and
+      archived cases delete after 12 months with audit/approval cleanup.
+- [x] Case retention sweep re-checks status/cutoff predicates under row locks
+      before archive/delete, so reopened cases are not archived or purged by a
+      stale sweep selection.
 - [x] Test teardown purges leaked tenants in dependency order.
 - [x] API feature modules replaced the old large composition file.
 - [x] Agent runtime was decomposed into named phases while keeping stateful
@@ -410,6 +415,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       workspaces, superseding the old one-supplier-one-workspace decision.
 - [x] Approval rows do not expire by age; email approval links remain bounded,
       and stale drafts are warned rather than blocked.
+- [x] Case retention archives resolved cases after 30 days and deletes archived
+      cases after 12 months; `archived` is runtime-owned and can reopen on a
+      customer reply before deletion.
 - [x] Member RBAC uses plain dashboard DB functions, not an Effect service tag,
       because agents do not consult human RBAC.
 - [x] Scenario-resolution agent was added beside legacy specialists behind a

@@ -242,6 +242,7 @@ const buildCase = (input: CreateCaseInput, now: Date): Case => ({
   createdAt: now,
   updatedAt: now,
   resolvedAt: null,
+  archivedAt: null,
 });
 
 export const CaseRepositoryTest = Layer.effect(
@@ -376,6 +377,12 @@ export const CaseRepositoryTest = Layer.effect(
             status: toStatus,
             updatedAt: now,
             resolvedAt: toStatus === "resolved" ? now : existing.resolvedAt,
+            archivedAt:
+              toStatus === "archived"
+                ? now
+                : existing.status === "archived"
+                  ? null
+                  : (existing.archivedAt ?? null),
           };
           store.set(id, updated);
           return Effect.succeed(updated);

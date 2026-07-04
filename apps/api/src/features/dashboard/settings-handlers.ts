@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
-  DEFAULT_RETENTION_DAYS,
   CustomAgentService,
   decodeResolutionPolicyUpdate,
   defaultRefundPolicy,
@@ -345,8 +344,8 @@ export const handleDashboardShopCurrency = async (
 };
 
 // GET /dashboard/settings — resolved tenant settings (refund policy +
-// supplier-escalation sheet + notification email + retention). Defaults are
-// applied by getSettings; a transient error falls back to platform defaults.
+// supplier-escalation sheet + notification email). Defaults are applied by
+// getSettings; a transient error falls back to platform defaults.
 export const handleDashboardSettings = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -366,7 +365,6 @@ export const handleDashboardSettings = async (
             notificationEmail: null,
             refundPolicy: defaultRefundPolicy,
             discountPolicy: defaultDiscountPolicy,
-            retentionDays: DEFAULT_RETENTION_DAYS,
             supplierEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
@@ -380,7 +378,6 @@ export const handleDashboardSettings = async (
     notificationEmail: settings.notificationEmail,
     refundPolicy: settings.refundPolicy,
     discountPolicy: settings.discountPolicy,
-    retentionDays: settings.retentionDays,
     supplierEscalationSheet: settings.supplierEscalationSheet,
     legalAcceptance: settings.legalAcceptance,
     // Restock-on-cancel flag for the refund-policy page's "Order

@@ -17,6 +17,7 @@ export type CaseStatus =
   | "waiting_for_approval"
   | "approved_action_running"
   | "resolved"
+  | "archived"
   | "failed"
   | "human_takeover";
 
@@ -29,6 +30,7 @@ export const CASE_STATUSES: ReadonlyArray<CaseStatus> = [
   "waiting_for_approval",
   "approved_action_running",
   "resolved",
+  "archived",
   "failed",
   "human_takeover",
 ];
@@ -42,8 +44,11 @@ export const CASE_STATUSES: ReadonlyArray<CaseStatus> = [
  *     resume (→ in_progress) or an administrative close (→ failed) exits;
  *     in particular the runtime must never resolve or re-park a case a
  *     manager just claimed (the final_message-over-takeover race).
- *   - `resolved`: may reopen (a customer replying on the thread re-enters
- *     the loop) but never flips to `failed`.
+   *   - `resolved`: may reopen (a customer replying on the thread re-enters
+   *     the loop) or move to retention-owned `archived`, but never flips to
+   *     `failed`.
+   *   - `archived`: may reopen from a customer reply; otherwise it stays parked
+   *     until the retention sweep deletes it.
  *   - `failed`: reopen or hand to a human only.
  */
 const RESTRICTED_TRANSITIONS: Partial<
@@ -51,6 +56,15 @@ const RESTRICTED_TRANSITIONS: Partial<
 > = {
   human_takeover: ["in_progress", "failed"],
   resolved: [
+    "in_progress",
+    "triaging",
+    "waiting_for_approval",
+    "waiting_for_customer",
+    "waiting_for_supplier",
+    "human_takeover",
+    "archived",
+  ],
+  archived: [
     "in_progress",
     "triaging",
     "waiting_for_approval",
@@ -184,4 +198,5 @@ export interface Case {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly resolvedAt: Date | null;
+  readonly archivedAt?: Date | null;
 }

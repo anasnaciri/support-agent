@@ -76,9 +76,10 @@ import { CaseDetailLoading } from "./CaseDetailLoading";
 
 // UI-visibility gates for the header actions (NOT the §10 transition matrix —
 // the api enforces the real rules; these just decide which buttons to show).
-const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
+const TERMINAL = new Set(["resolved", "archived", "human_takeover", "failed"]);
 const RESOLVE_HIDDEN = new Set([
   "resolved",
+  "archived",
   "failed",
   "waiting_for_approval",
   "waiting_for_supplier",
@@ -462,8 +463,8 @@ export function CaseDetailPage() {
 
   // Why the composer is read-only when the agent owns the conversation.
   const lockedMessage =
-    caseRow.status === "resolved"
-      ? "This case is resolved. Reopen it from the status menu to reply."
+    caseRow.status === "resolved" || caseRow.status === "archived"
+      ? "This case is closed. Reopen it from the status menu to reply."
       : caseRow.status === "failed"
         ? "This case is closed. Reopen it from the status menu to reply."
         : waitingOnSupplier

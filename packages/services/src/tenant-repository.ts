@@ -492,16 +492,11 @@ export const decodeResolutionPolicyUpdate = (raw: unknown): ResolutionPolicy => 
 };
 
 /**
- * Default retention for resolved cases. 24 months from `resolved_at`
- * matches the privacy-policy default in `docs/shopify-pcd.md` §7. The
- * retention sweep cron deletes resolved cases (and their cascaded
- * `case_state_transitions` / `audit_log` rows) past this window.
- *
- * Merchants can shorten this per-tenant via the dashboard; we don't let
- * them lengthen it past the platform-wide regulatory ceiling (today the
- * dashboard form caps at this default).
+ * Deprecated tenant-settings default retained so older tenant JSON and test
+ * fixtures still decode. It no longer drives case retention; the worker's
+ * current fixed policy lives in `apps/worker/src/retention-sweep.ts`.
  */
-export const DEFAULT_RETENTION_DAYS = 730;
+export const DEFAULT_RETENTION_DAYS = 365;
 
 /**
  * Per-tenant target for warehouse / supplier escalation rows written
@@ -532,7 +527,7 @@ export const defaultSupplierEscalationSheet: SupplierEscalationSheet | null =
  * changes; tenants with older versions must re-accept before new connector
  * writes are allowed.
  */
-export const DATA_PROCESSING_NOTICE_VERSION = "2026-06-04";
+export const DATA_PROCESSING_NOTICE_VERSION = "2026-07-04";
 export const DPA_VERSION = "2026-06-04";
 
 export interface LegalAcceptance {
@@ -567,9 +562,9 @@ export class TenantSettings extends Data.Class<{
    */
   readonly discountPolicy: DiscountPolicy;
   /**
-   * Days of retention for resolved cases (counted from `resolved_at`).
-   * The retention sweep cron deletes anything older. Defaults to
-   * `DEFAULT_RETENTION_DAYS` when the tenant has no value set.
+   * Legacy compatibility setting retained for older stored tenant JSON and
+   * test fixtures. The current worker policy is fixed: archive resolved cases
+   * after 30 days, then delete archived cases after 12 calendar months.
    */
   readonly retentionDays: number;
   /**

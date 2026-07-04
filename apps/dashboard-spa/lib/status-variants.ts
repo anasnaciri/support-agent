@@ -9,6 +9,8 @@ export const caseStatusVariant = (status: string): Variant => {
   switch (status) {
     case "resolved":
       return "successBright";
+    case "archived":
+      return "secondary";
     case "human_takeover":
       return "destructiveBright";
     case "waiting_for_approval":

@@ -168,6 +168,59 @@ describe("CaseRepository (Test layer)", () => {
     );
     expect(result.status).toBe("resolved");
     expect(result.resolvedAt).not.toBeNull();
+    expect(result.archivedAt).toBeNull();
+  });
+
+  it("transitionStatus changes status and sets archivedAt on archived", async () => {
+    const result = await newRun(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const c = yield* repo.create({
+          tenantId: TenantId("t1"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+        });
+        const resolved = yield* repo.transitionStatus(c.id, "resolved", {
+          expectedFromStatus: "new",
+          reason: "test",
+        });
+        return yield* repo.transitionStatus(resolved.id, "archived", {
+          expectedFromStatus: "resolved",
+          reason: "retention",
+        });
+      }),
+    );
+    expect(result.status).toBe("archived");
+    expect(result.resolvedAt).not.toBeNull();
+    expect(result.archivedAt).not.toBeNull();
+  });
+
+  it("transitionStatus clears archivedAt when an archived case reopens", async () => {
+    const result = await newRun(
+      Effect.gen(function* () {
+        const repo = yield* CaseRepository;
+        const c = yield* repo.create({
+          tenantId: TenantId("t1"),
+          channel: "email",
+          currentAgentId: AgentId("support-triage"),
+        });
+        const resolved = yield* repo.transitionStatus(c.id, "resolved", {
+          expectedFromStatus: "new",
+          reason: "test",
+        });
+        const archived = yield* repo.transitionStatus(resolved.id, "archived", {
+          expectedFromStatus: "resolved",
+          reason: "retention",
+        });
+        return yield* repo.transitionStatus(archived.id, "in_progress", {
+          expectedFromStatus: "archived",
+          reason: "customer reply",
+        });
+      }),
+    );
+    expect(result.status).toBe("in_progress");
+    expect(result.resolvedAt).not.toBeNull();
+    expect(result.archivedAt).toBeNull();
   });
 
   it("transitionStatus fails with CaseStateConflict when expected does not match", async () => {

@@ -70,6 +70,6 @@ export const caseUpdateStatus = defineTool({
           ),
         );
 
-      return { caseId: updated.id, status: updated.status };
+      return { caseId: updated.id, status: input.status };
     }),
 });

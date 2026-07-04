@@ -39,13 +39,24 @@ describe("isStatusTransitionAllowed", () => {
     ).toBe(false);
   });
 
-  it("resolved cases can reopen but never flip to failed", () => {
+  it("resolved cases can reopen or archive but never flip to failed", () => {
     expect(isStatusTransitionAllowed("resolved", "in_progress")).toBe(true);
     expect(isStatusTransitionAllowed("resolved", "waiting_for_approval")).toBe(
       true,
     );
     expect(isStatusTransitionAllowed("resolved", "human_takeover")).toBe(true);
+    expect(isStatusTransitionAllowed("resolved", "archived")).toBe(true);
     expect(isStatusTransitionAllowed("resolved", "failed")).toBe(false);
+  });
+
+  it("archived cases can reopen but never become failed or resolved again", () => {
+    expect(isStatusTransitionAllowed("archived", "in_progress")).toBe(true);
+    expect(isStatusTransitionAllowed("archived", "waiting_for_customer")).toBe(
+      true,
+    );
+    expect(isStatusTransitionAllowed("archived", "human_takeover")).toBe(true);
+    expect(isStatusTransitionAllowed("archived", "failed")).toBe(false);
+    expect(isStatusTransitionAllowed("archived", "resolved")).toBe(false);
   });
 
   it("failed cases can only be reopened or handed to a human", () => {
@@ -88,6 +99,7 @@ describe("MERCHANT_SETTABLE_STATUSES / allowedManualStatusTargets", () => {
       "waiting_for_supplier",
       "waiting_for_approval",
       "human_takeover",
+      "archived",
     ] as const) {
       expect(isMerchantSettableStatus(internal)).toBe(false);
     }

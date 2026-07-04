@@ -246,6 +246,13 @@
       "when": 1782911300000,
       "tag": "0034_supplier_multi_tenant",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782911400000,
+      "tag": "0035_case_archival_retention",
+      "breakpoints": true
     }
   ]
 }

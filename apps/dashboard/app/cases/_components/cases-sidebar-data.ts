@@ -112,8 +112,9 @@ export const applyFreshPage = <T extends { readonly id: string }>(
 /** "all" lists every case; "attention" hides resolved (done) cases. */
 export type SidebarMode = "all" | "attention";
 
-/** The terminal status hidden by the "Needs attention" mode. */
+/** The terminal statuses hidden by the "Needs attention" mode. */
 export const RESOLVED_STATUS = "resolved";
+export const ARCHIVED_STATUS = "archived";
 
 /** localStorage key remembering the merchant's chosen sidebar mode. */
 export const MODE_STORAGE_KEY = "cases-sidebar-mode";
@@ -122,7 +123,7 @@ export const MODE_STORAGE_KEY = "cases-sidebar-mode";
 export const sidebarExcludeStatuses = (
   mode: SidebarMode,
 ): ReadonlyArray<string> =>
-  mode === "attention" ? [RESOLVED_STATUS] : [];
+  mode === "attention" ? [RESOLVED_STATUS, ARCHIVED_STATUS] : [];
 
 /**
  * The stale-response / reset identity for a fetch. Folding the mode in (not
@@ -210,7 +211,7 @@ export const caseRowClasses = (args: {
       subject: "font-medium text-foreground",
     };
   }
-  if (args.status === RESOLVED_STATUS) {
+  if (args.status === RESOLVED_STATUS || args.status === ARCHIVED_STATUS) {
     return {
       container: "opacity-60 hover:bg-accent hover:opacity-100",
       subject: "font-light text-muted-foreground",

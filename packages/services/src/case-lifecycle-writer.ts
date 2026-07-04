@@ -388,6 +388,7 @@ const PRIMARY_AGENT_ID = "support-triage" as AgentId;
 
 const TERMINAL_TAKEOVER_STATUSES: ReadonlySet<CaseStatus> = new Set([
   "resolved",
+  "archived",
   "human_takeover",
   "failed",
 ]);
@@ -481,7 +482,9 @@ export const CaseLifecycleWriterLive = Layer.effect(
         tx.run(
           Effect.gen(function* () {
             let current = yield* cases.getById(input.caseId, input.tenantId);
-            if (current.status === "resolved") return current;
+            if (current.status === "resolved" || current.status === "archived") {
+              return current;
+            }
 
             // Bypass-proof identity-disclosure backstop (prod 3428f154): an
             // AGENT must never resolve a case that still carries an UNVERIFIED
@@ -717,7 +720,9 @@ export const CaseLifecycleWriterLive = Layer.effect(
               input.caseId,
               input.tenantId,
             );
-            if (current.status !== "resolved") return current;
+            if (current.status !== "resolved" && current.status !== "archived") {
+              return current;
+            }
             const row = yield* cases.transitionStatus(
               current.id,
               "in_progress",

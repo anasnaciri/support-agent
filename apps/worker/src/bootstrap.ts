@@ -299,9 +299,8 @@ export const buildWorker = async (
     ProcessedMessageStoreLive,
     ProcessedEventStoreLive,
     ToolExecutionStoreLive,
-    // Exposed so workers like the retention-sweep cron can read
-    // per-tenant settings (`retentionDays`). Other services that need
-    // TenantRepository (PlatformMailService, PermissionServiceLive)
+    // Exposed for worker services that need tenant settings. TenantRepository
+    // consumers (PlatformMailService, PermissionServiceLive)
     // are provided their own copy via inner Layer.provide; both copies
     // collapse to the same Live impl, so duplicating is harmless.
     TenantRepositoryLive,

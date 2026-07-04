@@ -74,9 +74,9 @@ export const renderDataProcessingNoticeHtml = (): string => {
 
     <h2>Retention</h2>
     <p>
-      Resolved cases default to 24 months of retention. A daily retention sweep
-      deletes resolved cases, their state transitions, approvals, and audit rows
-      past the tenant retention window.
+      Resolved cases are archived after 30 days. Archived cases are retained for
+      12 months, then a daily retention sweep deletes the case, state
+      transitions, approvals, and audit rows.
     </p>
 
     <h2>Security controls</h2>

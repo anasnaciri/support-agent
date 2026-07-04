@@ -65,6 +65,7 @@ const rowToCase = (r: CaseRow): Case => ({
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
   resolvedAt: r.resolvedAt,
+  archivedAt: r.archivedAt,
 });
 
 const wrap = <A>(
@@ -345,6 +346,12 @@ export const CaseRepositoryLive = Layer.effect(
                 updatedAt: now,
                 resolvedAt:
                   toStatus === "resolved" ? now : current.resolvedAt,
+                archivedAt:
+                  toStatus === "archived"
+                    ? now
+                    : current.status === "archived"
+                      ? null
+                      : current.archivedAt,
               })
               .where(eq(cases.id, id))
               .returning();

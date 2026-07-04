@@ -165,12 +165,12 @@ describe("applyFreshPage", () => {
   });
 });
 
-// The sidebar toggles between "All" and "Needs attention" (hide resolved).
+// The sidebar toggles between "All" and "Needs attention" (hide closed cases).
 // The mode drives a server-side excludeStatus filter, is folded into the
 // stale-response guard so a mode switch resets to page 1, and is persisted.
 describe("sidebarExcludeStatuses", () => {
-  it("hides resolved in attention mode", () => {
-    expect(sidebarExcludeStatuses("attention")).toEqual(["resolved"]);
+  it("hides resolved and archived cases in attention mode", () => {
+    expect(sidebarExcludeStatuses("attention")).toEqual(["resolved", "archived"]);
   });
 
   it("hides nothing in all mode", () => {
@@ -286,6 +286,13 @@ describe("caseRowClasses", () => {
 
   it("recedes inactive resolved rows: thinner, muted, lower opacity", () => {
     const r = caseRowClasses({ status: "resolved", active: false });
+    expect(r.subject).toContain("font-light");
+    expect(r.subject).toContain("text-muted-foreground");
+    expect(r.container).toContain("opacity-60");
+  });
+
+  it("recedes inactive archived rows like other closed cases", () => {
+    const r = caseRowClasses({ status: "archived", active: false });
     expect(r.subject).toContain("font-light");
     expect(r.subject).toContain("text-muted-foreground");
     expect(r.container).toContain("opacity-60");

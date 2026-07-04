@@ -348,13 +348,14 @@ const CASE_MENU_ACTIONS: Record<
   retryFromTriage: retryFromTriageAction,
 };
 
-const TERMINAL = new Set(["resolved", "human_takeover", "failed"]);
+const TERMINAL = new Set(["resolved", "archived", "human_takeover", "failed"]);
 // Manual close ("Resolve" button) is offered while the case is genuinely live
 // and not parked on machinery that owns its own exit (an approval row, a
 // supplier escalation, an in-flight approved action). human_takeover IS
 // included — a manager who owns the case can close it themselves.
 const RESOLVE_HIDDEN = new Set([
   "resolved",
+  "archived",
   "failed",
   "waiting_for_approval",
   "waiting_for_supplier",
@@ -798,8 +799,8 @@ export default async function CaseDetailPage({ params, searchParams }: Params) {
   const waitingOnSupplier =
     caseRow.waitingOn?.supplier ?? caseRow.status === "waiting_for_supplier";
   const lockedMessage =
-    caseRow.status === "resolved"
-      ? "This case is resolved. Reopen it from the status menu to reply."
+    caseRow.status === "resolved" || caseRow.status === "archived"
+      ? "This case is closed. Reopen it from the status menu to reply."
       : caseRow.status === "failed"
         ? "This case is closed. Reopen it from the status menu to reply."
         : waitingOnSupplier

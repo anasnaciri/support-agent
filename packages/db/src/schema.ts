@@ -140,6 +140,7 @@ export const cases = pgTable(
       .notNull()
       .defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (t) => [
     check(
@@ -152,7 +153,7 @@ export const cases = pgTable(
     ),
     check(
       "cases_status_check",
-      sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_supplier','waiting_for_approval','approved_action_running','resolved','failed','human_takeover')`,
+      sql`${t.status} IN ('new','triaging','in_progress','waiting_for_customer','waiting_for_supplier','waiting_for_approval','approved_action_running','resolved','archived','failed','human_takeover')`,
     ),
     // Mirrors CONVERSATION_PROVIDERS in @support-agent/services. NULL passes
     // the CHECK (unstamped legacy cases / non-conversation channels).
