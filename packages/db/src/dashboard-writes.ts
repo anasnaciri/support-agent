@@ -253,6 +253,16 @@ export interface EscalateCaseToSupplierInput {
   readonly problem: string;
   /** Free-text reason saved into the transition + audit details. */
   readonly reason?: string | undefined;
+  /**
+   * The customer-PII-free order projection the supplier sees, derived by the
+   * caller (the api handler) from the case's canonically-bound order — same
+   * slice the agent's supplier.escalate tool supplies. All best-effort nulls
+   * when the case has no resolved order or Shopify is unreachable.
+   */
+  readonly orderRef?: string | null | undefined;
+  readonly shipCity?: string | null | undefined;
+  readonly shipCountry?: string | null | undefined;
+  readonly trackingNumber?: string | null | undefined;
 }
 
 /**
@@ -298,10 +308,10 @@ export const escalateCaseToSupplier = async (
     caseId: input.caseId,
     supplierId: supplier.id,
     problem: input.problem,
-    orderRef: null,
-    shipCity: null,
-    shipCountry: null,
-    trackingNumber: null,
+    orderRef: input.orderRef ?? null,
+    shipCity: input.shipCity ?? null,
+    shipCountry: input.shipCountry ?? null,
+    trackingNumber: input.trackingNumber ?? null,
   });
 
   const reason = input.reason ?? "case escalated to supplier from dashboard";

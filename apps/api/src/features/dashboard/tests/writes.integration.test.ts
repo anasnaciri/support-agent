@@ -144,7 +144,14 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
       mkCase(caseSetStatus, tenantId, "waiting_for_approval"),
       mkCase(caseHt, tenantId, "human_takeover"),
       mkCase(caseDetails, tenantId, "human_takeover"),
-      mkCase(caseEscalate, tenantId, "human_takeover"),
+      {
+        ...mkCase(caseEscalate, tenantId, "human_takeover"),
+        // A canonically-bound order: the handler tries to auto-fill the
+        // supplier's order projection from it. No Shopify creds exist in this
+        // test env, so the lookup fails and the projection must degrade to
+        // nulls WITHOUT blocking the escalation.
+        context: { identifiedOrderId: "gid://shopify/Order/424242" },
+      },
       mkCase(caseEscalateApproval, tenantId, "waiting_for_approval"),
       mkCase(caseEscalateFailed, tenantId, "failed"),
       mkCase(caseEscalateOther, otherTenantId, "in_progress"),
@@ -550,6 +557,10 @@ describeIfDb("apps/api — /dashboard write endpoints (integration)", () => {
     // The escalation row is the notify outbox — the supplier email cron picks
     // up `notified_at IS NULL` rows, same as an agent escalation.
     expect(rows[0]?.notifiedAt).toBeNull();
+    // The bound order couldn't be fetched (no Shopify creds here), so the
+    // projection degrades to nulls rather than failing the escalation.
+    expect(rows[0]?.orderRef).toBeNull();
+    expect(rows[0]?.trackingNumber).toBeNull();
   });
 
   it("escalate-supplier is a no-op while an escalation is already open", async () => {

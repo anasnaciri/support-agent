@@ -89,6 +89,10 @@ import {
   resolveOrderForContext,
 } from "./shopify-panels.js";
 import {
+  resolveCanonicalOrder,
+  supplierOrderProjection,
+} from "./escalation-projection.js";
+import {
   classifyOrderRef,
   normalizeCustomerEmail,
   normalizeCustomerName,
@@ -896,7 +900,10 @@ export const handleDashboardResolveCase = async (
 // the notify outbox (worker cron emails the supplier), and the case parks in
 // waiting_for_supplier — bridging from human_takeover, or staying parked on
 // approval when that's the primary wait. The problem statement is required:
-// it's what the supplier sees in the portal + email.
+// it's what the supplier sees in the portal + email. The order projection
+// (ref, ship city/country, tracking) is auto-filled from the case's
+// canonically-bound order — best-effort, so an unreachable Shopify never
+// blocks the escalation.
 export const handleDashboardEscalateSupplier = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -915,14 +922,31 @@ export const handleDashboardEscalateSupplier = async (
   }
   const reason =
     typeof body["reason"] === "string" ? (body["reason"] as string) : undefined;
-  const outcome = await runWithDb(layer, (db) =>
-    escalateCaseToSupplier(db, {
-      caseId: id,
-      tenantId: auth.tenantId,
-      managerId: auth.userId!,
-      problem,
-      reason,
-    }),
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        const ctx = yield* Effect.promise(() =>
+          caseContextForTenant(db, auth.tenantId, id),
+        );
+        if (!ctx) return { kind: "case_not_found" as const };
+        const order = yield* resolveCanonicalOrder(
+          TenantId(auth.tenantId),
+          (ctx.context ?? {}) as Record<string, unknown>,
+        );
+        return yield* Effect.promise(() =>
+          escalateCaseToSupplier(db, {
+            caseId: id,
+            tenantId: auth.tenantId,
+            managerId: auth.userId!,
+            problem,
+            reason,
+            ...supplierOrderProjection(order),
+          }),
+        );
+      }),
+      layer,
+    ),
   );
   const status =
     outcome.kind === "case_not_found"
