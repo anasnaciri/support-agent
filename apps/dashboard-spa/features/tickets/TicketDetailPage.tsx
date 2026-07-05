@@ -46,8 +46,10 @@ import {
   type ContextBadge,
   type ContextRow,
 } from "@/lib/ticket-context";
+import { approvalDisplayNote } from "@/lib/approval-note";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
+import { composerKey } from "@/lib/composer-key";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -504,6 +506,7 @@ export function TicketDetailPage() {
   const requestedResolution = parseRequestedResolution(
     context["requestedResolution"],
   );
+  const approvalNote = approvalDisplayNote(context);
 
   // The floating card's rows: the customer's ask / evidence / risk / notes,
   // plus the quoted order ref only as a mis-quote heads-up. Empty → no card.
@@ -838,7 +841,7 @@ export function TicketDetailPage() {
                   />
                 ) : null}
                 <ChatComposer
-                  key={id}
+                  key={composerKey(id, composerMode)}
                   workspaceId={ctx.workspaceId}
                   ticketId={id}
                   customerEmail={customerEmail}
@@ -863,6 +866,7 @@ export function TicketDetailPage() {
                 riskFlags={riskFlags}
                 returnReason={returnReason}
                 requestedResolution={requestedResolution}
+                note={approvalNote}
               />
             ) : null}
           </div>

@@ -294,6 +294,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       workspace context, and route-level read/write pages.
 - [x] SPA ticket page supports mutations, approval decisions, refund modal,
       supplier update form, live refetch boundary, and settings forms.
+- [x] Approval UI hides the unused approval `reasoning` field and raw proposed
+      input JSON; approval cards/pages show the ticket context note instead.
 - [x] SPA onboarding self-heals org-less sessions and avoids redirect loops
       when the current user has no accessible workspace.
 - [x] BFF auth supports login, callback, session refresh, logout, onboarding,
@@ -409,6 +411,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `settings.blocked_senders` RBAC permission. SPA:
       `/settings/blocked-senders` page (add input with live classification
       hint, domains/addresses lists) + "Block sender" in the ticket ⋮ menu.
+- [x] SPA ticket page: drafted-reply approval now fills the composer live
+      (2026-07-05). When a live refresh flipped the composer from locked →
+      approval, the Approve/Reject controls appeared but the textarea stayed
+      empty until a page refresh — `ChatComposer` seeds its text state only on
+      mount and was keyed by ticket id alone. Fix: key it with
+      `composerKey(id, mode)` (`apps/dashboard-spa/lib/composer-key.ts`) so it
+      remounts on locked→approval, on a different pending approval, and on a
+      redraft of the same approval (new body), while staying stable across
+      refetches of the same draft so manager edits survive. Tests:
+      `apps/dashboard-spa/test/composer-key.test.ts`.
 
 ---
 
