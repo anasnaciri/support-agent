@@ -30,6 +30,7 @@ import {
   handleDashboardRetrySend,
   handleDashboardSetTicketStatus,
   handleDashboardShopifyApp,
+  handleDashboardBlockTicketSender,
   handleDashboardTakeover,
   handleDashboardToday,
   handleDashboardUsage,
@@ -37,6 +38,9 @@ import {
 import {
   handleDashboardAgentModelClear,
   handleDashboardAgentModelSet,
+  handleDashboardBlockedSenders,
+  handleDashboardBlockedSendersAdd,
+  handleDashboardBlockedSendersRemove,
   handleDashboardAgentSystemPromptClear,
   handleDashboardAgentSystemPromptSet,
   handleDashboardAgentToolPermissionClear,
@@ -235,6 +239,12 @@ export const registerDashboardRoutes = (
     "Best-effort Shopify store currency (ISO 4217) or null",
     handleDashboardShopCurrency,
   );
+  dashboardGet(
+    "/dashboard/blocked-senders",
+    "The tenant's sender blocklist (emails + domains)",
+    handleDashboardBlockedSenders,
+    "settings.blocked_senders",
+  );
 
   // ---- Dashboard write API ----
   dashboardPost(
@@ -304,6 +314,12 @@ export const registerDashboardRoutes = (
     "Escalate a ticket to the workspace's supplier by hand (manager)",
     handleDashboardEscalateSupplier,
     "tickets.set_status",
+  );
+  dashboardPost(
+    "/dashboard/tickets/:id/block-sender",
+    "Add this ticket's customer email to the sender blocklist (manager)",
+    handleDashboardBlockTicketSender,
+    "settings.blocked_senders",
   );
   dashboardPost(
     "/dashboard/tickets/:id/retry",
@@ -489,6 +505,18 @@ export const registerDashboardRoutes = (
     "Set the goodwill-coupon (discount) policy",
     handleDashboardDiscountPolicy,
     "settings.refund_policy",
+  );
+  dashboardPost(
+    "/dashboard/blocked-senders/add",
+    "Block an email address or a whole domain",
+    handleDashboardBlockedSendersAdd,
+    "settings.blocked_senders",
+  );
+  dashboardPost(
+    "/dashboard/blocked-senders/remove",
+    "Unblock an email address or domain",
+    handleDashboardBlockedSendersRemove,
+    "settings.blocked_senders",
   );
   dashboardPost(
     "/dashboard/resolution-policy",

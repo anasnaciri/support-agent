@@ -10,6 +10,7 @@ import {
   decideApprovalBundle,
   decisionToEvent,
   LLMService,
+  normalizeBlockedSenderInput,
   ShopifyService,
   TenantRepository,
   TrackingService,
@@ -17,6 +18,7 @@ import {
   namespaceThreadId,
   ShopifyAppProvisioningStore,
 } from "@support-agent/services";
+import { addBlockedSenderEntry } from "./settings-handlers.js";
 import {
   ApprovalId,
   TicketId,
@@ -1955,4 +1957,51 @@ export const handleDashboardRephrase = async (
           ? 403
           : 502; // failed
   return sendJson(res, status, outcome);
+};
+
+// POST /dashboard/tickets/:id/block-sender — add THIS ticket's customer email
+// to the tenant blocklist (the ⋮ quick action for spammers). The address is
+// derived server-side from the ticket's context — a client-posted email is
+// never trusted. 409 when the ticket has no usable customer email (the
+// operator can set one via the details pencil first).
+export const handleDashboardBlockTicketSender = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const ctx = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const db = yield* DbClient;
+        return yield* Effect.promise(() =>
+          ticketContextForTenant(db, auth.tenantId, id),
+        );
+      }),
+      layer,
+    ),
+  );
+  if (!ctx) return sendJson(res, 404, { error: "ticket_not_found" });
+  const customerEmail = (ctx.context as Record<string, unknown> | null)?.[
+    "customerEmail"
+  ];
+  const entry =
+    typeof customerEmail === "string"
+      ? normalizeBlockedSenderInput(customerEmail)
+      : null;
+  if (!entry || entry.kind !== "email") {
+    return sendJson(res, 409, { error: "missing_customer_email" });
+  }
+  const outcome = await addBlockedSenderEntry(layer, auth.tenantId, entry);
+  if (outcome.kind === "list_full") {
+    return sendJson(res, 400, { error: "list_full" });
+  }
+  return sendJson(res, 200, {
+    ok: true,
+    blocked: entry.value,
+    ...(outcome.kind === "already_blocked" ? { alreadyBlocked: true } : {}),
+  });
 };

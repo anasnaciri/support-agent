@@ -1,14 +1,19 @@
 import { Effect } from "effect";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import {
+  BLOCKED_SENDERS_MAX,
   CustomAgentService,
   decodeResolutionPolicyUpdate,
+  defaultBlockedSenders,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
   legalAcceptanceIsCurrent,
+  normalizeBlockedSenderInput,
   TenantAgentOverridesService,
   TenantRepository,
+  type BlockedSenderEntry,
+  type BlockedSenders,
   type LegalAcceptance,
   type ScenarioPolicy,
 } from "@support-agent/services";
@@ -753,6 +758,137 @@ export const handleDashboardAgentToolPermissionClear = async (
           AgentId(id),
           resolved.tool,
         );
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true });
+};
+
+// ---- Blocked senders ----
+
+const currentBlockedSenders = (
+  layer: ApiLayer,
+  tenantId: string,
+): Promise<BlockedSenders> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        const settings = yield* repo.getSettings(TenantId(tenantId));
+        return settings.blockedSenders ?? defaultBlockedSenders;
+      }).pipe(
+        Effect.catchAll(() => Effect.succeed(defaultBlockedSenders)),
+      ),
+      layer,
+    ),
+  );
+
+/**
+ * Append one normalized entry to the tenant's blocklist. Shared by the
+ * settings add endpoint and the ticket-page "Block sender" action so the
+ * dedupe/cap rules live in exactly one place. Returns the HTTP outcome.
+ */
+export const addBlockedSenderEntry = async (
+  layer: ApiLayer,
+  tenantId: string,
+  entry: BlockedSenderEntry,
+): Promise<
+  | { readonly kind: "added" | "already_blocked" }
+  | { readonly kind: "list_full" }
+> => {
+  const current = await currentBlockedSenders(layer, tenantId);
+  const list = entry.kind === "email" ? current.emails : current.domains;
+  if (list.includes(entry.value)) return { kind: "already_blocked" };
+  if (list.length >= BLOCKED_SENDERS_MAX) return { kind: "list_full" };
+  const next: BlockedSenders =
+    entry.kind === "email"
+      ? { ...current, emails: [...current.emails, entry.value] }
+      : { ...current, domains: [...current.domains, entry.value] };
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setBlockedSenders(TenantId(tenantId), next);
+      }),
+      layer,
+    ),
+  );
+  return { kind: "added" };
+};
+
+// GET /dashboard/blocked-senders — the tenant's sender blocklist. Its own
+// permission-gated endpoint, deliberately NOT part of /dashboard/settings
+// (which any signed-in member may read).
+export const handleDashboardBlockedSenders = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const blocked = await currentBlockedSenders(layer, auth.tenantId);
+  return sendJson(res, 200, {
+    emails: blocked.emails,
+    domains: blocked.domains,
+  });
+};
+
+// POST /dashboard/blocked-senders/add — add one entry. The value is
+// classified server-side: contains "@" with a local part → email entry
+// (blocks one address); bare or "@"-prefixed domain → domain entry (blocks
+// the domain and all its subdomains).
+export const handleDashboardBlockedSendersAdd = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const value = typeof body["value"] === "string" ? body["value"] : "";
+  const entry = normalizeBlockedSenderInput(value);
+  if (!entry) return sendJson(res, 400, { error: "bad_value" });
+  const outcome = await addBlockedSenderEntry(layer, auth.tenantId, entry);
+  if (outcome.kind === "list_full") {
+    return sendJson(res, 400, { error: "list_full" });
+  }
+  return sendJson(res, 200, {
+    ok: true,
+    entry,
+    ...(outcome.kind === "already_blocked" ? { alreadyBlocked: true } : {}),
+  });
+};
+
+// POST /dashboard/blocked-senders/remove — delete one entry. Removing a
+// value that isn't on the list is a no-op, not an error (idempotent UI).
+export const handleDashboardBlockedSendersRemove = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const kind = body["kind"];
+  const value =
+    typeof body["value"] === "string" ? body["value"].trim().toLowerCase() : "";
+  if ((kind !== "email" && kind !== "domain") || value === "") {
+    return sendJson(res, 400, { error: "bad_value" });
+  }
+  const current = await currentBlockedSenders(layer, auth.tenantId);
+  const next: BlockedSenders =
+    kind === "email"
+      ? { ...current, emails: current.emails.filter((e) => e !== value) }
+      : { ...current, domains: current.domains.filter((d) => d !== value) };
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setBlockedSenders(TenantId(auth.tenantId), next);
       }),
       layer,
     ),

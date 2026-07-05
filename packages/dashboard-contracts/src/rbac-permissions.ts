@@ -28,6 +28,7 @@ export type RbacPermissionId =
   | "settings.integrations"
   | "settings.llm"
   | "settings.refund_policy"
+  | "settings.blocked_senders"
   | "settings.notifications"
   | "audit.view"
   | "members.manage"
@@ -174,6 +175,13 @@ export const RBAC_PERMISSIONS: ReadonlyArray<RbacPermissionDef> = [
     id: "settings.refund_policy",
     label: "Edit refund policy",
     description: "Change refund thresholds and the refund policy mode.",
+    category: "Settings",
+  },
+  {
+    id: "settings.blocked_senders",
+    label: "Manage blocked senders",
+    description:
+      "Block email addresses or domains so their messages never open tickets.",
     category: "Settings",
   },
   {

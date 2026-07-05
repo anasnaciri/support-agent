@@ -835,6 +835,17 @@ export interface LegalAcceptanceView {
   readonly acceptedByUserId: string | null;
 }
 
+/**
+ * Sender blocklist for the `/settings/blocked-senders` page. Served by its
+ * own permission-gated GET (NOT part of `TenantSettingsView`, whose endpoint
+ * is reachable by any signed-in member). Email entries block one address;
+ * domain entries block the domain and all its subdomains.
+ */
+export interface BlockedSendersView {
+  readonly emails: ReadonlyArray<string>;
+  readonly domains: ReadonlyArray<string>;
+}
+
 export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
