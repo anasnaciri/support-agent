@@ -178,7 +178,9 @@ export function LlmPage() {
       } else if (err === "missing_key") {
         toast.warning("API key looks empty or too short. Paste the full key.");
       } else {
-        toast.warning("Something went wrong saving your key. Please try again.");
+        toast.warning(
+          "Something went wrong saving your key. Please try again.",
+        );
       }
     },
     onError: (e) => {
@@ -253,8 +255,8 @@ export function LlmPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">AI provider</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Bring your own key. Your agents use it for every reply they write —
-          we never fall back to a key of our own. Without one, new tickets pause
+          Bring your own key. Your agents use it for every reply they write — we
+          never fall back to a key of our own. Without one, new tickets pause
           and wait for you from the first message.
         </p>
       </div>
@@ -289,8 +291,8 @@ export function LlmPage() {
                       {active.source === "account"
                         ? "Inherited from your account. It applies to every workspace without its own override."
                         : status?.workspaceOverride?.updatedAt
-                          ? `Workspace override installed ${formatRelativeTime(status.workspaceOverride.updatedAt)}`
-                          : "Workspace override active"}
+                          ? `API key installed ${formatRelativeTime(status.workspaceOverride.updatedAt)}`
+                          : "API key active"}
                     </div>
                   </div>
                   {active.source === "workspace" ? (
@@ -301,7 +303,7 @@ export function LlmPage() {
                     >
                       {revokeM.isPending
                         ? "Disconnecting…"
-                        : "Disconnect workspace override"}
+                        : "Disconnect API key"}
                     </Button>
                   ) : (
                     <div className="space-y-3 border-t pt-4">
@@ -310,7 +312,7 @@ export function LlmPage() {
                         account key for this workspace only.
                       </p>
                       <CredentialForm
-                        submitLabel="Set workspace override"
+                        submitLabel="Set an API key"
                         onConnect={handleConnect}
                         pending={connectM.isPending}
                       />
@@ -336,8 +338,8 @@ export function LlmPage() {
                   Your provider is{" "}
                   <strong>{PROVIDER_LABEL[activeProvider]}</strong>, but the
                   following agents are set to AI models it can&apos;t serve.
-                  Those agents won&apos;t be able to respond — their tickets will
-                  pause and wait for you.
+                  Those agents won&apos;t be able to respond — their tickets
+                  will pause and wait for you.
                 </p>
                 <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm">
                   {mismatched.map((a) => (
