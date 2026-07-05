@@ -1,9 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
-import type { ModelsResponse } from "@support-agent/dashboard-contracts";
+import type {
+  ModelsResponse,
+  TicketConversationThreadResult,
+} from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
+import { qk } from "@/lib/query-keys";
+import {
+  OPTIMISTIC_MESSAGE_ID_PREFIX,
+  appendOptimisticReply,
+  buildOptimisticOutboundMessage,
+} from "@/lib/optimistic-reply";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -133,11 +146,44 @@ export function ChatComposer({
   );
   const approvalId = mode.kind === "approval" ? mode.approvalId : "";
 
-  const sendM = useTicketMutation({
+  // Optimistic send: drop a pulsing outbound bubble into the thread cache the
+  // instant Send is pressed, then either keep it (the ticket refetch on success
+  // swaps in the real message) or roll the cache back if the request fails.
+  const qc = useQueryClient();
+  const sendM = useTicketMutation<
+    void,
+    {
+      readonly key: QueryKey;
+      readonly previous: TicketConversationThreadResult | undefined;
+    }
+  >({
     workspaceId,
     ticketId,
     action: "reply",
     mutationFn: () => api.sendReply(ctx, ticketId, text),
+    onMutate: async () => {
+      const key = qk.ticketThread(workspaceId, ticketId);
+      // Stop any in-flight thread refetch from clobbering the placeholder.
+      await qc.cancelQueries({ queryKey: key });
+      const previous =
+        qc.getQueryData<TicketConversationThreadResult>(key);
+      const thread =
+        previous?.status === "available" ? previous.thread : null;
+      const optimistic = buildOptimisticOutboundMessage({
+        id: `${OPTIMISTIC_MESSAGE_ID_PREFIX}${Date.now()}`,
+        bodyText: text,
+        customerEmail,
+        thread,
+        sentAt: new Date().toISOString(),
+      });
+      qc.setQueryData<TicketConversationThreadResult>(key, (old) =>
+        appendOptimisticReply(old, optimistic),
+      );
+      return { key, previous };
+    },
+    onError: (rollback) => {
+      if (rollback) qc.setQueryData(rollback.key, rollback.previous);
+    },
     onDone: (kind) => {
       if (kind === "sent") setText("");
     },

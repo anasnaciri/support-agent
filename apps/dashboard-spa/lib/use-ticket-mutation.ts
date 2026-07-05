@@ -38,23 +38,33 @@ const toastFeedback = (fb: ActionFeedback): void => {
   toast[fb.tone](fb.text);
 };
 
-export const useTicketMutation = <TVars = void>(opts: {
+export const useTicketMutation = <TVars = void, TCtx = unknown>(opts: {
   readonly workspaceId: string;
   readonly ticketId: string;
   readonly action: TicketAction;
   readonly mutationFn: (vars: TVars) => Promise<TicketMutationResult>;
   /** Runs after the toast + invalidation on success (e.g. close a dialog). */
   readonly onDone?: (kind: string) => void;
+  /**
+   * Optimistic pre-flight, run before the request. Its return value is handed
+   * back to `onError` so an optimistic cache write can be rolled back on failure.
+   */
+  readonly onMutate?: (vars: TVars) => TCtx | Promise<TCtx>;
+  /** Undo any optimistic state here; runs before the generic error toast. */
+  readonly onError?: (ctx: TCtx | undefined) => void;
 }) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: opts.mutationFn,
+    // Spread conditionally: exactOptionalPropertyTypes rejects `onMutate: undefined`.
+    ...(opts.onMutate ? { onMutate: opts.onMutate } : {}),
     onSuccess: (result) => {
       toastFeedback(ticketActionFeedback(opts.action, result.kind));
       invalidateTicketQueries(qc, opts.workspaceId, opts.ticketId);
       opts.onDone?.(result.kind);
     },
-    onError: () => {
+    onError: (_err, _vars, ctx) => {
+      opts.onError?.(ctx as TCtx | undefined);
       toast.warning("Something went wrong. Please try again.");
     },
   });

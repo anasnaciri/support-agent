@@ -14,6 +14,7 @@ import {
   conversationThreadUnavailableView,
   formatAttachmentSize,
 } from "@/lib/ticket-timeline";
+import { isOptimisticMessage } from "@/lib/optimistic-reply";
 
 const formatDateTime = (date: string): string =>
   date.slice(0, 16).replace("T", " ");
@@ -23,6 +24,9 @@ const senderLabel = (p: DashboardConversationParticipant): string =>
 
 const Bubble = ({ message }: { readonly message: DashboardConversationMessage }) => {
   const outbound = message.direction === "outbound";
+  // An optimistic (not-yet-confirmed) reply pulses and reads "Sending…" until the
+  // real message replaces it on refetch (or is rolled back on failure).
+  const pending = isOptimisticMessage(message);
   return (
     <div
       className={cn(
@@ -40,10 +44,15 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
           {senderLabel(message.from)}
         </span>
         <span>·</span>
-        <span className="font-mono">{formatDateTime(message.sentAt)}</span>
+        <span className="font-mono">
+          {pending ? "Sending…" : formatDateTime(message.sentAt)}
+        </span>
       </div>
       <div
-        className={chatBubbleChromeClass(message)}
+        className={cn(
+          chatBubbleChromeClass(message),
+          pending && "animate-pulse",
+        )}
       >
         {message.sanitizedBodyHtml ? (
           <div
