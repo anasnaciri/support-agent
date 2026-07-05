@@ -51,6 +51,7 @@ import {
   SupplierEscalationServiceTest,
   TenantAgentOverridesServiceTest,
   TrackingServiceTest,
+  TenantRepository,
   TenantRepositoryTest,
   TenantSettings,
   TimerService,
@@ -6298,5 +6299,247 @@ describe("AgentRuntime — merchant notifications", () => {
     expect(notify?.title).toBe("Unverifiable claim");
     expect(notify?.message).toContain("promo code");
     expect(notify?.delivered).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------------
+// Blocked senders — inbound mail from a blocked address/domain is
+// dropped at the top of the tick: no ticket row, no LLM call, and the
+// runtime still reports Completed (so the queue job is consumed, not
+// retried). Fail-open: a settings read failure must NEVER drop mail.
+// ------------------------------------------------------------------
+describe("AgentRuntime — blocked senders", () => {
+  const inbound = (
+    threadId: string,
+    from: { name: string | null; email: string },
+    replyTo?: { name: string | null; email: string },
+    tenantId = "tenant-acme",
+  ): DomainEvent => ({
+    type: "message.received",
+    tenantId: TenantId(tenantId),
+    threadId: threadId as never,
+    payload: {
+      threadId: threadId as never,
+      messageId: `msg-${threadId}`,
+      from,
+      ...(replyTo ? { replyTo } : {}),
+      to: [{ name: "Support", email: "support@merchant.com" }],
+      subject: "BIG SALE 50% OFF",
+      bodyText: "Buy now!",
+      bodyHtml: null,
+      receivedAt: new Date(),
+      attachments: [],
+    },
+  });
+
+  const settingsWithBlocklist = new TenantSettings({
+    notificationEmail: null,
+    refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
+    retentionDays: 730,
+    supplierEscalationSheet: null,
+    legalAcceptance: null,
+    blockedSenders: {
+      emails: ["spammer@gmail.com"],
+      domains: ["marketing.example.com"],
+    },
+  });
+
+  // Env with an LLM spy: any call at all is a gate failure for blocked mail.
+  const makeEnv = (tenantRepo: Layer.Layer<TenantRepository>) => {
+    const llmCalls: string[] = [];
+    const spyLlm = LLMServiceFromFn((_req, ctx) =>
+      Effect.sync(() => {
+        llmCalls.push(`call-${ctx.callIndex}`);
+        return { type: "final_message", text: "ok" } as LLMDecision;
+      }),
+    );
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, orderStatusAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      spyLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepo,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    return { layer, llmCalls };
+  };
+
+  const blocklistRepo = () =>
+    TenantRepositoryTest({
+      settingsByTenant: new Map([
+        [TenantId("tenant-acme"), settingsWithBlocklist],
+      ]),
+    });
+
+  const dropCase = async (
+    threadId: string,
+    from: { name: string | null; email: string },
+    replyTo?: { name: string | null; email: string },
+  ) => {
+    const { layer, llmCalls } = makeEnv(blocklistRepo());
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const result = yield* runtime.handleEvent(
+            inbound(threadId, from, replyTo),
+          );
+          const found = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            threadId as never,
+          );
+          return { result, found };
+        }),
+        layer,
+      ),
+    );
+    expect(out.result.type).toBe("Completed");
+    expect(out.found).toBeNull();
+    expect(llmCalls).toEqual([]);
+  };
+
+  it("drops mail from an exactly blocked email address (no ticket, no LLM call)", async () => {
+    await dropCase("thread-blocked-email", {
+      name: "Spam Guy",
+      email: "spammer@gmail.com",
+    });
+  });
+
+  it("drops mail from a blocked domain, including subdomains", async () => {
+    await dropCase("thread-blocked-domain", {
+      name: "News",
+      email: "news@marketing.example.com",
+    });
+    await dropCase("thread-blocked-subdomain", {
+      name: "News",
+      email: "blast@em1.marketing.example.com",
+    });
+  });
+
+  it("is case-insensitive on the sender address", async () => {
+    await dropCase("thread-blocked-case", {
+      name: "Spam Guy",
+      email: "Spammer@Gmail.COM",
+    });
+  });
+
+  it("drops mail whose Reply-To is blocked even when From is clean", async () => {
+    await dropCase(
+      "thread-blocked-replyto",
+      { name: "Relay", email: "mailer@shopify.com" },
+      { name: "Spam Guy", email: "spammer@gmail.com" },
+    );
+  });
+
+  it("still processes mail from unblocked senders on the same provider domain", async () => {
+    const { layer, llmCalls } = makeEnv(blocklistRepo());
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const result = yield* runtime.handleEvent(
+            inbound("thread-clean", { name: "Jane", email: "jane@gmail.com" }),
+          );
+          const found = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "thread-clean" as never,
+          );
+          return { result, found };
+        }),
+        layer,
+      ),
+    );
+    // The spy LLM's bare final_message parks triage in human takeover —
+    // the assertion that matters is that the message was NOT dropped:
+    // a ticket exists and the agent actually ran.
+    expect(out.found).not.toBeNull();
+    expect(llmCalls.length).toBeGreaterThan(0);
+  });
+
+  it("drops a blocked sender's reply onto an already-open ticket", async () => {
+    const { layer } = makeEnv(
+      TenantRepositoryTest({
+        settingsByTenant: new Map([
+          [TenantId("tenant-acme"), defaultTenantSettings],
+        ]),
+      }),
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const tenants = yield* TenantRepository;
+          const audit = yield* AuditLogService;
+
+          // First message: sender not yet blocked → ticket is created.
+          yield* runtime.handleEvent(
+            inbound("thread-mid-block", { name: "Jane", email: "jane@x.com" }),
+          );
+          const created = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "thread-mid-block" as never,
+          );
+          expect(created).not.toBeNull();
+
+          // Merchant blocks the sender mid-conversation.
+          yield* tenants.setBlockedSenders(TenantId("tenant-acme"), {
+            emails: ["jane@x.com"],
+            domains: [],
+          });
+
+          // Second message on the SAME thread: dropped, no second tick.
+          const result = yield* runtime.handleEvent(
+            inbound("thread-mid-block", { name: "Jane", email: "jane@x.com" }),
+          );
+          const entries = yield* audit.forTicket(created!.id);
+          return { result, entries };
+        }),
+        layer,
+      ),
+    );
+    expect(out.result.type).toBe("Completed");
+    const eventReceivedCount = out.entries.filter(
+      (e) => e.action === "event.received",
+    ).length;
+    expect(eventReceivedCount).toBe(1);
+  });
+
+  it("fails open: a settings read failure never drops mail", async () => {
+    // Tenant absent from the repo → getSettings fails with TenantNotFound.
+    const { layer } = makeEnv(TenantRepositoryTest({}));
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const result = yield* runtime.handleEvent(
+            inbound("thread-failopen", {
+              name: "Jane",
+              email: "jane@example.com",
+            }),
+          );
+          const found = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "thread-failopen" as never,
+          );
+          return { result, found };
+        }),
+        layer,
+      ),
+    );
+    // Not dropped: the ticket exists even though the settings read failed.
+    expect(out.found).not.toBeNull();
   });
 });

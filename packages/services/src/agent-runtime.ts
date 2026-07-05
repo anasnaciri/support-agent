@@ -51,6 +51,10 @@ import {
   defaultResolutionPolicy,
   type TenantSettings,
 } from "./tenant-repository.js";
+import {
+  defaultBlockedSenders,
+  isBlockedSender,
+} from "./blocked-senders.js";
 import { parseRefundAmount } from "./permission-service-live.js";
 import {
   ProcessedMessageStore,
@@ -203,6 +207,10 @@ const AgentRuntimeLayer = Layer.effect(
 
     const tickBody = (
       event: DomainEvent,
+      // Settings already loaded by `tick`'s blocked-senders gate (only for
+      // message.received) — passed through so an inbound tick doesn't read
+      // the tenants row twice. Null ⇒ load lazily below, as before.
+      preloadedSettings: TenantSettings | null = null,
     ): Effect.Effect<WorkflowResult, never> =>
       Effect.gen(function* () {
         const lookup = eventToTicketLookup(event);
@@ -1305,9 +1313,11 @@ const AgentRuntimeLayer = Layer.effect(
           // header to the agent prompt. DB failures fall back to `null`
           // so the runtime continues with the bare agent prompt rather
           // than crashing on a settings-table issue.
-          const tenantSettings: TenantSettings | null = yield* tenantRepo
-            .getSettings(working.tenantId)
-            .pipe(Effect.catchAll(() => Effect.succeed(null)));
+          const tenantSettings: TenantSettings | null =
+            preloadedSettings ??
+            (yield* tenantRepo
+              .getSettings(working.tenantId)
+              .pipe(Effect.catchAll(() => Effect.succeed(null))));
           // Knowledge-base document titles for the system-prompt header. Loaded
           // once per tick (titles only — the `knowledge.search` tool pulls the
           // bodies on demand). Absent service (test layers) → no titles; DB
@@ -2729,6 +2739,40 @@ const AgentRuntimeLayer = Layer.effect(
             return { type: "Completed" } as const;
           }
         }
+        // Blocked-senders gate: inbound mail whose From or Reply-To matches
+        // the tenant's blocklist is dropped before ANY ticket work — no
+        // ticket row, no advisory lock, no agent tick (the whole point is
+        // saving the LLM spend on marketing/spam mail). Fail-open: a
+        // settings read failure must never silently drop customer mail.
+        // The loaded settings are threaded into tickBody so a normal
+        // inbound tick still reads the tenants row exactly once.
+        let preloadedSettings: TenantSettings | null = null;
+        let blocked = false;
+        if (event.type === "message.received") {
+          preloadedSettings = yield* tenantRepo
+            .getSettings(makeTenantId(event.tenantId))
+            .pipe(Effect.catchAll(() => Effect.succeed(null)));
+          if (
+            preloadedSettings &&
+            isBlockedSender(
+              preloadedSettings.blockedSenders ?? defaultBlockedSenders,
+              [event.payload.from.email, event.payload.replyTo?.email],
+            )
+          ) {
+            blocked = true;
+            // Log ids only, not the address itself (audit-redaction
+            // convention: no customer PII in operational logs).
+            yield* Effect.logInfo(
+              "inbound message dropped: sender is on the tenant blocklist",
+            ).pipe(
+              Effect.annotateLogs({
+                tenantId: event.tenantId,
+                threadId: String(event.threadId),
+                messageId: event.payload.messageId,
+              }),
+            );
+          }
+        }
         // Per-ticket serialization (audit L2): the queue keys
         // message.received by THREAD and approval/timer/resume events by
         // TICKET, so two events for the same ticket can run concurrently
@@ -2737,10 +2781,17 @@ const AgentRuntimeLayer = Layer.effect(
         // the ticket for the whole tick; a not-yet-created ticket locks on
         // its thread key instead (creation itself is guarded by the
         // unique (tenant, thread) index).
-        const lockKey = yield* deriveTickLockKey(event, tickets);
-        const result = lockKey
-          ? yield* tx.withLock(lockKey, tickBody(event))
-          : yield* tickBody(event);
+        // A blocked message still falls through to the claim below so a
+        // Pub/Sub redelivery doesn't re-run the settings read.
+        let result: WorkflowResult;
+        if (blocked) {
+          result = { type: "Completed" };
+        } else {
+          const lockKey = yield* deriveTickLockKey(event, tickets);
+          result = lockKey
+            ? yield* tx.withLock(lockKey, tickBody(event, preloadedSettings))
+            : yield* tickBody(event, preloadedSettings);
+        }
         if (
           claimInput &&
           Option.isSome(maybeProcessed) &&
