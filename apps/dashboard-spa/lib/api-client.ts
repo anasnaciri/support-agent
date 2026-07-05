@@ -18,6 +18,7 @@ import type {
   TicketTrackingResult,
   TicketListRow,
   TicketsFilter,
+  BlockedSendersView,
   CatalogResponse,
   CustomAgentView,
   CustomAgentWriteBody,
@@ -815,6 +816,29 @@ export const api = {
     enabled: boolean,
   ): Promise<CallResult> =>
     call("/resolution-agent", { method: "POST", body: { enabled }, ctx }),
+
+  // Sender blocklist (settings/blocked-senders). The add value is classified
+  // server-side: an address blocks one sender, a domain blocks the whole
+  // domain including subdomains.
+  blockedSenders: (ctx: CallCtx): Promise<BlockedSendersView> =>
+    okBody("/blocked-senders", ctx) as Promise<BlockedSendersView>,
+
+  addBlockedSender: (ctx: CallCtx, value: string): Promise<CallResult> =>
+    call("/blocked-senders/add", { method: "POST", body: { value }, ctx }),
+
+  removeBlockedSender: (
+    ctx: CallCtx,
+    entry: { readonly kind: "email" | "domain"; readonly value: string },
+  ): Promise<CallResult> =>
+    call("/blocked-senders/remove", { method: "POST", body: entry, ctx }),
+
+  // Block THIS ticket's customer email (the ⋮ quick action). The api derives
+  // the address from the ticket server-side; 409 = no customer email on it.
+  blockTicketSender: (ctx: CallCtx, ticketId: string): Promise<CallResult> =>
+    call(`/tickets/${encodeURIComponent(ticketId)}/block-sender`, {
+      method: "POST",
+      ctx,
+    }),
 
   setSupplierSheet: (
     ctx: CallCtx,

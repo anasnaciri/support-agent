@@ -23,6 +23,7 @@ import { KnowledgePage } from "@/features/settings/KnowledgePage";
 import { KnowledgeDocPage } from "@/features/settings/KnowledgeDocPage";
 import { LlmPage } from "@/features/settings/LlmPage";
 import { RefundPolicyPage } from "@/features/settings/RefundPolicyPage";
+import { BlockedSendersPage } from "@/features/settings/BlockedSendersPage";
 import { DiscountPolicyPage } from "@/features/settings/DiscountPolicyPage";
 import { ResolutionPolicyPage } from "@/features/settings/ResolutionPolicyPage";
 import { NotificationsPage } from "@/features/settings/NotificationsPage";
@@ -98,6 +99,10 @@ const settingsResolutionPolicyRoute = authedChild(
   "/settings/resolution-policy",
   ResolutionPolicyPage,
 );
+const settingsBlockedSendersRoute = authedChild(
+  "/settings/blocked-senders",
+  BlockedSendersPage,
+);
 const settingsNotificationsRoute = authedChild(
   "/settings/notifications",
   NotificationsPage,
@@ -158,6 +163,7 @@ const routeTree = rootRoute.addChildren([
     settingsRefundPolicyRoute,
     settingsDiscountPolicyRoute,
     settingsResolutionPolicyRoute,
+    settingsBlockedSendersRoute,
     settingsNotificationsRoute,
     settingsPermissionsRoute,
     settingsMembersRoute,

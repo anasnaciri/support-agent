@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Bot,
   Check,
@@ -48,6 +50,8 @@ interface Props {
   readonly showRetrySend: boolean;
   /** Offer "Escalate to supplier" in the ⋮ menu (not already with a supplier, not terminal). */
   readonly canEscalateSupplier: boolean;
+  /** Offer "Block sender" in the ⋮ menu (ticket has a customer email + member holds settings.blocked_senders). */
+  readonly canBlockSender: boolean;
   /** Hand-settable status targets (matrix-validated by the api). */
   readonly statusTargets: ReadonlyArray<string>;
   /** The RefundDialog trigger, when the order is refundable; sits before the ⋮ menu. */
@@ -211,6 +215,7 @@ export function TicketHeaderActions({
   canResume,
   showRetrySend,
   canEscalateSupplier,
+  canBlockSender,
   statusTargets,
   refundSlot,
 }: Props) {
@@ -252,6 +257,36 @@ export function TicketHeaderActions({
     action: "retry",
     mutationFn: () => api.retry(ctx, ticketId, { fromTriage: true }),
     onDone: () => setRetryOpen(false),
+  });
+  // Not a useTicketMutation: the outcome isn't a ticket-state kind, and the
+  // list that changes is the settings blocklist, not the ticket queries.
+  const blockSenderM = useMutation({
+    mutationFn: () => api.blockTicketSender(ctx, ticketId),
+    onSuccess: (res) => {
+      setMenuOpen(false);
+      if (res.status === 200) {
+        const body = res.body as {
+          blocked?: string;
+          alreadyBlocked?: boolean;
+        } | null;
+        const who = body?.blocked ?? "this sender";
+        if (body?.alreadyBlocked) {
+          toast.info(`${who} is already blocked.`);
+        } else {
+          toast.success(`Future emails from ${who} will be ignored.`);
+        }
+        return;
+      }
+      const err = (res.body as { error?: string } | null)?.error;
+      toast.warning(
+        err === "missing_customer_email"
+          ? "This ticket has no customer email to block."
+          : "Something went wrong. Please try again.",
+      );
+    },
+    onError: () => {
+      toast.warning("Something went wrong. Please try again.");
+    },
   });
   const setStatusM = useTicketMutation({
     ...base,
@@ -299,6 +334,18 @@ export function TicketHeaderActions({
               setMenuOpen(false);
               setEscalateOpen(true);
             },
+          },
+        ]
+      : []),
+    ...(canBlockSender
+      ? [
+          {
+            key: "blockSender",
+            label: blockSenderM.isPending ? "Blocking…" : "Block sender",
+            title:
+              "Ignore future emails from this customer's address (manage the list under Settings → Blocked senders)",
+            pending: blockSenderM.isPending,
+            run: () => blockSenderM.mutate(),
           },
         ]
       : []),

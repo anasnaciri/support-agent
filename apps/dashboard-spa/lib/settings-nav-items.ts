@@ -82,6 +82,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "knowledge.view",
       },
       {
+        href: "/settings/blocked-senders",
+        label: "Blocked senders",
+        match: prefix("/settings/blocked-senders"),
+        requires: "settings.blocked_senders",
+      },
+      {
         href: "/settings/usage",
         label: "Usage",
         match: prefix("/settings/usage"),

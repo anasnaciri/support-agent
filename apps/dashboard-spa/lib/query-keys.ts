@@ -36,6 +36,7 @@ export const qk = {
   models: (w: string) => ["models", w] as const,
   settings: (w: string) => ["settings", w] as const,
   resolutionPolicy: (w: string) => ["resolution-policy", w] as const,
+  blockedSenders: (w: string) => ["blocked-senders", w] as const,
   connections: (w: string) => ["connections", w] as const,
   shopifyApp: (w: string) => ["shopify-app", w] as const,
   knowledge: (w: string) => ["knowledge", w] as const,

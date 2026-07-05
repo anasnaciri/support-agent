@@ -12,7 +12,7 @@ import type { ApprovalDetail } from "@support-agent/dashboard-contracts";
 import { api } from "@/lib/api-client";
 import { ApiError } from "@/lib/errors";
 import { qk } from "@/lib/query-keys";
-import { useWorkspaceCtx } from "@/lib/session-context";
+import { useSession, useWorkspaceCtx } from "@/lib/session-context";
 import { usePathname } from "@/lib/navigation";
 import { ticketIdFromPathname } from "@/lib/tickets-sidebar-data";
 import { cn } from "@/lib/utils";
@@ -245,6 +245,7 @@ type SimplifiedTimelineItem =
 
 export function TicketDetailPage() {
   const ctx = useWorkspaceCtx();
+  const { permissions } = useSession();
   const pathname = usePathname() ?? "";
   const id = ticketIdFromPathname(pathname) ?? "";
   const [showFullAudit, setShowFullAudit] = useState(false);
@@ -515,6 +516,11 @@ export function TicketDetailPage() {
   // one status the state machine refuses to park from.
   const canEscalateSupplier = !waitingOnSupplier && ticketRow.status !== "failed";
 
+  // "Block sender" needs an address to block AND the blocklist permission
+  // (the api derives the address server-side; this only decides visibility).
+  const canBlockSender =
+    customerEmail !== null && permissions.has("settings.blocked_senders");
+
   // Why the composer is read-only when the agent owns the conversation.
   const lockedMessage =
     ticketRow.status === "resolved" || ticketRow.status === "archived"
@@ -649,6 +655,7 @@ export function TicketDetailPage() {
             canResume={canResume}
             showRetrySend={showRetrySend}
             canEscalateSupplier={canEscalateSupplier}
+            canBlockSender={canBlockSender}
             statusTargets={ticketRow.manualStatusTargets ?? []}
             refundSlot={
               refundableOrder ? (
