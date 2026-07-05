@@ -84,6 +84,25 @@ describe("buildContextRows", () => {
     ]);
   });
 
+  it("merges duplicate-photo flags into one chip carrying the matched ticket ids", () => {
+    const row = byKey(
+      buildContextRows({
+        riskFlags: [
+          "duplicate_photo_seen_in_ticket_abc",
+          "duplicate_photo_seen_in_ticket_def",
+        ],
+      }),
+      "riskFlags",
+    );
+    expect(row?.badges).toEqual([
+      {
+        text: "Duplicate photo seen in 2 tickets",
+        variant: "destructive",
+        ticketIds: ["abc", "def"],
+      },
+    ]);
+  });
+
   it("summarizes photo signals as a readable sentence", () => {
     const row = byKey(
       buildContextRows({

@@ -14,13 +14,16 @@ import {
   requestedResolutionLabel,
   returnReasonLabel,
 } from "./return-labels";
-import { riskFlagLabel } from "./risk-flag-label";
+import { buildRiskFlagBadges } from "./risk-flag-label";
 
 type BadgeVariant = NonNullable<BadgeProps["variant"]>;
 
 export interface ContextBadge {
   readonly text: string;
   readonly variant: BadgeVariant;
+  /** Tickets this chip references (duplicate-photo guard) — the renderer links
+   *  them: inline for one, in a hover tooltip for many. */
+  readonly ticketIds?: ReadonlyArray<string>;
 }
 
 export interface ContextRow {
@@ -269,7 +272,11 @@ export const buildContextRows = (
     rows.push({
       key: "riskFlags",
       label: "Risk flags",
-      badges: flags.map((f) => ({ text: riskFlagLabel(f), variant: "destructive" })),
+      badges: buildRiskFlagBadges(flags).map((b) => ({
+        text: b.text,
+        variant: "destructive" as const,
+        ...(b.ticketIds ? { ticketIds: b.ticketIds } : {}),
+      })),
     });
 
   // `liveTrackingStatus` is rendered by the dedicated Tracking card, not here —

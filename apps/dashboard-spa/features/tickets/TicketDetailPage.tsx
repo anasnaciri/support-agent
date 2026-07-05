@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -41,7 +41,11 @@ import {
   parseRequestedResolution,
   parseReturnReason,
 } from "@/lib/return-labels";
-import { buildContextCardRows, type ContextRow } from "@/lib/ticket-context";
+import {
+  buildContextCardRows,
+  type ContextBadge,
+  type ContextRow,
+} from "@/lib/ticket-context";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { Link } from "@/components/ui/link";
@@ -50,6 +54,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip } from "@/components/ui/tooltip";
 import { ChatThread } from "./ChatThread";
 import { ChatScrollArea } from "./ChatScrollArea";
 import { TicketDetailsPanel } from "./TicketDetailsPanel";
@@ -184,6 +189,88 @@ const RefundRecommendationBlock = ({
   </div>
 );
 
+// A short, stable handle for a ticket id in a chip/link — the full id (a long
+// opaque token) would blow out the narrow card.
+const shortTicketId = (id: string): string => `#${id.slice(0, 8)}`;
+
+function TicketLink({ id }: { readonly id: string }) {
+  return (
+    <Link
+      href={`/tickets/${id}`}
+      className="font-medium text-inherit underline decoration-1 underline-offset-2 hover:decoration-2"
+    >
+      {shortTicketId(id)}
+    </Link>
+  );
+}
+
+// One risk-flag / evidence chip in the context card. Duplicate-photo chips carry
+// the matched ticket ids: a single one is linked inline; several collapse into a
+// counted chip with a hover tooltip listing every linked ticket. Plain-text
+// chips truncate to keep the card narrow, revealing the full label on hover only
+// when it actually overflows.
+function ContextChip({ badge }: { readonly badge: ContextBadge }) {
+  const ids = badge.ticketIds ?? [];
+
+  if (ids.length === 1 && ids[0]) {
+    return (
+      <Badge variant={badge.variant} className="min-w-0 max-w-full">
+        <span className="min-w-0 truncate">{badge.text}</span>
+        <span className="ms-1 shrink-0">
+          <TicketLink id={ids[0]} />
+        </span>
+      </Badge>
+    );
+  }
+
+  if (ids.length > 1) {
+    return (
+      <Tooltip
+        content={
+          <ul className="flex flex-col gap-1">
+            {ids.map((id) => (
+              <li key={id}>
+                <TicketLink id={id} />
+              </li>
+            ))}
+          </ul>
+        }
+      >
+        <Badge
+          variant={badge.variant}
+          className="min-w-0 max-w-full cursor-default"
+        >
+          <span className="min-w-0 truncate">{badge.text}</span>
+        </Badge>
+      </Tooltip>
+    );
+  }
+
+  return <TruncatingChip badge={badge} />;
+}
+
+// A plain-text chip that shows its full label in a tooltip only when the text is
+// clipped by the card's width (measured after layout).
+function TruncatingChip({ badge }: { readonly badge: ContextBadge }) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (el) setOverflowing(el.scrollWidth > el.clientWidth + 1);
+  }, [badge.text]);
+
+  const chip = (
+    <Badge variant={badge.variant} className="min-w-0 max-w-full">
+      <span ref={textRef} className="min-w-0 truncate">
+        {badge.text}
+      </span>
+    </Badge>
+  );
+
+  return overflowing ? <Tooltip content={badge.text}>{chip}</Tooltip> : chip;
+}
+
 // Rendered inside the floating context card, which owns the border/background
 // chrome — this is just the divided row list. The page computes the rows
 // (buildContextCardRows) and skips the whole card when there are none.
@@ -205,9 +292,7 @@ function TicketContext({
             ) : row.badges ? (
               <div className="flex flex-wrap gap-1.5">
                 {row.badges.map((b, i) => (
-                  <Badge key={`${row.key}-${i}`} variant={b.variant}>
-                    {b.text}
-                  </Badge>
+                  <ContextChip key={`${row.key}-${i}`} badge={b} />
                 ))}
               </div>
             ) : (
