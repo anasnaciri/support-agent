@@ -17,7 +17,6 @@ import { usePathname } from "@/lib/navigation";
 import { ticketIdFromPathname } from "@/lib/tickets-sidebar-data";
 import { cn } from "@/lib/utils";
 import {
-  auditActionLabel,
   ticketStatusLabel,
   humanizeSlug,
   toolActionLabel,
@@ -248,7 +247,6 @@ export function TicketDetailPage() {
   const { permissions } = useSession();
   const pathname = usePathname() ?? "";
   const id = ticketIdFromPathname(pathname) ?? "";
-  const [showFullAudit, setShowFullAudit] = useState(false);
   // The floating context card pushes the chat column ~320px narrower, so it
   // only starts open where there's room (≥2xl); smaller screens keep the
   // header toggle.
@@ -935,69 +933,10 @@ export function TicketDetailPage() {
               <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Timeline
               </h2>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant={!showFullAudit ? "default" : "outline"}
-                  onClick={() => setShowFullAudit(false)}
-                >
-                  Activity
-                </Button>
-                <Button
-                  size="sm"
-                  variant={showFullAudit ? "default" : "outline"}
-                  onClick={() => setShowFullAudit(true)}
-                >
-                  Audit
-                </Button>
-              </div>
             </div>
 
-            {showFullAudit ? (
-              <ol className="relative">
-                {entries.map((e) => (
-                  <li
-                    key={e.id}
-                    className="relative ml-2 border-l-2 border-border pb-3 pl-5 last:pb-0"
-                  >
-                    <span className="absolute -left-[5px] top-3 size-2 rounded-full bg-primary" />
-                    <Card>
-                      {refundRecommendationFromEntry(e) ? (
-                        <CardContent className="space-y-3 p-3 2xl:p-4">
-                          <div className="text-sm font-medium">
-                            Refund recommendation
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {e.actorType}
-                            {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
-                            {formatDateTime(e.occurredAt)}
-                          </div>
-                          <RefundRecommendationBlock
-                            recommendation={refundRecommendationFromEntry(e)!}
-                          />
-                        </CardContent>
-                      ) : (
-                        <CardContent className="space-y-1.5 p-3 2xl:p-4">
-                          <div className="text-sm font-medium">
-                            {auditActionLabel(e.action)}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {e.actorType}
-                            {e.actorId ? ` · ${e.actorId}` : ""} ·{" "}
-                            {formatDateTime(e.occurredAt)}
-                          </div>
-                          {e.details ? (
-                            <pre className="overflow-auto rounded-md bg-muted/50 p-2 text-xs">
-                              {JSON.stringify(e.details, null, 2)}
-                            </pre>
-                          ) : null}
-                        </CardContent>
-                      )}
-                    </Card>
-                  </li>
-                ))}
-              </ol>
-            ) : summaryText || simplifiedTimelineItems.length > 0 ? (
+            {/* do not delete: the raw audit timeline is intentionally hidden. */}
+            {summaryText || simplifiedTimelineItems.length > 0 ? (
               <div className="space-y-3">
                 {summaryText ? (
                   <Card>

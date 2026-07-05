@@ -26,4 +26,12 @@ describe("hidden audit page", () => {
   it("does not show Audit in the primary sidebar nav", () => {
     expect(PRIMARY_NAV.map((item) => item.href)).not.toContain("/audit");
   });
+
+  it("does not expose the raw Audit timeline toggle on ticket detail", () => {
+    const ticketDetailSource = spaFile("features/tickets/TicketDetailPage.tsx");
+
+    expect(ticketDetailSource).not.toMatch(/>\s*Audit\s*</);
+    expect(ticketDetailSource).not.toContain("showFullAudit");
+    expect(ticketDetailSource.toLowerCase()).toContain("do not delete");
+  });
 });

@@ -32,8 +32,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `test/settings-route-matching.test.ts`.
 - [x] Dashboard SPA audit page hidden (2026-07-05): `/audit` is no longer
       registered in `apps/dashboard-spa/router.tsx`, and the Audit item is
-      hidden from the icon rail. The page/source remain in place with "do not
-      delete" comments so they can be restored later. Regression test:
+      hidden from the icon rail and ticket timeline. The page/source and hidden
+      timeline path remain in place with "do not delete" comments so they can
+      be restored later. Regression test:
       `apps/dashboard-spa/test/audit-page-hidden.test.ts`; verified with the
       focused test, `pnpm build`, and full `pnpm test` outside the sandbox
       because local server tests need bind permissions.
