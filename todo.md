@@ -54,6 +54,22 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       run, DB-gated suites, and `pnpm build`; historical migrations keep prior
       names as migration history. Post-review cleanup removed stale duplicate
       route-alias tests after the old aliases were dropped.
+- [x] Backfilled persisted `context.riskFlags` that the vocabulary rename missed
+      (2026-07-05): the case→ticket rename (40084e6) changed only what the
+      perceptual-hash guard STAMPS, so existing tickets still carried
+      `duplicate_photo_seen_in_case_<id>` and the dashboard rendered a mix of
+      "seen in case <uuid>" (stale flag humanized) and "seen on another ticket".
+      Migration `0037_backfill_duplicate_photo_flags.sql` rewrites the leading
+      marker to `duplicate_photo_seen_in_ticket_<id>` in place (id + array order
+      preserved, other flags untouched) AND de-duplicates the array: the runtime
+      dedupes flags with a Set keyed on the raw string, so a prior ticket flagged
+      under both vocabularies over time kept both, and the rename would otherwise
+      yield two identical `..._in_ticket_<id>` entries — the pass keeps each
+      flag's first occurrence. Verified against local Postgres:
+      `packages/db/test/backfill-duplicate-photo-flags.integration.test.ts`
+      (6 cases) + `drizzle-kit migrate` applies cleanly and is idempotent.
+      Lesson: a value-rename that touches strings persisted in JSON columns needs
+      a data backfill, not just a code/table rename.
 - [ ] Finish ticket-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
