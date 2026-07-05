@@ -70,6 +70,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       (6 cases) + `drizzle-kit migrate` applies cleanly and is idempotent.
       Lesson: a value-rename that touches strings persisted in JSON columns needs
       a data backfill, not just a code/table rename.
+- [x] General `context.riskFlags` de-dup (2026-07-05): 0037 only de-duplicated
+      rows that still had a legacy `_case_` flag, so pre-`includes()`-guard
+      arrays with a pure `duplicate_photo_seen_in_ticket_<id>` twin survived and
+      the card still counted "N tickets" with a repeat. Migration
+      `0038_dedup_risk_flags.sql` collapses ANY exact-duplicate array entry
+      (order-preserving, first occurrence), gated on `length > distinct count`.
+      Verified: `packages/db/test/dedup-risk-flags.integration.test.ts` (5 cases)
+      + local `drizzle-kit migrate`. The dashboard `buildRiskFlagBadges` also
+      counts DISTINCT tickets now, so the chip is correct even before the
+      backend redeploys and runs 0038.
 - [ ] Finish ticket-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
@@ -261,7 +271,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       each linked ticket. Copy says "ticket" not "case". Context-card chips
       truncate and reveal the full label in a portaled hover tooltip
       (`components/ui/tooltip.tsx`, fixed-position to escape the card's
-      `overflow-y-auto` clip) only when clipped.
+      `overflow-y-auto` clip) only when clipped. `buildRiskFlagBadges` counts
+      DISTINCT tickets (a repeated id / repeated non-photo flag collapses), and
+      the same merge now also drives the approval signal strip + card via the
+      shared self-contained `riskFlagChipText`.
 - [x] Dark-mode palette and theme switch landed for the SPA.
 - [x] Ticket-detail inbox compacts on small laptop screens (sub-`2xl`): narrower
       details column (`lg:w-72 xl:w-80 2xl:w-96`), tighter card/panel padding,
@@ -506,10 +519,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
-- [ ] `ApprovalSignalsStrip` / `ApprovalCard` still map risk flags 1:1 via
-      `riskFlagLabel`, so multiple duplicate-photo hits render as identical
-      chips there. Reuse `buildRiskFlagBadges` (+ inline/tooltip ticket links)
-      if those surfaces should match the context card's merged treatment.
+- [x] `ApprovalSignalsStrip` / `ApprovalCard` now merge risk flags via
+      `buildRiskFlagBadges` + the shared self-contained `riskFlagChipText`
+      (duplicate-photo hits collapse to one counted chip), matching the context
+      card. The compact surfaces show the count only (no inline links).
 - [ ] `apps/dashboard` (Next) has no Ship-to pencil — the shipping-address
       edit landed SPA-only (the api endpoint is shared, so porting is just the
       popover + action).
