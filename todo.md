@@ -46,7 +46,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Finish ticket-recovery hardening follow-ups: non-Gmail send dedup where
       feasible, and epoch handling for timer/supplier events.
 - [ ] Add deterministic automated-mail guards before triage and before sending
-      customer replies.
+      customer replies. (The manual blocked-senders list landed 2026-07-05;
+      this item is the automatic complement: Auto-Submitted / Precedence:bulk /
+      no-reply detection.)
+- [ ] Surface dropped blocked-sender mail to the merchant (counter or audit
+      trail) — v1 only writes a worker log line for each drop.
 - [ ] Improve connector-health surfacing when live thread load or manual reply
       detects revoked credentials.
 - [ ] Tighten API rate-limit keying so limits are per actor, not per proxy or
@@ -333,6 +337,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       matched-customer state again (it was dropped there, so the pencil
       vanished exactly when a Shopify customer resolved — the Next dashboard
       passes it in all three states).
+- [x] Blocked senders (2026-07-05): per-tenant blocklist of email addresses
+      and whole domains (domain entries cover subdomains) so marketing/spam
+      mail never opens tickets or burns LLM tokens. Runtime gate at the top of
+      the tick (after the processed-message dedup read) drops a matching
+      `message.received` — From AND Reply-To are checked — BEFORE the advisory
+      lock, ticket create, and agent tick; blocked messages are still claimed
+      so redeliveries stay cheap; replies onto already-open tickets are dropped
+      too; fail-open on settings-read errors (a DB hiccup never drops customer
+      mail). Storage: `blockedSenders` `{emails, domains}` sibling key in
+      `tenants.settings` JSONB (no migration) + full-replace
+      `setBlockedSenders` on `TenantRepository`; pure matcher module
+      `packages/services/src/blocked-senders.ts`. API: GET/add/remove
+      `/dashboard/blocked-senders` (server-side normalize + email-vs-domain
+      classification, dedupe, 500-per-list cap) and
+      `/dashboard/tickets/:id/block-sender` (address derived server-side from
+      ticket context; 409 when absent) — all gated on the new
+      `settings.blocked_senders` RBAC permission. SPA:
+      `/settings/blocked-senders` page (add input with live classification
+      hint, domains/addresses lists) + "Block sender" in the ticket ⋮ menu.
 
 ---
 
