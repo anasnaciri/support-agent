@@ -84,4 +84,37 @@ describe("buildRiskFlagBadges", () => {
       { text: "Duplicate photo seen on another ticket" },
     ]);
   });
+
+  it("counts and links DISTINCT tickets, collapsing a repeated ticket id", () => {
+    expect(
+      buildRiskFlagBadges([
+        "duplicate_photo_seen_in_ticket_abc",
+        "duplicate_photo_seen_in_ticket_abc",
+        "duplicate_photo_seen_in_ticket_def",
+      ]),
+    ).toEqual([
+      {
+        text: "Duplicate photo seen in 2 tickets",
+        ticketIds: ["abc", "def"],
+      },
+    ]);
+  });
+
+  it("renders a single chip when a repeated id leaves just one distinct ticket", () => {
+    expect(
+      buildRiskFlagBadges([
+        "duplicate_photo_seen_in_ticket_abc",
+        "duplicate_photo_seen_in_ticket_abc",
+      ]),
+    ).toEqual([{ text: "Duplicate photo seen on ticket", ticketIds: ["abc"] }]);
+  });
+
+  it("de-duplicates a repeated non-photo flag", () => {
+    expect(
+      buildRiskFlagBadges([
+        "refund_customer_mismatch",
+        "refund_customer_mismatch",
+      ]),
+    ).toEqual([{ text: "Refund order belongs to a different customer" }]);
+  });
 });

@@ -9,7 +9,7 @@ import {
   type RequestedResolution,
   type ReturnReason,
 } from "@/lib/return-labels";
-import { riskFlagLabel } from "@/lib/risk-flag-label";
+import { buildRiskFlagBadges, riskFlagChipText } from "@/lib/risk-flag-label";
 import { Link } from "@/components/ui/link";
 import { Badge } from "@/components/ui/badge";
 
@@ -77,9 +77,9 @@ export function ApprovalSignalsStrip({
           {returnReasonLabel(returnReason)}
         </Badge>
       ) : null}
-      {riskFlags.map((flag) => (
-        <Badge key={flag} variant="destructive" className="text-xs">
-          {riskFlagLabel(flag)}
+      {buildRiskFlagBadges(riskFlags).map((badge, i) => (
+        <Badge key={`${badge.text}-${i}`} variant="destructive" className="text-xs">
+          {riskFlagChipText(badge)}
         </Badge>
       ))}
       <Link

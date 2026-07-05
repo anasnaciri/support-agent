@@ -13,7 +13,7 @@ import {
   recommendationVariant,
   type RefundRecommendationSummary,
 } from "@/lib/refund-recommendation";
-import { riskFlagLabel } from "@/lib/risk-flag-label";
+import { buildRiskFlagBadges, riskFlagChipText } from "@/lib/risk-flag-label";
 import {
   requestedResolutionLabel,
   returnReasonLabel,
@@ -198,9 +198,13 @@ export function ApprovalCard({
             <span className="text-xs uppercase tracking-wider text-muted-foreground">
               Risk flags
             </span>
-            {riskFlags.map((flag) => (
-              <Badge key={flag} variant="destructive" className="text-xs">
-                {riskFlagLabel(flag)}
+            {buildRiskFlagBadges(riskFlags).map((badge, i) => (
+              <Badge
+                key={`${badge.text}-${i}`}
+                variant="destructive"
+                className="text-xs"
+              >
+                {riskFlagChipText(badge)}
               </Badge>
             ))}
           </div>

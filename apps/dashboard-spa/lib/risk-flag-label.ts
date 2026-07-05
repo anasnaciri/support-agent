@@ -43,23 +43,34 @@ export interface RiskFlagBadge {
  * identical pills, so they merge into a single chip that counts the matches and
  * carries their ids for linking. The merged chip keeps the slot of its first
  * flag; all other flags map 1:1 through {@link riskFlagLabel}.
+ *
+ * Duplicate entries collapse: the same ticket id (a chip aggregates DISTINCT
+ * tickets) and repeated non-photo flags are each shown once — some persisted
+ * arrays carry duplicates a value-rename or pre-dedup write left behind.
  */
 export const buildRiskFlagBadges = (
   flags: ReadonlyArray<string>,
 ): RiskFlagBadge[] => {
   const badges: RiskFlagBadge[] = [];
   const ticketIds: string[] = [];
+  const seenTicketIds = new Set<string>();
+  const seenFlags = new Set<string>();
   let dupSlot = -1;
   for (const flag of flags) {
     if (flag.startsWith(DUPLICATE_PHOTO_PREFIX)) {
       const id = flag.slice(DUPLICATE_PHOTO_PREFIX.length).trim();
-      if (id) ticketIds.push(id);
+      if (id && !seenTicketIds.has(id)) {
+        seenTicketIds.add(id);
+        ticketIds.push(id);
+      }
       if (dupSlot === -1) {
         dupSlot = badges.length;
         badges.push({ text: "" }); // placeholder; filled once the count is known
       }
       continue;
     }
+    if (seenFlags.has(flag)) continue;
+    seenFlags.add(flag);
     badges.push({ text: riskFlagLabel(flag) });
   }
   if (dupSlot !== -1) {
@@ -76,4 +87,16 @@ export const buildRiskFlagBadges = (
           };
   }
   return badges;
+};
+
+/**
+ * Self-contained chip text for a merged risk-flag badge — for compact surfaces
+ * (the approval signal strip / card) that can't render the context card's
+ * inline ticket links. A duplicate-photo chip names its DISTINCT ticket count;
+ * every other flag uses its own label.
+ */
+export const riskFlagChipText = (badge: RiskFlagBadge): string => {
+  const n = badge.ticketIds?.length ?? 0;
+  if (n === 0) return badge.text;
+  return `Duplicate photo seen on ${n} ticket${n === 1 ? "" : "s"}`;
 };
