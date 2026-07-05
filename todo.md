@@ -21,17 +21,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       once. Status stays the single `primaryWaitStatus` pointer (approval wins);
       both waits are row-derived and shown as chips; a supplier update on a
       waiting-for-approval ticket redrafts (supersedes pending approvals + resumes).
-- [ ] SPA port gap (user-reported 2026-07-04): the settings OVERVIEW is still
-      not ported/reachable. Code-wise `SettingsPage` (9-tile grid) exists and
-      is routed at `/settings` (router.tsx `settingsRoute`), so reproduce in
-      the browser first: check what the rail's Settings cog and the
-      settings-nav "Overview" item actually render — suspects are the
-      `hasAnySettingsAccess` gate hiding the cog, a landing redirect skipping
-      `/settings`, or the `/settings/$` splat/Placeholder winning the match.
-      Compare against apps/dashboard `/settings` and port whatever differs.
-- [ ] Re-sweep apps/dashboard → dashboard-spa for any other unported pages
-      after the above (2026-07-04 sweep found + fixed: /sign-up,
-      /workspaces/new, dead View-notice URL; rest verified route-registered).
+- [x] SPA settings OVERVIEW fixed (2026-07-05): the `/settings/$` splat
+      Placeholder route was SHADOWING the exact `/settings` route, so the
+      overview rendered "This page is being ported to the SPA" instead of
+      `SettingsPage`. TanStack ranks a same-prefix splat above the bare static
+      route for the bare path (verified: `matchRoutes("/settings")` →
+      `/settings/$`). The splat was a leftover from the incremental port and is
+      now obsolete (all settings pages are routed), so it was removed; unknown
+      `/settings/*` now correctly hit the NotFound component. Regression test:
+      `test/settings-route-matching.test.ts`.
+- [x] Re-swept apps/dashboard → dashboard-spa: every Next page has a real SPA
+      route + component (no Placeholder stubs remain outside the router's
+      NotFound fallback). Earlier sweep fixed /sign-up, /workspaces/new, dead
+      View-notice URL; the only remaining defect was the settings-overview
+      splat shadow above.
 - [ ] Remove `waiting_for_approval` / `waiting_for_supplier` from the
       agent-settable `ticket.update_status` enum (`packages/tools/src/ticket/update-status.ts`)
       — those are runtime-owned parks, not agent-settable; agent-visible schema

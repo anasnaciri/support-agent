@@ -130,10 +130,6 @@ const supplierTicketDetailRoute = authedChild(
   "/supplier/tickets/$escalationId",
   SupplierTicketDetailPage,
 );
-// Fallback for any settings subpage not explicitly routed above.
-const settingsSplatRoute = authedChild("/settings/$", () => (
-  <Placeholder title="Settings" />
-));
 
 const publicRoute = (path: string, component: () => React.JSX.Element) =>
   createRoute({ getParentRoute: () => rootRoute, path, component });
@@ -176,7 +172,6 @@ const routeTree = rootRoute.addChildren([
     newWorkspaceRoute,
     supplierTicketsRoute,
     supplierTicketDetailRoute,
-    settingsSplatRoute,
   ]),
   signInRoute,
   signUpRoute,
