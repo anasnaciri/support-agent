@@ -38,6 +38,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `apps/dashboard-spa/test/audit-page-hidden.test.ts`; verified with the
       focused test, `pnpm build`, and full `pnpm test` outside the sandbox
       because local server tests need bind permissions.
+- [x] Dashboard SPA 404 fallback added (2026-07-05): unknown routes now render
+      a dedicated `NotFoundPage` with a "Back home" button linking to `/`,
+      instead of the generic porting Placeholder. Regression test:
+      `apps/dashboard-spa/test/not-found-page.test.ts`; verified with the
+      focused test and `pnpm build`.
 - [x] Re-swept apps/dashboard → dashboard-spa: every Next page has a real SPA
       route + component (no Placeholder stubs remain outside the router's
       NotFound fallback). Earlier sweep fixed /sign-up, /workspaces/new, dead

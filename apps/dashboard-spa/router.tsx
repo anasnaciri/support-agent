@@ -34,7 +34,7 @@ import { AgentDetailPage } from "@/features/settings/AgentDetailPage";
 import { SuppliersPage } from "@/features/settings/SuppliersPage";
 import { SupplierEscalationPage } from "@/features/settings/SupplierEscalationPage";
 import { LegalPage } from "@/features/settings/LegalPage";
-import { Placeholder } from "@/features/placeholder";
+import { NotFoundPage } from "@/features/not-found/NotFoundPage";
 import { NewWorkspacePage } from "@/features/workspaces/NewWorkspacePage";
 import {
   GoodbyePage,
@@ -185,5 +185,5 @@ const routeTree = rootRoute.addChildren([
 export const router = createRouter({
   routeTree,
   defaultPreload: false,
-  defaultNotFoundComponent: () => <Placeholder title="Not found" />,
+  defaultNotFoundComponent: NotFoundPage,
 });
