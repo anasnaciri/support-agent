@@ -2,13 +2,7 @@
 import { useState } from "react";
 import { Link } from "@/components/ui/link";
 import { usePathname } from "@/lib/navigation";
-import {
-  Activity,
-  ClipboardCheck,
-  Home,
-  Inbox,
-  Settings,
-} from "lucide-react";
+import { Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import guidezillaLogo from "@/guidezilla-logo-dark.svg";
@@ -20,6 +14,7 @@ import type {
 
 import { cn } from "@/lib/utils";
 import { hasAnySettingsAccess } from "@/lib/settings-nav-items";
+import { PRIMARY_NAV } from "@/lib/primary-nav";
 import { SignOutButton } from "./SignOutButton";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -31,18 +26,6 @@ interface NavItem {
   /** Permission needed to see this item; absent → always shown. */
   readonly requires?: RbacPermissionId;
 }
-
-const PRIMARY_NAV: ReadonlyArray<NavItem> = [
-  { href: "/", label: "Today", icon: Home, requires: "tickets.view" },
-  { href: "/tickets", label: "Tickets", icon: Inbox, requires: "tickets.view" },
-  {
-    href: "/approvals",
-    label: "Approvals",
-    icon: ClipboardCheck,
-    requires: "approvals.view",
-  },
-  { href: "/audit", label: "Audit", icon: Activity, requires: "audit.view" },
-];
 
 /**
  * Filter nav by the member's permissions. `null` permissions → fail-open (show

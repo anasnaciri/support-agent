@@ -11,7 +11,6 @@ import { TicketsPage } from "@/features/tickets/TicketsPage";
 import { TicketDetailPage } from "@/features/tickets/TicketDetailPage";
 import { ApprovalsPage } from "@/features/approvals/ApprovalsPage";
 import { ApprovalDetailPage } from "@/features/approvals/ApprovalDetailPage";
-import { AuditPage } from "@/features/audit/AuditPage";
 import { UsagePage } from "@/features/usage/UsagePage";
 import { SupplierTicketsPage } from "@/features/supplier/SupplierTicketsPage";
 import { SupplierTicketDetailPage } from "@/features/supplier/SupplierTicketDetailPage";
@@ -66,7 +65,9 @@ const ticketsRoute = authedChild("/tickets", TicketsPage);
 const ticketDetailRoute = authedChild("/tickets/$ticketId", TicketDetailPage);
 const approvalsRoute = authedChild("/approvals", ApprovalsPage);
 const approvalDetailRoute = authedChild("/approvals/$approvalId", ApprovalDetailPage);
-const auditRoute = authedChild("/audit", AuditPage);
+// do not delete: the Audit page route is intentionally hidden for now.
+// import { AuditPage } from "@/features/audit/AuditPage";
+// const auditRoute = authedChild("/audit", AuditPage);
 const settingsRoute = authedChild("/settings", SettingsPage);
 const settingsUsageRoute = authedChild("/settings/usage", UsagePage);
 // Form-heavy settings pages (Phase 4 tail). Static segments are registered
@@ -147,7 +148,8 @@ const routeTree = rootRoute.addChildren([
     ticketDetailRoute,
     approvalsRoute,
     approvalDetailRoute,
-    auditRoute,
+    // do not delete: keep the hidden Audit route available to restore later.
+    // auditRoute,
     settingsRoute,
     settingsUsageRoute,
     settingsAccountRoute,

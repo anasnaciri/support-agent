@@ -30,6 +30,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       now obsolete (all settings pages are routed), so it was removed; unknown
       `/settings/*` now correctly hit the NotFound component. Regression test:
       `test/settings-route-matching.test.ts`.
+- [x] Dashboard SPA audit page hidden (2026-07-05): `/audit` is no longer
+      registered in `apps/dashboard-spa/router.tsx`, and the Audit item is
+      hidden from the icon rail. The page/source remain in place with "do not
+      delete" comments so they can be restored later. Regression test:
+      `apps/dashboard-spa/test/audit-page-hidden.test.ts`; verified with the
+      focused test, `pnpm build`, and full `pnpm test` outside the sandbox
+      because local server tests need bind permissions.
 - [x] Re-swept apps/dashboard → dashboard-spa: every Next page has a real SPA
       route + component (no Placeholder stubs remain outside the router's
       NotFound fallback). Earlier sweep fixed /sign-up, /workspaces/new, dead
@@ -230,6 +237,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       return reason, photo evidence, risk flags, notes) plus a quoted-vs-bound
       order mis-quote heads-up; card and toggle hide when there is nothing to
       show.
+- [x] Duplicate-photo risk flags merge in the context card: the runtime's
+      per-hit `duplicate_photo_seen_in_ticket_<id>` flags collapse into one chip
+      (`buildRiskFlagBadges`) — one match links the ticket inline (`#<short>`),
+      several show a counted chip ("… in N tickets") with a hover tooltip listing
+      each linked ticket. Copy says "ticket" not "case". Context-card chips
+      truncate and reveal the full label in a portaled hover tooltip
+      (`components/ui/tooltip.tsx`, fixed-position to escape the card's
+      `overflow-y-auto` clip) only when clipped.
 - [x] Dark-mode palette and theme switch landed for the SPA.
 - [x] Ticket-detail inbox compacts on small laptop screens (sub-`2xl`): narrower
       details column (`lg:w-72 xl:w-80 2xl:w-96`), tighter card/panel padding,
@@ -474,6 +489,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
+- [ ] `ApprovalSignalsStrip` / `ApprovalCard` still map risk flags 1:1 via
+      `riskFlagLabel`, so multiple duplicate-photo hits render as identical
+      chips there. Reuse `buildRiskFlagBadges` (+ inline/tooltip ticket links)
+      if those surfaces should match the context card's merged treatment.
 - [ ] `apps/dashboard` (Next) has no Ship-to pencil — the shipping-address
       edit landed SPA-only (the api endpoint is shared, so porting is just the
       popover + action).
