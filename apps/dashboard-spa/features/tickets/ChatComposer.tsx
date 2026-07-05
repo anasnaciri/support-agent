@@ -230,7 +230,7 @@ export function ChatComposer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={placeholder}
-          className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+          className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
         />
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <div className="flex items-center gap-1">
