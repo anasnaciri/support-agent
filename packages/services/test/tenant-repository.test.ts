@@ -10,9 +10,11 @@ import {
   TenantSettings,
   decodeResolutionPolicy,
   decodeResolutionPolicyUpdate,
+  defaultBlockedSenders,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
+  type BlockedSenders,
   type LegalAcceptance,
   type RefundPolicy,
   type ResolutionPolicy,
@@ -356,6 +358,44 @@ describe("TenantRepositoryTest", () => {
     );
     expect(got.resolutionAgentEnabled).toBe(true);
     expect(got.notificationEmail).toBe("ops@example.com");
+  });
+
+  it("setBlockedSenders round-trips and preserves siblings", async () => {
+    const initial = settings({ legalAcceptance: currentLegalAcceptance });
+    const layer = TenantRepositoryTest({
+      settingsByTenant: new Map([[tenantId, initial]]),
+    });
+    const blocked: BlockedSenders = {
+      emails: ["spammer@gmail.com"],
+      domains: ["marketing.example.com"],
+    };
+    const got = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setBlockedSenders(tenantId, blocked);
+          return yield* repo.getSettings(tenantId);
+        }),
+        layer,
+      ),
+    );
+    expect(got.blockedSenders).toEqual(blocked);
+    expect(got.notificationEmail).toBe("ops@example.com");
+    expect(got.legalAcceptance).toEqual(currentLegalAcceptance);
+  });
+
+  it("setBlockedSenders fails when the tenant is absent (TenantNotFound)", async () => {
+    const layer = TenantRepositoryTest({});
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.gen(function* () {
+          const repo = yield* TenantRepository;
+          yield* repo.setBlockedSenders(tenantId, defaultBlockedSenders);
+        }),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
   });
 });
 

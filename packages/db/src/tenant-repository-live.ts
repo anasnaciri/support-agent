@@ -1,6 +1,7 @@
 import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
+  decodeBlockedSenders,
   decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -9,6 +10,7 @@ import {
   TenantRepository,
   TenantRepositoryDbError,
   TenantSettings,
+  type BlockedSenders,
   type DiscountPolicy,
   type DiscountPolicyMode,
   type LegalAcceptance,
@@ -217,6 +219,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly cancellationRestock?: unknown;
                 readonly resolutionPolicy?: unknown;
                 readonly resolutionAgentEnabled?: unknown;
+                readonly blockedSenders?: unknown;
               }
             | null;
           const notificationEmail =
@@ -255,6 +258,9 @@ export const TenantRepositoryLive = Layer.effect(
           // Absent (older rows / never configured) ⇒ restock, the safe default
           // for stores that track inventory.
           const cancellationRestock = settings?.cancellationRestock !== false;
+          const blockedSenders = decodeBlockedSenders(
+            settings?.blockedSenders,
+          );
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -266,6 +272,7 @@ export const TenantRepositoryLive = Layer.effect(
             cancellationRestock,
             resolutionPolicy,
             resolutionAgentEnabled,
+            blockedSenders,
           });
         }),
 
@@ -473,6 +480,32 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setResolutionAgentEnabled",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setBlockedSenders: (tenantId, blocked: BlockedSenders) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy — replaces the
+          // `blockedSenders` block, leaves every sibling setting untouched.
+          const json = JSON.stringify({ blockedSenders: blocked });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setBlockedSenders",
                 cause,
               }),
           });

@@ -1,6 +1,8 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { TenantId } from "@support-agent/agent-core";
 
+import type { BlockedSenders } from "./blocked-senders.js";
+
 // ============================================================
 // TenantRepository
 // ============================================================
@@ -613,6 +615,15 @@ export class TenantSettings extends Data.Class<{
    * adopt or drop it.
    */
   readonly resolutionAgentEnabled?: boolean;
+  /**
+   * Sender blocklist: inbound mail whose From or Reply-To matches an
+   * entry is dropped before any ticket work (no ticket, no agent tick).
+   * Optional on the class (existing construction sites don't ripple);
+   * the Live `getSettings` always populates it via `decodeBlockedSenders`
+   * (defaults-on-read → empty lists). Readers building settings by hand
+   * should fall back to `defaultBlockedSenders`.
+   */
+  readonly blockedSenders?: BlockedSenders;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -704,6 +715,16 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setResolutionAgentEnabled: (
       tenantId: TenantId,
       enabled: boolean,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+    /**
+     * Replace the tenant's sender blocklist (both lists at once). Values
+     * must already be normalized (`normalizeBlockedSenderInput`). Same
+     * deep-merge semantics as `setRefundPolicy` — unrelated settings
+     * columns are preserved.
+     */
+    readonly setBlockedSenders: (
+      tenantId: TenantId,
+      blocked: BlockedSenders,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -816,6 +837,17 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, resolutionAgentEnabled: enabled }),
+        );
+        return Effect.void;
+      },
+      setBlockedSenders: (tenantId, blocked) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, blockedSenders: blocked }),
         );
         return Effect.void;
       },
