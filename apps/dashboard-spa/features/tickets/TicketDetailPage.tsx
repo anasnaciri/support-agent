@@ -775,7 +775,7 @@ export function TicketDetailPage() {
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <ChatScrollArea
             bottomKey={threadKey}
-            className="thin-scrollbar min-w-0 flex-1 overflow-y-auto px-4 py-6"
+            className="no-scrollbar min-w-0 flex-1 overflow-y-auto px-4 py-6"
           >
             <div className="mx-auto w-full max-w-3xl">
               <ChatThread

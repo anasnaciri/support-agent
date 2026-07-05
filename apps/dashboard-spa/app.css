@@ -338,6 +338,15 @@
   background: transparent;
 }
 
+/* Hides the scrollbar entirely while keeping the element scrollable. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Brand display font (Guidezilla wordmark). In the Next app this was wired via
    next/font/local; in the SPA it's a plain @font-face exposed as the same CSS
    variable the IconRail reads: font-[family-name:var(--font-climate-crisis)]. */
