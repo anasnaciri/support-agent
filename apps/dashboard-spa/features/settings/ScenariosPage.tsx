@@ -108,13 +108,14 @@ function ScenarioCard({
   readonly onRemove?: () => void;
 }) {
   const custom = onRemove != null;
+  const [active, setActive] = useState(scenario ? scenario.enabled : true);
   const byTool = new Map(
     (scenario?.enabledActions ?? []).map((a) => [a.tool, a.permission]),
   );
   const defaultSupplierMode = scenario?.supplierMode ?? "none";
 
   return (
-    <Card>
+    <Card className={active ? "transition-opacity" : "opacity-55 transition-opacity"}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -174,7 +175,8 @@ function ScenarioCard({
               <span className="font-medium">Active</span>
               <GlassSwitch
                 name={fieldName(formKey, "enabled")}
-                defaultChecked={scenario ? scenario.enabled : true}
+                checked={active}
+                onChange={(e) => setActive(e.currentTarget.checked)}
               />
             </label>
             {custom ? (
