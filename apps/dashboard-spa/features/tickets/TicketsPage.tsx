@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { isDefaultTicketsFilter } from "@/lib/tickets-filters";
 import { ticketStatusVariant } from "@/lib/status-variants";
+import { isTicketProcessing } from "@/lib/ticket-processing";
 import { extraWaitChips } from "@/lib/waiting-chips";
 import { Link } from "@/components/ui/link";
 import { Badge } from "@/components/ui/badge";
@@ -161,7 +162,13 @@ export function TicketsPage() {
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-1">
                       <Badge variant={ticketStatusVariant(r.status)}>
-                        {ticketStatusLabel(r.status)}
+                        <span
+                          className={cn(
+                            isTicketProcessing(r.status) && "chip-shimmer",
+                          )}
+                        >
+                          {ticketStatusLabel(r.status)}
+                        </span>
                       </Badge>
                       {/* Concurrent wait: a ticket parked waiting_for_approval
                           can also carry an open supplier escalation. */}
