@@ -24,6 +24,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       the shared switch motion to 450ms, and reduces the disabled fade so
       disabled scenarios stay readable. Verified with
       `pnpm --filter @support-agent/dashboard-spa build` and `pnpm build`.
+- [x] Dashboard SPA composer beam theme mapping fixed (2026-07-06):
+      `ChatComposer` now reads the persisted dashboard theme preference from
+      the existing `theme` localStorage-backed store, maps app `system` to
+      Beam `auto`, and resolves the OS color scheme only for strength: dark
+      idle/typing strength `0.45`, light idle/typing strength `0.7`, and
+      machine work (`processing` or rephrase in flight) stays `0.8`. Verified
+      with `pnpm vitest run apps/dashboard-spa/test/composer-beam.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`, and `pnpm build`.
 - [x] Dashboard SPA settings simplification (2026-07-06): renamed the UI route
       `/settings/resolution-policy` to `/settings/scenarios` with a client
       redirect from the old path; replaced the multi-agent settings UI with a
@@ -453,12 +461,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] SPA ticket page: live-activity animations (2026-07-06). The reply
       composer is wrapped in `border-beam`'s `<BorderBeam>` (new dashboard-spa
       dependency) — `size="md"`, `colorVariant="ocean"` (matches the blue
-      brand), `theme="auto"` (tracks the same system dark preference as
-      `index.html`'s `.dark` script) — and the beam is `active` while the
-      ticket is processing or a Rephrase-with-AI call is in flight (full
-      strength 0.8), or while the manager is typing in the input (fainter,
-      0.35, with a 1.5s linger after the last keystroke so it doesn't flicker
-      per key). The active/strength decision is the pure `composerBeam` helper
+      brand), with Beam theme mapped from the dashboard preference
+      (`light`/`dark` passthrough, app `system` → Beam `auto`) — and the beam
+      is `active` while the ticket is processing or a Rephrase-with-AI call is
+      in flight (machine-work strength 0.8), or while the manager is typing in
+      the input (theme-tuned strength: dark 0.45, light 0.7, with a 1.5s linger
+      after the last keystroke so it doesn't flicker per key). The
+      active/theme/strength decision is the pure `composerBeam` helper
       (`apps/dashboard-spa/lib/composer-beam.ts`, test:
       `test/composer-beam.test.ts`); only real keystrokes count as typing —
       programmatic setText (rephrase success) doesn't. "Processing" =

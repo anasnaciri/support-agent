@@ -39,6 +39,7 @@ const notify = (): void => {
 };
 
 export const getThemePreference = (): ThemePreference => preference;
+export const getSystemPrefersDark = (): boolean => media.matches;
 
 export const setThemePreference = (next: ThemePreference): void => {
   preference = next;
@@ -58,6 +59,7 @@ export const subscribeTheme = (listener: () => void): (() => void) => {
 
 media.addEventListener("change", () => {
   if (preference === "system") apply();
+  notify();
 });
 
 // Another tab changing the preference should not leave this one stale.
@@ -72,3 +74,6 @@ apply();
 
 export const useThemePreference = (): ThemePreference =>
   useSyncExternalStore(subscribeTheme, getThemePreference);
+
+export const useSystemPrefersDark = (): boolean =>
+  useSyncExternalStore(subscribeTheme, getSystemPrefersDark);

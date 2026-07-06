@@ -19,7 +19,8 @@ import {
   buildOptimisticOutboundMessage,
 } from "@/lib/optimistic-reply";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
-import { FULL_BEAM_STRENGTH, composerBeam } from "@/lib/composer-beam";
+import { composerBeam } from "@/lib/composer-beam";
+import { useSystemPrefersDark, useThemePreference } from "@/lib/theme-store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -153,6 +154,8 @@ export function ChatComposer({
   const [selectedModel, setSelectedModel] = useState<string | null>(
     models?.rephraseModel ?? null,
   );
+  const theme = useThemePreference();
+  const systemPrefersDark = useSystemPrefersDark();
   const approvalId = mode.kind === "approval" ? mode.approvalId : "";
 
   // Optimistic send: drop a pulsing outbound bubble into the thread cache the
@@ -278,13 +281,20 @@ export function ChatComposer({
   // it carries the processing beam; the editable composer only beams while a
   // rephrase is in flight (processing rarely overlaps an editable mode).
   if (mode.kind === "locked") {
+    const lockedBeam = composerBeam({
+      processing,
+      rephrasing: false,
+      typing: false,
+      theme,
+      systemPrefersDark,
+    });
     return (
       <BorderBeam
         size="md"
         colorVariant="ocean"
-        theme="auto"
-        strength={FULL_BEAM_STRENGTH}
-        active={processing}
+        theme={lockedBeam.theme}
+        strength={lockedBeam.strength}
+        active={lockedBeam.active}
       >
         <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           {mode.message}
@@ -312,6 +322,8 @@ export function ChatComposer({
     processing,
     rephrasing: rephraseM.isPending,
     typing,
+    theme,
+    systemPrefersDark,
   });
 
   return (
@@ -319,7 +331,7 @@ export function ChatComposer({
       <BorderBeam
         size="md"
         colorVariant="ocean"
-        theme="auto"
+        theme={beam.theme}
         strength={beam.strength}
         active={beam.active}
       >
