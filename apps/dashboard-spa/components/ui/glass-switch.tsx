@@ -133,6 +133,9 @@ function lensMapUrl(): string {
 const MOTION_MS = 450;
 const MOTION =
   "duration-[450ms] ease-[cubic-bezier(0.34,1.18,0.64,1)] motion-reduce:transition-none";
+// Color changes read sluggish on the spring curve — they snap faster. Keep in
+// sync with the per-property duration/easing literals on the track copy.
+const COLOR_MOTION = "duration-200 ease-out motion-reduce:transition-none";
 
 export type GlassSwitchProps = React.InputHTMLAttributes<HTMLInputElement>;
 
@@ -290,7 +293,7 @@ export function GlassSwitch({
           "shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06),inset_0_1.5px_3px_rgba(0,0,0,0.10)]",
           "group-has-[:checked]/gsw:bg-primary",
           "group-has-[:focus-visible]/gsw:ring-2 group-has-[:focus-visible]/gsw:ring-ring group-has-[:focus-visible]/gsw:ring-offset-2 group-has-[:focus-visible]/gsw:ring-offset-background",
-          MOTION,
+          COLOR_MOTION,
         )}
       />
 
@@ -355,7 +358,12 @@ export function GlassSwitch({
                 "absolute rounded-full bg-input transition-[background-color,transform]",
                 "[--px:0px] group-has-[:checked]/gsw:[--px:-20px] group-has-[:checked]/gsw:bg-primary",
                 "group-data-[dragging]/gsw:transition-none",
-                MOTION,
+                // Per-property, matching the transition-property order:
+                // background-color tracks COLOR_MOTION so the refracted copy
+                // recolors in step with the real track; transform keeps the
+                // slide spring so the copy counter-moves with the thumb.
+                "duration-[200ms,450ms] ease-[ease-out,cubic-bezier(0.34,1.18,0.64,1)]",
+                "motion-reduce:transition-none",
               )}
               style={{
                 left: BLEED - INSET,

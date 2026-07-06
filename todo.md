@@ -514,6 +514,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       (both tokens were `#ffffff`). Scenarios page: inactive scenario cards
       dim to `opacity-55` (Active toggle is now controlled local state, still
       submits via FormData `name`), so disabled scenarios read as disabled.
+      Color transitions (track + refracted track copy) run 200ms ease-out
+      (`COLOR_MOTION` / per-property `duration-[200ms,450ms]`) instead of the
+      450ms slide spring, which read sluggish on color.
 
 ---
 
