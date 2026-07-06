@@ -573,6 +573,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Add stable handling for simultaneous last-workspace deletes.
 - [ ] Reintroduce shareable URL filters in SPA tables if needed; current SPA
       filtering is local state.
+- [x] Integrations page paints a card-grid skeleton (`IntegrationsLoading`,
+      mirrors the provider-card layout) instead of the plain "Loading…" line
+      while connections/settings/shopify-gate queries resolve.
+- [ ] Other settings pages (Agents, AgentDetail, Members, Notifications,
+      Knowledge doc, Permissions, Refund policy, Integration detail, Legal)
+      still render plain "Loading…" text — port the skeleton treatment
+      opportunistically.
 
 ### Auth, RBAC, Workspaces, And Admin
 

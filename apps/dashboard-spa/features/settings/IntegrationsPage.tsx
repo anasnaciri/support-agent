@@ -27,6 +27,7 @@ import {
 } from "@/lib/integration-providers";
 import type { ResolvedToast } from "@/lib/toast-feedback";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -234,6 +235,37 @@ function DisconnectButton({
   );
 }
 
+/** Card-grid skeleton painted while connections/settings/gate queries resolve. */
+function IntegrationsLoading() {
+  return (
+    <div
+      className="grid gap-4 sm:grid-cols-2"
+      aria-busy
+      aria-label="Loading integrations"
+    >
+      {SUPPORTED_PROVIDERS.map((p) => (
+        <Card key={p}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-5 rounded" />
+                <Skeleton className="h-5 w-28" />
+              </div>
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Skeleton className="h-9 w-36 rounded-md" />
+              <Skeleton className="h-9 w-24 rounded-md" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export function IntegrationsPage() {
   const allowed = useRequirePermission("settings.integrations");
   const ctx = useWorkspaceCtx();
@@ -352,7 +384,7 @@ export function IntegrationsPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <IntegrationsLoading />
       ) : (
         <>
           <FeedbackToaster toasts={feedbackToasts} consume={feedbackConsume} />
