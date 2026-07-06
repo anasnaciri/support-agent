@@ -475,6 +475,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       translucent thumb if canvas/filter is unavailable. Geometry literals in
       Tailwind classes (`--x:20px`/`--px:-20px`) must stay in sync with
       `TRAVEL` — noted in the component header.
+- [x] Glass switch press-grow + finger drag: pressing swells the lens past the
+      track bounds (`data-pressed` / `group-active` → `--sx:1.3`/`--sy:1.45`,
+      scale on its own element so it animates while the slide transition is
+      cut) and the thumb is draggable — pointer capture, inline `--x`/`--px`
+      overrides, `data-dragging` disables transform transitions, release
+      commits past the track midpoint. Tap-vs-drag decision is pure
+      (`apps/dashboard-spa/lib/glass-switch-drag.ts`, test
+      `test/glass-switch-drag.test.ts`; drag latches at 3px so a returned drag
+      never re-reads as a tap). Toggling goes through `input.click()` and the
+      root cancels non-input clicks so the wrapping `<label>` can't
+      double-toggle. Not machine-verified in a real browser (auth-gated page)
+      — QA by hand: tap, keyboard space, drag past/short of midpoint, drag on
+      the disabled pending switch.
 
 ---
 
