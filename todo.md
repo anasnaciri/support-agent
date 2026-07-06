@@ -17,6 +17,11 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] `apps/dashboard` (Next) declared obsolete (2026-07-06): its tests are
+      excluded from the vitest suite (`apps/dashboard/**` in
+      `vitest.config.ts` exclude). `apps/dashboard-spa` is the dashboard.
+      The Next source tree itself still exists (and still builds via `tsc -b`);
+      deleting it is a separate decision.
 - [x] Concurrent wait states: a ticket can wait on approval AND a supplier at
       once. Status stays the single `primaryWaitStatus` pointer (approval wins);
       both waits are row-derived and shown as chips; a supplier update on a

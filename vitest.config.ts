@@ -8,7 +8,12 @@ export default defineConfig({
       // apps/api co-locates its tests next to the code under src/**/tests/.
       "apps/**/src/**/*.test.ts",
     ],
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      // apps/dashboard (Next.js) is obsolete — superseded by apps/dashboard-spa.
+      "apps/dashboard/**",
+    ],
     passWithNoTests: true,
     reporters: ["default"],
     // Backstop that deletes any tenant created during the run (cascades to
