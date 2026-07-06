@@ -26,11 +26,11 @@ import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
 
 const TILES = [
   {
-    href: "/settings/agents",
+    href: "/settings/agent",
     icon: Bot,
-    title: "Agents",
+    title: "Agent",
     description:
-      "What each agent does, which AI model it uses, and the actions it may take.",
+      "Tune the resolution agent's model, actions, and instructions.",
   },
   {
     href: "/settings/permissions",
@@ -96,9 +96,6 @@ export function SettingsPage() {
   });
 
   const valueFor = (href: string): string | null => {
-    if (href === "/settings/agents") {
-      return catalog ? String(catalog.agents.length) : null;
-    }
     if (href === "/settings/permissions") {
       return catalog ? String(catalog.tools.length) : null;
     }

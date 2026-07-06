@@ -29,7 +29,7 @@ import {
 
 const ICONS: Record<string, LucideIcon> = {
   "/settings": LayoutGrid,
-  "/settings/agents": Bot,
+  "/settings/agent": Bot,
   "/settings/permissions": ShieldCheck,
   "/settings/scenarios": Workflow,
   "/settings/llm": KeyRound,

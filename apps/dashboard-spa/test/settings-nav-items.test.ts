@@ -8,6 +8,17 @@ import {
 const flatItems = SETTINGS_NAV_GROUPS.flatMap((group) => group.items);
 
 describe("settings nav items", () => {
+  it("exposes Agent at the singular agent settings route", () => {
+    expect(flatItems.find((item) => item.href === "/settings/agent")?.label).toBe(
+      "Agent",
+    );
+  });
+
+  it("marks agent subpaths active under the agent nav item", () => {
+    expect(activeSettingsHref("/settings/agent")).toBe("/settings/agent");
+    expect(activeSettingsHref("/settings/agent/model")).toBe("/settings/agent");
+  });
+
   it("exposes Scenarios at the scenarios settings route", () => {
     expect(
       flatItems.find((item) => item.href === "/settings/scenarios")?.label,

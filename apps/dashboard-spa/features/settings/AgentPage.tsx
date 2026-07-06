@@ -1,15 +1,13 @@
 import * as React from "react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
-import { AlertTriangle, Check, ChevronDown, RotateCcw } from "lucide-react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import type {
   AgentDto,
   AgentOverrideRow,
   CatalogResponse,
-  CustomAgentWriteBody,
   ModelsResponse,
   TenantSettingsView,
 } from "@support-agent/dashboard-contracts";
@@ -17,15 +15,12 @@ import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
 import { useRequirePermission } from "@/lib/require-permission";
-import { useAppNavigate } from "@/lib/navigation";
 import {
   findAgent,
   tenantConfigurableActions,
   currentToolPermission,
   effectivePermission,
-  assignableTools,
 } from "@/lib/catalog";
-import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,11 +31,8 @@ import { Link } from "@/components/ui/link";
 import { ModelCombobox } from "@/components/ui/model-combobox";
 import { PermissionToggle } from "@/components/ui/permission-toggle";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
-import {
-  agentSwitcherOptions,
-  type AgentSwitcherOption,
-} from "@/lib/agent-switcher-data";
-import { AgentForm, DEFAULT_MODEL } from "./NewAgentPage";
+
+const SCENARIO_AGENT_ID = "scenario-resolution-agent";
 
 const modeVariant = (mode: string): "info" | "secondary" =>
   mode === "primary" ? "info" : "secondary";
@@ -67,100 +59,6 @@ const Row = ({
     <dd className="text-sm">{children}</dd>
   </>
 );
-
-// The page <h1> rendered as a dropdown trigger: clicking the agent name opens
-// a list of every agent and navigates to the picked one. Navigation goes
-// through the router so it's a client-side push, not a full reload.
-const AgentSwitcher = ({
-  options,
-  currentName,
-}: {
-  readonly options: ReadonlyArray<AgentSwitcherOption>;
-  readonly currentName: string;
-}) => {
-  const nav = useAppNavigate();
-  const [open, setOpen] = useState(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClickOutside);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const go = (href: string, current: boolean) => {
-    setOpen(false);
-    if (!current) nav.push(href);
-  };
-
-  return (
-    <div ref={containerRef} className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="group inline-flex items-center gap-2 rounded-md text-3xl font-semibold tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >
-        <span>{currentName}</span>
-        <ChevronDown
-          className={cn(
-            "size-5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-          aria-hidden
-        />
-      </button>
-
-      {open ? (
-        <div
-          className="absolute left-0 z-50 mt-2 max-h-[360px] w-[320px] overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-          role="listbox"
-        >
-          {options.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              onClick={() => go(o.href, o.current)}
-              role="option"
-              aria-selected={o.current}
-              className={cn(
-                "flex w-full items-start justify-between gap-3 rounded-sm px-3 py-2 text-left hover:bg-accent hover:text-accent-foreground",
-                o.current && "bg-accent/60",
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{o.name}</span>
-                  <Badge variant={modeVariant(o.mode)}>{o.mode}</Badge>
-                </div>
-                <div className="truncate font-mono text-xs text-muted-foreground">
-                  {o.id}
-                </div>
-              </div>
-              {o.current ? (
-                <Check
-                  className="mt-0.5 size-4 shrink-0 text-primary"
-                  aria-hidden
-                />
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-};
 
 // ---- Built-in agent: read-only cards + model / prompt / permission overrides ----
 
@@ -309,17 +207,12 @@ function BuiltinAgentDetail({
 
   return (
     <div className="space-y-6">
-      <SettingsBreadcrumb
-        items={[{ href: "/settings/agents", label: "Agents" }]}
-        current={agent.name}
-      />
+      <SettingsBreadcrumb current="Agent" />
 
       <div>
-        <AgentSwitcher
-          options={agentSwitcherOptions(catalog.agents, agent.id)}
-          currentName={agent.name}
-        />
+        <h1 className="text-3xl font-semibold tracking-tight">Agent</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>{agent.name}</span>
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
             {agent.id}
           </code>
@@ -610,132 +503,10 @@ function BuiltinAgentDetail({
   );
 }
 
-// ---- Custom (merchant-authored) agent: the editable form ----
-
-function CustomAgentDetail({
-  id,
-  catalog,
-  models,
-}: {
-  readonly id: string;
-  readonly catalog: CatalogResponse;
-  readonly models: ModelsResponse;
-}) {
-  const ctx = useWorkspaceCtx();
-  const w = ctx.workspaceId;
-  const qc = useQueryClient();
-  const nav = useAppNavigate();
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const viewQ = useQuery({
-    queryKey: qk.customAgent(w, id),
-    queryFn: () => api.getCustomAgent(ctx, id),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: (body: CustomAgentWriteBody) =>
-      api.updateCustomAgent(ctx, id, body),
-    onSuccess: (res) => {
-      if (res.status === 404) {
-        nav.replace("/settings/agents");
-        return;
-      }
-      if (res.status !== 200) {
-        setSaveError(
-          (res.body as { error?: string } | null)?.error ?? "unknown",
-        );
-        return;
-      }
-      setSaveError(null);
-      toast.success("Agent saved.");
-      void qc.invalidateQueries({ queryKey: qk.customAgent(w, id) });
-      void qc.invalidateQueries({ queryKey: qk.catalog(w) });
-      void qc.invalidateQueries({ queryKey: qk.agentOverrides(w) });
-    },
-    onError: () => toast.warning("Something went wrong. Please try again."),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => api.deleteCustomAgent(ctx, id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: qk.catalog(w) });
-      toast.success("Agent deleted.");
-      nav.push("/settings/agents");
-    },
-    onError: () => toast.warning("Something went wrong. Please try again."),
-  });
-
-  if (viewQ.isLoading) {
-    return (
-      <div className="space-y-6">
-        <SettingsBreadcrumb
-          items={[{ href: "/settings/agents", label: "Agents" }]}
-          current="Agent"
-        />
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      </div>
-    );
-  }
-
-  const view = viewQ.data;
-  if (!view) return <AgentNotFound />;
-
-  const handoffOptions = catalog.agents
-    .filter((a) => a.id !== id)
-    .map((a) => ({ label: a.name, value: a.id }));
-
-  return (
-    <div className="space-y-6">
-      <SettingsBreadcrumb
-        items={[{ href: "/settings/agents", label: "Agents" }]}
-        current={view.name}
-      />
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">{view.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Custom agent</p>
-      </div>
-      <AgentForm
-        mode="edit"
-        agent={view}
-        assignable={assignableTools(catalog)}
-        handoffOptions={handoffOptions}
-        models={models.entries}
-        defaultModel={view.model || DEFAULT_MODEL}
-        providerConnected={models.connected}
-        error={saveError}
-        onSubmit={(body) => updateMutation.mutate(body)}
-        pending={updateMutation.isPending}
-        onDelete={() => deleteMutation.mutate()}
-        deletePending={deleteMutation.isPending}
-      />
-    </div>
-  );
-}
-
-const AgentNotFound = () => (
-  <div className="space-y-6">
-    <SettingsBreadcrumb
-      items={[{ href: "/settings/agents", label: "Agents" }]}
-      current="Not found"
-    />
-    <div className="space-y-3">
-      <p className="text-sm font-medium">Agent not found</p>
-      <Link
-        href="/settings/agents"
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← All agents
-      </Link>
-    </div>
-  </div>
-);
-
-export function AgentDetailPage() {
+export function AgentPage() {
   const allowed = useRequirePermission("settings.agents");
   const ctx = useWorkspaceCtx();
   const w = ctx.workspaceId;
-  const params = useParams({ strict: false });
-  const id = (params as { agentId?: string }).agentId ?? "";
 
   const catalogQ = useQuery({
     queryKey: qk.catalog(w),
@@ -777,22 +548,20 @@ export function AgentDetailPage() {
   ) {
     return (
       <div className="space-y-6">
-        <SettingsBreadcrumb
-          items={[{ href: "/settings/agents", label: "Agents" }]}
-          current="Agent"
-        />
+        <SettingsBreadcrumb current="Agent" />
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
-  const agent = findAgent(catalog, id);
-  if (!agent) return <AgentNotFound />;
-
-  // Custom (merchant-authored) agents render the editable form, not the
-  // read-only built-in cards.
-  if (agent.isCustom) {
-    return <CustomAgentDetail id={id} catalog={catalog} models={models} />;
+  const agent = findAgent(catalog, SCENARIO_AGENT_ID);
+  if (!agent) {
+    return (
+      <div className="space-y-6">
+        <SettingsBreadcrumb current="Agent" />
+        <p className="text-sm font-medium">Agent unavailable</p>
+      </div>
+    );
   }
 
   const overrideRow = overrides.find((o) => o.agentId === agent.id) ?? null;

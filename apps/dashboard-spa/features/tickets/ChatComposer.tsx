@@ -5,6 +5,7 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
+import { BorderBeam } from "border-beam";
 import type {
   ModelsResponse,
   TicketConversationThreadResult,
@@ -270,7 +271,8 @@ export function ChatComposer({
 
   return (
     <div className="space-y-2">
-      <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
+      <BorderBeam size="md" colorVariant="ocean" theme="auto" strength={0.8}>
+        <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
         <Textarea
           ref={textareaRef}
           value={text}
@@ -340,7 +342,8 @@ export function ChatComposer({
             </Button>
           )}
         </div>
-      </div>
+        </div>
+      </BorderBeam>
       {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}
     </div>
   );

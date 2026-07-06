@@ -29,9 +29,7 @@ import { ScenariosPage } from "@/features/settings/ScenariosPage";
 import { NotificationsPage } from "@/features/settings/NotificationsPage";
 import { PermissionsPage } from "@/features/settings/PermissionsPage";
 import { MembersPage } from "@/features/settings/MembersPage";
-import { AgentsPage } from "@/features/settings/AgentsPage";
-import { NewAgentPage } from "@/features/settings/NewAgentPage";
-import { AgentDetailPage } from "@/features/settings/AgentDetailPage";
+import { AgentPage } from "@/features/settings/AgentPage";
 import { SuppliersPage } from "@/features/settings/SuppliersPage";
 import { SupplierEscalationPage } from "@/features/settings/SupplierEscalationPage";
 import { LegalPage } from "@/features/settings/LegalPage";
@@ -80,9 +78,7 @@ const approvalDetailRoute = authedChild("/approvals/$approvalId", ApprovalDetail
 // const auditRoute = authedChild("/audit", AuditPage);
 const settingsRoute = authedChild("/settings", SettingsPage);
 const settingsUsageRoute = authedChild("/settings/usage", UsagePage);
-// Form-heavy settings pages (Phase 4 tail). Static segments are registered
-// before their `$param` siblings (e.g. /settings/agents/new before
-// /settings/agents/$agentId) so the static route wins.
+// Form-heavy settings pages (Phase 4 tail).
 const settingsAccountRoute = authedChild("/settings/account", AccountSettingsPage);
 const settingsIntegrationsRoute = authedChild(
   "/settings/integrations",
@@ -123,12 +119,10 @@ const settingsPermissionsRoute = authedChild(
   PermissionsPage,
 );
 const settingsMembersRoute = authedChild("/settings/members", MembersPage);
-const settingsAgentsRoute = authedChild("/settings/agents", AgentsPage);
-const settingsNewAgentRoute = authedChild("/settings/agents/new", NewAgentPage);
-const settingsAgentDetailRoute = authedChild(
-  "/settings/agents/$agentId",
-  AgentDetailPage,
-);
+const settingsAgentRoute = authedChild("/settings/agent", AgentPage);
+const settingsAgentsRoute = authedChild("/settings/agents", () => (
+  <ClientRedirect to="/settings/agent" />
+));
 const settingsSuppliersRoute = authedChild("/settings/suppliers", SuppliersPage);
 const settingsSupplierEscalationRoute = authedChild(
   "/settings/supplier-escalation",
@@ -176,9 +170,8 @@ const routeTree = rootRoute.addChildren([
     settingsNotificationsRoute,
     settingsPermissionsRoute,
     settingsMembersRoute,
+    settingsAgentRoute,
     settingsAgentsRoute,
-    settingsNewAgentRoute,
-    settingsAgentDetailRoute,
     settingsSuppliersRoute,
     settingsSupplierEscalationRoute,
     settingsLegalRoute,

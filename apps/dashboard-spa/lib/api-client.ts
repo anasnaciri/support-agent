@@ -20,8 +20,6 @@ import type {
   TicketsFilter,
   BlockedSendersView,
   CatalogResponse,
-  CustomAgentView,
-  CustomAgentWriteBody,
   ConnectorConnectionView,
   KnowledgeDocumentSummaryView,
   KnowledgeDocumentView,
@@ -670,42 +668,6 @@ export const api = {
     call(`/agents/${encodeURIComponent(agentId)}/tool-permission/clear`, {
       method: "POST",
       body: { tool },
-      ctx,
-    }),
-
-  // ---- Custom (merchant-authored) agents ----
-  createCustomAgent: (
-    ctx: CallCtx,
-    body: CustomAgentWriteBody,
-  ): Promise<{ status: number; body: unknown }> =>
-    call("/custom-agents", { method: "POST", body, ctx, on403: "return" }),
-
-  getCustomAgent: async (
-    ctx: CallCtx,
-    id: string,
-  ): Promise<CustomAgentView | null> => {
-    const { status, body } = await call(
-      `/custom-agents/${encodeURIComponent(id)}`,
-      { ctx, on403: "return" },
-    );
-    return status === 200 ? (body as CustomAgentView) : null;
-  },
-
-  updateCustomAgent: (
-    ctx: CallCtx,
-    id: string,
-    body: CustomAgentWriteBody,
-  ): Promise<{ status: number; body: unknown }> =>
-    call(`/custom-agents/${encodeURIComponent(id)}`, {
-      method: "POST",
-      body,
-      ctx,
-      on403: "return",
-    }),
-
-  deleteCustomAgent: (ctx: CallCtx, id: string): Promise<CallResult> =>
-    call(`/custom-agents/${encodeURIComponent(id)}/delete`, {
-      method: "POST",
       ctx,
     }),
 

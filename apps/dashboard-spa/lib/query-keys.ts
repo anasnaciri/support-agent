@@ -45,7 +45,6 @@ export const qk = {
   usage: (w: string, start: string, end: string) =>
     ["usage", w, start, end] as const,
   agentOverrides: (w: string) => ["agent-overrides", w] as const,
-  customAgent: (w: string, id: string) => ["custom-agent", w, id] as const,
   members: (w: string) => ["members", w] as const,
   roles: (w: string) => ["roles", w] as const,
   permissionCatalog: (w: string) => ["permission-catalog", w] as const,
@@ -75,7 +74,6 @@ export const workspaceScopedKeyPrefixes = [
   "llm",
   "usage",
   "agent-overrides",
-  "custom-agent",
   "members",
   "roles",
   "permission-catalog",

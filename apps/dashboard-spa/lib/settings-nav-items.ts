@@ -40,9 +40,9 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
     label: "Workspace",
     items: [
       {
-        href: "/settings/agents",
-        label: "Agents",
-        match: prefix("/settings/agents"),
+        href: "/settings/agent",
+        label: "Agent",
+        match: prefix("/settings/agent"),
         requires: "settings.agents",
       },
       {
