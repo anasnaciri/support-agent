@@ -130,12 +130,18 @@ function lensMapUrl(): string {
 
 // Shared spring-ish motion for the thumb and the counter-moving track copy —
 // identical curves so the refracted track appears stationary mid-flight.
+const MOTION_MS = 450;
 const MOTION =
-  "duration-300 ease-[cubic-bezier(0.34,1.25,0.64,1)] motion-reduce:transition-none";
+  "duration-[450ms] ease-[cubic-bezier(0.34,1.18,0.64,1)] motion-reduce:transition-none";
 
 export type GlassSwitchProps = React.InputHTMLAttributes<HTMLInputElement>;
 
-export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
+export function GlassSwitch({
+  className,
+  checked,
+  onChange,
+  ...props
+}: GlassSwitchProps) {
   const filterId = React.useId();
   const [map, setMap] = React.useState<string>("");
   React.useEffect(() => {
@@ -146,6 +152,10 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const thumbRef = React.useRef<HTMLSpanElement>(null);
   const trackCopyRef = React.useRef<HTMLSpanElement>(null);
+  const stateChangeTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const lastControlledChecked = React.useRef(checked);
   // Live pointer gesture; null when idle. `dragged` latches once movement
   // exceeds the threshold so a drag returned to its start stays a drag.
   const gesture = React.useRef<{
@@ -154,6 +164,32 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
     origin: number;
     dragged: boolean;
   } | null>(null);
+
+  const markStateChanging = React.useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (stateChangeTimeout.current) clearTimeout(stateChangeTimeout.current);
+    root.setAttribute("data-state-changing", "");
+    stateChangeTimeout.current = setTimeout(() => {
+      root.removeAttribute("data-state-changing");
+      stateChangeTimeout.current = null;
+    }, MOTION_MS + 80);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (stateChangeTimeout.current) clearTimeout(stateChangeTimeout.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (checked === undefined || lastControlledChecked.current === checked) {
+      lastControlledChecked.current = checked;
+      return;
+    }
+    lastControlledChecked.current = checked;
+    markStateChanging();
+  }, [checked, markStateChanging]);
 
   const endGesture = (
     e: React.PointerEvent<HTMLSpanElement>,
@@ -173,7 +209,10 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
       // click() rather than assigning `checked` so `change` fires and
       // controlled parents hear about it. Committed before the inline drag
       // overrides are cleared so the thumb settles toward its new slot.
-      if (next !== input.checked) input.click();
+      if (next !== input.checked) {
+        markStateChanging();
+        input.click();
+      }
     }
     rootRef.current?.removeAttribute("data-pressed");
     rootRef.current?.removeAttribute("data-dragging");
@@ -186,7 +225,7 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
       ref={rootRef}
       className={cn(
         "group/gsw relative inline-block shrink-0 touch-none select-none",
-        "has-[:disabled]:opacity-50",
+        "has-[:disabled]:opacity-85",
         // The visible control is 28px tall; pad the hit area toward 40px.
         "before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']",
         className,
@@ -235,6 +274,11 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
         type="checkbox"
         role="switch"
         className="sr-only"
+        checked={checked}
+        onChange={(e) => {
+          markStateChanging();
+          onChange?.(e);
+        }}
         {...props}
       />
 
@@ -275,7 +319,9 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
             the positioner's transition is cut mid-drag. */}
         <span
           className={cn(
-            "absolute inset-0 overflow-hidden rounded-full transition-transform",
+            "absolute inset-0 overflow-hidden rounded-full bg-card transition-[background-color,transform]",
+            "group-has-[:checked]/gsw:bg-primary-foreground",
+            "group-has-[:disabled]/gsw:bg-card/90 group-has-[:checked]:has-[:disabled]/gsw:bg-primary-foreground/90",
             "shadow-[0_2px_5px_rgba(0,0,0,0.22),0_1px_1.5px_rgba(0,0,0,0.14)]",
             "[--sx:1] [--sy:1]",
             "group-active/gsw:[--sx:1.3] group-active/gsw:[--sy:1.45]",
@@ -289,7 +335,11 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
               track pill), counter-translated so it lines up with the real
               track, then bent by the displacement filter. */}
           <span
-            className="absolute bg-card"
+            className={cn(
+              "absolute bg-card opacity-0 transition-opacity",
+              "group-active/gsw:opacity-100 group-data-[pressed]/gsw:opacity-100 group-data-[dragging]/gsw:opacity-100 group-data-[state-changing]/gsw:opacity-100",
+              MOTION,
+            )}
             style={{
               left: -BLEED,
               top: -BLEED,
@@ -317,14 +367,22 @@ export function GlassSwitch({ className, ...props }: GlassSwitchProps) {
           </span>
 
           {/* Glass tint */}
-          <span className="absolute inset-0 rounded-full bg-white/10" />
+          <span
+            className={cn(
+              "absolute inset-0 rounded-full bg-white/10 opacity-0 transition-opacity",
+              "group-active/gsw:opacity-100 group-data-[pressed]/gsw:opacity-100 group-data-[dragging]/gsw:opacity-100 group-data-[state-changing]/gsw:opacity-100",
+              MOTION,
+            )}
+          />
 
           {/* Specular highlight + rim light */}
           <span
             className={cn(
-              "absolute inset-0 rounded-full",
+              "absolute inset-0 rounded-full opacity-0 transition-opacity",
+              "group-active/gsw:opacity-100 group-data-[pressed]/gsw:opacity-100 group-data-[dragging]/gsw:opacity-100 group-data-[state-changing]/gsw:opacity-100",
               "bg-[linear-gradient(160deg,rgba(255,255,255,0.38),rgba(255,255,255,0)_42%)]",
               "shadow-[inset_0_1px_1px_rgba(255,255,255,0.65),inset_0_-1px_2px_rgba(255,255,255,0.18),inset_1px_0_1px_rgba(255,255,255,0.16),inset_-1px_0_1px_rgba(255,255,255,0.16),inset_0_-2px_4px_rgba(0,0,0,0.08)]",
+              MOTION,
             )}
           />
         </span>

@@ -17,6 +17,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Dashboard SPA GlassSwitch resting treatment refined (2026-07-06):
+      `apps/dashboard-spa/components/ui/glass-switch.tsx` now keeps the thumb
+      as an opaque solid surface at rest, reveals the glass/refraction layers
+      only while the switch is changing state or being pressed/dragged, slows
+      the shared switch motion to 450ms, and reduces the disabled fade so
+      disabled scenarios stay readable. Verified with
+      `pnpm --filter @support-agent/dashboard-spa build` and `pnpm build`.
 - [x] Dashboard SPA settings simplification (2026-07-06): renamed the UI route
       `/settings/resolution-policy` to `/settings/scenarios` with a client
       redirect from the old path; replaced the multi-agent settings UI with a
