@@ -4,7 +4,7 @@
 // feedback, not activity. When inactive the strength is irrelevant (the beam
 // is faded out) — it stays at the typing level.
 export const FULL_BEAM_STRENGTH = 0.8;
-export const TYPING_BEAM_STRENGTH = 0.35;
+export const TYPING_BEAM_STRENGTH = 0.55;
 
 export interface ComposerBeamSignals {
   readonly processing: boolean;
