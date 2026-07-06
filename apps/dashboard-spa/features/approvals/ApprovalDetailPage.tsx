@@ -8,6 +8,7 @@ import { useWorkspaceCtx } from "@/lib/session-context";
 import { approvalStatusLabel, toolActionLabel } from "@/lib/labels";
 import { approvalStatusVariant, riskVariant } from "@/lib/status-variants";
 import { draftStaleness } from "@/lib/draft-staleness";
+import { approvalDisplayNote } from "@/lib/approval-note";
 import { Link } from "@/components/ui/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { ApprovalDecisionCard } from "./ApprovalDecisionCard";
 
-// The standalone approval-detail page: reasoning, proposed input, staleness,
-// and the decision surface (ApprovalDecisionCard — edit-and-approve / reject,
-// wired to api.approveApproval / rejectApproval; Phase 4). A settled approval
-// shows a read-only decided summary.
+// The standalone approval-detail page: ticket note, staleness, and the decision
+// surface (ApprovalDecisionCard — edit-and-approve / reject, wired to
+// api.approveApproval / rejectApproval). A settled approval shows a read-only
+// decided summary.
 
 export function ApprovalDetailPage() {
   const ctx = useWorkspaceCtx();
@@ -29,6 +30,11 @@ export function ApprovalDetailPage() {
     queryKey: qk.approval(ctx.workspaceId, id),
     queryFn: () => api.approvalDetail(ctx, id),
     enabled: id.length > 0,
+  });
+  const { data: ticketDetail } = useQuery({
+    queryKey: qk.ticket(ctx.workspaceId, row?.ticketId ?? ""),
+    queryFn: () => api.ticketDetail(ctx, row!.ticketId),
+    enabled: Boolean(row?.ticketId),
   });
 
   if (isLoading) {
@@ -48,6 +54,10 @@ export function ApprovalDetailPage() {
 
   const isPending = row.status === "pending";
   const staleness = isPending ? draftStaleness(row.createdAt) : null;
+  const ticketContext = (ticketDetail?.ticket.context ?? {}) as Readonly<
+    Record<string, unknown>
+  >;
+  const note = approvalDisplayNote(ticketContext);
 
   return (
     <div className="space-y-6">
@@ -101,27 +111,16 @@ export function ApprovalDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Reasoning</CardTitle>
+          <CardTitle>Note</CardTitle>
         </CardHeader>
         <CardContent>
-          {row.reasoning ? (
-            <p className="text-sm">{row.reasoning}</p>
+          {note ? (
+            <p className="whitespace-pre-wrap text-sm">{note}</p>
           ) : (
             <p className="text-sm italic text-muted-foreground">
-              (no reasoning recorded)
+              (no note recorded)
             </p>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Proposed input</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-            {JSON.stringify(row.proposedInput, null, 2)}
-          </pre>
         </CardContent>
       </Card>
 

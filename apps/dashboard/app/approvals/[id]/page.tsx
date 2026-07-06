@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { PageBreadcrumb } from "@/components/page-breadcrumb";
+import { approvalDisplayNote } from "@/lib/approval-note";
 
 import { approveAction, rejectAction } from "./actions";
 
@@ -28,6 +29,7 @@ export default async function ApprovalDetailPage({ params }: Params) {
   const ctx = await getDashboardContext();
   const row = await api.approvalDetail(ctx, id);
   if (!row) notFound();
+  const ticketDetail = await api.ticketDetail(ctx, row.ticketId);
   const isPending = row.status === "pending";
   const proposed =
     row.proposedInput && typeof row.proposedInput === "object"
@@ -38,6 +40,10 @@ export default async function ApprovalDetailPage({ params }: Params) {
       ? (proposed["bodyText"] as string)
       : null;
   const staleness = isPending ? draftStaleness(row.createdAt) : null;
+  const ticketContext = (ticketDetail?.ticket.context ?? {}) as Readonly<
+    Record<string, unknown>
+  >;
+  const note = approvalDisplayNote(ticketContext);
 
   return (
     <div className="space-y-6">
@@ -93,27 +99,16 @@ export default async function ApprovalDetailPage({ params }: Params) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Reasoning</CardTitle>
+          <CardTitle>Note</CardTitle>
         </CardHeader>
         <CardContent>
-          {row.reasoning ? (
-            <p className="text-sm">{row.reasoning}</p>
+          {note ? (
+            <p className="whitespace-pre-wrap text-sm">{note}</p>
           ) : (
             <p className="text-sm italic text-muted-foreground">
-              (no reasoning recorded)
+              (no note recorded)
             </p>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Proposed input</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-            {JSON.stringify(row.proposedInput, null, 2)}
-          </pre>
         </CardContent>
       </Card>
 

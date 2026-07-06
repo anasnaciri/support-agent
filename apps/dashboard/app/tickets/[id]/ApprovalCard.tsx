@@ -72,6 +72,7 @@ interface Props {
    */
   readonly returnReason?: ReturnReason | null;
   readonly requestedResolution?: RequestedResolution | null;
+  readonly note?: string | null;
 }
 
 const PRODUCT_MATCH_LABEL: Record<
@@ -97,6 +98,7 @@ export const ApprovalCard = ({
   riskFlags,
   returnReason,
   requestedResolution,
+  note,
 }: Props) => {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -145,8 +147,8 @@ export const ApprovalCard = ({
           </div>
         ) : null}
 
-        {approval.reasoning ? (
-          <p className="text-sm">{approval.reasoning}</p>
+        {note ? (
+          <p className="whitespace-pre-wrap text-sm">{note}</p>
         ) : null}
 
         {productMatch ? (
@@ -279,28 +281,18 @@ export const ApprovalCard = ({
             </div>
           </form>
         ) : (
-          <>
-            <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">
-                Proposed input
-              </summary>
-              <pre className="mt-2 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-                {JSON.stringify(approval.proposedInput, null, 2)}
-              </pre>
-            </details>
-            <form action={approveAction}>
-              <input type="hidden" name="approvalId" value={approval.id} />
-              <input type="hidden" name="returnTo" value={returnTo} />
-              <div className="flex flex-wrap items-center gap-2">
-                <SubmitButton variant="default" pendingLabel="Approving…">
-                  Approve
-                </SubmitButton>
-                <Button asChild variant="outline">
-                  <Link href={`/approvals/${approval.id}`}>Open full view</Link>
-                </Button>
-              </div>
-            </form>
-          </>
+          <form action={approveAction}>
+            <input type="hidden" name="approvalId" value={approval.id} />
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <div className="flex flex-wrap items-center gap-2">
+              <SubmitButton variant="default" pendingLabel="Approving…">
+                Approve
+              </SubmitButton>
+              <Button asChild variant="outline">
+                <Link href={`/approvals/${approval.id}`}>Open full view</Link>
+              </Button>
+            </div>
+          </form>
         )}
 
         <Separator className="bg-warning/30" />

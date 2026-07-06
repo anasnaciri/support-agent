@@ -44,6 +44,7 @@ interface Props {
   readonly riskFlags?: ReadonlyArray<string>;
   readonly returnReason?: ReturnReason | null;
   readonly requestedResolution?: RequestedResolution | null;
+  readonly note?: string | null;
 }
 
 const PRODUCT_MATCH_LABEL: Record<"match" | "mismatch" | "uncertain", string> = {
@@ -67,6 +68,7 @@ export function ApprovalCard({
   riskFlags,
   returnReason,
   requestedResolution,
+  note,
 }: Props) {
   const proposed =
     approval.proposedInput && typeof approval.proposedInput === "object"
@@ -139,8 +141,8 @@ export function ApprovalCard({
           </div>
         ) : null}
 
-        {approval.reasoning ? (
-          <p className="text-sm">{approval.reasoning}</p>
+        {note ? (
+          <p className="whitespace-pre-wrap text-sm">{note}</p>
         ) : null}
 
         {productMatch ? (
@@ -281,27 +283,17 @@ export function ApprovalCard({
             </div>
           </div>
         ) : (
-          <>
-            <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">
-                Proposed input
-              </summary>
-              <pre className="mt-2 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-                {JSON.stringify(approval.proposedInput, null, 2)}
-              </pre>
-            </details>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                onClick={() => approveM.mutate()}
-                disabled={approveM.isPending}
-              >
-                Approve
-              </Button>
-              <Button asChild variant="outline">
-                <Link href={`/approvals/${approval.id}`}>Open full view</Link>
-              </Button>
-            </div>
-          </>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => approveM.mutate()}
+              disabled={approveM.isPending}
+            >
+              Approve
+            </Button>
+            <Button asChild variant="outline">
+              <Link href={`/approvals/${approval.id}`}>Open full view</Link>
+            </Button>
+          </div>
         )}
 
         <Separator className="bg-warning/30" />

@@ -78,6 +78,7 @@ import { buildContextRows } from "./ticket-context";
 import { parseLiveTracking } from "./tracking-panel-data";
 import { shouldShowRetrySendAction } from "./retry-send-visibility";
 import { cn } from "@/lib/utils";
+import { approvalDisplayNote } from "@/lib/approval-note";
 
 interface Params {
   readonly params: Promise<{
@@ -678,6 +679,7 @@ export default async function TicketDetailPage({ params, searchParams }: Params)
   const requestedResolution = parseRequestedResolution(
     context["requestedResolution"],
   );
+  const approvalNote = approvalDisplayNote(context);
   // Prefer the fresh live lookup (rich: origin/destination, transit days, full
   // checkpoint history); fall back to the on-ticket `liveTrackingStatus` stamp.
   const liveTracking =
@@ -1020,6 +1022,7 @@ export default async function TicketDetailPage({ params, searchParams }: Params)
               riskFlags={riskFlags}
               returnReason={returnReason}
               requestedResolution={requestedResolution}
+              note={approvalNote}
             />
           ) : null}
           </div>
