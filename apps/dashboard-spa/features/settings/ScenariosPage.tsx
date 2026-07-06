@@ -22,6 +22,7 @@ import {
 } from "@/lib/parse-resolution";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { GlassSwitch } from "@/components/ui/glass-switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,8 +73,7 @@ function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }) {
 
   return (
     <label className="flex cursor-pointer items-center gap-3">
-      <input
-        type="checkbox"
+      <GlassSwitch
         name="enabled"
         checked={checked}
         disabled={toggleM.isPending}
@@ -82,7 +82,6 @@ function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }) {
           setChecked(next);
           toggleM.mutate(next);
         }}
-        className="size-4 rounded border-input accent-primary"
       />
       <span className="text-sm font-medium">
         Route new tickets to the resolution agent
@@ -172,13 +171,11 @@ function ScenarioCard({
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+              <span className="font-medium">Active</span>
+              <GlassSwitch
                 name={fieldName(formKey, "enabled")}
                 defaultChecked={scenario ? scenario.enabled : true}
-                className="size-4 rounded border-input accent-primary"
               />
-              <span className="font-medium">Active</span>
             </label>
             {custom ? (
               <Button

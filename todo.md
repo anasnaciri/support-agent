@@ -463,6 +463,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       the agent works) and the header status chip gets a `.chip-shimmer`
       highlight sweep (`app.css`, reduced-motion safe). Follow-up candidate,
       not done: shimmer on the tickets-list / sidebar status chips.
+- [x] Scenarios page: replaced the two native checkboxes (page-level "route to
+      resolution agent" + per-scenario "Active") with a liquid-glass switch
+      (`apps/dashboard-spa/components/ui/glass-switch.tsx`, Aave-glass style).
+      The thumb is a lens: a canvas-generated displacement map feeds an SVG
+      `feDisplacementMap` (3 chroma-split passes) that refracts a
+      counter-translated copy of the track; CSS layers add specular/rim.
+      Wraps a real `<input type="checkbox" role="switch">`, so uncontrolled
+      FormData usage (`enabled` → "on") and the controlled toggle both work
+      unchanged; visuals are pure CSS `:has(:checked)`. Degrades to a clean
+      translucent thumb if canvas/filter is unavailable. Geometry literals in
+      Tailwind classes (`--x:20px`/`--px:-20px`) must stay in sync with
+      `TRAVEL` — noted in the component header.
 
 ---
 
