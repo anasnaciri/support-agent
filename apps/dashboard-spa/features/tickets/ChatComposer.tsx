@@ -19,6 +19,7 @@ import {
   buildOptimisticOutboundMessage,
 } from "@/lib/optimistic-reply";
 import { useApprovalDecision, useTicketMutation } from "@/lib/use-ticket-mutation";
+import { FULL_BEAM_STRENGTH, composerBeam } from "@/lib/composer-beam";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,10 @@ interface ChatComposerProps {
 // scrolls instead of pushing the send controls off-screen.
 const COMPOSER_MIN_HEIGHT = 64;
 const COMPOSER_MAX_HEIGHT = 260;
+
+// How long the faint typing beam lingers after the last keystroke, so it
+// breathes through natural pauses instead of flickering per key.
+const TYPING_BEAM_LINGER_MS = 1500;
 
 const rephraseErrorText = (kind: string): string => {
   if (kind === "no_llm") return "Connect an AI provider in settings to rephrase.";
@@ -234,6 +239,26 @@ export function ChatComposer({
     mutationFn: (id: string) => api.setRephraseModel(ctx, id),
   });
 
+  // The typing signal for the beam: lit on each keystroke, cleared after a
+  // linger so it fades out when the manager pauses. Only real keystrokes set
+  // it — programmatic setText (rephrase success) doesn't go through onChange.
+  const [typing, setTyping] = useState(false);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteTyping = () => {
+    setTyping(true);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(
+      () => setTyping(false),
+      TYPING_BEAM_LINGER_MS,
+    );
+  };
+  useEffect(
+    () => () => {
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+    },
+    [],
+  );
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Resize to fit the content, clamped to [MIN, MAX]; scroll past the cap.
   useEffect(() => {
@@ -258,7 +283,7 @@ export function ChatComposer({
         size="md"
         colorVariant="ocean"
         theme="auto"
-        strength={0.8}
+        strength={FULL_BEAM_STRENGTH}
         active={processing}
       >
         <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
@@ -283,20 +308,29 @@ export function ChatComposer({
     saveModelM.mutate(id);
   };
 
+  const beam = composerBeam({
+    processing,
+    rephrasing: rephraseM.isPending,
+    typing,
+  });
+
   return (
     <div className="space-y-2">
       <BorderBeam
         size="md"
         colorVariant="ocean"
         theme="auto"
-        strength={0.8}
-        active={processing || rephraseM.isPending}
+        strength={beam.strength}
+        active={beam.active}
       >
         <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
           <Textarea
             ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+            setText(e.target.value);
+            noteTyping();
+          }}
             placeholder={placeholder}
             className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />

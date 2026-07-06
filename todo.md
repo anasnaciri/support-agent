@@ -447,9 +447,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       composer is wrapped in `border-beam`'s `<BorderBeam>` (new dashboard-spa
       dependency) — `size="md"`, `colorVariant="ocean"` (matches the blue
       brand), `theme="auto"` (tracks the same system dark preference as
-      `index.html`'s `.dark` script), `strength={0.8}` — and the beam is
-      `active` only while the ticket is processing or a Rephrase-with-AI call
-      is in flight. "Processing" =
+      `index.html`'s `.dark` script) — and the beam is `active` while the
+      ticket is processing or a Rephrase-with-AI call is in flight (full
+      strength 0.8), or while the manager is typing in the input (fainter,
+      0.35, with a 1.5s linger after the last keystroke so it doesn't flicker
+      per key). The active/strength decision is the pure `composerBeam` helper
+      (`apps/dashboard-spa/lib/composer-beam.ts`, test:
+      `test/composer-beam.test.ts`); only real keystrokes count as typing —
+      programmatic setText (rephrase success) doesn't. "Processing" =
       `triaging | in_progress | approved_action_running`
       (`apps/dashboard-spa/lib/ticket-processing.ts`, fail-safe false for
       `new`/waits/terminal/unknown; test:
