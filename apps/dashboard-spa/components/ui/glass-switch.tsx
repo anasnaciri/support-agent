@@ -319,9 +319,10 @@ export function GlassSwitch({
             the positioner's transition is cut mid-drag. */}
         <span
           className={cn(
-            "absolute inset-0 overflow-hidden rounded-full bg-card transition-[background-color,transform]",
-            "group-has-[:checked]/gsw:bg-primary-foreground",
-            "group-has-[:disabled]/gsw:bg-card/90 group-has-[:checked]:has-[:disabled]/gsw:bg-primary-foreground/90",
+            // Always white — the lens must not pick up dark-theme surface
+            // tokens (card / primary-foreground both go dark in .dark).
+            "absolute inset-0 overflow-hidden rounded-full bg-white transition-[background-color,transform]",
+            "group-has-[:disabled]/gsw:bg-white/90",
             "shadow-[0_2px_5px_rgba(0,0,0,0.22),0_1px_1.5px_rgba(0,0,0,0.14)]",
             "[--sx:1] [--sy:1]",
             "group-active/gsw:[--sx:1.3] group-active/gsw:[--sy:1.45]",
