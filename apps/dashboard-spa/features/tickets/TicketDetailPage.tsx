@@ -704,9 +704,11 @@ export function TicketDetailPage() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge
                 variant={ticketStatusVariant(ticketRow.status)}
-                className={cn("px-1.5 py-0", processing && "chip-shimmer")}
+                className="px-1.5 py-0"
               >
-                {ticketStatusLabel(ticketRow.status)}
+                <span className={cn(processing && "chip-shimmer")}>
+                  {ticketStatusLabel(ticketRow.status)}
+                </span>
               </Badge>
               {/* Concurrent wait: show the OTHER wait(s) as a second chip when
                   they hold but aren't already the status badge. */}

@@ -347,26 +347,22 @@
   display: none;
 }
 
-/* Shimmer sweep for the ticket-page status chip while the agent is actively
-   working the ticket — a soft highlight travels across the badge. Purely
-   decorative overlay: pointer-events off, and stilled entirely for users who
-   prefer reduced motion. */
+/* Shimmer sweep for the ticket-page status chip's label while the agent is
+   actively working the ticket — a soft highlight travels across the text only,
+   never the chip background. The gradient is clipped to the glyphs and built
+   from currentColor so it inherits each badge variant's text color; stilled
+   entirely for users who prefer reduced motion. */
 .chip-shimmer {
-  position: relative;
-  overflow: hidden;
-}
-.chip-shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
+  background-image: linear-gradient(
     105deg,
-    transparent 40%,
-    rgb(255 255 255 / 0.35) 50%,
-    transparent 60%
+    currentColor 40%,
+    color-mix(in srgb, currentColor, white 75%) 50%,
+    currentColor 60%
   );
   background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   animation: chip-shimmer-sweep 2s linear infinite;
 }
 @keyframes chip-shimmer-sweep {
@@ -378,9 +374,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chip-shimmer::after {
+  .chip-shimmer {
     animation: none;
-    background: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
   }
 }
 
