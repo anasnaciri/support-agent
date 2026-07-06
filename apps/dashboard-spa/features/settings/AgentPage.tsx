@@ -349,95 +349,98 @@ function BuiltinAgentDetail({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Actions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          <p className="pb-2 text-sm text-muted-foreground">
-            Decide which actions this agent does on its own and which wait for
-            your approval first.
-          </p>
-          {actions.length === 0 ? (
-            <p className="py-2 text-sm text-muted-foreground">
-              This agent has no customer-facing actions to configure.
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Permissions</h2>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Actions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <p className="pb-2 text-sm text-muted-foreground">
+              Decide which actions this agent does on its own and which wait for
+              your approval first.
             </p>
-          ) : (
-            <ul className="divide-y">
-              {actions.map(({ tool }) => (
-                <li
-                  key={tool.name}
-                  className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between"
-                >
-                  <div className="min-w-0 sm:pr-6">
-                    <div className="text-sm font-medium">
-                      {tool.displayName ?? tool.name}
+            {actions.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">
+                This agent has no customer-facing actions to configure.
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {actions.map(({ tool }) => (
+                  <li
+                    key={tool.name}
+                    className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between"
+                  >
+                    <div className="min-w-0 sm:pr-6">
+                      <div className="text-sm font-medium">
+                        {tool.displayName ?? tool.name}
+                      </div>
+                      {tool.displayDescription ? (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {tool.displayDescription}
+                        </p>
+                      ) : null}
                     </div>
-                    {tool.displayDescription ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {tool.displayDescription}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="shrink-0">
-                    {tool.tenantControl === "refund-threshold" ? (
-                      <div className="sm:text-right">
-                        <p className="text-xs text-muted-foreground">
-                          Auto up to {refundPolicy.currencyCode}{" "}
-                          {minorToMajor(refundPolicy.askAboveMinorUnits)} · asks{" "}
-                          {minorToMajor(refundPolicy.askAboveMinorUnits)}–
-                          {minorToMajor(refundPolicy.denyAboveMinorUnits)} ·
-                          blocked above {refundPolicy.currencyCode}{" "}
-                          {minorToMajor(refundPolicy.denyAboveMinorUnits)}
-                        </p>
-                        <Link
-                          href="/settings/refund-policy"
-                          className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
-                        >
-                          Manage refund limits →
-                        </Link>
-                      </div>
-                    ) : tool.tenantControl === "discount-threshold" ? (
-                      <div className="sm:text-right">
-                        <p className="text-xs text-muted-foreground">
-                          {discountPolicy.mode === "always_deny"
-                            ? "Coupons blocked"
-                            : discountPolicy.mode === "always_ask"
-                              ? "Every coupon asks"
-                              : `Auto up to ${discountPolicy.askAbovePercentage}% · blocked above ${discountPolicy.maxPercentage}%`}
-                        </p>
-                        <Link
-                          href="/settings/discount-policy"
-                          className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
-                        >
-                          Manage discount limits →
-                        </Link>
-                      </div>
-                    ) : (
-                      <PermissionToggle
-                        action={handleToolPermission}
-                        agentId={agent.id}
-                        tool={tool.name}
-                        label={tool.displayName ?? tool.name}
-                        current={
-                          currentToolPermission(
-                            agent,
-                            catalog,
-                            overrideRow,
-                            tool.name,
-                          ) === "allow"
-                            ? "allow"
-                            : "ask"
-                        }
-                      />
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+                    <div className="shrink-0">
+                      {tool.tenantControl === "refund-threshold" ? (
+                        <div className="sm:text-right">
+                          <p className="text-xs text-muted-foreground">
+                            Auto up to {refundPolicy.currencyCode}{" "}
+                            {minorToMajor(refundPolicy.askAboveMinorUnits)} · asks{" "}
+                            {minorToMajor(refundPolicy.askAboveMinorUnits)}–
+                            {minorToMajor(refundPolicy.denyAboveMinorUnits)} ·
+                            blocked above {refundPolicy.currencyCode}{" "}
+                            {minorToMajor(refundPolicy.denyAboveMinorUnits)}
+                          </p>
+                          <Link
+                            href="/settings/refund-policy"
+                            className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+                          >
+                            Manage refund limits →
+                          </Link>
+                        </div>
+                      ) : tool.tenantControl === "discount-threshold" ? (
+                        <div className="sm:text-right">
+                          <p className="text-xs text-muted-foreground">
+                            {discountPolicy.mode === "always_deny"
+                              ? "Coupons blocked"
+                              : discountPolicy.mode === "always_ask"
+                                ? "Every coupon asks"
+                                : `Auto up to ${discountPolicy.askAbovePercentage}% · blocked above ${discountPolicy.maxPercentage}%`}
+                          </p>
+                          <Link
+                            href="/settings/discount-policy"
+                            className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+                          >
+                            Manage discount limits →
+                          </Link>
+                        </div>
+                      ) : (
+                        <PermissionToggle
+                          action={handleToolPermission}
+                          agentId={agent.id}
+                          tool={tool.name}
+                          label={tool.displayName ?? tool.name}
+                          current={
+                            currentToolPermission(
+                              agent,
+                              catalog,
+                              overrideRow,
+                              tool.name,
+                            ) === "allow"
+                              ? "allow"
+                              : "ask"
+                          }
+                        />
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader className="pb-3">

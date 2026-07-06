@@ -6,7 +6,6 @@ import {
   FileText,
   KeyRound,
   Plug,
-  ShieldCheck,
   TicketPercent,
   Trash2,
 } from "lucide-react";
@@ -31,13 +30,6 @@ const TILES = [
     title: "Agent",
     description:
       "Tune the resolution agent's model, actions, and instructions.",
-  },
-  {
-    href: "/settings/permissions",
-    icon: ShieldCheck,
-    title: "Permissions",
-    description:
-      "Choose which actions run automatically and which wait for your approval.",
   },
   {
     href: "/settings/integrations",
@@ -96,9 +88,6 @@ export function SettingsPage() {
   });
 
   const valueFor = (href: string): string | null => {
-    if (href === "/settings/permissions") {
-      return catalog ? String(catalog.tools.length) : null;
-    }
     if (href === "/settings/llm") return "Key";
     if (href === "/settings/legal") return "Terms";
     if (href === "/settings/refund-policy") return "$";

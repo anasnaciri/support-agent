@@ -11,7 +11,6 @@ import {
   LayoutGrid,
   Library,
   Plug,
-  ShieldCheck,
   Trash2,
   Users,
   Workflow,
@@ -30,7 +29,6 @@ import {
 const ICONS: Record<string, LucideIcon> = {
   "/settings": LayoutGrid,
   "/settings/agent": Bot,
-  "/settings/permissions": ShieldCheck,
   "/settings/scenarios": Workflow,
   "/settings/llm": KeyRound,
   "/settings/refund-policy": Banknote,

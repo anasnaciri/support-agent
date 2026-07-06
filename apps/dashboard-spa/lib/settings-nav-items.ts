@@ -46,12 +46,6 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "settings.agents",
       },
       {
-        href: "/settings/permissions",
-        label: "Permissions",
-        match: prefix("/settings/permissions"),
-        requires: "settings.agents",
-      },
-      {
         href: "/settings/scenarios",
         label: "Scenarios",
         match: prefix("/settings/scenarios"),

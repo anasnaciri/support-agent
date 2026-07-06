@@ -27,7 +27,6 @@ import { BlockedSendersPage } from "@/features/settings/BlockedSendersPage";
 import { DiscountPolicyPage } from "@/features/settings/DiscountPolicyPage";
 import { ScenariosPage } from "@/features/settings/ScenariosPage";
 import { NotificationsPage } from "@/features/settings/NotificationsPage";
-import { PermissionsPage } from "@/features/settings/PermissionsPage";
 import { MembersPage } from "@/features/settings/MembersPage";
 import { AgentPage } from "@/features/settings/AgentPage";
 import { SuppliersPage } from "@/features/settings/SuppliersPage";
@@ -114,10 +113,6 @@ const settingsNotificationsRoute = authedChild(
   "/settings/notifications",
   NotificationsPage,
 );
-const settingsPermissionsRoute = authedChild(
-  "/settings/permissions",
-  PermissionsPage,
-);
 const settingsMembersRoute = authedChild("/settings/members", MembersPage);
 const settingsAgentRoute = authedChild("/settings/agent", AgentPage);
 const settingsAgentsRoute = authedChild("/settings/agents", () => (
@@ -168,7 +163,6 @@ const routeTree = rootRoute.addChildren([
     settingsResolutionPolicyRoute,
     settingsBlockedSendersRoute,
     settingsNotificationsRoute,
-    settingsPermissionsRoute,
     settingsMembersRoute,
     settingsAgentRoute,
     settingsAgentsRoute,

@@ -8,6 +8,13 @@ import {
 const flatItems = SETTINGS_NAV_GROUPS.flatMap((group) => group.items);
 
 describe("settings nav items", () => {
+  it("does not expose the old permissions matrix", () => {
+    expect(flatItems.some((item) => item.href === "/settings/permissions")).toBe(
+      false,
+    );
+    expect(activeSettingsHref("/settings/permissions")).toBeNull();
+  });
+
   it("exposes Agent at the singular agent settings route", () => {
     expect(flatItems.find((item) => item.href === "/settings/agent")?.label).toBe(
       "Agent",
