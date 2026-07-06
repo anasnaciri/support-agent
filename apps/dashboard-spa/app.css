@@ -347,6 +347,43 @@
   display: none;
 }
 
+/* Shimmer sweep for the ticket-page status chip while the agent is actively
+   working the ticket — a soft highlight travels across the badge. Purely
+   decorative overlay: pointer-events off, and stilled entirely for users who
+   prefer reduced motion. */
+.chip-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.chip-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgb(255 255 255 / 0.35) 50%,
+    transparent 60%
+  );
+  background-size: 250% 100%;
+  animation: chip-shimmer-sweep 2s linear infinite;
+}
+@keyframes chip-shimmer-sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip-shimmer::after {
+    animation: none;
+    background: none;
+  }
+}
+
 /* Brand display font (Guidezilla wordmark). In the Next app this was wired via
    next/font/local; in the SPA it's a plain @font-face exposed as the same CSS
    variable the IconRail reads: font-[family-name:var(--font-climate-crisis)]. */

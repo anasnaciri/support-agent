@@ -17,6 +17,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Dashboard SPA settings simplification (2026-07-06): renamed the UI route
+      `/settings/resolution-policy` to `/settings/scenarios` with a client
+      redirect from the old path; replaced the multi-agent settings UI with a
+      single `/settings/agent` page pinned to `scenario-resolution-agent`; and
+      removed the standalone `/settings/permissions` matrix in favor of the
+      agent page's Actions card under a Permissions heading. Verified by the
+      nav-model regression test, `pnpm build`, full `pnpm test` outside the
+      sandbox, and commit-hook local CI (build + migrations + full tests).
+      Intentional follow-ups/deviations to remember: the dashboard API contract
+      still uses `/resolution-policy` / `qk.resolutionPolicy` /
+      `lib/parse-resolution`, and custom agents remain functional in the
+      backend (`tenant_custom_agents`, resolver, API) while merchants no longer
+      have UI to create/edit/delete them.
 - [x] `apps/dashboard` (Next) declared obsolete (2026-07-06): its tests are
       excluded from the vitest suite (`apps/dashboard/**` in
       `vitest.config.ts` exclude). `apps/dashboard-spa` is the dashboard.
@@ -430,6 +443,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       redraft of the same approval (new body), while staying stable across
       refetches of the same draft so manager edits survive. Tests:
       `apps/dashboard-spa/test/composer-key.test.ts`.
+- [x] SPA ticket page: live-activity animations (2026-07-06). The reply
+      composer is wrapped in `border-beam`'s `<BorderBeam>` (new dashboard-spa
+      dependency) — `size="md"`, `colorVariant="ocean"` (matches the blue
+      brand), `theme="auto"` (tracks the same system dark preference as
+      `index.html`'s `.dark` script), `strength={0.8}` — and the beam is
+      `active` only while the ticket is processing or a Rephrase-with-AI call
+      is in flight. "Processing" =
+      `triaging | in_progress | approved_action_running`
+      (`apps/dashboard-spa/lib/ticket-processing.ts`, fail-safe false for
+      `new`/waits/terminal/unknown; test:
+      `apps/dashboard-spa/test/ticket-processing.test.ts`). While processing,
+      the locked composer hint carries the beam (that's what's on screen when
+      the agent works) and the header status chip gets a `.chip-shimmer`
+      highlight sweep (`app.css`, reduced-motion safe). Follow-up candidate,
+      not done: shimmer on the tickets-list / sidebar status chips.
 
 ---
 

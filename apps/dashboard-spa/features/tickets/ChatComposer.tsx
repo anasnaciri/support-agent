@@ -50,6 +50,8 @@ interface ChatComposerProps {
   /** Tenant model catalog + current rephrase model; null hides the picker. */
   readonly models: ModelsResponse | null;
   readonly mode: ComposerMode;
+  /** True while the agent is actively working the ticket — lights the beam. */
+  readonly processing: boolean;
 }
 
 // The composer input grows with its content but is capped — past the cap it
@@ -136,6 +138,7 @@ export function ChatComposer({
   customerEmail,
   models,
   mode,
+  processing,
 }: ChatComposerProps) {
   const ctx = { workspaceId };
   const [text, setText] = useState(
@@ -246,11 +249,22 @@ export function ChatComposer({
       el.scrollHeight > COMPOSER_MAX_HEIGHT ? "auto" : "hidden";
   }, [text]);
 
+  // The locked hint is what's on screen while the agent works the ticket, so
+  // it carries the processing beam; the editable composer only beams while a
+  // rephrase is in flight (processing rarely overlaps an editable mode).
   if (mode.kind === "locked") {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        {mode.message}
-      </div>
+      <BorderBeam
+        size="md"
+        colorVariant="ocean"
+        theme="auto"
+        strength={0.8}
+        active={processing}
+      >
+        <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          {mode.message}
+        </div>
+      </BorderBeam>
     );
   }
 
@@ -271,77 +285,83 @@ export function ChatComposer({
 
   return (
     <div className="space-y-2">
-      <BorderBeam size="md" colorVariant="ocean" theme="auto" strength={0.8}>
+      <BorderBeam
+        size="md"
+        colorVariant="ocean"
+        theme="auto"
+        strength={0.8}
+        active={processing || rephraseM.isPending}
+      >
         <div className="rounded-xl border border-input bg-card focus-within:ring-2 focus-within:ring-ring">
-        <Textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={placeholder}
-          className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-        />
-        <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => rephraseM.mutate()}
-              disabled={empty || rephraseM.isPending}
-              title="Rewrite your draft to be clearer and more professional"
-            >
-              <Sparkles aria-hidden />
-              {rephraseM.isPending ? "Rephrasing…" : "Rephrase"}
-            </Button>
-            {showPicker ? (
-              <RephraseModelPicker
-                entries={models!.entries}
-                value={selectedModel}
-                onSelect={onPickModel}
-                disabled={rephraseM.isPending}
-              />
-            ) : null}
-          </div>
-
-          {mode.kind === "approval" ? (
-            <div className="flex items-center gap-2">
-              <ConfirmButton
-                size="icon"
-                variant="secondary"
-                className="rounded-full"
-                aria-label="Reject this draft and take over"
-                title="Reject this approval?"
-                confirmLabel="Reject & take over"
-                description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
-                pending={rejectM.isPending}
-                onConfirm={() => rejectM.mutate()}
+          <Textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={placeholder}
+            className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => rephraseM.mutate()}
+                disabled={empty || rephraseM.isPending}
+                title="Rewrite your draft to be clearer and more professional"
               >
-                <X aria-hidden />
-              </ConfirmButton>
+                <Sparkles aria-hidden />
+                {rephraseM.isPending ? "Rephrasing…" : "Rephrase"}
+              </Button>
+              {showPicker ? (
+                <RephraseModelPicker
+                  entries={models!.entries}
+                  value={selectedModel}
+                  onSelect={onPickModel}
+                  disabled={rephraseM.isPending}
+                />
+              ) : null}
+            </div>
+
+            {mode.kind === "approval" ? (
+              <div className="flex items-center gap-2">
+                <ConfirmButton
+                  size="icon"
+                  variant="secondary"
+                  className="rounded-full"
+                  aria-label="Reject this draft and take over"
+                  title="Reject this approval?"
+                  confirmLabel="Reject & take over"
+                  description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
+                  pending={rejectM.isPending}
+                  onConfirm={() => rejectM.mutate()}
+                >
+                  <X aria-hidden />
+                </ConfirmButton>
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={() => approveM.mutate()}
+                  disabled={busy}
+                  aria-label="Approve and send"
+                  title="Approve and send this reply to the customer"
+                >
+                  <SendHorizontal aria-hidden />
+                </Button>
+              </div>
+            ) : (
               <Button
                 type="button"
                 size="icon"
-                onClick={() => approveM.mutate()}
-                disabled={busy}
-                aria-label="Approve and send"
-                title="Approve and send this reply to the customer"
+                onClick={() => sendM.mutate()}
+                disabled={empty || sendM.isPending}
+                aria-label="Send reply"
+                title="Send this reply to the customer on the existing email thread"
               >
                 <SendHorizontal aria-hidden />
               </Button>
-            </div>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              onClick={() => sendM.mutate()}
-              disabled={empty || sendM.isPending}
-              aria-label="Send reply"
-              title="Send this reply to the customer on the existing email thread"
-            >
-              <SendHorizontal aria-hidden />
-            </Button>
-          )}
-        </div>
+            )}
+          </div>
         </div>
       </BorderBeam>
       {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}

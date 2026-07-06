@@ -50,6 +50,7 @@ import { approvalDisplayNote } from "@/lib/approval-note";
 import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
+import { isTicketProcessing } from "@/lib/ticket-processing";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -634,6 +635,8 @@ export function TicketDetailPage() {
   const refundToIssue = issuableRefund(entries);
   const refundableOrder =
     order && order.financialStatus !== "refunded" ? order : null;
+  // Lights the composer's border beam and the status chip's shimmer.
+  const processing = isTicketProcessing(ticketRow.status);
   const composerMode =
     singleApproval && singleApprovalDraft !== null
       ? {
@@ -701,7 +704,7 @@ export function TicketDetailPage() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge
                 variant={ticketStatusVariant(ticketRow.status)}
-                className="px-1.5 py-0"
+                className={cn("px-1.5 py-0", processing && "chip-shimmer")}
               >
                 {ticketStatusLabel(ticketRow.status)}
               </Badge>
@@ -847,6 +850,7 @@ export function TicketDetailPage() {
                   customerEmail={customerEmail}
                   models={replyModelsQuery.data ?? null}
                   mode={composerMode}
+                  processing={processing}
                 />
               </>
             ) : pendingApprovals.length > 1 ? (
