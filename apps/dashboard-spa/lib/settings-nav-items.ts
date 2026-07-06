@@ -52,9 +52,9 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "settings.agents",
       },
       {
-        href: "/settings/resolution-policy",
-        label: "Resolution agent",
-        match: prefix("/settings/resolution-policy"),
+        href: "/settings/scenarios",
+        label: "Scenarios",
+        match: prefix("/settings/scenarios"),
         requires: "settings.agents",
       },
       {

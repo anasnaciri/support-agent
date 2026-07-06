@@ -411,7 +411,7 @@ function ResolutionPolicyForm({
   );
 }
 
-export function ResolutionPolicyPage() {
+export function ScenariosPage() {
   const allowed = useRequirePermission("settings.agents");
   const ctx = useWorkspaceCtx();
 
@@ -429,12 +429,10 @@ export function ResolutionPolicyPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsBreadcrumb current="Resolution agent" />
+      <SettingsBreadcrumb current="Scenarios" />
 
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Resolution agent
-        </h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Scenarios</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           A single agent that resolves tickets end-to-end, steered by the
           scenarios below. When it&apos;s on, triage routes a matching ticket to

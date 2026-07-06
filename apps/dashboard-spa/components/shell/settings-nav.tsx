@@ -31,7 +31,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings": LayoutGrid,
   "/settings/agents": Bot,
   "/settings/permissions": ShieldCheck,
-  "/settings/resolution-policy": Workflow,
+  "/settings/scenarios": Workflow,
   "/settings/llm": KeyRound,
   "/settings/refund-policy": Banknote,
   "/settings/knowledge": Library,

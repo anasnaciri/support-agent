@@ -1,3 +1,4 @@
+import * as React from "react";
 import {
   Outlet,
   createRootRoute,
@@ -24,7 +25,7 @@ import { LlmPage } from "@/features/settings/LlmPage";
 import { RefundPolicyPage } from "@/features/settings/RefundPolicyPage";
 import { BlockedSendersPage } from "@/features/settings/BlockedSendersPage";
 import { DiscountPolicyPage } from "@/features/settings/DiscountPolicyPage";
-import { ResolutionPolicyPage } from "@/features/settings/ResolutionPolicyPage";
+import { ScenariosPage } from "@/features/settings/ScenariosPage";
 import { NotificationsPage } from "@/features/settings/NotificationsPage";
 import { PermissionsPage } from "@/features/settings/PermissionsPage";
 import { MembersPage } from "@/features/settings/MembersPage";
@@ -43,6 +44,7 @@ import {
   SignInPage,
   SignUpPage,
 } from "@/features/auth/pages";
+import { useAppNavigate } from "@/lib/navigation";
 
 // Code-based route tree (we deliberately skip the generated route tree + type
 // registration, keeping `to` loose as `string` so the next/link shim works).
@@ -59,6 +61,14 @@ const authedChild = (
   path: string,
   component: () => React.JSX.Element | null,
 ) => createRoute({ getParentRoute: () => authedRoute, path, component });
+
+const ClientRedirect = ({ to }: { readonly to: string }) => {
+  const nav = useAppNavigate();
+  React.useEffect(() => {
+    nav.replace(to);
+  }, [nav, to]);
+  return null;
+};
 
 const homeRoute = authedChild("/", HomePage);
 const ticketsRoute = authedChild("/tickets", TicketsPage);
@@ -96,10 +106,10 @@ const settingsDiscountPolicyRoute = authedChild(
   "/settings/discount-policy",
   DiscountPolicyPage,
 );
-const settingsResolutionPolicyRoute = authedChild(
-  "/settings/resolution-policy",
-  ResolutionPolicyPage,
-);
+const settingsScenariosRoute = authedChild("/settings/scenarios", ScenariosPage);
+const settingsResolutionPolicyRoute = authedChild("/settings/resolution-policy", () => (
+  <ClientRedirect to="/settings/scenarios" />
+));
 const settingsBlockedSendersRoute = authedChild(
   "/settings/blocked-senders",
   BlockedSendersPage,
@@ -160,6 +170,7 @@ const routeTree = rootRoute.addChildren([
     settingsLlmRoute,
     settingsRefundPolicyRoute,
     settingsDiscountPolicyRoute,
+    settingsScenariosRoute,
     settingsResolutionPolicyRoute,
     settingsBlockedSendersRoute,
     settingsNotificationsRoute,
