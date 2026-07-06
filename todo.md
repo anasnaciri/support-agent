@@ -477,8 +477,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `apps/dashboard-spa/test/ticket-processing.test.ts`). While processing,
       the locked composer hint carries the beam (that's what's on screen when
       the agent works) and the header status chip gets a `.chip-shimmer`
-      highlight sweep (`app.css`, reduced-motion safe). Follow-up candidate,
-      not done: shimmer on the tickets-list / sidebar status chips.
+      highlight sweep (`app.css`, reduced-motion safe). Reworked so the
+      shimmer is clipped to the label text only (background-clip: text over a
+      currentColor gradient), not swept across the whole chip background.
+      The tickets-list status chips shimmer the same way (primary chip only —
+      extra wait chips are parked states, never processing). Follow-up
+      candidate, not done: shimmer on the sidebar status chips.
 - [x] Scenarios page: replaced the two native checkboxes (page-level "route to
       resolution agent" + per-scenario "Active") with a liquid-glass switch
       (`apps/dashboard-spa/components/ui/glass-switch.tsx`, Aave-glass style).
@@ -504,6 +508,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       double-toggle. Not machine-verified in a real browser (auth-gated page)
       — QA by hand: tap, keyboard space, drag past/short of midpoint, drag on
       the disabled pending switch.
+- [x] Glass switch dark-mode fix: the lens is now always `bg-white` (the old
+      `bg-card` / checked `bg-primary-foreground` both resolve dark in
+      `.dark`, turning the thumb near-black). In light mode this is a no-op
+      (both tokens were `#ffffff`). Scenarios page: inactive scenario cards
+      dim to `opacity-55` (Active toggle is now controlled local state, still
+      submits via FormData `name`), so disabled scenarios read as disabled.
 
 ---
 
