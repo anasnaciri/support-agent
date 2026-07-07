@@ -19,6 +19,8 @@ import {
 } from "@support-agent/services";
 import { TenantId } from "@support-agent/agent-core";
 import {
+  GRAPH_INBOX_RESOURCE,
+  GRAPH_JUNK_RESOURCE,
   GRAPH_SUBSCRIPTION_TTL_MS,
   graphCreateSubscription,
   graphRenewSubscription,
@@ -57,10 +59,35 @@ export interface GraphRenewalResult {
     | { readonly failed: string };
 }
 
+// Each mailbox carries one subscription per watched folder: the Inbox
+// (original) and Junk Email (spam is ingested, not filtered). Slots keep
+// their own metadata keys; the inbox slot keeps the pre-junk key names so
+// existing connectors renew in place, and connectors without the junk keys
+// get that subscription created on the next cron fire.
+interface SubscriptionSlot {
+  readonly resource: string;
+  readonly idKey: string;
+  readonly expiresKey: string;
+}
+
+const SUBSCRIPTION_SLOTS: ReadonlyArray<SubscriptionSlot> = [
+  {
+    resource: GRAPH_INBOX_RESOURCE,
+    idKey: "subscriptionId",
+    expiresKey: "subscriptionExpiresAt",
+  },
+  {
+    resource: GRAPH_JUNK_RESOURCE,
+    idKey: "junkSubscriptionId",
+    expiresKey: "junkSubscriptionExpiresAt",
+  },
+];
+
 const subscriptionExpiryFromMetadata = (
   metadata: Readonly<Record<string, unknown>>,
+  key: string,
 ): Date | null => {
-  const raw = metadata["subscriptionExpiresAt"];
+  const raw = metadata[key];
   if (typeof raw !== "string") return null;
   const t = Date.parse(raw);
   return Number.isFinite(t) ? new Date(t) : null;
@@ -68,9 +95,26 @@ const subscriptionExpiryFromMetadata = (
 
 const subscriptionIdFromMetadata = (
   metadata: Readonly<Record<string, unknown>>,
+  key: string,
 ): string | null => {
-  const raw = metadata["subscriptionId"];
+  const raw = metadata[key];
   return typeof raw === "string" && raw ? raw : null;
+};
+
+const slotIsDue = (
+  metadata: Readonly<Record<string, unknown>>,
+  slot: SubscriptionSlot,
+  now: Date,
+): boolean => {
+  const id = subscriptionIdFromMetadata(metadata, slot.idKey);
+  const expiresAt = subscriptionExpiryFromMetadata(metadata, slot.expiresKey);
+  // Due unless we HAVE a live subscription comfortably in lease. A missing
+  // id means "never created" → create it now.
+  return !(
+    id &&
+    expiresAt !== null &&
+    expiresAt.getTime() - now.getTime() > RENEWAL_WINDOW_MS
+  );
 };
 
 /** Narrow store surface `renewOne` needs (lets tests pass a plain object). */
@@ -94,15 +138,10 @@ export const renewOne = async (
   store: GraphRenewalStoreOps,
   now: Date,
 ): Promise<GraphRenewalResult> => {
-  const subscriptionId = subscriptionIdFromMetadata(conn.metadata);
-  const expiresAt = subscriptionExpiryFromMetadata(conn.metadata);
-  // Skip only when we HAVE a live subscription comfortably in lease. A
-  // missing subscriptionId means "never created" → create it now.
-  if (
-    subscriptionId &&
-    expiresAt !== null &&
-    expiresAt.getTime() - now.getTime() > RENEWAL_WINDOW_MS
-  ) {
+  const dueSlots = SUBSCRIPTION_SLOTS.filter((slot) =>
+    slotIsDue(conn.metadata, slot, now),
+  );
+  if (dueSlots.length === 0) {
     return {
       tenantId: conn.tenantId,
       mailbox: conn.shopDomain,
@@ -149,47 +188,63 @@ export const renewOne = async (
   }
 
   const newExpiry = new Date(now.getTime() + GRAPH_SUBSCRIPTION_TTL_MS).toISOString();
-  try {
-    if (subscriptionId) {
-      const sub = await graphRenewSubscription({
+  const failures: Array<string> = [];
+  let created = 0;
+  let renewed = 0;
+  for (const slot of dueSlots) {
+    const subscriptionId = subscriptionIdFromMetadata(conn.metadata, slot.idKey);
+    try {
+      if (subscriptionId) {
+        const sub = await graphRenewSubscription({
+          token: accessToken,
+          subscriptionId,
+          expirationDateTime: newExpiry,
+          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        });
+        await store.patchMetadata({
+          tenantId: conn.tenantId,
+          shopDomain: conn.shopDomain,
+          metadata: { [slot.expiresKey]: sub.expirationDateTime },
+        });
+        renewed += 1;
+        continue;
+      }
+      const notificationUrl = `${deps.microsoft.notificationUrl.replace(/\/+$/, "")}/${encodeURIComponent(conn.tenantId)}`;
+      const sub = await graphCreateSubscription({
         token: accessToken,
-        subscriptionId,
+        notificationUrl,
+        clientState: deps.microsoft.webhookClientState,
         expirationDateTime: newExpiry,
+        resource: slot.resource,
         ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
       });
       await store.patchMetadata({
         tenantId: conn.tenantId,
         shopDomain: conn.shopDomain,
-        metadata: { subscriptionExpiresAt: sub.expirationDateTime },
+        metadata: {
+          [slot.idKey]: sub.id,
+          [slot.expiresKey]: sub.expirationDateTime,
+        },
       });
-      return { tenantId: conn.tenantId, mailbox: conn.shopDomain, outcome: "renewed" };
+      created += 1;
+    } catch (cause) {
+      failures.push(
+        `subscription(${slot.resource}): ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
     }
-    const notificationUrl = `${deps.microsoft.notificationUrl.replace(/\/+$/, "")}/${encodeURIComponent(conn.tenantId)}`;
-    const sub = await graphCreateSubscription({
-      token: accessToken,
-      notificationUrl,
-      clientState: deps.microsoft.webhookClientState,
-      expirationDateTime: newExpiry,
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-    });
-    await store.patchMetadata({
-      tenantId: conn.tenantId,
-      shopDomain: conn.shopDomain,
-      metadata: {
-        subscriptionId: sub.id,
-        subscriptionExpiresAt: sub.expirationDateTime,
-      },
-    });
-    return { tenantId: conn.tenantId, mailbox: conn.shopDomain, outcome: "created" };
-  } catch (cause) {
+  }
+  if (failures.length > 0) {
     return {
       tenantId: conn.tenantId,
       mailbox: conn.shopDomain,
-      outcome: {
-        failed: `subscription: ${cause instanceof Error ? cause.message : String(cause)}`,
-      },
+      outcome: { failed: failures.join("; ") },
     };
   }
+  return {
+    tenantId: conn.tenantId,
+    mailbox: conn.shopDomain,
+    outcome: created > 0 ? "created" : "renewed",
+  };
 };
 
 /** One renewal pass over every active Outlook connector. */

@@ -49,6 +49,10 @@ const fakeOps = (over: Partial<ImapSmtpOps> = {}): ImapSmtpOps => ({
   listSince: vi.fn(async () => ({ messages: [], latestUid: 0 })),
   latestUid: vi.fn(async () => 0),
   markRead: vi.fn(async () => {}),
+  // Default: mailbox without a junk folder.
+  listJunkSince: vi.fn(async () => null),
+  latestJunkUid: vi.fn(async () => null),
+  markJunkRead: vi.fn(async () => {}),
   send: vi.fn(async () => ({ messageId: "x" })),
   verify: vi.fn(async () => {}),
   ...over,
@@ -171,6 +175,71 @@ describe("imap-poll pollOne", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("seeds the junk cursor alongside the inbox cursor when a junk folder exists", async () => {
+    const ops = fakeOps({
+      latestUid: vi.fn(async () => 7),
+      latestJunkUid: vi.fn(async () => 3),
+    });
+    const published: DomainEvent[] = [];
+    const { ops: store, calls } = recordingStore();
+    const res = await pollOne(conn(), depsWith(ops, published), store);
+    expect(res.outcome).toBe("seeded");
+    expect(calls[0]!.metadata["lastUid"]).toBe(7);
+    expect(calls[0]!.metadata["lastJunkUid"]).toBe(3);
+  });
+
+  it("publishes junk-folder messages — spam is ingested, not filtered", async () => {
+    const markJunkRead = vi.fn(async () => {});
+    const ops = fakeOps({
+      listSince: vi.fn(async () => ({ messages: [], latestUid: 5 })),
+      listJunkSince: vi.fn(async () => ({
+        messages: [rawMsg({ uid: 3, messageId: "spam-3@host" })],
+        latestUid: 3,
+      })),
+      markJunkRead,
+    });
+    const published: DomainEvent[] = [];
+    const { ops: store, calls } = recordingStore();
+    const res = await pollOne(
+      conn({ imapHost: "i", smtpHost: "s", lastUid: 5, lastJunkUid: 2 }),
+      depsWith(ops, published),
+      store,
+    );
+    expect(res.outcome).toEqual({ polled: 1 });
+    expect(ops.listJunkSince).toHaveBeenCalledWith(2);
+    expect(published).toHaveLength(1);
+    expect(published[0]!.type).toBe("message.received");
+    expect(published[0]!.threadId).toBe("imap:spam-3@host");
+    expect(markJunkRead).toHaveBeenCalledWith([3]);
+    const merged = Object.assign(
+      {},
+      ...calls.map((c) => c.metadata),
+    ) as Record<string, unknown>;
+    expect(merged["lastJunkUid"]).toBe(3);
+  });
+
+  it("seeds a missing junk cursor on an already-connected mailbox without replaying old spam", async () => {
+    const ops = fakeOps({
+      listSince: vi.fn(async () => ({ messages: [], latestUid: 5 })),
+      latestJunkUid: vi.fn(async () => 4),
+    });
+    const published: DomainEvent[] = [];
+    const { ops: store, calls } = recordingStore();
+    const res = await pollOne(
+      conn({ imapHost: "i", smtpHost: "s", lastUid: 5 }),
+      depsWith(ops, published),
+      store,
+    );
+    expect(res.outcome).toEqual({ polled: 0 });
+    expect(ops.listJunkSince).not.toHaveBeenCalled();
+    expect(published).toHaveLength(0);
+    const merged = Object.assign(
+      {},
+      ...calls.map((c) => c.metadata),
+    ) as Record<string, unknown>;
+    expect(merged["lastJunkUid"]).toBe(4);
   });
 
   it("skips a connector with incomplete host metadata", async () => {

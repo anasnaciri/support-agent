@@ -230,6 +230,31 @@ describe("gmailListHistory — INBOX filter", () => {
     expect(result.newMessageIds).toEqual(["m1", "m3"]);
     expect(result.latestHistoryId).toBe("12350");
   });
+
+  it("includes SPAM-labelled messages — spam is ingested, not filtered", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        historyId: "12360",
+        history: [
+          {
+            id: "h1",
+            messagesAdded: [
+              { message: { id: "m-inbox", threadId: "t1", labelIds: ["INBOX", "UNREAD"] } },
+              { message: { id: "m-spam", threadId: "t2", labelIds: ["SPAM", "UNREAD"] } },
+              { message: { id: "m-sent", threadId: "t3", labelIds: ["SENT"] } },
+              { message: { id: "m-draft", threadId: "t4", labelIds: ["DRAFT"] } },
+            ],
+          },
+        ],
+      }),
+    );
+    const result = await gmailListHistory({
+      token: "tok",
+      startHistoryId: "12350",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.newMessageIds).toEqual(["m-inbox", "m-spam"]);
+  });
 });
 
 describe("buildGmailMime", () => {
@@ -336,6 +361,9 @@ describe("gmailListInboxMessageIds", () => {
       expect(u).toContain("/users/me/messages?");
       expect(u).toContain("q=in%3Ainbox+newer_than%3A7d");
       expect(u).toContain("maxResults=50");
+      // Without this flag the Gmail API drops SPAM/TRASH results even when
+      // the query names them explicitly (`in:spam`).
+      expect(u).toContain("includeSpamTrash=true");
       return okJson({
         messages: [
           { id: "m-1", threadId: "t-1" },

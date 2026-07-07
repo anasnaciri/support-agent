@@ -26,6 +26,7 @@ import {
   toInboundMessage,
   type ImapSmtpConfig,
   type ImapSmtpOps,
+  type RawImapMessage,
 } from "@support-agent/providers";
 import {
   DbClient,
@@ -74,16 +75,48 @@ export const pollOne = async (
   }
   const ops = (deps.opsFactory ?? makeImapSmtpOps)(config);
   const lastUidRaw = conn.metadata["lastUid"];
+  const lastJunkUidRaw = conn.metadata["lastJunkUid"];
+
+  const publishInbound = async (raw: RawImapMessage): Promise<boolean> => {
+    const msg = toConversationMessage(raw, conn.shopDomain);
+    if (msg.direction === "outbound") return false; // mail we sent
+    // Namespace the thread id so the conversation router replies through
+    // this same connector (a tenant can hold several mailboxes at once).
+    const inbound = {
+      ...toInboundMessage(msg),
+      threadId: namespaceThreadId("imap", msg.threadId),
+      mailbox: conn.shopDomain,
+      // RFC threading headers — the runtime correlates this reply to its
+      // existing ticket by matching these against the message-id index, which
+      // is robust to clients that reorder/drop `References` (the failure
+      // that otherwise minted a duplicate ticket per reply).
+      inReplyTo: raw.inReplyTo,
+      references: raw.references,
+    };
+    await deps.publish({
+      type: "message.received",
+      tenantId: TenantId(conn.tenantId),
+      threadId: inbound.threadId,
+      payload: inbound,
+    });
+    return true;
+  };
 
   try {
-    // First run: seed the cursor at the current top of the mailbox so we
-    // start from "new mail after connect", not the entire history.
+    // First run: seed the cursors at the current top of each folder so we
+    // start from "new mail after connect", not the entire history. The junk
+    // cursor (spam is ingested, not filtered) seeds in the same patch; a
+    // mailbox without a junk folder just doesn't get one.
     if (typeof lastUidRaw !== "number") {
       const latest = await ops.latestUid();
+      const latestJunk = await ops.latestJunkUid();
       await store.patchMetadata({
         tenantId: conn.tenantId,
         shopDomain: conn.shopDomain,
-        metadata: { lastUid: latest },
+        metadata: {
+          lastUid: latest,
+          ...(latestJunk !== null ? { lastJunkUid: latestJunk } : {}),
+        },
       });
       return { tenantId: conn.tenantId, mailbox: conn.shopDomain, outcome: "seeded" };
     }
@@ -92,29 +125,10 @@ export const pollOne = async (
     let polled = 0;
     const acceptedInboundUids: Array<number> = [];
     for (const raw of messages) {
-      const msg = toConversationMessage(raw, conn.shopDomain);
-      if (msg.direction === "outbound") continue; // mail we sent
-      // Namespace the thread id so the conversation router replies through
-      // this same connector (a tenant can hold several mailboxes at once).
-      const inbound = {
-        ...toInboundMessage(msg),
-        threadId: namespaceThreadId("imap", msg.threadId),
-        mailbox: conn.shopDomain,
-        // RFC threading headers — the runtime correlates this reply to its
-        // existing ticket by matching these against the message-id index, which
-        // is robust to clients that reorder/drop `References` (the failure
-        // that otherwise minted a duplicate ticket per reply).
-        inReplyTo: raw.inReplyTo,
-        references: raw.references,
-      };
-      await deps.publish({
-        type: "message.received",
-        tenantId: TenantId(conn.tenantId),
-        threadId: inbound.threadId,
-        payload: inbound,
-      });
-      acceptedInboundUids.push(raw.uid);
-      polled += 1;
+      if (await publishInbound(raw)) {
+        acceptedInboundUids.push(raw.uid);
+        polled += 1;
+      }
     }
     if (acceptedInboundUids.length > 0) {
       await ops.markRead(acceptedInboundUids).catch((cause) => {
@@ -132,6 +146,58 @@ export const pollOne = async (
         metadata: { lastUid: latestUid },
       });
     }
+
+    // Junk-folder leg. Own try/catch: a junk failure must never cost the
+    // inbox poll above (its cursor is already advanced).
+    try {
+      if (typeof lastJunkUidRaw !== "number") {
+        // Connector predates junk polling — seed its junk cursor at the
+        // current top so old spam isn't replayed, mirroring first-connect
+        // behavior. `null` = no junk folder; re-probed next poll.
+        const latestJunk = await ops.latestJunkUid();
+        if (latestJunk !== null) {
+          await store.patchMetadata({
+            tenantId: conn.tenantId,
+            shopDomain: conn.shopDomain,
+            metadata: { lastJunkUid: latestJunk },
+          });
+        }
+      } else {
+        const junk = await ops.listJunkSince(lastJunkUidRaw);
+        if (junk !== null) {
+          const acceptedJunkUids: Array<number> = [];
+          for (const raw of junk.messages) {
+            if (await publishInbound(raw)) {
+              acceptedJunkUids.push(raw.uid);
+              polled += 1;
+            }
+          }
+          if (acceptedJunkUids.length > 0) {
+            await ops.markJunkRead(acceptedJunkUids).catch((cause) => {
+              console.warn(
+                `[imap-poll] failed to mark junk messages read for ${conn.shopDomain}: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }`,
+              );
+            });
+          }
+          if (junk.latestUid > lastJunkUidRaw) {
+            await store.patchMetadata({
+              tenantId: conn.tenantId,
+              shopDomain: conn.shopDomain,
+              metadata: { lastJunkUid: junk.latestUid },
+            });
+          }
+        }
+      }
+    } catch (cause) {
+      console.warn(
+        `[imap-poll] junk-folder poll failed for ${conn.shopDomain}: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+
     return { tenantId: conn.tenantId, mailbox: conn.shopDomain, outcome: { polled } };
   } catch (cause) {
     return {

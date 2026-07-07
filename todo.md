@@ -17,6 +17,51 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Ingest spam/junk mail across ALL mailbox connectors (decided + landed
+      2026-07-07): spam-filtered customer mail was invisible to the agent
+      forever — even Gmail "Not spam" rescue was dropped because
+      `gmailListHistory` requests `historyTypes=messageAdded` only and
+      un-spamming is a `labelAdded` event. Decision: do NOT listen for
+      labelAdded; stop filtering spam at ingestion for every provider.
+      - Gmail: watch defaults to `labelIds` INBOX+SPAM (`gmail-watch.ts`);
+        history filter accepts SPAM alongside INBOX (still drops
+        SENT/DRAFT/TRASH); backfill + reseed queries `(in:inbox OR in:spam)`;
+        `gmailListInboxMessageIds` now sends `includeSpamTrash=true` (Gmail
+        drops `in:spam` matches from `messages.list` without it). Existing
+        INBOX-only watches re-register on the NEXT 6h renewal-cron fire, not
+        at lease end: `watchLabelIds` metadata marker — missing marker =
+        pre-spam watch = due now (`apps/worker/src/gmail-watch-renewal.ts`).
+      - Outlook/Graph: second change-notification subscription on
+        `mailfolders('junkemail')` (`GRAPH_JUNK_RESOURCE`), keys
+        `junkSubscriptionId`/`junkSubscriptionExpiresAt`; created at install
+        AND by the renewal cron for existing connectors (slot-based
+        `renewOne`). Webhook untouched — it is folder-agnostic (fetches by
+        message id).
+      - IMAP: junk-folder poll leg with its own `lastJunkUid` cursor (UIDs
+        are per-mailbox); folder resolved via \Junk special-use then common
+        names (Junk/Spam/Junk E-mail/Junk Email/Bulk Mail); no junk folder →
+        `null`, leg skipped; junk-leg errors warn but never fail the inbox
+        poll; existing connectors seed `lastJunkUid` at current top (no old
+        spam replayed).
+      - Unchanged: blocked-senders gate pre-LLM; processed_messages / thread
+        dedup keeps re-publishes idempotent.
+      - Untested gap (pre-existing): microsoft-install callback subscription
+        registration has no test harness; junk-slot behavior is covered at
+        the renewal-cron level instead.
+      - NOT retroactive: mail already sitting in spam before deploy is only
+        picked up if still `is:unread newer_than:30d` on a Gmail re-install
+        backfill, or on a Gmail 7d-reseed; otherwise resend the message.
+- [x] Fly Gmail OAuth redirect repaired (2026-07-07): the live Fly app still
+      had `GOOGLE_OAUTH_CALLBACK_URL` set to the old Railway callback
+      (`https://api-production-7770.up.railway.app/google/auth/callback`),
+      causing Google `redirect_uri_mismatch` after the authorized redirect URI
+      was moved to `https://support-agent-backend.fly.dev/google/auth/callback`.
+      Updated Fly secrets for `GOOGLE_OAUTH_CALLBACK_URL` and
+      `APPROVAL_BASE_URL` to the Fly API origin, and `DASHBOARD_BASE_URL` to
+      the current dashboard SPA Worker after verifying the old Worker URL 404s
+      and `support-agent-dashboard-v2` is live. Verified the running machine
+      env via `fly ssh console` and `curl -fsS
+      https://support-agent-backend.fly.dev/healthz`.
 - [x] Data-processing notice subprocessor list corrected (2026-07-07):
       `apps/api/src/features/system/legal.ts` now lists one entity per row
       with its purpose — added Microsoft (Outlook/Graph mailbox connector)
@@ -99,6 +144,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       NotFound fallback). Earlier sweep fixed /sign-up, /workspaces/new, dead
       View-notice URL; the only remaining defect was the settings-overview
       splat shadow above.
+- [x] Fresh post-settings-rework re-sweep (2026-07-07): diffed all 34 Next
+      pages against the SPA router after the 07-06 settings simplification.
+      Every page is ported, deliberately hidden (/audit), or inlined
+      (/connect/imap lives inside IntegrationDetailPage). Fixed the two
+      findings: (1) the 07-06 removals were inconsistent — /settings/permissions
+      and old agent deep links (/settings/agents/new, /settings/agents/<id>)
+      fell to the 404 page while /settings/resolution-policy and bare
+      /settings/agents got ClientRedirects; both now redirect to
+      /settings/agent (splat /settings/agents/$ — shadowing the bare sibling
+      is harmless since both share the target). (2) deleted the dead
+      features/placeholder.tsx (nothing imported it since the splat removal).
+      Test: test/legacy-settings-redirects.test.ts (source pins + splat
+      matching pins). Verified with the SPA suite (483 tests), `pnpm build`,
+      and the SPA Vite build.
 - [ ] Remove `waiting_for_approval` / `waiting_for_supplier` from the
       agent-settable `ticket.update_status` enum (`packages/tools/src/ticket/update-status.ts`)
       — those are runtime-owned parks, not agent-settable; agent-visible schema
@@ -148,6 +207,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       detects revoked credentials.
 - [ ] Tighten API rate-limit keying so limits are per actor, not per proxy or
       server egress IP.
+- [ ] Improve internal admin API auth diagnostics: `apps/admin` currently throws
+      only `admin api <status> on <path>`, so a production 401 on `/admin/tenants`
+      does not surface whether apps/api reported `missing bearer token` or
+      `invalid token`, nor which admin/API origins were involved. Include
+      enough non-secret runtime context to distinguish wrong API origin from a
+      wrong admin runtime secret.
 - [ ] Ensure CI runs DB-gated integration suites, especially Drizzle seam tests.
 - [ ] Isolate DB-gated integration test data so the full Vitest suite can run
       with file parallelism; 2026-07-04 ticket-migration verification needed

@@ -397,6 +397,14 @@ export const GRAPH_SUBSCRIPTION_TTL_MS = 4000 * 60 * 1000;
 /** Default resource: new mail landing in the Inbox. */
 export const GRAPH_INBOX_RESOURCE = "/me/mailfolders('inbox')/messages";
 
+/**
+ * Junk-mail resource: spam is ingested, not filtered, so every mailbox
+ * carries a second subscription on the Junk Email folder. The webhook is
+ * folder-agnostic (it fetches messages by id), so junk notifications flow
+ * through the exact same path as inbox ones.
+ */
+export const GRAPH_JUNK_RESOURCE = "/me/mailfolders('junkemail')/messages";
+
 export interface GraphSubscription {
   readonly id: string;
   readonly expirationDateTime: string;

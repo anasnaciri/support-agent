@@ -536,6 +536,10 @@ export const gmailListInboxMessageIds = async (
   const params = new URLSearchParams({
     q: opts.query,
     maxResults: String(opts.maxResults ?? 50),
+    // Gmail excludes SPAM/TRASH results even when the query names them
+    // (`in:spam`) unless this flag is set. Queries stay folder-pinned via
+    // `in:` terms, so this never leaks trash into inbox-only lists.
+    includeSpamTrash: "true",
   });
   const raw = (await gmailFetch({
     path: `/users/me/messages?${params.toString()}`,
@@ -583,8 +587,9 @@ export const gmailListHistory = async (
   for (const entry of raw.history ?? []) {
     for (const ma of entry.messagesAdded ?? []) {
       const labels = ma.message.labelIds ?? [];
-      // Limit to INBOX so SENT echoes and trash drafts don't trigger us.
-      if (!labels.includes("INBOX")) continue;
+      // Accept INBOX and SPAM (spam is ingested, not filtered) while still
+      // excluding SENT echoes, drafts, and trash.
+      if (!labels.includes("INBOX") && !labels.includes("SPAM")) continue;
       if (seen.has(ma.message.id)) continue;
       seen.add(ma.message.id);
       ids.push(ma.message.id);
