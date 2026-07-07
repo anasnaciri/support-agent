@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ApprovalId, TicketId, TenantId } from "@support-agent/agent-core";
 import {
   buildApprovalNotification,
+  buildBundleApprovalNotification,
   verifyApprovalToken,
+  verifyBundleReviewToken,
 } from "@support-agent/services";
 
 const linkConfig = {
@@ -74,5 +76,58 @@ describe("buildApprovalNotification", () => {
     expect(n.merchant.kind).toBe("approval_requested");
     expect(n.merchant.body).toContain(n.approveUrl);
     expect(n.merchant.body).toContain(n.rejectUrl);
+  });
+});
+
+describe("buildBundleApprovalNotification", () => {
+  const bundleBase = {
+    tenantId: TenantId("tenant-1"),
+    ticketId: TicketId("ticket-1"),
+    ticketSubject: "Where is my order?",
+    customerEmail: "jane@example.com",
+    actions: [
+      {
+        tool: "conversation.reply",
+        proposedInput: { bodyText: "Hi Jane, here's an update." },
+      },
+      {
+        tool: "refund.create",
+        proposedInput: {
+          orderId: "gid://shopify/Order/123",
+          amount: { amount: "23.50", currencyCode: "EUR" },
+        },
+      },
+    ],
+    linkConfig,
+  };
+
+  it("mints a ticket-bound review URL that verifies as a bundle token", () => {
+    const n = buildBundleApprovalNotification(bundleBase);
+    expect(n.reviewUrl).toContain(
+      `${linkConfig.baseUrl}/approvals/bundle/${bundleBase.ticketId}?token=`,
+    );
+    const token = decodeURIComponent(n.reviewUrl.split("token=")[1] ?? "");
+    const verified = verifyBundleReviewToken({
+      token,
+      secret: linkConfig.signingKey,
+    });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) {
+      expect(verified.ticketId).toBe(bundleBase.ticketId);
+    }
+  });
+
+  it("hands the merchant ping the per-action summaries and the review link", () => {
+    const n = buildBundleApprovalNotification(bundleBase);
+    expect(n.merchant.kind).toBe("approval_requested");
+    expect(n.merchant.body).toContain("jane@example.com");
+    expect(n.merchant.body).toContain("23.50 EUR");
+    expect(n.merchant.body).toContain(n.reviewUrl);
+  });
+
+  it("honors the nowMs override for deterministic tokens", () => {
+    const a = buildBundleApprovalNotification({ ...bundleBase, nowMs: 1000 });
+    const b = buildBundleApprovalNotification({ ...bundleBase, nowMs: 1000 });
+    expect(a.reviewUrl).toBe(b.reviewUrl);
   });
 });

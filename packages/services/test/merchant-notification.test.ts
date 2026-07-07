@@ -5,10 +5,12 @@ import {
   MerchantNotificationService,
   MerchantNotificationSendFailed,
   approvalRequestedNotification,
+  bundleApprovalRequestedNotification,
   connectorBrokenNotification,
   humanTakeoverNotification,
   llmCreditsLowNotification,
   makeMerchantNotificationServiceTest,
+  summarizeApprovalAction,
   type MerchantNotification,
 } from "../src/index.js";
 
@@ -203,5 +205,118 @@ describe("connectorBrokenNotification", () => {
     expect(n.body).toContain("support@merchant.com");
     expect(n.body).toContain("refresh token revoked");
     expect(n.body.toLowerCase()).toContain("not");
+  });
+});
+
+describe("summarizeApprovalAction", () => {
+  it("summarizes a reply with a short quoted preview", () => {
+    const line = summarizeApprovalAction("conversation.reply", {
+      subject: "Re: order #1001",
+      bodyText:
+        "Hi Jane, sorry about the delay — your replacement ships tomorrow and you'll get tracking by email.",
+    });
+    expect(line).toContain("Send a reply");
+    expect(line).toContain("Hi Jane, sorry about the delay");
+    // Long drafts are truncated to keep the ping scannable.
+    expect(line.length).toBeLessThan(140);
+  });
+
+  it("summarizes a refund with amount and currency from the input", () => {
+    const line = summarizeApprovalAction("refund.create", {
+      orderId: "gid://shopify/Order/123",
+      amount: { amount: "23.50", currencyCode: "EUR" },
+    });
+    expect(line).toContain("Refund");
+    expect(line).toContain("23.50 EUR");
+    // Raw GIDs are jargon — never surfaced to the merchant.
+    expect(line).not.toContain("gid://");
+  });
+
+  it("never invents a currency when the input has none", () => {
+    const line = summarizeApprovalAction("refund.create", {
+      orderId: "gid://shopify/Order/123",
+    });
+    expect(line).toContain("Refund");
+    expect(line).not.toContain("USD");
+  });
+
+  it("summarizes an order cancellation", () => {
+    const line = summarizeApprovalAction("order.cancel", {
+      orderId: "gid://shopify/Order/123",
+      amount: { amount: "80.00", currencyCode: "GBP" },
+    });
+    expect(line).toContain("Cancel");
+    expect(line).toContain("80.00 GBP");
+    expect(line).not.toContain("gid://");
+  });
+
+  it("summarizes percentage and fixed-amount discounts", () => {
+    expect(
+      summarizeApprovalAction("discount.create", {
+        valueType: "percentage",
+        value: "15",
+      }),
+    ).toContain("15%");
+    expect(
+      summarizeApprovalAction("discount.create", {
+        valueType: "fixed_amount",
+        value: "10.00",
+        currencyCode: "EUR",
+      }),
+    ).toContain("10.00 EUR");
+  });
+
+  it("falls back to the tool id for unknown tools", () => {
+    const line = summarizeApprovalAction("some.future_tool", { x: 1 });
+    expect(line).toContain("some.future_tool");
+  });
+});
+
+describe("bundleApprovalRequestedNotification", () => {
+  const base = {
+    ticketId: TicketId("c1"),
+    ticketSubject: "Where is my order?",
+    customerEmail: "jane@example.com",
+    actions: [
+      {
+        tool: "conversation.reply",
+        proposedInput: { bodyText: "Hi Jane, here's an update." },
+      },
+      {
+        tool: "refund.create",
+        proposedInput: {
+          orderId: "gid://shopify/Order/123",
+          amount: { amount: "23.50", currencyCode: "EUR" },
+        },
+      },
+    ],
+    reviewUrl: "https://api.example.com/approvals/bundle/c1?token=T",
+  };
+
+  it("lists every queued action with the customer and one review link", () => {
+    const n = bundleApprovalRequestedNotification(base);
+    expect(n.kind).toBe("approval_requested");
+    expect(n.ticketId).toBe(base.ticketId);
+    expect(n.title).toContain("Where is my order?");
+    expect(n.body).toContain("jane@example.com");
+    expect(n.body).toContain("2 actions");
+    expect(n.body).toContain("1. ");
+    expect(n.body).toContain("2. ");
+    expect(n.body).toContain("Hi Jane, here's an update.");
+    expect(n.body).toContain("23.50 EUR");
+    expect(n.body).toContain(base.reviewUrl);
+    // The review page is the single decision surface — no bare
+    // approve/reject links that would decide sight-unseen.
+    expect(n.body.match(/https?:\/\//gu)).toHaveLength(1);
+  });
+
+  it("omits the customer line when unknown and falls back to the action count in the title", () => {
+    const n = bundleApprovalRequestedNotification({
+      ...base,
+      ticketSubject: null,
+      customerEmail: null,
+    });
+    expect(n.title).toContain("2 actions");
+    expect(n.body).not.toContain("Customer:");
   });
 });

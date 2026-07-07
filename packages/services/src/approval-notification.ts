@@ -1,8 +1,12 @@
 import type { ApprovalId, TicketId, TenantId } from "@support-agent/agent-core";
-import { signApprovalToken } from "./approval-tokens.js";
+import {
+  signApprovalToken,
+  signBundleReviewToken,
+} from "./approval-tokens.js";
 import { derivePreview, deriveSubject } from "./agent-runtime-helpers.js";
 import {
   approvalRequestedNotification,
+  bundleApprovalRequestedNotification,
   type MerchantNotification,
 } from "./merchant-notification.js";
 import type { SendApprovalLinkInput } from "./platform-mail.js";
@@ -97,4 +101,59 @@ export const buildApprovalNotification = (
     rejectUrl,
   });
   return { approveUrl, rejectUrl, draftSubject, draftPreview, mail, merchant };
+};
+
+// ============================================================
+// Bundle (queued-approvals) notification builder
+// ============================================================
+
+export interface BuildBundleApprovalNotificationInput {
+  readonly tenantId: TenantId;
+  readonly ticketId: TicketId;
+  readonly ticketSubject: string | null;
+  readonly customerEmail: string | null;
+  /** The queued approval rows, in proposal order. */
+  readonly actions: ReadonlyArray<{
+    readonly tool: string;
+    readonly proposedInput: unknown;
+  }>;
+  readonly linkConfig: ApprovalLinkParams;
+  /** Clock injection for deterministic token signing in tests. */
+  readonly nowMs?: number;
+}
+
+export interface BundleApprovalNotification {
+  /** Signed, ticket-bound magic link to the api's bundle review page. */
+  readonly reviewUrl: string;
+  /** Ready to hand to `MerchantNotificationService.notify`. */
+  readonly merchant: MerchantNotification;
+}
+
+/**
+ * Bundle counterpart of `buildApprovalNotification`. One signed link to
+ * the review page (GET renders, POST decides — the link itself never
+ * mutates), one ping listing every queued action. Shared by the runtime's
+ * bundle park and any future reminder pass, so link format and copy can't
+ * drift.
+ */
+export const buildBundleApprovalNotification = (
+  input: BuildBundleApprovalNotificationInput,
+): BundleApprovalNotification => {
+  const { ticketId, linkConfig } = input;
+  const nowOverride = input.nowMs !== undefined ? { nowMs: input.nowMs } : {};
+  const token = signBundleReviewToken({
+    ticketId,
+    secret: linkConfig.signingKey,
+    ttlMs: linkConfig.ttlMs,
+    ...nowOverride,
+  });
+  const reviewUrl = `${linkConfig.baseUrl}/approvals/bundle/${ticketId}?token=${encodeURIComponent(token)}`;
+  const merchant = bundleApprovalRequestedNotification({
+    ticketId: input.ticketId,
+    ticketSubject: input.ticketSubject,
+    customerEmail: input.customerEmail,
+    actions: input.actions,
+    reviewUrl,
+  });
+  return { reviewUrl, merchant };
 };

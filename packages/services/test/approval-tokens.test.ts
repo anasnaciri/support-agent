@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   signApprovalToken,
+  signBundleReviewToken,
   verifyApprovalToken,
+  verifyBundleReviewToken,
 } from "../src/approval-tokens.js";
 
 describe("approval tokens", () => {
@@ -156,6 +158,108 @@ describe("approval tokens", () => {
       const token = signApprovalToken({
         approvalId: `appr-${i}-${"x".repeat(i)}`,
         action: i % 2 === 0 ? "approve" : "reject",
+        secret: SECRET,
+        ttlMs: 60_000,
+        nowMs: NOW + i,
+      });
+      expect(token).not.toMatch(/[+/=]/u);
+    }
+  });
+});
+
+describe("bundle review tokens", () => {
+  const SECRET = "test-signing-secret-do-not-use-in-prod";
+  const NOW = 1_700_000_000_000;
+
+  it("round-trips a valid token", () => {
+    const token = signBundleReviewToken({
+      ticketId: "ticket-abc",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const result = verifyBundleReviewToken({
+      token,
+      secret: SECRET,
+      nowMs: NOW + 1_000,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.ticketId).toBe("ticket-abc");
+      expect(result.expiresAt).toBe(NOW + 60_000);
+    }
+  });
+
+  it("rejects an expired token", () => {
+    const token = signBundleReviewToken({
+      ticketId: "ticket-abc",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const result = verifyBundleReviewToken({
+      token,
+      secret: SECRET,
+      nowMs: NOW + 60_001,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("expired");
+  });
+
+  it("rejects a tampered signature", () => {
+    const token = signBundleReviewToken({
+      ticketId: "ticket-abc",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const result = verifyBundleReviewToken({
+      token: token.slice(0, -2) + "xx",
+      secret: SECRET,
+      nowMs: NOW,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("does not verify a single-approval token as a bundle review token", () => {
+    // Cross-surface replay: an approve link's token must not open the
+    // bundle review page for a ticket.
+    const token = signApprovalToken({
+      approvalId: "ticket-abc",
+      action: "approve",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const result = verifyBundleReviewToken({
+      token,
+      secret: SECRET,
+      nowMs: NOW,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("does not verify a bundle review token as a single-approval token", () => {
+    // Reverse direction: the review link must not decide a single
+    // approval whose id happens to equal the ticket id.
+    const token = signBundleReviewToken({
+      ticketId: "ticket-abc",
+      secret: SECRET,
+      ttlMs: 60_000,
+      nowMs: NOW,
+    });
+    const result = verifyApprovalToken({
+      token,
+      secret: SECRET,
+      nowMs: NOW,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("emits URL-safe tokens", () => {
+    for (let i = 0; i < 30; i++) {
+      const token = signBundleReviewToken({
+        ticketId: `ticket-${i}-${"x".repeat(i)}`,
         secret: SECRET,
         ttlMs: 60_000,
         nowMs: NOW + i,

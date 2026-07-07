@@ -146,3 +146,96 @@ export const verifyApprovalToken = (
 
   return { ok: true, approvalId, action, expiresAt };
 };
+
+// ============================================================
+// Bundle review tokens
+// ============================================================
+//
+// The autonomous loop parks a ticket with SEVERAL queued approvals at
+// once; the merchant ping carries ONE link to a review page that lists
+// the whole bundle before any decision (a bundle must never be decidable
+// sight-unseen — the S2 scanner problem applies doubly to Telegram,
+// whose preview fetcher follows every sent URL).
+//
+// Same cryptogram format as the single-approval token, with the ticket
+// id in the id slot and the fixed action `bundle_review`. That action
+// string is deliberately outside the single-token enum, so neither
+// token kind verifies on the other surface: an approve link can't open
+// a review page, and a review link can't decide a single approval.
+
+const BUNDLE_REVIEW_ACTION = "bundle_review";
+
+export interface SignBundleReviewTokenInput {
+  readonly ticketId: string;
+  readonly secret: string;
+  /** Time-to-live in milliseconds. Defaults to the 30-day link TTL. */
+  readonly ttlMs?: number;
+  /** Clock override for tests. */
+  readonly nowMs?: number;
+}
+
+export const signBundleReviewToken = (
+  input: SignBundleReviewTokenInput,
+): string => {
+  const now = input.nowMs ?? Date.now();
+  const ttl = input.ttlMs ?? DEFAULT_APPROVAL_TOKEN_TTL_MS;
+  const expiresAt = now + ttl;
+  const body = `${input.ticketId}.${BUNDLE_REVIEW_ACTION}.${expiresAt}`;
+  const sig = createHmac(HMAC_ALGO, input.secret).update(body).digest();
+  return `${body}.${b64urlEncode(sig)}`;
+};
+
+export type VerifyBundleReviewTokenResult =
+  | {
+      readonly ok: true;
+      readonly ticketId: string;
+      readonly expiresAt: number;
+    }
+  | {
+      readonly ok: false;
+      readonly reason: "malformed" | "invalid_signature" | "expired";
+    };
+
+export const verifyBundleReviewToken = (
+  input: VerifyApprovalTokenInput,
+): VerifyBundleReviewTokenResult => {
+  const parts = input.token.split(".");
+  if (parts.length !== 4) return { ok: false, reason: "malformed" };
+  const [ticketId, action, expiresAtStr, sigB64] = parts as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (!ticketId || !expiresAtStr || !sigB64) {
+    return { ok: false, reason: "malformed" };
+  }
+  if (action !== BUNDLE_REVIEW_ACTION) {
+    return { ok: false, reason: "malformed" };
+  }
+  const expiresAt = Number.parseInt(expiresAtStr, 10);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return { ok: false, reason: "malformed" };
+  }
+
+  const body = `${ticketId}.${action}.${expiresAtStr}`;
+  const expected = createHmac(HMAC_ALGO, input.secret).update(body).digest();
+  let provided: Buffer;
+  try {
+    provided = b64urlDecode(sigB64);
+  } catch {
+    return { ok: false, reason: "invalid_signature" };
+  }
+  if (provided.length !== expected.length) {
+    return { ok: false, reason: "invalid_signature" };
+  }
+  if (!timingSafeEqual(provided, expected)) {
+    return { ok: false, reason: "invalid_signature" };
+  }
+
+  // Expiry AFTER signature — same side-channel reasoning as above.
+  const now = input.nowMs ?? Date.now();
+  if (now >= expiresAt) return { ok: false, reason: "expired" };
+
+  return { ok: true, ticketId, expiresAt };
+};

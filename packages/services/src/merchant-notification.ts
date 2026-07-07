@@ -277,3 +277,120 @@ export const MerchantNotificationServiceTest = (
   fixtures: MerchantNotificationTestFixtures = {},
 ): Layer.Layer<MerchantNotificationService> =>
   makeMerchantNotificationServiceTest(fixtures).layer;
+
+/**
+ * One merchant-readable line per queued gated action, assembled from the
+ * approval row's structured `proposedInput` — never LLM-generated at send
+ * time, so a money amount can't be paraphrased. Agent-written words (the
+ * reply draft) appear only as a verbatim, truncated quote. Unknown tools
+ * fall back to the tool id verbatim — better an ugly line than a silent
+ * one when a new gated tool appears.
+ */
+const ACTION_PREVIEW_MAX = 80;
+
+const summaryMoney = (input: Record<string, unknown>): string | null => {
+  const m = input["amount"];
+  if (!m || typeof m !== "object") return null;
+  const r = m as Record<string, unknown>;
+  const amount = typeof r["amount"] === "string" ? r["amount"] : null;
+  const currency =
+    typeof r["currencyCode"] === "string" ? r["currencyCode"] : null;
+  // Never invent a currency — show a bare amount over a wrong "USD".
+  if (amount && currency) return `${amount} ${currency}`;
+  return amount;
+};
+
+export const summarizeApprovalAction = (
+  tool: string,
+  proposedInput: unknown,
+): string => {
+  const input = (
+    proposedInput && typeof proposedInput === "object" ? proposedInput : {}
+  ) as Record<string, unknown>;
+  switch (tool) {
+    case "conversation.reply":
+    case "conversation.ask_customer": {
+      const verb =
+        tool === "conversation.ask_customer"
+          ? "Ask the customer a question"
+          : "Send a reply";
+      const body =
+        typeof input["bodyText"] === "string" ? input["bodyText"] : null;
+      if (!body) return verb;
+      const preview =
+        body.length > ACTION_PREVIEW_MAX
+          ? `${body.slice(0, ACTION_PREVIEW_MAX)}…`
+          : body;
+      return `${verb} — "${preview}"`;
+    }
+    case "refund.create": {
+      const money = summaryMoney(input);
+      return money ? `Refund ${money}` : "Refund the customer";
+    }
+    case "order.cancel": {
+      const money = summaryMoney(input);
+      return money ? `Cancel the order and refund ${money}` : "Cancel the order";
+    }
+    case "discount.create": {
+      const value = typeof input["value"] === "string" ? input["value"] : null;
+      if (value && input["valueType"] === "percentage") {
+        return `Create a ${value}% discount code`;
+      }
+      if (value && input["valueType"] === "fixed_amount") {
+        const currency =
+          typeof input["currencyCode"] === "string"
+            ? input["currencyCode"]
+            : null;
+        return `Create a ${value}${currency ? ` ${currency}` : ""} discount code`;
+      }
+      return "Create a discount code";
+    }
+    case "supplier.escalate":
+      return "Escalate to the supplier";
+    default:
+      return `Run "${tool}"`;
+  }
+};
+
+export interface BundleApprovalRequestedNotificationInput {
+  readonly ticketId: TicketId;
+  readonly ticketSubject: string | null;
+  readonly customerEmail: string | null;
+  readonly actions: ReadonlyArray<{
+    readonly tool: string;
+    readonly proposedInput: unknown;
+  }>;
+  /** The single review-page link — deliberately the ONLY URL in the ping. */
+  readonly reviewUrl: string;
+}
+
+/**
+ * Merchant ping for a QUEUED BUNDLE park (autonomous loop end). Unlike the
+ * single-approval ping there are no bare approve/reject links: a bundle is
+ * several actions, so the one link opens a review page that lists them all
+ * before any decision.
+ */
+export const bundleApprovalRequestedNotification = (
+  input: BundleApprovalRequestedNotificationInput,
+): MerchantNotification => {
+  const count = input.actions.length;
+  const countLabel = `${count} action${count === 1 ? "" : "s"}`;
+  const actionLines = input.actions.map(
+    (a, i) => `${i + 1}. ${summarizeApprovalAction(a.tool, a.proposedInput)}`,
+  );
+  return {
+    kind: "approval_requested",
+    title: input.ticketSubject
+      ? `Approval needed: ${input.ticketSubject}`
+      : `Approval needed (${countLabel})`,
+    body: [
+      `The agent queued ${countLabel} on this ticket and is waiting for your approval.`,
+      ``,
+      ...(input.customerEmail ? [`Customer: ${input.customerEmail}`, ``] : []),
+      ...actionLines,
+      ``,
+      `Review and approve: ${input.reviewUrl}`,
+    ].join("\n"),
+    ticketId: input.ticketId,
+  };
+};
