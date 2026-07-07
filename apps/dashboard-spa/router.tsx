@@ -118,6 +118,18 @@ const settingsAgentRoute = authedChild("/settings/agent", AgentPage);
 const settingsAgentsRoute = authedChild("/settings/agents", () => (
   <ClientRedirect to="/settings/agent" />
 ));
+// Legacy deep links from the multi-agent era (/settings/agents/new,
+// /settings/agents/<id>) all collapse into the single agent page. This splat
+// outranks the bare /settings/agents sibling for that path too (the
+// settings-overview shadowing lesson), which is harmless here: both redirect
+// to the same target.
+const settingsAgentsSplatRoute = authedChild("/settings/agents/$", () => (
+  <ClientRedirect to="/settings/agent" />
+));
+// The permissions matrix moved onto the agent page's Actions card.
+const settingsPermissionsRoute = authedChild("/settings/permissions", () => (
+  <ClientRedirect to="/settings/agent" />
+));
 const settingsSuppliersRoute = authedChild("/settings/suppliers", SuppliersPage);
 const settingsSupplierEscalationRoute = authedChild(
   "/settings/supplier-escalation",
@@ -166,6 +178,8 @@ const routeTree = rootRoute.addChildren([
     settingsMembersRoute,
     settingsAgentRoute,
     settingsAgentsRoute,
+    settingsAgentsSplatRoute,
+    settingsPermissionsRoute,
     settingsSuppliersRoute,
     settingsSupplierEscalationRoute,
     settingsLegalRoute,

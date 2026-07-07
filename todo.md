@@ -153,7 +153,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       fell to the 404 page while /settings/resolution-policy and bare
       /settings/agents got ClientRedirects; both now redirect to
       /settings/agent (splat /settings/agents/$ — shadowing the bare sibling
-      is harmless since both share the target). (2) deleted the dead
+      is harmless since both share the target). Test coverage pins both removed
+      legacy URLs and splat matching so `/settings/agents/*` does not shadow the
+      distinct `/settings/agent` page. (2) deleted the dead
       features/placeholder.tsx (nothing imported it since the splat removal).
       Test: test/legacy-settings-redirects.test.ts (source pins + splat
       matching pins). Verified with the SPA suite (483 tests), `pnpm build`,
