@@ -596,6 +596,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       Color transitions (track + refracted track copy) run 200ms ease-out
       (`COLOR_MOTION` / per-property `duration-[200ms,450ms]`) instead of the
       450ms slide spring, which read sluggish on color.
+- [x] Queued-bundle approval ping fixed + magic-link review surface (2026-07-07).
+      The bundle park's Telegram ping pointed `${APPROVAL_BASE_URL}/tickets/:id`
+      (a dashboard path on the API host → `not_found`). Now: the ping lists each
+      queued action (code-derived `summarizeApprovalAction` over the approval
+      rows' structured `proposedInput` — no LLM at send time, currency never
+      invented) and carries ONE signed ticket-bound magic link
+      (`signBundleReviewToken`, action namespace `bundle_review`, no cross-replay
+      with single-approval tokens) to `GET /approvals/bundle/:ticketId` — a
+      token-auth review page (GET never mutates; Telegram's preview fetcher =
+      the S2 scanner rule) with Approve-all / Reject-all confirm-POSTs reusing
+      `decideApprovalBundle` (all rows decided, then ONE event) and a "View on
+      dashboard" link for edits / per-action decisions.
 
 ---
 

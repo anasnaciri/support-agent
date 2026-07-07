@@ -128,7 +128,9 @@ export interface DecideApprovalOptions {
   readonly managerId?: UserId;
 }
 
-const SYSTEM_MANAGER_ID = UserId("00000000-0000-0000-0000-000000000000");
+export const SYSTEM_MANAGER_ID = UserId(
+  "00000000-0000-0000-0000-000000000000",
+);
 
 export const decideApproval = async (
   opts: DecideApprovalOptions,
@@ -204,20 +206,20 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f6f6f6;
 .badge.bad{background:#fee2e2;color:#991b1b}
 .badge.info{background:#dbeafe;color:#1e40af}
 </style></head><body><div class="card">`;
-const SHELL_FOOT = `</div></body></html>`;
+export const SHELL_FOOT = `</div></body></html>`;
 
 const BUTTON_CSS = `.btn{display:inline-block;border:0;border-radius:8px;padding:10px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
 .btn.ok{background:#0057ff;color:#fff}
 .btn.bad{background:#991b1b;color:#fff}
 a.dash{display:inline-block;margin-top:16px;font-size:14px;color:#1e40af}`;
 
-const SHELL_HEAD_WITH_BUTTONS = SHELL_HEAD.replace(
+export const SHELL_HEAD_WITH_BUTTONS = SHELL_HEAD.replace(
   "</style>",
   `\n${BUTTON_CSS}</style>`,
 );
 
 /** Minimal HTML-entity escape for values interpolated into pages. */
-const escapeHtml = (s: string): string =>
+export const escapeHtml = (s: string): string =>
   s
     .replace(/&/gu, "&amp;")
     .replace(/</gu, "&lt;")

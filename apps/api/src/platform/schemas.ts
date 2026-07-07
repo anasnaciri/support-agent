@@ -188,3 +188,18 @@ export const approvalParamsSchema = {
   },
   additionalProperties: false,
 };
+
+export const bundleReviewParamsSchema = {
+  type: "object",
+  properties: { ticketId: { type: "string" } },
+  additionalProperties: false,
+};
+
+export const bundleDecisionParamsSchema = {
+  type: "object",
+  properties: {
+    ticketId: { type: "string" },
+    action: { type: "string" },
+  },
+  additionalProperties: false,
+};

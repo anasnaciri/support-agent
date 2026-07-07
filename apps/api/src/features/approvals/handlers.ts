@@ -8,6 +8,13 @@ import {
   renderApprovalPage,
   verifyApprovalLink,
 } from "./endpoints.js";
+import {
+  decideBundleFromLink,
+  loadBundleReview,
+  renderBundleDecisionPage,
+  renderBundleReviewErrorPage,
+  renderBundleReviewPage,
+} from "./bundle-endpoints.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
 import { sendHtml, sendJson } from "../../platform/http.js";
@@ -121,5 +128,102 @@ export const handleApprovalDecision = async (
   const page = renderApprovalPage(outcome, match.action, {
     dashboardBaseUrl: cfg.dashboardBaseUrl,
   });
+  sendHtml(res, page.status, page.body);
+};
+
+// ============================================================
+// Bundle review (queued-approvals magic link)
+// ============================================================
+
+const UUID_RE = /^[0-9a-f-]{36}$/iu;
+
+/**
+ * GET /approvals/bundle/:ticketId — verification + review page ONLY.
+ * Lists every queued action so the merchant sees what they're approving;
+ * the decision happens in the POST below (audit S2 — Telegram's link
+ * preview fetcher follows every sent URL, exactly like email scanners).
+ */
+export const handleBundleReviewPage = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const { ticketId } = req.params as { ticketId: string };
+  if (!UUID_RE.test(ticketId)) {
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const token = extractToken(req.url ?? "/");
+  if (!token) {
+    const page = renderBundleReviewErrorPage({
+      kind: "bad_token",
+      reason: "malformed",
+    });
+    sendHtml(res, page.status, page.body);
+    return;
+  }
+  const outcome = await loadBundleReview({
+    ticketId,
+    token,
+    signingKey: cfg.approvalSigningKey,
+    layer,
+  });
+  if (outcome.kind === "ok") {
+    const page = renderBundleReviewPage({
+      ticket: outcome.ticket,
+      pending: outcome.pending,
+      token,
+      dashboardBaseUrl: cfg.dashboardBaseUrl,
+    });
+    sendHtml(res, page.status, page.body);
+    return;
+  }
+  const page = renderBundleReviewErrorPage(outcome);
+  sendHtml(res, page.status, page.body);
+};
+
+/**
+ * POST /approvals/bundle/:ticketId/:action — decide the WHOLE pending
+ * bundle (confirm-page POST). Token in the body, same as the single-
+ * approval confirm form (audit S6 — keeps it out of request logs).
+ */
+export const handleBundleDecision = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<void> => {
+  const { ticketId, action } = req.params as {
+    ticketId: string;
+    action: string;
+  };
+  if (!UUID_RE.test(ticketId) || (action !== "approve" && action !== "reject")) {
+    sendJson(res, 404, { error: "not_found" });
+    return;
+  }
+  const token = extractTokenFromPostBody(req.body) ?? extractToken(req.url ?? "/");
+  if (!token) {
+    const page = renderBundleReviewErrorPage({
+      kind: "bad_token",
+      reason: "malformed",
+    });
+    sendHtml(res, page.status, page.body);
+    return;
+  }
+  const outcome = await decideBundleFromLink({
+    ticketId,
+    action,
+    token,
+    signingKey: cfg.approvalSigningKey,
+    layer,
+    publish: makePgBossApprovalPublisher(() =>
+      acquireApprovalBoss(cfg.databaseUrl),
+    ),
+  });
+  const page =
+    outcome.kind === "decided" || outcome.kind === "no_pending"
+      ? renderBundleDecisionPage(outcome)
+      : renderBundleReviewErrorPage(outcome);
   sendHtml(res, page.status, page.body);
 };
