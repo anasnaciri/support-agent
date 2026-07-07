@@ -529,7 +529,7 @@ export const defaultSupplierEscalationSheet: SupplierEscalationSheet | null =
  * changes; tenants with older versions must re-accept before new connector
  * writes are allowed.
  */
-export const DATA_PROCESSING_NOTICE_VERSION = "2026-07-04";
+export const DATA_PROCESSING_NOTICE_VERSION = "2026-07-07";
 export const DPA_VERSION = "2026-06-04";
 
 export interface LegalAcceptance {

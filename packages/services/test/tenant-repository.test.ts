@@ -43,8 +43,8 @@ const settings = (
   });
 
 describe("TenantRepositoryTest", () => {
-  it("uses a new data-processing notice version for the retention policy change", () => {
-    expect(DATA_PROCESSING_NOTICE_VERSION).toBe("2026-07-04");
+  it("uses a new data-processing notice version for the subprocessor-list change", () => {
+    expect(DATA_PROCESSING_NOTICE_VERSION).toBe("2026-07-07");
   });
 
   it("returns the configured settings on getSettings", async () => {

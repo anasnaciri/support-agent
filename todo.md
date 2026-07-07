@@ -17,6 +17,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Data-processing notice subprocessor list corrected (2026-07-07):
+      `apps/api/src/features/system/legal.ts` now lists one entity per row
+      with its purpose — added Microsoft (Outlook/Graph mailbox connector)
+      and Telegram (merchant notifications), renamed "Cloudflare R2" to
+      Cloudflare (object storage + web hosting), noted merchant-connected
+      IMAP/SMTP mailboxes flow through the merchant's own provider, and
+      added a "Sharing on merchant instructions" section for supplier-portal
+      / supplier-sheet disclosure. `DATA_PROCESSING_NOTICE_VERSION` bumped
+      2026-07-04 → 2026-07-07, so existing tenants must re-accept before new
+      connector writes (`legalAcceptanceIsCurrent`). DPA version unchanged.
+      Verified with `pnpm build` and the legal + tenant-repository tests.
+- [ ] Consider extracting the subprocessor list to a standalone page/appendix
+      referenced from the DPA with a notify-of-changes clause, so future
+      connector additions don't re-version the whole notice.
 - [x] Dashboard SPA GlassSwitch resting treatment refined (2026-07-06):
       `apps/dashboard-spa/components/ui/glass-switch.tsx` now keeps the thumb
       as an opaque solid surface at rest, reveals the glass/refraction layers

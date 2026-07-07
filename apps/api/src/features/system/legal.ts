@@ -65,11 +65,33 @@ export const renderDataProcessingNoticeHtml = (): string => {
 
     <h2>Subprocessors</h2>
     <p>
-      The platform may use OpenRouter, Anthropic, or OpenAI for tenant-selected
-      LLM inference; Google for Gmail and Google Sheets connectors; Shopify for
-      commerce data; Resend for platform/system mail; Cloudflare R2 for object
-      storage; 17track when carrier lookup is configured; and the hosting and
-      database infrastructure configured for the production deployment.
+      Depending on the connectors and options the merchant enables, the
+      platform may use:
+    </p>
+    <ul>
+      <li>OpenRouter, Anthropic, or OpenAI — tenant-selected LLM inference;</li>
+      <li>Google — Gmail mailbox connector and Google Sheets supplier workflows;</li>
+      <li>Microsoft — Outlook / Microsoft 365 mailbox connector;</li>
+      <li>Shopify — commerce data;</li>
+      <li>Resend — platform/system mail;</li>
+      <li>Telegram — merchant notifications, which may reference ticket details;</li>
+      <li>Cloudflare — object storage and web application hosting;</li>
+      <li>17track — carrier tracking lookup, when configured;</li>
+      <li>the hosting and database infrastructure configured for the production deployment.</li>
+    </ul>
+    <p>
+      Where the merchant connects a mailbox over IMAP/SMTP, support-message
+      content flows through the merchant's own mail provider rather than a
+      platform subprocessor.
+    </p>
+
+    <h2>Sharing on merchant instructions</h2>
+    <p>
+      When a ticket is escalated to a supplier — through the supplier portal or
+      a merchant-connected spreadsheet — relevant order, shipping, and
+      conversation details are shared with that supplier. Suppliers are chosen
+      by the merchant and act on the merchant's instructions; they are not
+      Support Agent subprocessors.
     </p>
 
     <h2>Retention</h2>

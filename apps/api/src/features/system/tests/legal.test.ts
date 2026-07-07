@@ -22,4 +22,25 @@ describe("renderDataProcessingNoticeHtml", () => {
     expect(html).toContain("Data Processing Notice");
     expect(html).toContain("Data Processing Addendum");
   });
+
+  it("names every live subprocessor entity with its purpose", () => {
+    // One row per legal entity — product names (R2, Gmail) only describe scope.
+    expect(html).toContain("Microsoft");
+    expect(html).toContain("Telegram");
+    expect(html).toContain("Cloudflare");
+    expect(html).not.toContain("Cloudflare R2");
+    // Merchant-connected IMAP/SMTP servers are covered alongside Gmail/Outlook.
+    expect(html).toContain("IMAP/SMTP");
+  });
+
+  it("discloses supplier sharing as merchant-directed, not subprocessing", () => {
+    expect(html).toContain("supplier");
+    expect(html).toContain("merchant's instructions");
+  });
+
+  it("was re-versioned for the subprocessor-list change", () => {
+    // Microsoft/Telegram landed before 2026-07-04; the corrected list must
+    // carry a version bump so existing tenants re-accept.
+    expect(DATA_PROCESSING_NOTICE_VERSION >= "2026-07-07").toBe(true);
+  });
 });
