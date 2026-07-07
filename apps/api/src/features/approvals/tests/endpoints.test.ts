@@ -506,6 +506,30 @@ describe("GET confirm page — no state change (audit S2)", () => {
     // The token value is HTML-escaped into the hidden field.
     expect(page.body).toContain(token);
   });
+
+  it("offers a small dashboard link when a dashboard URL is configured", () => {
+    const token = signApprovalToken({
+      approvalId: APPROVAL_ID,
+      action: "reject",
+      secret: SIGNING_KEY,
+      ttlMs: 60_000,
+    });
+    const page = renderApprovalConfirmPage(
+      { approvalId: APPROVAL_ID, action: "reject", token },
+      { dashboardBaseUrl: "https://dash.example.com" },
+    );
+    expect(page.body).toContain("View on dashboard");
+    expect(page.body).toContain(
+      `https://dash.example.com/approvals/${APPROVAL_ID}`,
+    );
+    // Without a configured dashboard the link is simply omitted.
+    const bare = renderApprovalConfirmPage({
+      approvalId: APPROVAL_ID,
+      action: "reject",
+      token,
+    });
+    expect(bare.body).not.toContain("View on dashboard");
+  });
 });
 
 describe("receipt page dashboard link (audit U12)", () => {

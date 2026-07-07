@@ -61,11 +61,14 @@ export const handleApprovalConfirmPage = (
     sendHtml(res, page.status, page.body);
     return;
   }
-  const page = renderApprovalConfirmPage({
-    approvalId: match.approvalId,
-    action: match.action,
-    token,
-  });
+  const page = renderApprovalConfirmPage(
+    {
+      approvalId: match.approvalId,
+      action: match.action,
+      token,
+    },
+    { dashboardBaseUrl: cfg.dashboardBaseUrl },
+  );
   sendHtml(res, page.status, page.body);
 };
 
@@ -154,12 +157,13 @@ export const handleBundleReviewPage = async (
     sendJson(res, 404, { error: "not_found" });
     return;
   }
+  const pageOpts = { ticketId, dashboardBaseUrl: cfg.dashboardBaseUrl };
   const token = extractToken(req.url ?? "/");
   if (!token) {
-    const page = renderBundleReviewErrorPage({
-      kind: "bad_token",
-      reason: "malformed",
-    });
+    const page = renderBundleReviewErrorPage(
+      { kind: "bad_token", reason: "malformed" },
+      pageOpts,
+    );
     sendHtml(res, page.status, page.body);
     return;
   }
@@ -179,7 +183,7 @@ export const handleBundleReviewPage = async (
     sendHtml(res, page.status, page.body);
     return;
   }
-  const page = renderBundleReviewErrorPage(outcome);
+  const page = renderBundleReviewErrorPage(outcome, pageOpts);
   sendHtml(res, page.status, page.body);
 };
 
@@ -202,12 +206,13 @@ export const handleBundleDecision = async (
     sendJson(res, 404, { error: "not_found" });
     return;
   }
+  const pageOpts = { ticketId, dashboardBaseUrl: cfg.dashboardBaseUrl };
   const token = extractTokenFromPostBody(req.body) ?? extractToken(req.url ?? "/");
   if (!token) {
-    const page = renderBundleReviewErrorPage({
-      kind: "bad_token",
-      reason: "malformed",
-    });
+    const page = renderBundleReviewErrorPage(
+      { kind: "bad_token", reason: "malformed" },
+      pageOpts,
+    );
     sendHtml(res, page.status, page.body);
     return;
   }
@@ -223,7 +228,7 @@ export const handleBundleDecision = async (
   });
   const page =
     outcome.kind === "decided" || outcome.kind === "no_pending"
-      ? renderBundleDecisionPage(outcome)
-      : renderBundleReviewErrorPage(outcome);
+      ? renderBundleDecisionPage(outcome, pageOpts)
+      : renderBundleReviewErrorPage(outcome, pageOpts);
   sendHtml(res, page.status, page.body);
 };

@@ -243,29 +243,47 @@ export const renderBundleReviewPage = (
   };
 };
 
+/**
+ * Small "View on dashboard" escape hatch for receipt/error pages: links to
+ * the ticket when both the dashboard origin and a ticket id are known,
+ * otherwise renders nothing (single-binary pilot, or a path so malformed
+ * there's no ticket to point at).
+ */
+export interface BundlePageOptions {
+  readonly ticketId?: string;
+  readonly dashboardBaseUrl?: string | null;
+}
+
+const bundleDashboardLink = (opts?: BundlePageOptions): string =>
+  opts?.dashboardBaseUrl && opts.ticketId
+    ? `<a class="dash" href="${escapeHtml(`${opts.dashboardBaseUrl.replace(/\/+$/u, "")}/tickets/${opts.ticketId}`)}">View on dashboard →</a>`
+    : "";
+
 export const renderBundleDecisionPage = (
   outcome: Exclude<BundleDecisionOutcome, BundleReviewError>,
+  opts?: BundlePageOptions,
 ): { readonly status: number; readonly body: string } => {
   if (outcome.kind === "no_pending") {
     return {
       status: 200,
-      body: `${BUNDLE_SHELL_HEAD}<span class="badge info">Already decided</span><h1 class="title">Nothing left to decide</h1><p class="muted">These actions were already decided — from the dashboard or an earlier click. No further action is needed.</p>${SHELL_FOOT}`,
+      body: `${BUNDLE_SHELL_HEAD}<span class="badge info">Already decided</span><h1 class="title">Nothing left to decide</h1><p class="muted">These actions were already decided — from the dashboard or an earlier click. No further action is needed.</p>${bundleDashboardLink(opts)}${SHELL_FOOT}`,
     };
   }
   const ok = outcome.action === "approve";
   const countLabel = `${outcome.decidedCount} action${outcome.decidedCount === 1 ? "" : "s"}`;
   return {
     status: 200,
-    body: `${BUNDLE_SHELL_HEAD}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${countLabel} ${ok ? "approved" : "rejected"}</h1><p class="muted">${ok ? "Your support agent is executing them now, in order." : "Nothing was sent or refunded. The ticket has been escalated to your team."}</p>${SHELL_FOOT}`,
+    body: `${BUNDLE_SHELL_HEAD}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approved" : "Rejected"}</span><h1 class="title">${countLabel} ${ok ? "approved" : "rejected"}</h1><p class="muted">${ok ? "Your support agent is executing them now, in order." : "Nothing was sent or refunded. The ticket has been escalated to your team."}</p>${bundleDashboardLink(opts)}${SHELL_FOOT}`,
   };
 };
 
 export const renderBundleReviewErrorPage = (
   outcome: BundleReviewError | { readonly kind: "no_pending" },
+  opts?: BundlePageOptions,
 ): { readonly status: number; readonly body: string } => {
   switch (outcome.kind) {
     case "no_pending":
-      return renderBundleDecisionPage({ kind: "no_pending" });
+      return renderBundleDecisionPage({ kind: "no_pending" }, opts);
     case "ticket_not_found":
       return {
         status: 404,
@@ -279,7 +297,7 @@ export const renderBundleReviewErrorPage = (
     case "bad_token":
       return {
         status: 400,
-        body: `${BUNDLE_SHELL_HEAD}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${escapeHtml(outcome.reason)}. Review links expire after 30 days for safety; decide from the dashboard if you still need to act.</p>${SHELL_FOOT}`,
+        body: `${BUNDLE_SHELL_HEAD}<span class="badge bad">Invalid link</span><h1 class="title">This link can't be used</h1><p class="muted">Reason: ${escapeHtml(outcome.reason)}. Review links expire after 30 days for safety; decide from the dashboard if you still need to act.</p>${bundleDashboardLink(opts)}${SHELL_FOOT}`,
       };
   }
 };

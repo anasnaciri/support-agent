@@ -211,7 +211,8 @@ export const SHELL_FOOT = `</div></body></html>`;
 const BUTTON_CSS = `.btn{display:inline-block;border:0;border-radius:8px;padding:10px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
 .btn.ok{background:#0057ff;color:#fff}
 .btn.bad{background:#991b1b;color:#fff}
-a.dash{display:inline-block;margin-top:16px;font-size:14px;color:#1e40af}`;
+.card>form{margin-top:24px}
+a.dash{display:inline-block;margin-top:20px;font-size:14px;color:#1e40af}`;
 
 export const SHELL_HEAD_WITH_BUTTONS = SHELL_HEAD.replace(
   "</style>",
@@ -241,24 +242,29 @@ const dashboardLink = (
   opts?: RenderApprovalPageOptions,
 ): string =>
   opts?.dashboardBaseUrl
-    ? `<a class="dash" href="${escapeHtml(`${opts.dashboardBaseUrl}/approvals/${approvalId}`)}">View this approval in the dashboard →</a>`
+    ? `<a class="dash" href="${escapeHtml(`${opts.dashboardBaseUrl}/approvals/${approvalId}`)}">View on dashboard →</a>`
     : "";
 
 /**
  * GET confirm page (audit S2). Renders a form whose POST carries the
  * token in the body — the GET itself never mutates, so email-security
  * scanners that prefetch links can't decide approvals. The token was
- * already verified (signature + id + action) before this renders.
+ * already verified (signature + id + action) before this renders. The
+ * small dashboard link is the "I'd rather see the whole ticket" escape
+ * hatch next to the one-click decision.
  */
-export const renderApprovalConfirmPage = (input: {
-  readonly approvalId: string;
-  readonly action: "approve" | "reject";
-  readonly token: string;
-}): { readonly status: number; readonly body: string } => {
+export const renderApprovalConfirmPage = (
+  input: {
+    readonly approvalId: string;
+    readonly action: "approve" | "reject";
+    readonly token: string;
+  },
+  opts?: RenderApprovalPageOptions,
+): { readonly status: number; readonly body: string } => {
   const ok = input.action === "approve";
   return {
     status: 200,
-    body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approve" : "Reject"}</span><h1 class="title">Confirm: ${ok ? "approve this reply?" : "reject this reply?"}</h1><p class="muted">${ok ? "Your support agent will send the proposed reply to the customer." : "The ticket will be escalated to your team for human handling."}</p><form method="post" action="/approvals/${escapeHtml(input.approvalId)}/${input.action}"><input type="hidden" name="token" value="${escapeHtml(input.token)}"><button class="btn ${ok ? "ok" : "bad"}" type="submit">${ok ? "Approve and send" : "Reject"}</button></form>${SHELL_FOOT}`,
+    body: `${SHELL_HEAD_WITH_BUTTONS}<span class="badge ${ok ? "ok" : "bad"}">${ok ? "Approve" : "Reject"}</span><h1 class="title">Confirm: ${ok ? "approve this reply?" : "reject this reply?"}</h1><p class="muted">${ok ? "Your support agent will send the proposed reply to the customer." : "The ticket will be escalated to your team for human handling."}</p><form method="post" action="/approvals/${escapeHtml(input.approvalId)}/${input.action}"><input type="hidden" name="token" value="${escapeHtml(input.token)}"><button class="btn ${ok ? "ok" : "bad"}" type="submit">${ok ? "Approve and send" : "Reject"}</button></form>${dashboardLink(input.approvalId, opts)}${SHELL_FOOT}`,
   };
 };
 

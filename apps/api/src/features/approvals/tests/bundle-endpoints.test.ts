@@ -441,4 +441,38 @@ describe("bundle review page rendering", () => {
     const missing = renderBundleReviewErrorPage({ kind: "ticket_not_found" });
     expect(missing.status).toBe(404);
   });
+
+  it("receipts and expired links carry a small dashboard link when configured", () => {
+    const opts = {
+      ticketId: TICKET as string,
+      dashboardBaseUrl: "https://dash.example.com" as string | null,
+    };
+    const approved = renderBundleDecisionPage(
+      { kind: "decided", action: "approve", decidedCount: 2 },
+      opts,
+    );
+    expect(approved.body).toContain("View on dashboard");
+    expect(approved.body).toContain(
+      `https://dash.example.com/tickets/${TICKET}`,
+    );
+
+    const already = renderBundleReviewErrorPage({ kind: "no_pending" }, opts);
+    expect(already.body).toContain("View on dashboard");
+
+    const expired = renderBundleReviewErrorPage(
+      { kind: "bad_token", reason: "expired" },
+      opts,
+    );
+    expect(expired.body).toContain(
+      `https://dash.example.com/tickets/${TICKET}`,
+    );
+
+    // No dashboard configured → no link, no broken href.
+    const bare = renderBundleDecisionPage({
+      kind: "decided",
+      action: "approve",
+      decidedCount: 2,
+    });
+    expect(bare.body).not.toContain("View on dashboard");
+  });
 });
