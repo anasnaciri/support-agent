@@ -657,9 +657,7 @@ describe("shopify.search_products tool", () => {
     expect(
       (shopifySearchProducts as { tenantControl?: unknown }).tenantControl,
     ).toBeUndefined();
-    expect(
-      (shopifySearchProducts as { displayName?: unknown }).displayName,
-    ).toBeUndefined();
+    expect(shopifySearchProducts.displayName).toBe("Search products");
   });
 });
 
@@ -753,9 +751,7 @@ describe("shopify.get_store_info tool", () => {
     expect(
       (shopifyGetStoreInfo as { tenantControl?: unknown }).tenantControl,
     ).toBeUndefined();
-    expect(
-      (shopifyGetStoreInfo as { displayName?: unknown }).displayName,
-    ).toBeUndefined();
+    expect(shopifyGetStoreInfo.displayName).toBe("Read store details");
   });
 });
 
@@ -849,9 +845,9 @@ describe("shopify.list_pickup_locations tool", () => {
       (shopifyListPickupLocations as { tenantControl?: unknown })
         .tenantControl,
     ).toBeUndefined();
-    expect(
-      (shopifyListPickupLocations as { displayName?: unknown }).displayName,
-    ).toBeUndefined();
+    expect(shopifyListPickupLocations.displayName).toBe(
+      "List pickup locations",
+    );
   });
 });
 

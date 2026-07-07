@@ -22,7 +22,7 @@ export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
   },
   {
     tool: "order.cancel",
-    label: "Cancel the order",
+    label: "Cancel and refund the order",
     help: "Cancel an unshipped order and refund it — governed by your Refund policy.",
   },
 ];

@@ -37,7 +37,6 @@ export const shopifyRefundCreate = defineTool({
   name: "refund.create",
   description:
     "Issue a refund against an existing Shopify order. Amount-only — refunds the specified amount against the order's primary refundable transaction. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`) or a numeric internal id (which is auto-wrapped); order names like `#1001` are NOT accepted — call `shopify.get_order` first to resolve to a GID. `amount` is a decimal string + ISO currency code; the currency must match the order's currency. `reason` is recorded as the refund note. `notifyCustomer` defaults to false — set true to have Shopify email the customer the refund confirmation. Permission policy: defaultPermission is `ask` and the runtime overlays a per-tenant amount threshold on top (small refunds auto-run, large refunds escalate). This moves real money: never call it twice for the same request — if the result is unclear, check the order's refund state via `shopify.get_order` instead of retrying.",
-  displayName: "Issue a refund",
   displayDescription:
     "The agent issues a refund on the customer's order. Governed by your refund-policy thresholds.",
   tenantControl: "refund-threshold",

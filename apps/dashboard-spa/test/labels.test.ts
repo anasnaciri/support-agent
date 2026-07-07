@@ -101,15 +101,24 @@ describe("approvalStatusLabel", () => {
 
 describe("toolActionLabel", () => {
   it("names the approval-gated actions the way the catalog does", () => {
-    expect(toolActionLabel("conversation.reply")).toBe("Send customer reply");
+    expect(toolActionLabel("conversation.reply")).toBe("Reply to the customer");
     expect(toolActionLabel("refund.create")).toBe("Issue a refund");
+    expect(toolActionLabel("discount.create")).toBe("Issue a discount code");
     expect(toolActionLabel("supplier.add_sheet_row")).toBe(
-      "Escalate to supplier",
+      "Log the issue with the supplier",
+    );
+    expect(toolActionLabel("supplier.escalate")).toBe(
+      "Ask the supplier for help",
     );
   });
 
+  it("names internal tools too — audit rows must read as words", () => {
+    expect(toolActionLabel("shopify.get_order")).toBe("Look up an order");
+    expect(toolActionLabel("tracking.lookup")).toBe("Check shipment tracking");
+  });
+
   it("humanizes the tool's last segment as a fallback", () => {
-    expect(toolActionLabel("shopify.get_order")).toBe("Get order");
+    expect(toolActionLabel("some.future_tool")).toBe("Future tool");
   });
 });
 

@@ -387,7 +387,7 @@ describe("bundle review page rendering", () => {
     seedTwo(env);
     const page = renderBundleReviewPage(pageInput(env));
     expect(page.status).toBe(200);
-    expect(page.body).toContain("Send a reply");
+    expect(page.body).toContain("Reply to the customer");
     expect(page.body).toContain("23.50 EUR");
     expect(page.body).toContain("Hi Jane, your refund is on the way.");
     expect(page.body).toContain("jane@example.com");

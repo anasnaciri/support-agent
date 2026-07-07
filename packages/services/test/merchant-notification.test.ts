@@ -215,7 +215,7 @@ describe("summarizeApprovalAction", () => {
       bodyText:
         "Hi Jane, sorry about the delay — your replacement ships tomorrow and you'll get tracking by email.",
     });
-    expect(line).toContain("Send a reply");
+    expect(line).toContain("Reply to the customer");
     expect(line).toContain("Hi Jane, sorry about the delay");
     // Long drafts are truncated to keep the ping scannable.
     expect(line.length).toBeLessThan(140);
@@ -226,7 +226,7 @@ describe("summarizeApprovalAction", () => {
       orderId: "gid://shopify/Order/123",
       amount: { amount: "23.50", currencyCode: "EUR" },
     });
-    expect(line).toContain("Refund");
+    expect(line).toContain("Issue a refund");
     expect(line).toContain("23.50 EUR");
     // Raw GIDs are jargon — never surfaced to the merchant.
     expect(line).not.toContain("gid://");
@@ -236,7 +236,7 @@ describe("summarizeApprovalAction", () => {
     const line = summarizeApprovalAction("refund.create", {
       orderId: "gid://shopify/Order/123",
     });
-    expect(line).toContain("Refund");
+    expect(line).toContain("Issue a refund");
     expect(line).not.toContain("USD");
   });
 
@@ -245,7 +245,7 @@ describe("summarizeApprovalAction", () => {
       orderId: "gid://shopify/Order/123",
       amount: { amount: "80.00", currencyCode: "GBP" },
     });
-    expect(line).toContain("Cancel");
+    expect(line).toContain("Cancel and refund the order");
     expect(line).toContain("80.00 GBP");
     expect(line).not.toContain("gid://");
   });

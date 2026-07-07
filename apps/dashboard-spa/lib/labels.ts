@@ -3,6 +3,8 @@
 // known values explicitly and humanizes unknown ones, so a newly-added
 // backend code still renders as words while it waits for a real label.
 
+import { TOOL_DISPLAY_NAMES } from "@support-agent/agent-core";
+
 /** "where_is_order" / "ticket.escalated_to_human" → "Where is order" / "Ticket escalated to human". */
 export const humanizeSlug = (value: string): string => {
   const words = value.replace(/[._]/g, " ").trim();
@@ -54,23 +56,15 @@ export const approvalStatusLabel = (status: string): string =>
   humanizeSlug(status);
 
 /**
- * Friendly names for tool ids shown on approvals. Mirrors each tool's
- * catalog `displayName` (packages/tools) — keep them in sync when a gated
- * tool is added or renamed. The fallback drops the namespace so even an
- * unmapped tool reads as an action, not an identifier.
+ * Friendly names for tool ids shown on approvals / the timeline. The map IS
+ * `TOOL_DISPLAY_NAMES` from agent-core — the same source `defineTool` stamps
+ * onto every tool and the catalog ships as `displayName` — so this surface
+ * can't drift from the agent-settings card or the Telegram pings. The
+ * fallback drops the namespace so even an unmapped tool reads as an action,
+ * not an identifier.
  */
-const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
-  "conversation.reply": "Send customer reply",
-  "conversation.ask_customer": "Ask the customer a question",
-  "refund.create": "Issue a refund",
-  "order.cancel": "Cancel the order",
-  "supplier.add_sheet_row": "Escalate to supplier",
-  "supplier.escalate": "Escalate to supplier",
-  "merchant.notify": "Send you a heads-up",
-};
-
 export const toolActionLabel = (tool: string): string => {
-  const known = TOOL_ACTION_LABELS[tool];
+  const known = TOOL_DISPLAY_NAMES[tool];
   if (known) return known;
   const dot = tool.lastIndexOf(".");
   return humanizeSlug(dot === -1 ? tool : tool.slice(dot + 1));

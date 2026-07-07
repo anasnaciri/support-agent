@@ -1,5 +1,9 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { TicketId, TenantId } from "@support-agent/agent-core";
+import {
+  toolDisplayName,
+  type TicketId,
+  type TenantId,
+} from "@support-agent/agent-core";
 
 // ============================================================
 // MerchantNotificationService
@@ -109,6 +113,7 @@ export const approvalRequestedNotification = (
     input.draftPreview,
     ``,
     `Approve: ${input.approveUrl}`,
+    ``,
     `Reject:  ${input.rejectUrl}`,
   ].join("\n"),
   ticketId: input.ticketId,
@@ -281,10 +286,12 @@ export const MerchantNotificationServiceTest = (
 /**
  * One merchant-readable line per queued gated action, assembled from the
  * approval row's structured `proposedInput` — never LLM-generated at send
- * time, so a money amount can't be paraphrased. Agent-written words (the
- * reply draft) appear only as a verbatim, truncated quote. Unknown tools
- * fall back to the tool id verbatim — better an ugly line than a silent
- * one when a new gated tool appears.
+ * time, so a money amount can't be paraphrased. The line's base is the
+ * tool's `TOOL_DISPLAY_NAMES` entry (agent-core — THE naming source of
+ * truth), with per-tool detail appended: a verbatim truncated draft quote,
+ * a refund amount, a discount value. Unknown tools fall back to the tool
+ * id verbatim — better an ugly line than a silent one when a new gated
+ * tool appears.
  */
 const ACTION_PREVIEW_MAX = 80;
 
@@ -307,48 +314,42 @@ export const summarizeApprovalAction = (
   const input = (
     proposedInput && typeof proposedInput === "object" ? proposedInput : {}
   ) as Record<string, unknown>;
+  const base = toolDisplayName(tool);
   switch (tool) {
     case "conversation.reply":
     case "conversation.ask_customer": {
-      const verb =
-        tool === "conversation.ask_customer"
-          ? "Ask the customer a question"
-          : "Send a reply";
       const body =
         typeof input["bodyText"] === "string" ? input["bodyText"] : null;
-      if (!body) return verb;
+      if (!body) return base;
       const preview =
         body.length > ACTION_PREVIEW_MAX
           ? `${body.slice(0, ACTION_PREVIEW_MAX)}…`
           : body;
-      return `${verb} — "${preview}"`;
+      return `${base} — "${preview}"`;
     }
-    case "refund.create": {
-      const money = summaryMoney(input);
-      return money ? `Refund ${money}` : "Refund the customer";
-    }
+    case "refund.create":
     case "order.cancel": {
       const money = summaryMoney(input);
-      return money ? `Cancel the order and refund ${money}` : "Cancel the order";
+      return money ? `${base} — ${money}` : base;
     }
     case "discount.create": {
       const value = typeof input["value"] === "string" ? input["value"] : null;
       if (value && input["valueType"] === "percentage") {
-        return `Create a ${value}% discount code`;
+        return `${base} — ${value}%`;
       }
       if (value && input["valueType"] === "fixed_amount") {
         const currency =
           typeof input["currencyCode"] === "string"
             ? input["currencyCode"]
             : null;
-        return `Create a ${value}${currency ? ` ${currency}` : ""} discount code`;
+        return `${base} — ${value}${currency ? ` ${currency}` : ""}`;
       }
-      return "Create a discount code";
+      return base;
     }
-    case "supplier.escalate":
-      return "Escalate to the supplier";
     default:
-      return `Run "${tool}"`;
+      // `toolDisplayName` echoes unknown ids; quote those so the line
+      // still reads as an action rather than a bare identifier.
+      return base === tool ? `Run "${tool}"` : base;
   }
 };
 

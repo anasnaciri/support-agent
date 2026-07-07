@@ -23,7 +23,7 @@ export interface PermissionToggleProps {
   readonly action: (formData: FormData) => void | Promise<void>;
   readonly agentId: string;
   readonly tool: string;
-  /** Friendly action label, used in the confirm copy (e.g. "Send customer reply"). */
+  /** Friendly action label, used in the confirm copy (e.g. "Reply to the customer"). */
   readonly label: string;
   /** The effective current state: "ask" first, or "allow" (auto). */
   readonly current: "ask" | "allow";

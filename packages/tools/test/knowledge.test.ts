@@ -102,8 +102,8 @@ describe("knowledge.search tool", () => {
     expect(
       (knowledgeSearch as { tenantControl?: unknown }).tenantControl,
     ).toBeUndefined();
-    expect(
-      (knowledgeSearch as { displayName?: unknown }).displayName,
-    ).toBeUndefined();
+    // Every tool carries a friendly displayName (stamped from
+    // TOOL_DISPLAY_NAMES); hidden-from-the-Actions-UI is tenantControl only.
+    expect(knowledgeSearch.displayName).toBe("Search your knowledge base");
   });
 });

@@ -609,6 +609,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `decideApprovalBundle` (all rows decided, then ONE event) and a "View on
       dashboard" link for edits / per-action decisions.
 
+- [x] Tool display names have ONE source of truth (2026-07-08):
+      `TOOL_DISPLAY_NAMES` in agent-core (`tool-display-names.ts`). `defineTool`
+      stamps `Tool.displayName` (now required) from it; inline displayNames were
+      removed from the real tools; SPA `toolActionLabel` reads the same map; the
+      Telegram bundle summarizer uses it as the line base. Renames:
+      conversation.reply → "Reply to the customer", order.cancel → "Cancel and
+      refund the order", supplier.escalate → "Ask the supplier for help",
+      supplier.add_sheet_row → "Log the issue with the supplier"; every internal
+      tool got a friendly name too (audit rows read as words). Visibility on the
+      agent page remains governed solely by `tenantControl` — a name no longer
+      implies tenant-facing. Drift guard: packages/tools/test/display-names.test.ts
+      (map ⊆ registry, registry ⊆ map, uniqueness, renames pinned).
+
 ---
 
 ## Implementation Backlog

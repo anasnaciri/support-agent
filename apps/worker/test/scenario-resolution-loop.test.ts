@@ -266,7 +266,7 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
     const ping = approvalPings[0]!;
     // The ping lists what was actually queued, not just a count.
     expect(ping.body).toContain("2 actions");
-    expect(ping.body).toContain("Send a reply");
+    expect(ping.body).toContain("Reply to the customer");
     expect(ping.body).toContain("We're processing a refund");
     // One signed review link on the API origin — the old ping pointed
     // `/tickets/:id` (a dashboard route) at the API host, a dead URL.

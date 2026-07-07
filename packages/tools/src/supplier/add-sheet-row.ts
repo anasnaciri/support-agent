@@ -32,7 +32,6 @@ export const supplierAddSheetRow = defineTool({
   name: "supplier.add_sheet_row",
   description:
     "Append a row to a shared Google Sheets spreadsheet. Used to escalate a support ticket to warehouse / ops via a shared sheet they already watch. The tenant must have connected Google Sheets in Settings → Integrations first; failures surface as `SheetsAuthMissing` until they do. `range` is an A1 reference with sheet name (e.g. `Escalations!A:E`); Google appends below the last non-empty row within those columns, so existing data is never overwritten. `values` is one row's cells left-to-right — strings, numbers, booleans, or null for blank. Permission policy: defaultPermission is `ask` — writing to a shared sheet is operator-visible and irreversible without manual cleanup, so it requires human approval until per-tenant policy raises trust.",
-  displayName: "Escalate to supplier",
   displayDescription:
     "The agent logs an escalation row to your supplier sheet (e.g. for missing-package or warehouse claims).",
   tenantControl: "permission-toggle",

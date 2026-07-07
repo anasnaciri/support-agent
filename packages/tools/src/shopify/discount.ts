@@ -67,7 +67,6 @@ export const shopifyDiscountCreate = defineTool({
   name: "discount.create",
   description:
     "Create a single-use discount (coupon) code as a goodwill / service-recovery gesture, locked to the customer on an existing order. You choose only the `valueType` (`percentage` or `fixed_amount`) and `value`; everything else is fixed by the store's policy and CANNOT be set here — the code is single-use, usable only by the order's customer (a leaked code is worthless), non-combinable with other discounts, applies to the whole next order, and expires after the store's configured window. The `orderId` must be a Shopify GID (`gid://shopify/Order/...`) or numeric id — call `shopify.get_order` first; order names like `#1001` are NOT accepted. For `fixed_amount`, set `currencyCode` to the order's `totalPrice.currencyCode` (it must match the order's currency); for `percentage`, omit it and pass `value` as a whole percent (e.g. \"15\" for 15% off). Permission policy: defaultPermission is `ask` and the runtime overlays the tenant's discount thresholds (small discounts auto-run, larger ones escalate for approval, over-cap ones are denied). If it denies, draft a reply for human review instead. This issues a real coupon: never call it twice for the same request.",
-  displayName: "Issue a discount code",
   displayDescription:
     "The agent issues a single-use coupon code, locked to the customer, as a goodwill gesture. Governed by your discount-policy thresholds.",
   tenantControl: "discount-threshold",

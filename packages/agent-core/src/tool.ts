@@ -71,11 +71,14 @@ export interface Tool<I, O> {
   readonly defaultPermission: Permission;
   readonly sideEffectClass: ToolSideEffectClass;
   /**
-   * Friendly, tenant-facing label for the dashboard (e.g. "Send customer
-   * reply"). `description` stays LLM-facing/technical; this is the human copy.
-   * Only set on tools that carry a `tenantControl`.
+   * Friendly, tenant-facing label (e.g. "Reply to the customer").
+   * `description` stays LLM-facing/technical; this is the human copy.
+   * Required on every constructed Tool — `defineTool` stamps it from
+   * `TOOL_DISPLAY_NAMES` (tool-display-names.ts, THE naming source of
+   * truth) when the definition doesn't set it inline. Visibility on the
+   * tenant agent page is governed by `tenantControl`, not by this.
    */
-  readonly displayName?: string;
+  readonly displayName: string;
   /**
    * Short, plain-language blurb shown under the `displayName` on the agent
    * page. Distinct from the LLM-facing `description`.

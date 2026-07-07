@@ -26,7 +26,7 @@ describe("tenant-facing tool metadata", () => {
     {
       tool: conversationReply,
       name: "conversation.reply",
-      displayName: "Send customer reply",
+      displayName: "Reply to the customer",
       control: "permission-toggle",
     },
     {
@@ -38,13 +38,13 @@ describe("tenant-facing tool metadata", () => {
     {
       tool: supplierAddSheetRow,
       name: "supplier.add_sheet_row",
-      displayName: "Escalate to supplier",
+      displayName: "Log the issue with the supplier",
       control: "permission-toggle",
     },
     {
       tool: supplierEscalate,
       name: "supplier.escalate",
-      displayName: "Escalate to supplier",
+      displayName: "Ask the supplier for help",
       control: "permission-toggle",
     },
     {
@@ -62,7 +62,7 @@ describe("tenant-facing tool metadata", () => {
     {
       tool: shopifyOrderCancel,
       name: "order.cancel",
-      displayName: "Cancel the order",
+      displayName: "Cancel and refund the order",
       // Cancelling issues a refund, so it's governed by the refund policy —
       // same control as refund.create.
       control: "refund-threshold",
@@ -95,10 +95,13 @@ describe("tenant-facing tool metadata", () => {
     );
   });
 
-  it("internal tools carry no display label", () => {
+  it("internal tools stay off the tenant page (no tenantControl), but still carry a friendly name", () => {
     for (const t of ALL_TOOLS) {
       if (t.tenantControl === undefined) {
-        expect(t.displayName).toBeUndefined();
+        // Visibility is governed by tenantControl alone; the name exists for
+        // audit rows / timelines, where an id must never surface.
+        expect(t.displayName).toBeTruthy();
+        expect(t.displayName).not.toBe(t.name);
       }
     }
   });
