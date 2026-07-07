@@ -15,7 +15,10 @@ import {
   scenarioResolutionAgent,
   supportTriage,
 } from "@support-agent/agents";
-import type { ResolutionPolicy } from "@support-agent/services";
+import type {
+  MerchantNotification,
+  ResolutionPolicy,
+} from "@support-agent/services";
 import {
   AgentResolverTest,
   AgentRuntime,
@@ -31,6 +34,7 @@ import {
   decideApprovalBundle,
   LLMServiceScripted,
   makeConversationServiceTest,
+  MerchantNotificationService,
   PlatformMailServiceTest,
   ShopifyServiceTest,
   SupplierEscalationServiceTest,
@@ -216,6 +220,60 @@ describe("scenario-resolution autonomous loop — queue + end-of-loop mapping", 
     // End-of-loop: one bundle park, not three separate parks.
     expect(out.result.type).toBe("PausedWaitingForApproval");
     expect(out.fetched.status).toBe("waiting_for_approval");
+  });
+
+  it("pings the merchant ONCE with the queued actions and a bundle review link", async () => {
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "q1",
+        tool: "refund.recommend",
+        input: { orderId: "gid://shopify/Order/1001" },
+      },
+      {
+        type: "tool_call",
+        callId: "q2",
+        tool: "conversation.reply",
+        input: {
+          threadId: "thread-x",
+          to: [{ name: null, email: "cust@example.com" }],
+          subject: null,
+          bodyText: "We're processing a refund; you'll see it shortly.",
+          bodyHtml: null,
+          inReplyToMessageId: null,
+          draftId: "scenario-reply-thread-x",
+        },
+      },
+      { type: "final_message", text: "Queued the refund and the reply." },
+    ];
+
+    const pings: MerchantNotification[] = [];
+    const pingRecorder = Layer.succeed(MerchantNotificationService, {
+      notify: (_tenantId, notification) => {
+        pings.push(notification);
+        return Effect.succeed({
+          delivered: true,
+          channel: "telegram" as const,
+        });
+      },
+    });
+
+    const out = await driveTicket(loopAgent(), script, [pingRecorder]);
+    expect(out.fetched.status).toBe("waiting_for_approval");
+
+    const approvalPings = pings.filter((p) => p.kind === "approval_requested");
+    expect(approvalPings).toHaveLength(1);
+    const ping = approvalPings[0]!;
+    // The ping lists what was actually queued, not just a count.
+    expect(ping.body).toContain("2 actions");
+    expect(ping.body).toContain("Send a reply");
+    expect(ping.body).toContain("We're processing a refund");
+    // One signed review link on the API origin — the old ping pointed
+    // `/tickets/:id` (a dashboard route) at the API host, a dead URL.
+    expect(ping.body).toContain(
+      `https://api.test.example/approvals/bundle/${out.fetched.id}?token=`,
+    );
+    expect(ping.body).not.toContain(`/tickets/${out.fetched.id}`);
   });
 
   it("resolves when an auto-permitted reply was sent and nothing was queued", async () => {

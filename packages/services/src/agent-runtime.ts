@@ -34,13 +34,15 @@ import { TransactionRunner } from "./transaction-runner.js";
 import { PlatformMailService } from "./platform-mail.js";
 import {
   MerchantNotificationService,
-  approvalRequestedNotification,
   humanTakeoverNotification,
   type MerchantNotification,
 } from "./merchant-notification.js";
 import { ImageHashStore, type SimilarImageHit } from "./image-hash-store.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
-import { buildApprovalNotification } from "./approval-notification.js";
+import {
+  buildApprovalNotification,
+  buildBundleApprovalNotification,
+} from "./approval-notification.js";
 import {
   TenantAgentOverridesService,
   type AgentOverride,
@@ -1654,16 +1656,41 @@ const AgentRuntimeLayer = Layer.effect(
                 approvalIds: queuedApprovals,
                 turn,
               });
+              // Ping the merchant ONCE with what was actually queued. The
+              // rows are re-read (id-filtered, so a stale pending row from
+              // an earlier park isn't attributed to this bundle) and each
+              // action is summarized from its structured proposedInput —
+              // deterministic code, no LLM at send time. The single link is
+              // a signed, ticket-bound magic link to the api's bundle
+              // review page (GET renders, POST decides); there are no bare
+              // approve/reject links because a bundle must never be decided
+              // sight-unseen. Best-effort: a failed read still pings.
+              const queuedIds = new Set<string>(queuedApprovals);
+              const queuedRows = (yield* approvals
+                .listForTicket(parked.tenantId, parked.id)
+                .pipe(
+                  Effect.catchAll(() =>
+                    Effect.succeed([] as ReadonlyArray<Approval>),
+                  ),
+                )).filter((a) => queuedIds.has(a.id));
+              const ctxEmail = parked.context["customerEmail"];
+              const bundleNotification = buildBundleApprovalNotification({
+                tenantId: parked.tenantId,
+                ticketId: parked.id,
+                ticketSubject: parked.subject,
+                customerEmail:
+                  typeof ctxEmail === "string" && ctxEmail.length > 0
+                    ? ctxEmail
+                    : null,
+                actions: queuedRows.map((a) => ({
+                  tool: a.tool,
+                  proposedInput: a.proposedInput,
+                })),
+                linkConfig,
+              });
               yield* notifyMerchant(
                 parked.tenantId,
-                approvalRequestedNotification({
-                  ticketId: parked.id,
-                  toolName: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"}`,
-                  draftSubject: parked.subject,
-                  draftPreview: `${queuedApprovals.length} action${queuedApprovals.length === 1 ? "" : "s"} are queued and awaiting your approval.`,
-                  approveUrl: `${linkConfig.baseUrl}/tickets/${parked.id}`,
-                  rejectUrl: `${linkConfig.baseUrl}/tickets/${parked.id}`,
-                }),
+                bundleNotification.merchant,
               );
               return {
                 type: "PausedWaitingForApproval",
