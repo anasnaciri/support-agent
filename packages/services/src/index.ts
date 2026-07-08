@@ -43,6 +43,7 @@ export * from "./approval-notification.js";
 export * from "./timer-service.js";
 export * from "./idempotency-store.js";
 export * from "./image-hash-store.js";
+export * from "./ticket-attachments.js";
 export * from "./transaction-runner.js";
 export * from "./workflow-queue.js";
 export * from "./event-bus.js";

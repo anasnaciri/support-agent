@@ -16,6 +16,7 @@ export * from "./tenant-repository-live.js";
 export * from "./timer-service-live.js";
 export * from "./idempotency-store-live.js";
 export * from "./image-hash-store-live.js";
+export * from "./ticket-attachment-store-live.js";
 export * from "./dashboard-reads.js";
 export * from "./dashboard-writes.js";
 export * from "./member-rbac-store.js";

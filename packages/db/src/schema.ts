@@ -833,6 +833,46 @@ export const imageHashes = pgTable(
 export type ImageHashRow = typeof imageHashes.$inferSelect;
 export type ImageHashInsert = typeof imageHashes.$inferInsert;
 
+/**
+ * Index of attachment blobs bound to a ticket — the durable mapping from a
+ * ticket to a BlobStorage key. Bytes live in R2, never here. `source` records
+ * who put the file on the ticket: `inbound` (connector-ingested customer
+ * attachment), `supplier` (portal upload), or `merchant` (dashboard upload).
+ * Everything outside the trust boundary references rows by `id`; storage keys
+ * stay server-side.
+ */
+export const ticketAttachments = pgTable(
+  "ticket_attachments",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    storageKey: text("storage_key").notNull(),
+    uploadedBy: text("uploaded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ticket_attachments_ticket_idx").on(t.ticketId),
+    check(
+      "ticket_attachments_source_check",
+      sql`${t.source} IN ('inbound','supplier','merchant')`,
+    ),
+  ],
+);
+
+export type TicketAttachmentRow = typeof ticketAttachments.$inferSelect;
+export type TicketAttachmentInsert = typeof ticketAttachments.$inferInsert;
+
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;
 export type TicketRow = typeof tickets.$inferSelect;

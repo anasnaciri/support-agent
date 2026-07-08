@@ -274,6 +274,13 @@
       "when": 1783353600000,
       "tag": "0038_dedup_risk_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783872000000,
+      "tag": "0039_ticket_attachments",
+      "breakpoints": true
     }
   ]
 }
