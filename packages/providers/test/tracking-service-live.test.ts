@@ -112,7 +112,7 @@ describe("TrackingServiceLive", () => {
     );
   });
 
-  it("17track rejection → kind: 'no_provider' with reason 'unsupported_carrier'", async () => {
+  it("17track rejection without later accepted data → kind: 'no_provider' with reason 'sync_pending'", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.endsWith("/register")) return okJson({});
@@ -134,12 +134,104 @@ describe("TrackingServiceLive", () => {
     );
     expect(result.kind).toBe("no_provider");
     if (result.kind === "no_provider") {
-      expect(result.reason).toBe("unsupported_carrier");
+      expect(result.reason).toBe("sync_pending");
       expect(result.trackingUrl).toContain("EXOTIC-1");
     }
   });
 
-  it("17track sync-pending response fails instead of stamping unsupported_carrier", async () => {
+  it("retries a first gettrackinfo rejection before treating the carrier as unsupported", async () => {
+    let getInfoCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/register")) return okJson({});
+      getInfoCalls += 1;
+      if (getInfoCalls === 1) {
+        return okJson({
+          code: 0,
+          data: {
+            accepted: [],
+            rejected: [
+              {
+                number: "LZ408772868CN",
+                error: { code: -1, message: "not ready" },
+              },
+            ],
+          },
+        });
+      }
+      return okJson({
+        code: 0,
+        data: {
+          accepted: [
+            {
+              number: "LZ408772868CN",
+              carrier: 3011,
+              track: { e: 50 },
+              track_info: {
+                latest_event: {
+                  time_iso: "2026-07-07T06:28:13.000Z",
+                  location: null,
+                  description:
+                    "DEVOLUCION, Finalizado plazo retirada, Devolución del envío por finalización de plazo de retirada",
+                },
+                time_metrics: { days_of_transit: 60 },
+              },
+            },
+          ],
+        },
+      });
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(TrackingService, (s) =>
+          s.lookup(tenantId, { trackingNumber: "LZ408772868CN" }),
+        ),
+        buildLayer(fetchImpl as unknown as typeof fetch),
+      ),
+    );
+    expect(result.kind).toBe("live");
+    if (result.kind === "live") {
+      expect(result.carrier).toBe("3011");
+      expect(result.status).toBe("exception");
+      expect(result.transitDays).toBe(60);
+      expect(result.lastScan?.description).toContain("DEVOLUCION");
+    }
+    expect(getInfoCalls).toBe(2);
+  });
+
+  it("repeated gettrackinfo rejections surface as sync_pending, not unsupported_carrier", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/register")) return okJson({});
+      return okJson({
+        code: 0,
+        data: {
+          accepted: [],
+          rejected: [
+            {
+              number: "LZ408772868CN",
+              error: { code: -1, message: "not ready" },
+            },
+          ],
+        },
+      });
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(TrackingService, (s) =>
+          s.lookup(tenantId, { trackingNumber: "LZ408772868CN" }),
+        ),
+        buildLayer(fetchImpl as unknown as typeof fetch),
+      ),
+    );
+    expect(result.kind).toBe("no_provider");
+    if (result.kind === "no_provider") {
+      expect(result.reason).toBe("sync_pending");
+      expect(result.trackingUrl).toContain("LZ408772868CN");
+    }
+  });
+
+  it("17track sync-pending response returns no_provider/sync_pending", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.endsWith("/register")) return okJson({});
@@ -151,7 +243,7 @@ describe("TrackingServiceLive", () => {
         },
       });
     });
-    const exit = await Effect.runPromiseExit(
+    const result = await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(TrackingService, (s) =>
           s.lookup(tenantId, { trackingNumber: "LULU1000630903" }),
@@ -159,13 +251,10 @@ describe("TrackingServiceLive", () => {
         buildLayer(fetchImpl as unknown as typeof fetch),
       ),
     );
-    if (exit._tag !== "Failure") throw new Error("expected failure");
-    if (exit.cause._tag !== "Fail") throw new Error("expected Fail cause");
-    expect(exit.cause.error).toBeInstanceOf(TrackingProviderUnavailable);
-    expect(exit.cause.error).toMatchObject({
-      trackingNumber: "LULU1000630903",
-      message: expect.stringContaining("sync pending"),
-    });
+    expect(result.kind).toBe("no_provider");
+    if (result.kind === "no_provider") {
+      expect(result.reason).toBe("sync_pending");
+    }
   });
 
   it("upstream 429 → TrackingProviderRateLimited", async () => {

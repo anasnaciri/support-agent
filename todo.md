@@ -17,6 +17,40 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Harden first-look tracking failures for order-status / scenario replies
+      (discovered 2026-07-08): production ticket
+      `12626e22-d367-40aa-950b-f3065406a711` initially stamped
+      `context.liveTrackingStatus.kind=no_provider` /
+      `reason=unsupported_carrier` for `LZ408772868CN`, so the
+      scenario-resolution agent drafted a generic "has shipped, track here"
+      reply. A later live provider probe returned carrier `3011`,
+      `status=exception`, `transitDays=60`, latest scan
+      `DEVOLUCION, Finalizado plazo retirada...`. Likely cause: first
+      `tracking.lookup` ran immediately after 17track registration and mapped a
+      transient rejected/not-yet-synced response to permanent
+      `unsupported_carrier`. Note: the provider already has a `sync_pending`
+      error, but only when `gettrackinfo` returns neither `accepted[]` nor
+      `rejected[]`; any `rejected[]` returned `null` and the live service
+      converted it to `no_provider/unsupported_carrier`. The scenario
+      prompt also has no hard rule for stale/no-provider international
+      shipments. Fixed by retrying a first rejected/empty 17track info response
+      as `sync_pending`, widening tool/dashboard contracts for that reason, and
+      adding scenario/order-status prompt guidance not to draft a confident
+      "just shipped" reply for old or unsynced tracking. Verified with focused
+      Vitest regressions and `pnpm build`.
+- [x] Keep ticket Tracking card in sync with restarted scenario runs
+      (discovered 2026-07-08): on the same ticket, a full retry saw Shopify's
+      newer fulfillment tracking number `1ST04125178926` and drafted against
+      it, but the card still used stale `context.liveTrackingStatus.trackingNumber`
+      (`LZ408772868CN`) because `GET /dashboard/tickets/:id/tracking` prefers
+      the persisted stamp before resolving the current order fulfillment. The
+      scenario-resolution agent can call `tracking.lookup` without the explicit
+      order-status-agent instruction to re-stamp `liveTrackingStatus`, so
+      restart/retry did not necessarily refresh the card source. Fixed in the
+      runtime: every successful `tracking.lookup` now stamps
+      `context.liveTrackingStatus` atomically in the same transaction as the
+      tool audit, and failed lookups clear the stale stamp. Verified with a
+      runtime regression where the agent does not call `ticket.update_context`.
 - [x] Product image thumbnails in the ticket order card (2026-07-08):
       `ShopifyLineItem` gained `imageUrl` (mapped from `image { url }` in the
       shared `ORDER_FIELDS` fragment, so `get_order` and `find_customer_order`
@@ -769,8 +803,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `2026-07-08T14:31:50Z`. Fix: provider tests now pin "registered / sync
       pending" (`accepted: []`, `rejected: []`) and the 17track parser maps it
       to `TrackingProviderUnavailable` instead of the successful
-      `unsupported_carrier` degrade; real `rejected[]` rows still return
-      `unsupported_carrier`.
+      `unsupported_carrier` degrade. Superseded by the 2026-07-08 hardening
+      above: repeated `rejected[]` rows now surface as `sync_pending`, not
+      permanent `unsupported_carrier`, because 17track may return them before
+      first sync completes.
 - [ ] Add Aftership/EasyPost carrier integrations with per-tenant credentials
       and proactive `tracking.changed` webhook ingestion.
 

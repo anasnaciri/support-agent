@@ -308,7 +308,7 @@ export interface DashboardTracking {
   readonly destinationCountry: string | null;
   readonly transitDays: number | null;
   readonly checkpoints: ReadonlyArray<DashboardTrackingScan>;
-  readonly reason: "no_api_key" | "unsupported_carrier" | null;
+  readonly reason: "no_api_key" | "unsupported_carrier" | "sync_pending" | null;
 }
 
 export type TicketTrackingResult =

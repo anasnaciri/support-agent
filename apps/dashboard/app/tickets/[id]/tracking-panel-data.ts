@@ -24,7 +24,7 @@ export interface ParsedTracking {
   readonly lastScan: ParsedTrackingScan | null;
   readonly estimatedDeliveryAt: string | null;
   readonly trackingUrl: string | null;
-  readonly reason: "no_api_key" | "unsupported_carrier" | null;
+  readonly reason: "no_api_key" | "unsupported_carrier" | "sync_pending" | null;
   // Rich fields from the live `ticketTracking` endpoint (absent on the narrower
   // on-ticket `liveTrackingStatus` stamp → null / []).
   readonly originCountry: string | null;
@@ -77,7 +77,9 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
       : null;
   const reasonRaw = r["reason"];
   const reason =
-    reasonRaw === "no_api_key" || reasonRaw === "unsupported_carrier"
+    reasonRaw === "no_api_key" ||
+    reasonRaw === "unsupported_carrier" ||
+    reasonRaw === "sync_pending"
       ? reasonRaw
       : null;
 

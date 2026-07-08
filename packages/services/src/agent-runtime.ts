@@ -14,6 +14,7 @@ import {
   type LLMDecision,
   type LLMError,
   type TenantId,
+  type Ticket,
   type ThreadId,
   type ToolContext,
   type WorkflowResult,
@@ -202,6 +203,24 @@ const AgentRuntimeLayer = Layer.effect(
             .notify(tenantId, notification)
             .pipe(Effect.ignore)
         : Effect.void;
+
+    const stampTrackingLookup = (
+      ticket: Pick<Ticket, "id" | "context">,
+      toolName: string,
+      result: { readonly _tag: "Right" | "Left"; readonly right?: unknown },
+    ) => {
+      if (toolName !== "tracking.lookup") return Effect.succeed(null);
+      const { liveTrackingStatus: _liveTrackingStatus, ...rest } =
+        ticket.context;
+      return tickets.update(ticket.id, {
+        context: {
+          ...rest,
+          ...(result._tag === "Right"
+            ? { liveTrackingStatus: result.right }
+            : {}),
+        },
+      });
+    };
 
     // `applyOverride` (a pure module-level helper, defined above) overlays the
     // per-(tenant, agent) override row onto the in-code AgentConfig before each
@@ -603,7 +622,7 @@ const AgentRuntimeLayer = Layer.effect(
               exec = { _tag: "Right", right: { deduped: true } };
             } else {
               const result = yield* resumeEffect.pipe(Effect.either);
-              yield* tx.run(
+              const updatedTrackingTicket = yield* tx.run(
                 Effect.gen(function* () {
                   yield* audit.record({
                     tenantId: working.tenantId,
@@ -640,8 +659,14 @@ const AgentRuntimeLayer = Layer.effect(
                       })
                       .pipe(Effect.catchAll(() => Effect.void));
                   }
+                  return yield* stampTrackingLookup(
+                    working,
+                    approval.tool,
+                    result,
+                  );
                 }),
               );
+              if (updatedTrackingTicket) working = updatedTrackingTicket;
               exec = result;
             }
             // The decision has now been ACTED ON (executed, deduped, or about to
@@ -2047,7 +2072,7 @@ const AgentRuntimeLayer = Layer.effect(
                 Effect.timeout(tool.timeout ?? defaultToolTimeoutMs),
               );
               const result = yield* toolEffect.pipe(Effect.either);
-              const exec = yield* tx.run(
+              const toolTx = yield* tx.run(
                 Effect.gen(function* () {
                   const outputDetails =
                     tool.name === "refund.recommend" && result._tag === "Right"
@@ -2111,9 +2136,16 @@ const AgentRuntimeLayer = Layer.effect(
                       })
                       .pipe(Effect.catchAll(() => Effect.void));
                   }
-                  return result;
+                  const updatedTicket = yield* stampTrackingLookup(
+                    current,
+                    tool.name,
+                    result,
+                  );
+                  return { result, updatedTicket };
                 }),
               );
+              const exec = toolTx.result;
+              if (toolTx.updatedTicket) current = toolTx.updatedTicket;
 
               if (exec._tag === "Right") {
                 // Index our outbound reply's Message-ID for thread correlation of

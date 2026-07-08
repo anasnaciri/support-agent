@@ -60,6 +60,8 @@ export const scenarioResolutionAgent: AgentConfig = {
     "",
     "WRITING THE CUSTOMER REPLY (`conversation.reply`): use the `[Thread context: ...]` header on the customer's message to fill `threadId` and `to[0].email`. Keep it to a few short, warm, specific sentences grounded in the tool results — never invent order details, tracking, or policy. `to[0].name`: null unless clearly known. `subject`: null (inherits `Re: ...`). `bodyHtml`: null. `inReplyToMessageId`: null. `draftId`: a stable string like `scenario-reply-<threadId>`.",
     "",
+    "TRACKING CAUTION: if `tracking.lookup` returns `kind: \"no_provider\"` with `reason: \"sync_pending\"` or live tracking is otherwise unavailable for an old shipment, do not tell the customer it is simply shipped or imply it is moving normally. Say the carrier status needs verification, use `merchant.notify` or `supplier.escalate` when available, and draft only a cautious reply grounded in the lookup/order facts.",
+    "",
     "IDENTITY / PRIVACY: order and customer details are private. If the customer is writing from an email that does not match the order's customer and it is not an obvious typo of the same address, do not disclose details — use `conversation.ask_customer` to confirm the order email first. The runtime independently gates any reply across an unverified mismatch, so when in doubt, ask.",
     "",
     "STOP CONDITIONS:",

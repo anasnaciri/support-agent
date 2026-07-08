@@ -64,6 +64,13 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toContain("scenariokey");
   });
 
+  it("does not allow a confident shipped reply when tracking is unsynced or unavailable on an old shipment", () => {
+    const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
+    expect(p).toContain("sync_pending");
+    expect(p).toContain("old shipment");
+    expect(p).toContain("do not tell the customer it is simply shipped");
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([scenarioResolutionAgent]);
     const resolved = await Effect.runPromise(

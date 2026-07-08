@@ -43,6 +43,59 @@ const mapHttpError = (
   return new NetworkError({ cause: err });
 };
 
+const getTrackInfo = (
+  cfg: { readonly apiKey: string; readonly fetchImpl?: typeof fetch },
+  trackingNumber: string,
+): Effect.Effect<
+  Awaited<ReturnType<typeof seventeenTrackGetInfo>>,
+  TrackingError
+> =>
+  Effect.tryPromise({
+    try: async () => {
+      try {
+        return await seventeenTrackGetInfo({
+          apiKey: cfg.apiKey,
+          trackingNumber,
+          ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+        });
+      } catch (cause) {
+        if (
+          cause instanceof SeventeenTrackHttpError &&
+          cause.failure.kind === "sync_pending"
+        ) {
+          return null;
+        }
+        throw cause;
+      }
+    },
+    catch: (cause) => mapHttpError(cause, { trackingNumber }),
+  });
+
+const getTrackInfoWithRejectedRetry = (
+  cfg: { readonly apiKey: string; readonly fetchImpl?: typeof fetch },
+  trackingNumber: string,
+): Effect.Effect<
+  NonNullable<Awaited<ReturnType<typeof seventeenTrackGetInfo>>> | "sync_pending",
+  TrackingError
+> =>
+  Effect.gen(function* () {
+    const first = yield* getTrackInfo(cfg, trackingNumber);
+    if (first !== null) return first;
+    const second = yield* getTrackInfo(cfg, trackingNumber);
+    return second ?? "sync_pending";
+  });
+
+const noProviderResult = (
+  input: LookupTrackingInput,
+  reason: "sync_pending" | "unsupported_carrier",
+): TrackingLookup => ({
+  kind: "no_provider",
+  carrier: input.carrier ?? "unknown",
+  trackingNumber: input.trackingNumber,
+  trackingUrl: publicTrackingUrl(input.trackingNumber),
+  reason,
+});
+
 // ============================================================
 // Live Layer
 // ============================================================
@@ -58,9 +111,11 @@ const mapHttpError = (
  *     boundary surfaces it as `ToolOutputInvalid`. The agent's prompt
  *     handles that as a "skip tracking enrichment, drop straight to
  *     the reply with the public URL" path.
- *   - 17track `rejected[]` (unsupported carrier / bad number): NOT an
- *     error — maps to `kind: "no_provider"` with reason
- *     `unsupported_carrier` so the agent reply still has a URL.
+ *   - 17track `rejected[]` immediately after registration: treated as
+ *     a possible provider sync lag, retried once, then maps to
+ *     `kind: "no_provider"` with reason `sync_pending` so the agent
+ *     does not confuse a first-look miss for a permanent unsupported
+ *     carrier.
  *
  * The register call is wrapped in `Effect.either` so a register
  * failure doesn't abort the gettrackinfo flow (17track's register is
@@ -97,28 +152,13 @@ export const TrackingServiceLive: Layer.Layer<
           }),
         );
 
-        const info = yield* Effect.tryPromise({
-          try: () =>
-            seventeenTrackGetInfo({
-              apiKey: cfg.apiKey,
-              trackingNumber: input.trackingNumber,
-              ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
-            }),
-          catch: (cause) =>
-            mapHttpError(cause, { trackingNumber: input.trackingNumber }),
-        });
+        const info = yield* getTrackInfoWithRejectedRetry(
+          cfg,
+          input.trackingNumber,
+        );
 
-        if (info === null) {
-          // 17track rejected the number (unsupported carrier / bad
-          // format). Surface as `no_provider` so the agent can still
-          // hand the customer a public URL.
-          return {
-            kind: "no_provider",
-            carrier: input.carrier ?? "unknown",
-            trackingNumber: input.trackingNumber,
-            trackingUrl: publicTrackingUrl(input.trackingNumber),
-            reason: "unsupported_carrier",
-          } as const;
+        if (info === "sync_pending") {
+          return noProviderResult(input, "sync_pending");
         }
 
         return {

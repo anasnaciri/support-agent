@@ -193,7 +193,7 @@ export type TrackingLookup =
       readonly carrier: string;
       readonly trackingNumber: string;
       readonly trackingUrl: string;
-      readonly reason: "no_api_key" | "unsupported_carrier";
+      readonly reason: "no_api_key" | "unsupported_carrier" | "sync_pending";
     };
 
 export interface ProposedAction {

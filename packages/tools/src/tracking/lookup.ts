@@ -38,14 +38,14 @@ const Output = Schema.Union(
     carrier: Schema.String,
     trackingNumber: Schema.String,
     trackingUrl: Schema.String,
-    reason: Schema.Literal("no_api_key", "unsupported_carrier"),
+    reason: Schema.Literal("no_api_key", "unsupported_carrier", "sync_pending"),
   }),
 );
 
 export const trackingLookup = defineTool({
   name: "tracking.lookup",
   description:
-    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up or the carrier isn't supported (still returns the tracking number + a public tracking URL the customer can follow). Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
+    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up, the carrier isn't supported, or the upstream has not synced the newly registered number yet (still returns the tracking number + a public tracking URL the customer can follow). Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

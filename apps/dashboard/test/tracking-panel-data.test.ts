@@ -105,10 +105,10 @@ describe("parseLiveTracking", () => {
       kind: "no_provider",
       carrier: "lulu",
       trackingNumber: "LULU1",
-      reason: "unsupported_carrier",
+      reason: "sync_pending",
     });
     expect(parsed?.kind).toBe("no_provider");
-    expect(parsed?.reason).toBe("unsupported_carrier");
+    expect(parsed?.reason).toBe("sync_pending");
   });
 });
 

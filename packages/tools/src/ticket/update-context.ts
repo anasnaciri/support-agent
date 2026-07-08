@@ -124,7 +124,7 @@ const Input = Schema.Struct({
       estimatedDeliveryAt: Schema.optional(Schema.NullOr(Schema.String)),
       trackingUrl: Schema.optional(Schema.String),
       reason: Schema.optional(
-        Schema.Literal("no_api_key", "unsupported_carrier"),
+        Schema.Literal("no_api_key", "unsupported_carrier", "sync_pending"),
       ),
     }),
   ),
