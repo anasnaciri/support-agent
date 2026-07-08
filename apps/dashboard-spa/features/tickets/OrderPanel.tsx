@@ -213,6 +213,7 @@ export const OrderPanel = ({
                     src={li.imageUrl}
                     alt=""
                     loading="lazy"
+                    decoding="async"
                     className="size-9 shrink-0 rounded-md border border-border/60 bg-muted object-cover"
                   />
                 ) : (

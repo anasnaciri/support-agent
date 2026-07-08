@@ -40,10 +40,12 @@ export type ShopifyLineItem = {
    */
   readonly productId: string | null;
   /**
-   * URL of the line item's product/variant image, or null when the product
-   * has none (or was deleted). Dashboard-only: rendered as a thumbnail in
-   * the ticket order card; deliberately not projected into `get_order` tool
-   * output, so it never reaches the agent's context.
+   * CDN-resized thumbnail URL (≤96px) of the line item's product/variant
+   * image, or null when the product has none (or was deleted).
+   * Dashboard-only: rendered as a small thumbnail in the ticket order card;
+   * deliberately not projected into `get_order` tool output, so it never
+   * reaches the agent's context. Not suitable for full-size display — the
+   * transform is applied at query time in `ORDER_FIELDS`.
    */
   readonly imageUrl: string | null;
 };

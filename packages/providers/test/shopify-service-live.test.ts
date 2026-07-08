@@ -241,6 +241,11 @@ describe("ShopifyServiceLive — getOrder", () => {
       variables: Record<string, unknown>;
     };
     expect(body.query).toContain("query GetOrder");
+    // Line-item images must be requested as CDN-resized thumbnails, not
+    // full-size originals — the dashboard renders them at 36px.
+    expect(body.query).toContain(
+      "image { url(transform: { maxWidth: 96, maxHeight: 96 }) }",
+    );
     expect(body.variables).toEqual({ id: "gid://shopify/Order/12345" });
   });
 

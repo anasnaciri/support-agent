@@ -25,6 +25,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       fallback. Deliberately NOT projected into the `get_order` tool output —
       the agent's context stays image-URL-free; the refund modal's separate
       `ShopifyRefundLineItem.imageUrl` was already there and is untouched.
+      - Thumbnails are CDN-resized at query time (2026-07-08):
+        `url(transform: { maxWidth: 96, maxHeight: 96 })` in `ORDER_FIELDS`
+        (validated against the Admin schema; no new scopes), so the browser
+        never downloads full-size product originals for a 36px tile; `<img>`
+        also `loading="lazy" decoding="async"`.
+- [ ] Refund modal line-item images (`getOrderRefundContext`, plain
+      `image { url }` in shopify-service-live.ts) still fetch full-size
+      originals for small thumbnails — apply the same
+      `url(transform: ...)` there.
 - [x] Tickets sidebar status badge kept in sync with the ticket page's live
       chips (2026-07-08): the detail page is on TanStack Query and
       `TicketLiveBoundary` invalidates `qk.ticket(w, id)` when its `?since=`

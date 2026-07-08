@@ -552,7 +552,7 @@ const ORDER_FIELDS = `
     name address1 address2 city province country zip phone
   }
   lineItems(first: 50) {
-    nodes { id title quantity sku variantTitle product { id } image { url } }
+    nodes { id title quantity sku variantTitle product { id } image { url(transform: { maxWidth: 96, maxHeight: 96 }) } }
   }
   fulfillments(first: 20) {
     id
