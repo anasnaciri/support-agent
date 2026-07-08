@@ -25,6 +25,7 @@ export type SeventeenTrackHttpFailure =
   | { readonly kind: "auth_failed"; readonly status: number }
   | { readonly kind: "rate_limited"; readonly retryAfterMs: number }
   | { readonly kind: "not_found"; readonly status: number }
+  | { readonly kind: "sync_pending"; readonly trackingNumber: string }
   | { readonly kind: "invalid"; readonly status: number; readonly message: string }
   | { readonly kind: "network"; readonly status: number; readonly body: string };
 
@@ -335,6 +336,13 @@ export const seventeenTrackGetInfo = async (
 
   const accepted = raw.data?.accepted?.[0];
   if (!accepted) {
+    const rejected = raw.data?.rejected?.[0];
+    if (!rejected) {
+      throw new SeventeenTrackHttpError(
+        { kind: "sync_pending", trackingNumber: input.trackingNumber },
+        `17track /track/v2.2/gettrackinfo: sync pending for ${input.trackingNumber}`,
+      );
+    }
     return null;
   }
   const track = accepted.track ?? {};

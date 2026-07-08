@@ -200,6 +200,30 @@ describe("seventeenTrackGetInfo", () => {
     expect(info).toBeNull();
   });
 
+  it("throws sync_pending when 17track has no accepted or rejected row yet", async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        code: 0,
+        data: {
+          accepted: [],
+          rejected: [],
+        },
+      }),
+    );
+    await expect(
+      seventeenTrackGetInfo({
+        apiKey: "k1",
+        trackingNumber: "LULU1000630903",
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        kind: "sync_pending",
+        trackingNumber: "LULU1000630903",
+      },
+    });
+  });
+
   it("maps in-transit numeric code 30 to 'in_transit'", async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({

@@ -747,7 +747,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       customer id.
 - [ ] Decide whether refund mismatch guard should use resolved customer id or
       remain email-strict.
-- [ ] Fix 17track first-lookup race for newly registered tracking numbers
+- [x] Fixed 17track first-lookup race for newly registered tracking numbers
       (prod finding 2026-07-08): `tracking.lookup` can run seconds after a new
       number is registered with 17track, before 17track's first carrier sync is
       complete. The current Live impl treats an empty/non-accepted
@@ -757,8 +757,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `35df42a9-7756-4cc5-8bcc-a81182004dee` looked up
       `LULU1000630903` at `2026-07-08T14:25:18Z`; direct prod-key 17track
       fetch later returned live data with `latest_sync_time`
-      `2026-07-08T14:31:50Z`. Add a provider test for "registered / sync
-      pending" and map it to a retry/deferred-pending path, not
+      `2026-07-08T14:31:50Z`. Fix: provider tests now pin "registered / sync
+      pending" (`accepted: []`, `rejected: []`) and the 17track parser maps it
+      to `TrackingProviderUnavailable` instead of the successful
+      `unsupported_carrier` degrade; real `rejected[]` rows still return
       `unsupported_carrier`.
 - [ ] Add Aftership/EasyPost carrier integrations with per-tenant credentials
       and proactive `tracking.changed` webhook ingestion.

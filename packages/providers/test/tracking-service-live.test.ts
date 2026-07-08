@@ -139,6 +139,35 @@ describe("TrackingServiceLive", () => {
     }
   });
 
+  it("17track sync-pending response fails instead of stamping unsupported_carrier", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/register")) return okJson({});
+      return okJson({
+        code: 0,
+        data: {
+          accepted: [],
+          rejected: [],
+        },
+      });
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(TrackingService, (s) =>
+          s.lookup(tenantId, { trackingNumber: "LULU1000630903" }),
+        ),
+        buildLayer(fetchImpl as unknown as typeof fetch),
+      ),
+    );
+    if (exit._tag !== "Failure") throw new Error("expected failure");
+    if (exit.cause._tag !== "Fail") throw new Error("expected Fail cause");
+    expect(exit.cause.error).toBeInstanceOf(TrackingProviderUnavailable);
+    expect(exit.cause.error).toMatchObject({
+      trackingNumber: "LULU1000630903",
+      message: expect.stringContaining("sync pending"),
+    });
+  });
+
   it("upstream 429 → TrackingProviderRateLimited", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
