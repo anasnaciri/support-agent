@@ -205,9 +205,18 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [],
-      supplierMode: "none",
+      // Steering-only since 2026-06-28: this mode's guidance line is what
+      // permits (or forbids) the supplier. A status question can turn out to
+      // be a delivery problem once tracking is checked, so `none` — which
+      // injects "Do NOT involve a supplier" — would block escalating a
+      // discovered exception.
+      supplierMode: "escalate_and_wait",
       notes:
-        "Look up the order, check tracking if available, and tell the customer the status.",
+        "Look up the order, check tracking if available, and tell the customer the status. " +
+        "If the lookup shows the shipment is stuck, lost, or far past its delivery window, " +
+        "this is really the delivery-problem scenario: update scenarioKey to delivery_issue " +
+        "and follow its guidance — escalate to the supplier if one is available and send the " +
+        "customer a short reassuring reply without promising a specific outcome yet.",
     },
     {
       key: "delivery_issue",
@@ -218,7 +227,10 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
-        "Verify the carrier status first. On an exception, escalate to the supplier to reship and let the customer know. If genuinely lost and there is no supplier, offer a refund.",
+        "Verify the carrier status first. On an exception, escalate to the supplier to reship " +
+        "AND always send the customer a short reassuring reply in the same run — we are looking " +
+        "into it and will follow up — without promising a specific outcome yet. If genuinely " +
+        "lost and there is no supplier, offer a refund.",
     },
     {
       key: "damaged_product",
