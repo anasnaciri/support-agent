@@ -784,6 +784,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       tool-execution markers.
 - [ ] Consider a worker-local connector supervisor for Gmail watch renewal,
       Graph subscription renewal, and IMAP poll passes.
+- [ ] `gmailListHistory` does not follow `nextPageToken`, but the push handler
+      still advances the cursor to `latestHistoryId` — a burst of >1 page of
+      history records would silently drop the overflow messages. Paginate, or
+      only advance the cursor to the last page actually consumed. (Found
+      2026-07-08 while diagnosing a "resend didn't reopen" report; not the
+      cause of that incident.)
+- [ ] Gmail token-refresh failures in the push handler only `console.error`
+      and drop the push — repeated refresh failures should stamp connector
+      health / notify the merchant (Elva Labs mailbox was dead ~17h on
+      2026-07-08 before anyone noticed; see incident notes in memory).
+- [ ] Gmail push handler advances the history cursor past messages whose
+      dispatch FAILED (`publishGmailMessageIds` counts `failed` but
+      `handleGmailPushNotification` still patches `historyId` to
+      `latestHistoryId`) — one transient `messages.get`/publish/blob error
+      permanently loses that inbound email. Only advance past successfully
+      published ids, or park failed ids for retry. Prime suspect for the
+      2026-07-08 "customer reply didn't reopen ticket e3a7b4c7" report
+      (16:30 push refreshed token + advanced cursor, zero messages ingested).
 
 ### Shopify, Refunds, Orders, And Tracking
 
