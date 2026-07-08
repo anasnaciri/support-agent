@@ -123,6 +123,7 @@ const ORDER_PAYLOAD = {
             sku: "MUG-01",
             variantTitle: null,
             product: { id: "gid://shopify/Product/555" },
+            image: { url: "https://cdn.shopify.com/s/files/mug.jpg" },
           },
         ],
       },
@@ -223,6 +224,9 @@ describe("ShopifyServiceLive — getOrder", () => {
     expect(order.lineItems).toHaveLength(1);
     expect(order.lineItems[0]!.title).toBe("Mug");
     expect(order.lineItems[0]!.productId).toBe("gid://shopify/Product/555");
+    expect(order.lineItems[0]!.imageUrl).toBe(
+      "https://cdn.shopify.com/s/files/mug.jpg",
+    );
     expect(order.fulfillments[0]!.trackingNumbers).toEqual(["1Z999"]);
 
     // Verify HTTP request was correctly assembled.

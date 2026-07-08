@@ -85,6 +85,7 @@ const buildOrder = (id: string): ShopifyOrder => ({
       sku: "MUG-01",
       variantTitle: null,
       productId: "gid://shopify/Product/555",
+      imageUrl: null,
     },
   ],
   fulfillments: [

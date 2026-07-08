@@ -39,6 +39,13 @@ export type ShopifyLineItem = {
    * photos (the damaged-product product-match check).
    */
   readonly productId: string | null;
+  /**
+   * URL of the line item's product/variant image, or null when the product
+   * has none (or was deleted). Dashboard-only: rendered as a thumbnail in
+   * the ticket order card; deliberately not projected into `get_order` tool
+   * output, so it never reaches the agent's context.
+   */
+  readonly imageUrl: string | null;
 };
 
 /**

@@ -303,6 +303,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "MUG-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -1514,6 +1515,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "MUG-1",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -1679,6 +1681,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "KET-1",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -1816,6 +1819,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "BEAN-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -2000,7 +2004,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       totalPrice: { amount: "29.00", currencyCode: "USD" },
       shippingAddress: null,
       lineItems: [
-        { id: "li-1", title: "T-shirt", quantity: 1, sku: "TS-01", variantTitle: null, productId: null },
+        { id: "li-1", title: "T-shirt", quantity: 1, sku: "TS-01", variantTitle: null, productId: null, imageUrl: null },
       ],
       fulfillments: [], // no tracking number to look up
       createdAt: new Date("2026-05-22T00:00:00.000Z"),
@@ -2323,6 +2327,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "NB-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -3437,6 +3442,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "EAR-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -3629,6 +3635,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "MUG-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -3801,6 +3808,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "MUG-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -3946,6 +3954,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "BEAN-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -4117,6 +4126,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "BEAN-01",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -4351,6 +4361,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "VASE-01",
           variantTitle: null,
           productId: "gid://shopify/Product/777",
+          imageUrl: null,
         },
       ],
       fulfillments: [
@@ -4721,6 +4732,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "MUG-01",
           variantTitle: null,
           productId: "gid://shopify/Product/778",
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -4939,6 +4951,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
           sku: "HD-7",
           variantTitle: null,
           productId: null,
+          imageUrl: null,
         },
       ],
       fulfillments: [],
@@ -5849,6 +5862,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
         sku: "EAR-01",
         variantTitle: null,
         productId: null,
+        imageUrl: null,
       },
     ],
     fulfillments: [],

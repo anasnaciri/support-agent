@@ -208,12 +208,21 @@ export const OrderPanel = ({
           <ul className="space-y-0.5">
             {order.lineItems.map((li) => (
               <li key={li.id} className="flex items-center gap-2.5 py-1">
-                <div
-                  className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                  aria-hidden
-                >
-                  <Package className="size-4" />
-                </div>
+                {li.imageUrl ? (
+                  <img
+                    src={li.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    className="size-9 shrink-0 rounded-md border border-border/60 bg-muted object-cover"
+                  />
+                ) : (
+                  <div
+                    className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                    aria-hidden
+                  >
+                    <Package className="size-4" />
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[0.8125rem] font-medium">
                     {li.title}

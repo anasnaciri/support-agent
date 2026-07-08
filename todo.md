@@ -17,6 +17,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Product image thumbnails in the ticket order card (2026-07-08):
+      `ShopifyLineItem` gained `imageUrl` (mapped from `image { url }` in the
+      shared `ORDER_FIELDS` fragment, so `get_order` and `find_customer_order`
+      both carry it); both OrderPanels (dashboard-spa + legacy Next dashboard)
+      render the thumbnail with the old Package-icon tile as the null-image
+      fallback. Deliberately NOT projected into the `get_order` tool output —
+      the agent's context stays image-URL-free; the refund modal's separate
+      `ShopifyRefundLineItem.imageUrl` was already there and is untouched.
 - [x] Tickets sidebar status badge kept in sync with the ticket page's live
       chips (2026-07-08): the detail page is on TanStack Query and
       `TicketLiveBoundary` invalidates `qk.ticket(w, id)` when its `?since=`
