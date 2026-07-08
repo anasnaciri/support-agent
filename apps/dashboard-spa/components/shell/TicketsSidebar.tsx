@@ -8,6 +8,7 @@ import { api } from "@/lib/api-client";
 import { UnauthorizedError } from "@/lib/errors";
 import { login } from "@/lib/auth/session-api";
 import { useWorkspaceCtx } from "@/lib/session-context";
+import { subscribeTicketsChanged } from "@/lib/tickets-refresh-signal";
 import { cn } from "@/lib/utils";
 import { ticketStatusLabel, ticketSubjectLabel, hasSubject } from "@/lib/labels";
 import { ticketStatusVariant } from "@/lib/status-variants";
@@ -165,10 +166,30 @@ export function TicketsSidebar() {
     void fetchPage(1, true);
   }, [debounced, mode, workspaceId, fetchPage]);
 
+  // In-place freshness top-up: refetch page 1 and fold the fresh rows into
+  // what's loaded — same position, no reorder, no pagination reset, no scroll
+  // jump. Stable (empty deps): live values come from the refs above.
+  const refreshTopPage = useCallback(async () => {
+    const activeMode = modeRef.current;
+    const q = debouncedRef.current;
+    const sig = sidebarRequestSignature(activeMode, q);
+    try {
+      const data = await api.tickets(
+        { workspaceId: workspaceIdRef.current },
+        buildFilter(q, activeMode),
+        1,
+        SIDEBAR_PAGE_SIZE,
+      );
+      if (sig !== latestQueryRef.current) return;
+      setRows((prev) => applyFreshPage(prev, data.rows));
+    } catch {
+      // Ignore — purely a freshness top-up.
+    }
+  }, []);
+
   // Pathname change ⇒ an action probably just ran (take over, hand back,
   // approve) — but this list is client state, so its status badges would stay
-  // stale (U8). Refetch page 1 and fold the fresh rows into what's loaded, in
-  // place: no reorder, no scroll jump.
+  // stale (U8). Top up in place.
   const mountedPathRef = useRef<string | null>(null);
   useEffect(() => {
     if (mountedPathRef.current === null) {
@@ -178,24 +199,17 @@ export function TicketsSidebar() {
     }
     if (mountedPathRef.current === pathname) return;
     mountedPathRef.current = pathname;
-    const activeMode = modeRef.current;
-    const q = debouncedRef.current;
-    const sig = sidebarRequestSignature(activeMode, q);
-    void (async () => {
-      try {
-        const data = await api.tickets(
-          { workspaceId: workspaceIdRef.current },
-          buildFilter(q, activeMode),
-          1,
-          SIDEBAR_PAGE_SIZE,
-        );
-        if (sig !== latestQueryRef.current) return;
-        setRows((prev) => applyFreshPage(prev, data.rows));
-      } catch {
-        // Ignore — purely a freshness top-up.
-      }
-    })();
-  }, [pathname]);
+    void refreshTopPage();
+  }, [pathname, refreshTopPage]);
+
+  // Live-event nudge: TicketLiveBoundary broadcasts when its poll sees a new
+  // audit event on the open ticket. Without this, the banner chips on the
+  // ticket page update near-live while this list's status badge stays stale
+  // until the next navigation. Same in-place top-up as the pathname effect.
+  useEffect(
+    () => subscribeTicketsChanged(() => void refreshTopPage()),
+    [refreshTopPage],
+  );
 
   // Measure the scroll viewport so the window math knows how many rows fit.
   useEffect(() => {

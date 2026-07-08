@@ -6,6 +6,7 @@ import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
 import { cn } from "@/lib/utils";
 import { isPaused, nextFailureCount } from "@/lib/live-status";
+import { broadcastTicketsChanged } from "@/lib/tickets-refresh-signal";
 
 const POLL_MS = 2500;
 
@@ -67,6 +68,10 @@ export function TicketLiveBoundary({ ticketId }: { readonly ticketId: string }) 
     if (newest && newest !== sinceRef.current) {
       sinceRef.current = newest;
       void qc.invalidateQueries({ queryKey: qk.ticket(ctx.workspaceId, ticketId) });
+      // The sidebar's rows are client state outside the query cache, so its
+      // status badge would drift from the banner chips this invalidation just
+      // refreshed. Nudge it to fold in a fresh page 1 (in place, no reorder).
+      broadcastTicketsChanged();
     }
   }, [
     dataUpdatedAt,

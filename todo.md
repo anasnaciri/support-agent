@@ -17,6 +17,23 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Tickets sidebar status badge kept in sync with the ticket page's live
+      chips (2026-07-08): the detail page is on TanStack Query and
+      `TicketLiveBoundary` invalidates `qk.ticket(w, id)` when its `?since=`
+      poll sees a new audit event, but the sidebar is hand-rolled client state
+      whose only freshness trigger was a pathname change — so its status badge
+      drifted while the merchant sat on the ticket. Fix: tiny framework-free
+      pub/sub (`lib/tickets-refresh-signal.ts`, unit-tested); the boundary
+      broadcasts alongside the invalidation and `TicketsSidebar` subscribes,
+      re-running the existing fetch-page-1 + `applyFreshPage` in-place top-up
+      (extracted into a shared `refreshTopPage` callback; no reorder, no
+      scroll jump). Deliberately did NOT migrate the sidebar to
+      `useInfiniteQuery`: invalidation would refetch all loaded pages with the
+      server's current sort and reintroduce the reorder/scroll-jump that
+      `applyFreshPage` exists to avoid.
+      - Residual gap (pre-existing, unchanged): the top-up only folds in page
+        1, so a changed ticket sitting beyond page 1 of a deep-scrolled list
+        keeps a stale badge until it sorts into page 1 by `updated_at`.
 - [x] Ingest spam/junk mail across ALL mailbox connectors (decided + landed
       2026-07-07): spam-filtered customer mail was invisible to the agent
       forever — even Gmail "Not spam" rescue was dropped because
