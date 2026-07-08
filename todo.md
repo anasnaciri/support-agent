@@ -144,6 +144,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [ ] Consider extracting the subprocessor list to a standalone page/appendix
       referenced from the DPA with a notify-of-changes clause, so future
       connector additions don't re-version the whole notice.
+- [ ] Replace the current "any data-processing notice version bump blocks
+      connector writes" legal gate with a DPA-once model: hard-block only when
+      no DPA/current material contract was accepted; treat subprocessor /
+      informational notice updates as notify-only with an objection window
+      (email/in-app), backed by a public subprocessor appendix. Connector
+      installs remain explicit merchant instructions for that connector.
 - [x] Dashboard SPA GlassSwitch resting treatment refined (2026-07-06):
       `apps/dashboard-spa/components/ui/glass-switch.tsx` now keeps the thumb
       as an opaque solid surface at rest, reveals the glass/refraction layers
