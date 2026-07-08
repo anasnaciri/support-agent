@@ -1252,6 +1252,12 @@ export const buildScenarioPlaybookHeader = (scenario: ScenarioPolicy): string =>
   const notes = scenario.notes?.trim();
   if (notes) lines.push(notes);
   lines.push(supplierGuidanceLine(scenario.supplierMode));
+  // Re-engaged tickets run under their stamped scenario's playbook — this is
+  // the only place the flip rule can reach them, so it must travel with the
+  // header, not just the entry menu.
+  lines.push(
+    "This playbook applies while the ticket still matches this scenario. If a tool result or a new customer message shows it is really a different scenario from the store's list, update scenarioKey with ticket.update_context and follow that scenario's guidance instead.",
+  );
   lines.push("]");
   return lines.join("\n");
 };
@@ -1423,6 +1429,7 @@ export const applyResolutionAgentEntry = (
     ...lines,
     "",
     "As your FIRST action, call ticket.update_context with `scenarioKey` set to the matching scenario's key (and `classification`/`quotedOrderRef`/`notes` when useful). Then follow that scenario's guidance to resolve the ticket end-to-end using your available tools.",
+    "Your scenario pick is PROVISIONAL — re-evaluate it as you work. Whenever a tool result or a new customer message reveals the ticket really matches a DIFFERENT scenario from the list above (a status question turns out to be a lost shipment; the customer now asks to cancel an order that has not shipped; a cancellation turns out already shipped and becomes a refund request), call ticket.update_context again with the corrected scenarioKey and follow THAT scenario's guidance from that point on.",
     "If the message genuinely fits NONE of these scenarios — spam, an offer/solicitation, or something only a human should decide — do NOT guess and do NOT send a customer reply: call merchant.notify and stop with a brief final message, which parks the ticket for a human. Never close a real customer's ticket without helping them.]",
   ].join("\n");
   return {

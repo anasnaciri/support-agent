@@ -722,6 +722,15 @@ describe("buildScenarioPlaybookHeader", () => {
     expect(header).toContain("Delivery problem");
     expect(header).not.toContain("undefined");
   });
+
+  it("tells the agent to flip the scenario when new information no longer matches", () => {
+    // Re-engaged tickets run under their STAMPED scenario's playbook; without
+    // this line a ticket stamped where_is_order would keep following status
+    // guidance after the customer pivots to e.g. a cancellation.
+    const header = buildScenarioPlaybookHeader(scenario({}));
+    expect(header).toContain("different scenario");
+    expect(header).toContain("scenarioKey");
+  });
 });
 
 // Slice 6: triage routing to the scenario-resolution-agent behind the flag.
@@ -831,6 +840,15 @@ describe("applyResolutionAgentEntry", () => {
   it("tells the agent to escalate (merchant.notify) when no scenario fits", () => {
     const out = applyResolutionAgentEntry(scenarioAgent(), routingPolicy());
     expect(out.promptTemplate).toContain("merchant.notify");
+  });
+
+  it("marks the scenario pick as provisional — re-stamp when evidence flips it", () => {
+    // Where-is-my-order can become delivery_issue after a tracking lookup, or
+    // order_cancellation after the customer's next message. The pick must not
+    // lock the ticket to the first guess.
+    const out = applyResolutionAgentEntry(scenarioAgent(), routingPolicy());
+    expect(out.promptTemplate.toLowerCase()).toContain("provisional");
+    expect(out.promptTemplate).toContain("corrected scenarioKey");
   });
 
   it("lists only ENABLED scenarios", () => {
