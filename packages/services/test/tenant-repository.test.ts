@@ -511,28 +511,6 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
   });
 });
 
-describe("where_is_order built-in scenario", () => {
-  const wio = defaultResolutionPolicy.scenarios.find(
-    (s) => s.key === "where_is_order",
-  );
-
-  it("may involve the supplier when the lookup reveals a shipment problem", () => {
-    // A plain status question can turn out to be a delivery problem once
-    // tracking is checked. supplierMode is steering-only (2026-06-28), so
-    // `none` would inject "Do NOT involve a supplier" — the one line that
-    // blocks escalating a discovered exception.
-    expect(wio).toBeDefined();
-    expect(wio!.supplierMode).toBe("escalate_and_wait");
-  });
-
-  it("tells the agent to pivot to delivery_issue on a discovered exception", () => {
-    const notes = (wio!.notes ?? "").toLowerCase();
-    expect(notes).toContain("delivery_issue");
-    expect(notes).toContain("supplier");
-    expect(notes).toContain("reassur");
-  });
-});
-
 describe("delivery_issue built-in scenario", () => {
   const di = defaultResolutionPolicy.scenarios.find(
     (s) => s.key === "delivery_issue",

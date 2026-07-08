@@ -205,18 +205,13 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       builtin: true,
       enabled: true,
       enabledActions: [],
-      // Steering-only since 2026-06-28: this mode's guidance line is what
-      // permits (or forbids) the supplier. A status question can turn out to
-      // be a delivery problem once tracking is checked, so `none` — which
-      // injects "Do NOT involve a supplier" — would block escalating a
-      // discovered exception.
-      supplierMode: "escalate_and_wait",
+      // A status question that turns out to be a shipping problem is handled
+      // by the GENERAL re-classification rule (the agent re-stamps
+      // scenarioKey to delivery_issue and follows that playbook), so this
+      // scenario stays supplier-free for the plain answer-the-status case.
+      supplierMode: "none",
       notes:
-        "Look up the order, check tracking if available, and tell the customer the status. " +
-        "If the lookup shows the shipment is stuck, lost, or far past its delivery window, " +
-        "this is really the delivery-problem scenario: update scenarioKey to delivery_issue " +
-        "and follow its guidance — escalate to the supplier if one is available and send the " +
-        "customer a short reassuring reply without promising a specific outcome yet.",
+        "Look up the order, check tracking if available, and tell the customer the status.",
     },
     {
       key: "delivery_issue",
