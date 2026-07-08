@@ -930,6 +930,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       normalizer re-seeds built-ins). Affected `shipping_address_update`
       (2026-07-08) exactly as it did `order_cancellation`. Consider merging
       missing built-ins on read.
+- [ ] Same stored-policy gap applies to CHANGED built-in defaults: the
+      2026-07-08 `where_is_order` supplierMode flip + pivot notes and the
+      `delivery_issue` reassure-reply note (`39ab74e`) need a policy re-save
+      (or the merge-on-read above) to reach existing tenants — for live
+      tenants, edit /settings/resolution-policy directly.
+- [ ] If `supplier.escalate` is ever set to `auto`, the tool description
+      ("must NOT send a customer reply" after escalated:true) suppresses the
+      reassuring holding reply — reword the description before flipping any
+      tenant to auto-escalation.
 - [ ] Implement LLM fallback chains.
 - [ ] Add cost dashboards by model, provider, agent, ticket, and tenant.
 - [ ] Add platform vs tenant-billed LLM cost reporting for 17track and future
