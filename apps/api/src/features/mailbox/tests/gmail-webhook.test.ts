@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import {
   BlobStorageTest,
+  ConnectorCredentialStore,
   ConnectorCredentialStoreTest,
+  type ConnectorConnection,
 } from "@support-agent/services";
 import { TenantId, type DomainEvent } from "@support-agent/agent-core";
 import {
   backfillUnreadGmailInbox,
+  handleGmailPushNotification,
   parseGmailPushEnvelope,
 } from "../gmail-webhook.js";
 
@@ -179,6 +182,7 @@ describe("backfillUnreadGmailInbox", () => {
       listed: 2,
       published: 1,
       skippedSent: 1,
+      skippedMissing: 0,
       failed: 0,
     });
     expect(published).toHaveLength(1);
@@ -201,5 +205,144 @@ describe("backfillUnreadGmailInbox", () => {
       "mark-read:m-unread",
       "get:m-sent",
     ]);
+  });
+});
+
+describe("handleGmailPushNotification history-cursor safety", () => {
+  const tenantId = TenantId("tenant-1");
+  const mailbox = "support@merchant.com";
+
+  const google = {
+    clientId: "cid",
+    clientSecret: "cs",
+    callbackUrl: "https://api.example.com/google/auth/callback",
+    pubsubTopic: "projects/p/topics/gmail-inbox",
+    pushToken: "push-token",
+  };
+
+  const makeConnection = (): ConnectorConnection => ({
+    tenantId,
+    provider: "gmail",
+    shopDomain: mailbox,
+    accessToken: "tok",
+    refreshToken: "refresh",
+    tokenExpiresAt: new Date(Date.now() + 600_000),
+    metadata: { historyId: "100" },
+    scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+    apiVersion: null,
+    installedAt: new Date("2026-06-02T00:00:00.000Z"),
+    status: "active",
+  });
+
+  /**
+   * The in-memory ConnectorCredentialStoreTest layer rebuilds its Map on
+   * every `Effect.provide`, so writes made inside the handler are invisible
+   * afterwards. This recording impl is a single shared instance instead —
+   * cursor advancement is observable via `metadataPatches`.
+   */
+  const makeRecordingStoreLayer = (conn: ConnectorConnection) => {
+    const metadataPatches: Array<Record<string, unknown>> = [];
+    const layer = Layer.succeed(ConnectorCredentialStore, {
+      put: () => Effect.die("put not expected"),
+      get: () => Effect.succeed(conn),
+      revoke: () => Effect.die("revoke not expected"),
+      listForTenant: () => Effect.succeed([conn]),
+      patchTokens: () => Effect.die("patchTokens not expected"),
+      patchMetadata: (input) =>
+        Effect.sync(() => {
+          metadataPatches.push({ ...input.metadata });
+          return { ...conn, metadata: { ...conn.metadata, ...input.metadata } };
+        }),
+    });
+    return { layer, metadataPatches };
+  };
+
+  const errorResponse = (status: number): Response =>
+    ({
+      ok: false,
+      status,
+      text: async () => `gmail error ${status}`,
+      json: async () => ({}),
+      headers: new Headers(),
+    }) as unknown as Response;
+
+  const okMessage = (id: string): Response =>
+    okJson({
+      id,
+      threadId: "t-1",
+      labelIds: ["INBOX"],
+      internalDate: "1770000000000",
+      payload: {
+        headers: [
+          { name: "From", value: "jane@example.com" },
+          { name: "To", value: mailbox },
+          { name: "Subject", value: "Re: order #1001" },
+        ],
+        body: { data: b64url("Any update?") },
+      },
+    });
+
+  const makeHistoryFetch = (
+    messageIds: ReadonlyArray<string>,
+  ): typeof fetch =>
+    vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/users/me/history?")) {
+        expect(new URL(u).searchParams.get("startHistoryId")).toBe("100");
+        return okJson({
+          history: [
+            {
+              messagesAdded: messageIds.map((id) => ({
+                message: { id, labelIds: ["INBOX"] },
+              })),
+            },
+          ],
+          historyId: "200",
+        });
+      }
+      if (u.includes("/users/me/messages/m-ok?")) return okMessage("m-ok");
+      if (u.includes("/users/me/messages/m-fail?")) return errorResponse(500);
+      if (u.includes("/users/me/messages/m-gone?")) return errorResponse(404);
+      throw new Error(`unexpected fetch ${u}`);
+    }) as unknown as typeof fetch;
+
+  const run = async (messageIds: ReadonlyArray<string>) => {
+    const { layer, metadataPatches } = makeRecordingStoreLayer(
+      makeConnection(),
+    );
+    const published: DomainEvent[] = [];
+    await handleGmailPushNotification({
+      tenantId,
+      rawBody: makeEnvelope({ emailAddress: mailbox, historyId: "205" }),
+      layer: Layer.mergeAll(layer, BlobStorageTest({})),
+      google,
+      fetchImpl: makeHistoryFetch(messageIds),
+      publish: async (event) => {
+        published.push(event);
+      },
+    });
+    return { published, metadataPatches };
+  };
+
+  it("advances the cursor when every listed message dispatches", async () => {
+    const { published, metadataPatches } = await run(["m-ok"]);
+    expect(published).toHaveLength(1);
+    expect(metadataPatches).toEqual([{ historyId: "200" }]);
+  });
+
+  it("does not advance the cursor past a message that failed to dispatch", async () => {
+    // m-ok publishes, m-fail 500s on messages.get. Advancing the cursor
+    // anyway would permanently drop m-fail — the next push must re-list it.
+    const { published, metadataPatches } = await run(["m-ok", "m-fail"]);
+    expect(published).toHaveLength(1);
+    expect(metadataPatches).toEqual([]);
+  });
+
+  it("skips a message deleted between history.list and messages.get and still advances", async () => {
+    // 404 means the message is permanently gone; treating it as a dispatch
+    // failure would wedge the cursor (and re-fetch the window) forever.
+    const { published, metadataPatches } = await run(["m-gone", "m-ok"]);
+    expect(published).toHaveLength(1);
+    expect(metadataPatches).toEqual([{ historyId: "200" }]);
   });
 });

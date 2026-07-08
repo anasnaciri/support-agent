@@ -27,7 +27,7 @@ import {
   toInboundMessage,
 } from "@support-agent/providers";
 import { connectorConnections, DbClient } from "@support-agent/db";
-import type { ApiLayer, GoogleAppConfig } from "../../bootstrap.js";
+import type { GoogleAppConfig } from "../../bootstrap.js";
 
 // ============================================================
 // Pub/Sub envelope parsing
@@ -132,7 +132,7 @@ const defaultPublish = async (event: DomainEvent): Promise<void> => {
 export interface GmailPushHandlerOptions {
   readonly tenantId: string;
   readonly rawBody: Buffer;
-  readonly layer: ApiLayer;
+  readonly layer: GmailConnectorLayer;
   readonly google: GoogleAppConfig;
   /** Override for tests. Defaults to global `fetch`. */
   readonly fetchImpl?: typeof fetch;
@@ -168,6 +168,8 @@ export type GmailConnectorLayer = Layer.Layer<
 export interface GmailMessageDispatchResult {
   readonly published: number;
   readonly skippedSent: number;
+  /** Messages that vanished between listing and fetch (messages.get 404). */
+  readonly skippedMissing: number;
   readonly failed: number;
 }
 
@@ -241,20 +243,46 @@ const publishGmailMessageIds = async (opts: {
 }): Promise<GmailMessageDispatchResult> => {
   const blob = await resolveBlobStorage(opts.layer, opts.logPrefix);
   if (!blob) {
-    return { published: 0, skippedSent: 0, failed: opts.messageIds.length };
+    return {
+      published: 0,
+      skippedSent: 0,
+      skippedMissing: 0,
+      failed: opts.messageIds.length,
+    };
   }
 
   let published = 0;
   let skippedSent = 0;
+  let skippedMissing = 0;
   let failed = 0;
 
   for (const messageId of opts.messageIds) {
+    let msg: Awaited<ReturnType<typeof gmailGetMessage>>;
     try {
-      const msg = await gmailGetMessage({
+      msg = await gmailGetMessage({
         token: opts.accessToken,
         messageId,
         ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       });
+    } catch (cause) {
+      // Permanently gone (deleted between history.list and here). Counting
+      // this as `failed` would hold the history cursor back forever.
+      if (
+        cause instanceof GmailHttpError &&
+        cause.failure.kind === "not_found"
+      ) {
+        skippedMissing += 1;
+        continue;
+      }
+      failed += 1;
+      // eslint-disable-next-line no-console
+      console.error(
+        `${opts.logPrefix} messages.get failed for messageId=${messageId}:`,
+        cause,
+      );
+      continue;
+    }
+    try {
       // Skip messages we sent — outbound idempotency is handled upstream.
       if (msg.labelIds.includes("SENT")) {
         skippedSent += 1;
@@ -311,7 +339,7 @@ const publishGmailMessageIds = async (opts: {
     }
   }
 
-  return { published, skippedSent, failed };
+  return { published, skippedSent, skippedMissing, failed };
 };
 
 export const backfillUnreadGmailInbox = async (opts: {
@@ -508,7 +536,7 @@ export const handleGmailPushNotification = async (
     }
   }
 
-  await publishGmailMessageIds({
+  const dispatched = await publishGmailMessageIds({
     tenantId: opts.tenantId,
     mailbox: payload.emailAddress,
     accessToken: conn.accessToken,
@@ -518,6 +546,20 @@ export const handleGmailPushNotification = async (
     publish: opts.publish ?? defaultPublish,
     logPrefix: "[gmail webhook]",
   });
+
+  // Advancing the cursor past a message that failed to dispatch loses it
+  // permanently (the route 200-acks Pub/Sub, so there is no redelivery).
+  // Hold the cursor so the next push re-lists the same window; downstream
+  // dedups the already-published ids by messageId. Genuinely-missing
+  // messages (404) are counted as skipped, not failed — a deleted message
+  // must not wedge the cursor forever.
+  if (dispatched.failed > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[gmail webhook] ${dispatched.failed} message(s) failed to dispatch for ${payload.emailAddress}; keeping history cursor at ${storedHistoryId} so the next push retries them`,
+    );
+    return;
+  }
 
   const advanceTo = listed.latestHistoryId ?? payload.historyId;
   const patchExit = await Effect.runPromiseExit(
