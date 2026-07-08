@@ -266,6 +266,30 @@ describe("summarizeApprovalAction", () => {
     ).toContain("10.00 EUR");
   });
 
+  it("summarizes a shipping-address update with the destination", () => {
+    // A merchant approving a redirect must see WHERE the parcel would go —
+    // the street + city, never the raw GID.
+    const line = summarizeApprovalAction("order.update_shipping_address", {
+      orderId: "gid://shopify/Order/123",
+      address1: "500 New St",
+      city: "Austin",
+      province: "TX",
+      zip: "78701",
+    });
+    expect(line).toContain("Update the shipping address");
+    expect(line).toContain("500 New St");
+    expect(line).toContain("Austin");
+    expect(line).not.toContain("gid://");
+  });
+
+  it("keeps the bare label when the address edit carries no locatable fields", () => {
+    const line = summarizeApprovalAction("order.update_shipping_address", {
+      orderId: "gid://shopify/Order/123",
+      phone: "+1 555 0100",
+    });
+    expect(line).toBe("Update the shipping address");
+  });
+
   it("falls back to the tool id for unknown tools", () => {
     const line = summarizeApprovalAction("some.future_tool", { x: 1 });
     expect(line).toContain("some.future_tool");

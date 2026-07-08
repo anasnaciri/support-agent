@@ -34,6 +34,7 @@ import {
   shopifyRefundCreate,
   shopifyRefundRecommend,
   shopifyOrderCancel,
+  shopifyUpdateShippingAddress,
   computeRefundRecommendation,
 } from "../src/index.js";
 import {
@@ -44,6 +45,7 @@ import {
   type CancelOrderInput,
   type CustomerRefundHistory,
   type RefundPolicy,
+  type UpdateOrderShippingAddressInput,
 } from "@support-agent/services";
 
 const tenantId = TenantId("t1");
@@ -1506,5 +1508,156 @@ describe("shopify.find_customer_order tool", () => {
       provider: "shopify",
       scopes: ["read_orders"],
     });
+  });
+});
+
+describe("order.update_shipping_address tool", () => {
+  // Layer with the order seeded for the tool's pre-write read (merge base +
+  // fulfillment guard) and an updateOrderShippingAddress capture so we can
+  // assert the merged address that reaches Shopify.
+  const envWith = (
+    order: ShopifyOrder,
+    capture: { input?: UpdateOrderShippingAddressInput },
+  ) =>
+    ShopifyServiceTest({
+      orders: new Map([[order.id, order]]),
+      updateOrderShippingAddress: (input) => {
+        capture.input = input;
+        return Effect.succeed(input.address);
+      },
+    });
+
+  const unfulfilled = (id: string): ShopifyOrder => ({
+    ...buildOrder(id),
+    fulfillmentStatus: "unfulfilled",
+    fulfillments: [],
+  });
+
+  const run = (
+    input: Record<string, unknown>,
+    env: ReturnType<typeof ShopifyServiceTest>,
+    ticketId = "c-ship-1",
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        shopifyUpdateShippingAddress.execute(
+          input as never,
+          baseCtx(ticketId),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+  it("merges the edit over the current address: absent keeps, null clears, string sets", async () => {
+    const orderId = OrderId("gid://shopify/Order/71");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    const exit = await run(
+      {
+        orderId,
+        address1: "500 New St",
+        address2: null, // explicit clear — no unit at the new address
+        city: "Austin",
+        province: "TX",
+        zip: "78701",
+        // name / country / phone absent → keep the order's current values
+      },
+      envWith(unfulfilled(orderId), capture),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input?.orderId).toBe(orderId);
+    expect(capture.input?.address).toEqual({
+      name: "Jane Doe", // kept
+      address1: "500 New St",
+      address2: null, // cleared
+      city: "Austin",
+      province: "TX",
+      country: "US", // kept
+      zip: "78701",
+      phone: null, // kept (was null)
+    });
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["orderId"]).toBe(orderId);
+    expect(result["address"]).toEqual(capture.input?.address);
+  });
+
+  it("refuses an order that already has a fulfillment (parcel is on its way)", async () => {
+    const orderId = OrderId("gid://shopify/Order/72");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    // buildOrder ships with one in-transit fulfillment.
+    const exit = await run(
+      { orderId, address1: "500 New St" },
+      envWith(buildOrder(orderId), capture),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(capture.input).toBeUndefined();
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("order.update_shipping_address");
+        expect(err.issues).toEqual(["OrderAlreadyFulfilled"]);
+      }
+    }
+  });
+
+  it("refuses a cancelled order", async () => {
+    const orderId = OrderId("gid://shopify/Order/73");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    const cancelled: ShopifyOrder = {
+      ...unfulfilled(orderId),
+      cancelledAt: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const exit = await run(
+      { orderId, address1: "500 New St" },
+      envWith(cancelled, capture),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(capture.input).toBeUndefined();
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["OrderCancelled"]);
+      }
+    }
+  });
+
+  it("refuses a call with no address fields at all", async () => {
+    const orderId = OrderId("gid://shopify/Order/74");
+    const capture: { input?: UpdateOrderShippingAddressInput } = {};
+    const exit = await run({ orderId }, envWith(unfulfilled(orderId), capture));
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(capture.input).toBeUndefined();
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["NothingToUpdate"]);
+      }
+    }
+  });
+
+  it("declares write risk, ask default, write_orders scope, and the permission toggle", () => {
+    expect(shopifyUpdateShippingAddress.name).toBe(
+      "order.update_shipping_address",
+    );
+    expect(shopifyUpdateShippingAddress.risk).toBe("write");
+    expect(shopifyUpdateShippingAddress.defaultPermission).toBe("ask");
+    expect(shopifyUpdateShippingAddress.sideEffectClass).toBe("external_state");
+    expect(shopifyUpdateShippingAddress.tenantControl).toBe("permission-toggle");
+    expect(shopifyUpdateShippingAddress.requiredConnectorScopes).toEqual({
+      provider: "shopify",
+      scopes: ["write_orders"],
+    });
+  });
+
+  it("idempotencyKey is stable per order", () => {
+    expect(
+      shopifyUpdateShippingAddress.idempotencyKey!({
+        orderId: "gid://shopify/Order/71",
+        address1: "500 New St",
+      } as never),
+    ).toBe("ship:gid://shopify/Order/71");
   });
 });

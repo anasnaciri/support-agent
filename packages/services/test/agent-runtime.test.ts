@@ -564,6 +564,7 @@ const scenarioAgent = (): AgentConfig =>
       "refund.create",
       "discount.create",
       "order.cancel",
+      "order.update_shipping_address",
       "supplier.escalate",
     ],
   });
@@ -662,6 +663,31 @@ describe("applyScenarioEnvelope", () => {
     const out = applyScenarioEnvelope(scenarioAgent(), scenario());
     expect(out.tools).not.toContain("order.cancel");
     expect(out.permissionOverrides["order.cancel"]).toBe("deny");
+  });
+
+  it("treats order.update_shipping_address as a gated remedy", () => {
+    // Not enabled → removed + denied…
+    const denied = applyScenarioEnvelope(scenarioAgent(), scenario());
+    expect(denied.tools).not.toContain("order.update_shipping_address");
+    expect(denied.permissionOverrides["order.update_shipping_address"]).toBe(
+      "deny",
+    );
+    // …enabled by the shipping-address scenario → present as ask.
+    const out = applyScenarioEnvelope(
+      scenarioAgent(),
+      scenario({
+        key: "shipping_address_update",
+        label: "Update my shipping address",
+        enabledActions: [
+          { tool: "order.update_shipping_address", permission: "ask" },
+        ],
+        supplierMode: "escalate_and_wait",
+      }),
+    );
+    expect(out.tools).toContain("order.update_shipping_address");
+    expect(out.permissionOverrides["order.update_shipping_address"]).toBe(
+      "ask",
+    );
   });
 });
 

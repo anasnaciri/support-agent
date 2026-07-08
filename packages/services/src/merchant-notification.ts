@@ -332,6 +332,15 @@ export const summarizeApprovalAction = (
       const money = summaryMoney(input);
       return money ? `${base} — ${money}` : base;
     }
+    case "order.update_shipping_address": {
+      // Show WHERE the parcel would be redirected — street + city/province is
+      // enough to sanity-check the approval; a phone-only edit has nothing
+      // locatable to show.
+      const parts = ["address1", "city", "province"]
+        .map((k) => (typeof input[k] === "string" ? (input[k] as string) : null))
+        .filter((v): v is string => v !== null && v.length > 0);
+      return parts.length > 0 ? `${base} — ${parts.join(", ")}` : base;
+    }
     case "discount.create": {
       const value = typeof input["value"] === "string" ? input["value"] : null;
       if (value && input["valueType"] === "percentage") {

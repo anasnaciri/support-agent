@@ -9,6 +9,7 @@ import {
   shopifyRefundCreate,
   shopifyDiscountCreate,
   shopifyOrderCancel,
+  shopifyUpdateShippingAddress,
 } from "../src/index.js";
 
 // The dashboard's tenant-facing "Actions" card is driven entirely by this
@@ -67,6 +68,12 @@ describe("tenant-facing tool metadata", () => {
       // same control as refund.create.
       control: "refund-threshold",
     },
+    {
+      tool: shopifyUpdateShippingAddress,
+      name: "order.update_shipping_address",
+      displayName: "Update the shipping address",
+      control: "permission-toggle",
+    },
   ];
 
   for (const e of expected) {
@@ -91,6 +98,7 @@ describe("tenant-facing tool metadata", () => {
         "refund.create",
         "discount.create",
         "order.cancel",
+        "order.update_shipping_address",
       ].sort(),
     );
   });

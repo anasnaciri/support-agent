@@ -40,6 +40,7 @@ describe("scenario-resolution-agent config", () => {
       "refund.recommend",
       "refund.create",
       "discount.create",
+      "order.update_shipping_address",
       "supplier.escalate",
       "tracking.lookup",
     ]) {

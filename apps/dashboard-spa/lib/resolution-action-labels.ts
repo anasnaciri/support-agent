@@ -25,6 +25,11 @@ export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
     label: "Cancel and refund the order",
     help: "Cancel an unshipped order and refund it — governed by your Refund policy.",
   },
+  {
+    tool: "order.update_shipping_address",
+    label: "Update the shipping address",
+    help: "Change the delivery address on an order that hasn't shipped yet.",
+  },
 ];
 
 export interface SupplierModeOption {

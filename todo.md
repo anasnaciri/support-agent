@@ -320,6 +320,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       of generic network failures.
 - [x] Built-in "cancel my order" scenario uses `order.cancel` behind the same
       permission path as refunds.
+- [x] Built-in "update my shipping address" scenario (2026-07-08): new
+      `order.update_shipping_address` tool (Shopify `orderUpdate` via the
+      existing `ShopifyService.updateOrderShippingAddress`) lets the agent fix
+      the ship-to on an UNSHIPPED order — refuses any order with a fulfillment
+      (`OrderAlreadyFulfilled`) or a cancelled one; per-field three-state edits
+      (absent keep / null clear / string set) merged over the current address,
+      same semantics as the dashboard pencil. risk:write, ask-gated
+      `permission-toggle`, `write_orders` (already requested — no re-OAuth).
+      Scenario `shipping_address_update`: customer gave the address → propose
+      the update; didn't → `ask_customer` first; already shipped →
+      `supplierMode: escalate_and_wait`. Bundle-ping summarizer shows the
+      destination (street + city), never the GID.
 - [x] Discount/coupon tool issues bounded, single-use, customer-locked goodwill
       coupons through tenant discount policy.
 - [x] 17track lookup-only `TrackingService` enriches order-status flows and
@@ -790,6 +802,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Policy, Agents, Models, And Cost
 
+- [ ] New built-in scenarios don't reach tenants with a STORED resolution
+      policy until their next scenarios-page save (`decodeResolutionPolicy`
+      read path returns stored scenarios verbatim; only the write-path
+      normalizer re-seeds built-ins). Affected `shipping_address_update`
+      (2026-07-08) exactly as it did `order_cancellation`. Consider merging
+      missing built-ins on read.
 - [ ] Implement LLM fallback chains.
 - [ ] Add cost dashboards by model, provider, agent, ticket, and tenant.
 - [ ] Add platform vs tenant-billed LLM cost reporting for 17track and future

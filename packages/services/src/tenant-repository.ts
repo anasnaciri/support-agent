@@ -265,6 +265,27 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "will refund it per our return policy.",
     },
     {
+      key: "shipping_address_update",
+      label: "Update my shipping address",
+      recognition:
+        "Customer wants to change or correct the shipping / delivery address on an order they placed (moved, typo'd the address, wrong apartment).",
+      builtin: true,
+      enabled: true,
+      enabledActions: [
+        { tool: "order.update_shipping_address", permission: "ask" },
+      ],
+      supplierMode: "escalate_and_wait",
+      notes:
+        "Look up the order first. If it has NOT shipped yet (no fulfillments and not cancelled): " +
+        "when the customer already gave the complete new address, update it with " +
+        "order.update_shipping_address and confirm the change; when they did not, ask them for the " +
+        "full new address (street, city, state/province, postal code, country) with " +
+        "conversation.ask_customer and update it once they reply — never guess or fill in missing " +
+        "parts yourself. If the order HAS already shipped, the address on the order can no longer " +
+        "redirect the parcel — do not edit it; escalate to the supplier with the customer's new " +
+        "address and wait for their answer before promising the customer anything.",
+    },
+    {
       key: "general_inquiry",
       label: "General question",
       recognition: "A general store, product, or policy question.",

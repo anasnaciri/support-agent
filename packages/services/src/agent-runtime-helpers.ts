@@ -1225,6 +1225,7 @@ export const SCENARIO_REMEDY_TOOLS: ReadonlySet<string> = new Set([
   "refund.create",
   "discount.create",
   "order.cancel",
+  "order.update_shipping_address",
 ]);
 
 const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";

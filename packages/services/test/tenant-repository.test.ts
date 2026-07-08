@@ -536,6 +536,37 @@ describe("order_cancellation built-in scenario", () => {
   });
 });
 
+describe("shipping_address_update built-in scenario", () => {
+  const ship = defaultResolutionPolicy.scenarios.find(
+    (s) => s.key === "shipping_address_update",
+  );
+
+  it("ships as a built-in with the address edit gated by approval", () => {
+    expect(ship).toBeDefined();
+    expect(ship!.builtin).toBe(true);
+    expect(ship!.enabled).toBe(true);
+    expect(ship!.enabledActions).toEqual([
+      { tool: "order.update_shipping_address", permission: "ask" },
+    ]);
+  });
+
+  it("escalates to the supplier and waits when the order already shipped", () => {
+    // The unfulfilled branch edits the order; the fulfilled branch can't —
+    // the parcel is moving — so the playbook hands it to the supplier.
+    expect(ship!.supplierMode).toBe("escalate_and_wait");
+    const notes = (ship!.notes ?? "").toLowerCase();
+    expect(notes).toContain("ask");
+    expect(notes).toContain("supplier");
+  });
+
+  it("survives the write-path normalizer as a forced built-in", () => {
+    const p = decodeResolutionPolicyUpdate({ scenarios: [] });
+    const out = p.scenarios.find((s) => s.key === "shipping_address_update");
+    expect(out).toBeDefined();
+    expect(out!.builtin).toBe(true);
+  });
+});
+
 describe("decodeResolutionPolicyUpdate (write-path normalizer)", () => {
   const builtinKeys = defaultResolutionPolicy.scenarios.map((s) => s.key);
 
