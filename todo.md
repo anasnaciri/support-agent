@@ -411,6 +411,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Merchant dashboard includes Today, ticket list, ticket detail, approvals,
       audit, settings, members, integrations, policies, knowledge, and supplier
       surfaces.
+- [x] SPA is mobile friendly (2026-07-08). Below `md` (768px, pinned by
+      `lib/use-media-query.ts` + test) the shell branches in JS via
+      `useIsMobile()`: icon rail is replaced by a dark top bar whose hamburger
+      opens the labeled nav as a drawer (`RailNavContent`, extracted from
+      `IconRail`, powers both the hover rail and the drawer); the secondary
+      sidebar (settings nav / ticket switcher) becomes an overlay drawer,
+      closed by default and untied from the persisted desktop open/width
+      prefs; `h-screen` → `h-dvh` (iOS browser chrome); alert dialogs keep a
+      16px gutter + `max-h-[90dvh]` scroll; ticket-detail header wraps and
+      hides the customer email below `sm`; details panel drawer is opaque
+      (`bg-background`) while off-canvas. Tables intentionally keep
+      horizontal scroll on phones (decided 2026-07-08, no card layouts).
+      Verified by stubbed-API Playwright screenshots at 375×812 and 1440×900.
 - [x] Ticket detail page uses the inbox-style layout with left ticket navigation,
       center conversation, and right/floating context panels.
 - [x] Manual reply composer supports approve/reject flows, direct replies,
@@ -734,6 +747,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       customer id.
 - [ ] Decide whether refund mismatch guard should use resolved customer id or
       remain email-strict.
+- [ ] Fix 17track first-lookup race for newly registered tracking numbers
+      (prod finding 2026-07-08): `tracking.lookup` can run seconds after a new
+      number is registered with 17track, before 17track's first carrier sync is
+      complete. The current Live impl treats an empty/non-accepted
+      `gettrackinfo` response as `no_provider / unsupported_carrier`, so the
+      agent may draft from a public URL even though the same key returns live
+      data a few minutes later. Repro evidence: ticket
+      `35df42a9-7756-4cc5-8bcc-a81182004dee` looked up
+      `LULU1000630903` at `2026-07-08T14:25:18Z`; direct prod-key 17track
+      fetch later returned live data with `latest_sync_time`
+      `2026-07-08T14:31:50Z`. Add a provider test for "registered / sync
+      pending" and map it to a retry/deferred-pending path, not
+      `unsupported_carrier`.
 - [ ] Add Aftership/EasyPost carrier integrations with per-tenant credentials
       and proactive `tracking.changed` webhook ingestion.
 

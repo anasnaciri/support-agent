@@ -694,14 +694,14 @@ export function TicketDetailPage() {
     <div className="flex h-full min-h-0">
       {/* CENTER — conversation */}
       <section className="flex min-w-0 flex-1 flex-col bg-background">
-        <header className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-card py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/ticket:pl-14">
-          <div className="min-w-0">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 bg-card py-2.5 pl-4 pr-4 group-data-[sidebar-state=collapsed]/ticket:pl-14">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold tracking-tight">
                 {customerName}
               </h1>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               <Badge
                 variant={ticketStatusVariant(ticketRow.status)}
                 className="px-1.5 py-0"
@@ -728,9 +728,13 @@ export function TicketDetailPage() {
                   : "Uncategorized"}
               </span>
               {customerEmail && customerEmail !== customerName ? (
+                // The email is the first thing to give up room on a phone —
+                // it's repeated in the details panel.
                 <>
-                  <span>·</span>
-                  <span className="truncate">{customerEmail}</span>
+                  <span className="hidden sm:inline">·</span>
+                  <span className="hidden truncate sm:inline">
+                    {customerEmail}
+                  </span>
                 </>
               ) : null}
               <span>·</span>
