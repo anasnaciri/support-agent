@@ -7,7 +7,9 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "@/lib/navigation";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+
+import guidezillaLogo from "@/guidezilla-logo-dark.svg";
 
 import type {
   RbacPermissionId,
@@ -21,7 +23,9 @@ import {
   clampSidebarWidth,
   parseSidebarWidth,
 } from "@/lib/sidebar-width";
-import { IconRail } from "./IconRail";
+import { useIsMobile } from "@/lib/use-media-query";
+import { Link } from "@/components/ui/link";
+import { IconRail, RailNavContent } from "./IconRail";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { SettingsNav } from "./settings-nav";
 import { TicketsSidebar } from "./TicketsSidebar";
@@ -74,9 +78,16 @@ export function AppShell({
   children,
 }: Props) {
   const pathname = usePathname() ?? "/";
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(readSidebarOpen);
   const [width, setWidth] = useState(readSidebarWidth);
   const [resizing, setResizing] = useState(false);
+  // Mobile-only chrome: the nav drawer (hamburger) and the secondary panel
+  // rendered as an overlay. Both are transient — never persisted — and close
+  // on navigation. The desktop `open`/`width` prefs stay untouched by them.
+  const [navOpen, setNavOpen] = useState(false);
+  const [mobileSecondaryOpen, setMobileSecondaryOpen] = useState(false);
+  const [drawerSignOutOpen, setDrawerSignOutOpen] = useState(false);
   // Latest width without re-subscribing the drag listeners; read on pointer-up
   // to persist, and as the base for each drag.
   const widthRef = useRef(width);
@@ -123,6 +134,15 @@ export function AppShell({
     setResizing(true);
   };
 
+  // Navigating dismisses the mobile drawers (nav links, ticket switcher,
+  // settings nav all navigate); crossing to desktop resets them so nothing
+  // transient leaks back on the next shrink.
+  useEffect(() => {
+    setNavOpen(false);
+    setMobileSecondaryOpen(false);
+    setDrawerSignOutOpen(false);
+  }, [pathname, isMobile]);
+
   // While dragging, follow the pointer on the window (so the cursor can leave
   // the 6px handle) and persist once on release.
   useEffect(() => {
@@ -165,11 +185,11 @@ export function AppShell({
           // The escalation-detail chat needs a definite height to fill (its
           // bubbles scroll, its composer pins); document routes keep growing.
           supplierEscalationIdFromPathname(pathname)
-            ? "h-screen"
-            : "min-h-screen",
+            ? "h-dvh"
+            : "min-h-dvh",
         )}
       >
-        <header className="flex items-center justify-between border-b border-border/60 px-6 py-3">
+        <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold tracking-tight">
               Supplier portal
@@ -180,7 +200,9 @@ export function AppShell({
           </div>
           <div className="flex items-center gap-3">
             {email ? (
-              <span className="text-xs text-muted-foreground">{email}</span>
+              <span className="hidden text-xs text-muted-foreground sm:inline">
+                {email}
+              </span>
             ) : null}
             <button
               type="button"
@@ -198,7 +220,7 @@ export function AppShell({
           // scrollable document layout.
           <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
         ) : (
-          <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+          <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8">
             <div className="mx-auto w-full max-w-3xl">{children}</div>
           </main>
         )}
@@ -206,8 +228,170 @@ export function AppShell({
     );
   }
 
+  // Mobile (< md): no icon rail. A slim dark top bar carries a hamburger that
+  // opens the full labeled nav as a drawer; the secondary panel (settings nav /
+  // ticket switcher) becomes an overlay drawer, closed by default regardless
+  // of the persisted desktop preference. Branching in JS (not CSS) keeps one
+  // DOM tree per mode — the virtualized ticket sidebar and the drag-resize
+  // handle never exist on mobile.
+  if (isMobile) {
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden bg-sidebar">
+        <header className="flex h-12 shrink-0 items-center gap-1.5 px-2 text-sidebar-foreground">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
+            className="flex size-9 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
+          >
+            <Menu className="size-5" aria-hidden />
+          </button>
+          <Link
+            href="/"
+            aria-label="Guidezilla home"
+            className="flex items-center gap-2"
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#0345FC]">
+              <img
+                src={guidezillaLogo}
+                alt=""
+                aria-hidden
+                className="size-7 object-contain"
+              />
+            </span>
+            <span className="font-[family-name:var(--font-climate-crisis)] text-base tracking-wide">
+              Guidezilla
+            </span>
+          </Link>
+        </header>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          {/* Secondary sections get a slim sub-header opening the overlay —
+              except ticket detail, whose own header leaves room (pl-14) for
+              the floating expand button instead. */}
+          {secondary && !onTicketDetail ? (
+            <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-2 py-1.5">
+              <button
+                type="button"
+                onClick={() => setMobileSecondaryOpen(true)}
+                aria-label={`Show ${secondary.title} panel`}
+                aria-expanded={mobileSecondaryOpen}
+                className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <PanelLeftOpen className="size-4" aria-hidden />
+              </button>
+              <span className="text-sm font-medium">{secondary.title}</span>
+            </div>
+          ) : null}
+
+          <main
+            className={cn(
+              "relative min-w-0 flex-1",
+              onTicketDetail ? "overflow-hidden" : "overflow-y-auto px-4 py-6",
+            )}
+          >
+            {secondary && onTicketDetail ? (
+              <button
+                type="button"
+                onClick={() => setMobileSecondaryOpen(true)}
+                aria-label={`Show ${secondary.title} panel`}
+                aria-expanded={mobileSecondaryOpen}
+                className="absolute left-3 top-3 z-10 flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <PanelLeftOpen className="size-4" aria-hidden />
+              </button>
+            ) : null}
+            {onTicketDetail ? (
+              // Always "collapsed" on mobile: the secondary panel is an
+              // overlay, so the ticket header keeps its indent for the
+              // floating expand button.
+              <div className="group/ticket h-full" data-sidebar-state="collapsed">
+                {children}
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-5xl">{children}</div>
+            )}
+          </main>
+        </div>
+
+        {/* Nav drawer — the rail's content with labels always visible. */}
+        {navOpen ? (
+          <div
+            className="fixed inset-0 z-40 bg-foreground/40"
+            onClick={() => setNavOpen(false)}
+            aria-hidden
+          />
+        ) : null}
+        <div
+          inert={!navOpen}
+          className={cn(
+            "fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col bg-sidebar px-3 py-4 text-sidebar-foreground shadow-xl transition-transform duration-300 ease-in-out",
+            navOpen ? "translate-x-0" : "-translate-x-full",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => setNavOpen(false)}
+            aria-label="Close navigation"
+            className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-md text-sidebar-foreground/55 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+          <RailNavContent
+            email={email}
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            permissions={permissions}
+            expanded
+            onNavigate={() => setNavOpen(false)}
+            signOutOpen={drawerSignOutOpen}
+            onSignOutOpenChange={setDrawerSignOutOpen}
+          />
+        </div>
+
+        {/* Secondary panel as an overlay drawer. */}
+        {secondary ? (
+          <>
+            {mobileSecondaryOpen ? (
+              <div
+                className="fixed inset-0 z-40 bg-foreground/40"
+                onClick={() => setMobileSecondaryOpen(false)}
+                aria-hidden
+              />
+            ) : null}
+            <div
+              inert={!mobileSecondaryOpen}
+              className={cn(
+                "fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-border/50 bg-background shadow-xl transition-transform duration-300 ease-in-out",
+                mobileSecondaryOpen ? "translate-x-0" : "-translate-x-full",
+              )}
+            >
+              <div className="flex items-center justify-between px-5 pb-2 pt-5">
+                <h2 className="text-lg font-semibold tracking-tight">
+                  {secondary.title}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setMobileSecondaryOpen(false)}
+                  aria-label="Hide panel"
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {secondary.node}
+              </div>
+            </div>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-screen overflow-hidden bg-sidebar">
+    <div className="flex h-dvh overflow-hidden bg-sidebar">
       <IconRail
         email={email}
         workspaces={workspaces}

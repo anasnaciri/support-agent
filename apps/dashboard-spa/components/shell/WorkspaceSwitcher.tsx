@@ -9,6 +9,13 @@ import { useSession } from "@/lib/session-context";
 interface Props {
   /** "rail" = the dark merchant icon rail; "header" = the light supplier bar. */
   readonly variant?: "rail" | "header";
+  /**
+   * Where the menu opens relative to the trigger. Defaults per variant
+   * ("rail" → beside it, "header" → below-right); the mobile nav drawer
+   * overrides the rail trigger to "below" so the menu stays inside the
+   * drawer instead of opening past its right edge.
+   */
+  readonly menuPlacement?: "right" | "below" | "below-right";
 }
 
 /**
@@ -18,7 +25,7 @@ interface Props {
  * surface (merchant dashboard vs the supplier portal). Reads the merged list
  * straight from the session so both shells share one source of truth.
  */
-export function WorkspaceSwitcher({ variant = "rail" }: Props) {
+export function WorkspaceSwitcher({ variant = "rail", menuPlacement }: Props) {
   const { workspaces, activeWorkspaceId, setActiveWorkspace } = useSession();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -54,9 +61,11 @@ export function WorkspaceSwitcher({ variant = "rail" }: Props) {
       aria-label="Workspaces"
       className={cn(
         "z-50 w-64 rounded-lg border border-border bg-background py-1.5 text-foreground shadow-lg",
-        variant === "rail"
-          ? "absolute left-full top-0 ml-3"
-          : "absolute right-0 top-full mt-2",
+        {
+          right: "absolute left-full top-0 ml-3",
+          below: "absolute left-0 top-full mt-2",
+          "below-right": "absolute right-0 top-full mt-2",
+        }[menuPlacement ?? (variant === "rail" ? "right" : "below-right")],
       )}
     >
       <p className="px-3 pb-1 pt-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">

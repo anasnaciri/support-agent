@@ -22,8 +22,11 @@ const ICONS: Record<ThemePreference, LucideIcon> = {
  * Expanded, a segmented Light/Dark/System control fades in where the other
  * rows show their label. `overflow-hidden` clips the segments while the rail
  * is narrow — same trick the labels play with `truncate`.
+ *
+ * `expanded` (the mobile nav drawer) skips the hover reveal: the segments are
+ * always visible because there is no hover on touch.
  */
-export function ThemeSwitch() {
+export function ThemeSwitch({ expanded = false }: { readonly expanded?: boolean }) {
   const preference = useThemePreference();
   const Icon = ICONS[preference];
 
@@ -41,7 +44,12 @@ export function ThemeSwitch() {
       <div
         role="group"
         aria-label="Theme"
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-1 overflow-hidden",
+          expanded
+            ? "opacity-100"
+            : "opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100",
+        )}
       >
         {THEME_PREFERENCES.map((option) => {
           const OptionIcon = ICONS[option];

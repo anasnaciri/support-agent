@@ -25,6 +25,13 @@ interface Props {
   readonly labelClassName: string;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /**
+   * Where the confirmation opens. "right" (default) suits the hover rail and
+   * brings the safe-cone bridge; "above" suits the mobile nav drawer, where
+   * the rail's right edge is the drawer's edge and there is no hover to
+   * bridge.
+   */
+  readonly placement?: "right" | "above";
 }
 
 /**
@@ -45,6 +52,7 @@ export function SignOutButton({
   labelClassName,
   open,
   onOpenChange,
+  placement = "right",
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -73,9 +81,9 @@ export function SignOutButton({
   // pointer sits inside the cone while approaching the panel and falls out
   // once it deliberately turns away — then the rail's mouse-leave closes the
   // menu. Written straight to CSS custom properties (no React re-render per
-  // move).
+  // move). Only the hover rail ("right") needs the bridge.
   useEffect(() => {
-    if (!open) {
+    if (!open || placement !== "right") {
       heading.current = null;
       return;
     }
@@ -99,7 +107,7 @@ export function SignOutButton({
     };
     window.addEventListener("pointermove", onMove);
     return () => window.removeEventListener("pointermove", onMove);
-  }, [open]);
+  }, [open, placement]);
 
   return (
     <div ref={rootRef} className="relative">
@@ -134,7 +142,12 @@ export function SignOutButton({
           ref={panelRef}
           role="menu"
           aria-label="Confirm sign out"
-          className="signout-cone absolute bottom-0 left-full z-50 ml-5 w-56 rounded-lg border border-white/10 bg-sidebar p-3 text-sidebar-foreground shadow-xl shadow-black/30"
+          className={cn(
+            "absolute z-50 w-56 rounded-lg border border-white/10 bg-sidebar p-3 text-sidebar-foreground shadow-xl shadow-black/30",
+            placement === "right"
+              ? "signout-cone bottom-0 left-full ml-5"
+              : "bottom-full left-0 mb-2",
+          )}
         >
           <p className="text-sm font-medium">Sign out?</p>
           {email ? (
