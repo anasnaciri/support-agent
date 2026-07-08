@@ -255,6 +255,11 @@ export type ShopifyRefundLineItem = {
   readonly title: string;
   readonly variantTitle: string | null;
   readonly sku: string | null;
+  /**
+   * CDN-resized thumbnail URL (≤96px), or null when the product has no
+   * image. Sized for the refund modal's 40px tiles — not for full-size
+   * display; the transform is applied at query time.
+   */
   readonly imageUrl: string | null;
   /** Quantity still refundable on this line (the selector's max). */
   readonly refundableQuantity: number;

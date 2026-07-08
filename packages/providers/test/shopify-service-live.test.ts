@@ -1946,6 +1946,12 @@ describe("ShopifyServiceLive — getOrderRefundContext", () => {
     const li = ctx.lineItems[0]!;
     expect(li.lineItemId).toBe("gid://shopify/LineItem/1");
     expect(li.imageUrl).toBe("https://cdn/snow.png");
+    // Line-item images must be requested as CDN-resized thumbnails, not
+    // full-size originals — the refund modal renders them at 40px.
+    const contextBody = JSON.parse(captures[0]!.body) as { query: string };
+    expect(contextBody.query).toContain(
+      "image { url(transform: { maxWidth: 96, maxHeight: 96 }) }",
+    );
     expect(li.refundableQuantity).toBe(2);
     // 600.00 subtotal / qty 2 = 300.00 per unit; 60.00 tax / 2 = 30.00.
     expect(li.unitPrice).toEqual({ amount: "300.00", currencyCode: "USD" });

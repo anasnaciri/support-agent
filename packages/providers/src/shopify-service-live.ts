@@ -1048,7 +1048,7 @@ const ORDER_REFUND_CONTEXT_QUERY = `
           unfulfilledQuantity
           restockable
           discountedUnitPriceSet { shopMoney { amount currencyCode } }
-          image { url }
+          image { url(transform: { maxWidth: 96, maxHeight: 96 }) }
         }
       }
       suggestedRefund(suggestFullRefund: true) {

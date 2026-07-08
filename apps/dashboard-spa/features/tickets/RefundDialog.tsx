@@ -470,6 +470,8 @@ const LineGroup = ({
                 <img
                   src={li.imageUrl}
                   alt=""
+                  loading="lazy"
+                  decoding="async"
                   className="size-10 shrink-0 rounded object-cover outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
                 />
               ) : (
