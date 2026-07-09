@@ -281,6 +281,13 @@
       "when": 1783872000000,
       "tag": "0039_ticket_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1783958400000,
+      "tag": "0040_attachment_escalation_binding",
+      "breakpoints": true
     }
   ]
 }

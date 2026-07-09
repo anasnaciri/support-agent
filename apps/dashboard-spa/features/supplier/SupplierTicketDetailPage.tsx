@@ -16,6 +16,7 @@ import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
 import { useRequirePermission } from "@/lib/require-permission";
+import { formatAttachmentSize } from "@/lib/ticket-timeline";
 import { cn } from "@/lib/utils";
 import {
   supplierChatMessages,
@@ -225,6 +226,22 @@ const Bubble = ({ message }: { readonly message: SupplierChatMessage }) => {
           <p className="mt-2 border-t border-primary-foreground/25 pt-2 text-[0.8125rem] text-primary-foreground/85">
             Suggested resolution: {message.resolution}
           </p>
+        ) : null}
+        {message.attachments.length > 0 ? (
+          <ul className="mt-2 space-y-1 border-t border-primary-foreground/25 pt-2">
+            {message.attachments.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center gap-1.5 text-[0.8125rem] text-primary-foreground/85"
+              >
+                <Paperclip className="size-3 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{a.filename}</span>
+                <span className="shrink-0 text-primary-foreground/65">
+                  {formatAttachmentSize(a.sizeBytes)}
+                </span>
+              </li>
+            ))}
+          </ul>
         ) : null}
       </div>
     </div>

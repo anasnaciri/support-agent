@@ -669,6 +669,7 @@ describe("draft attachmentIds resolution", () => {
     sizeBytes: 3,
     storageKey: "upload/t1/c-att/label.pdf",
     uploadedBy: "supplier-user",
+    escalationId: "esc-1",
     createdAt: new Date("2026-07-01T00:00:00Z"),
     ...over,
   });

@@ -276,6 +276,9 @@ export const handleSupplierAttachmentUpload = async (
           sizeBytes: bytes.length,
           storageKey,
           uploadedBy: userId,
+          // Binds the file to THIS escalation: the update's id validation and
+          // the portal's "files you sent" view are both escalation-scoped.
+          escalationId: escalation.id,
         });
         return { kind: "ok" as const, record };
       }).pipe(

@@ -3,7 +3,10 @@
 // the escalation → bubbles derivation are unit-testable (mirrors
 // tickets-sidebar-data.ts).
 
-import type { SupplierEscalationDetailView } from "@/lib/api-client";
+import type {
+  SupplierEscalationAttachmentView,
+  SupplierEscalationDetailView,
+} from "@/lib/api-client";
 
 /**
  * The escalation id for a `/supplier/tickets/<id>` detail route, or null for the
@@ -26,14 +29,17 @@ export interface SupplierChatMessage {
   readonly body: string;
   /** The supplier's suggested resolution — outbound messages only. */
   readonly resolution: string | null;
+  /** Files sent with this message — the supplier's own update only. */
+  readonly attachments: ReadonlyArray<SupplierEscalationAttachmentView>;
 }
 
 /**
  * The escalation as a chat transcript: the support team's "what's needed"
  * request as the inbound message, and — once the supplier has responded
- * (status resolved) — their posted update as the outbound reply. A note on an
- * unresolved escalation is never shown: the update only exists once posting it
- * flipped the status.
+ * (status resolved) — their posted update as the outbound reply, carrying the
+ * files they sent. A note on an unresolved escalation is never shown: the
+ * update only exists once posting it flipped the status. Files follow the same
+ * rule, so an upload staged against an abandoned draft never reads as an answer.
  */
 export const supplierChatMessages = (
   detail: SupplierEscalationDetailView,
@@ -45,6 +51,7 @@ export const supplierChatMessages = (
     sentAt: detail.createdAt,
     body: detail.problem,
     resolution: null,
+    attachments: [],
   };
   if (detail.status !== "resolved") return [request];
   return [
@@ -56,6 +63,7 @@ export const supplierChatMessages = (
       sentAt: null,
       body: detail.note ?? "(no note recorded)",
       resolution: detail.proposedResolution,
+      attachments: detail.attachments,
     },
   ];
 };

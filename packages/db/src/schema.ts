@@ -852,6 +852,16 @@ export const ticketAttachments = pgTable(
       .notNull()
       .references(() => tickets.id, { onDelete: "cascade" }),
     source: text("source").notNull(),
+    /**
+     * The supplier escalation this file was uploaded against — set only for
+     * `source='supplier'` rows. It scopes the update's id validation (a second
+     * escalation can't re-send the first one's files) and drives the portal's
+     * "files you sent" projection. Merchant/inbound rows carry null.
+     */
+    escalationId: uuid("escalation_id").references(
+      () => ticketSupplierEscalations.id,
+      { onDelete: "cascade" },
+    ),
     filename: text("filename").notNull(),
     contentType: text("content_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -863,6 +873,7 @@ export const ticketAttachments = pgTable(
   },
   (t) => [
     index("ticket_attachments_ticket_idx").on(t.ticketId),
+    index("ticket_attachments_escalation_idx").on(t.escalationId),
     check(
       "ticket_attachments_source_check",
       sql`${t.source} IN ('inbound','supplier','merchant')`,

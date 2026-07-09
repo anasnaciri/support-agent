@@ -280,9 +280,22 @@ export interface SupplierEscalationListItem {
   readonly createdAt: string;
 }
 
+/**
+ * A file the supplier uploaded against this escalation. Metadata only —
+ * storage keys never cross the portal boundary (the opaque id is the handle).
+ */
+export interface SupplierEscalationAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+}
+
 export interface SupplierEscalationDetail extends SupplierEscalationListItem {
   readonly note: string | null;
   readonly proposedResolution: string | null;
+  /** Files the supplier sent with their update, oldest first. */
+  readonly attachments: ReadonlyArray<SupplierEscalationAttachment>;
 }
 
 export interface InsertEscalationInput {
@@ -407,6 +420,18 @@ export const getEscalationForSupplier = async (
     .limit(1);
   const r = rows[0];
   if (!r) return null;
+  // The files the supplier uploaded against this escalation. Bound by
+  // escalation_id, so a sibling escalation on the same ticket never leaks in.
+  const attachments = await db
+    .select({
+      id: ticketAttachments.id,
+      filename: ticketAttachments.filename,
+      contentType: ticketAttachments.contentType,
+      sizeBytes: ticketAttachments.sizeBytes,
+    })
+    .from(ticketAttachments)
+    .where(eq(ticketAttachments.escalationId, r.id))
+    .orderBy(ticketAttachments.createdAt);
   return {
     id: r.id,
     ticketId: r.ticketId,
@@ -419,6 +444,7 @@ export const getEscalationForSupplier = async (
     note: r.note,
     proposedResolution: r.proposedResolution,
     createdAt: r.createdAt.toISOString(),
+    attachments,
   };
 };
 
@@ -518,9 +544,10 @@ export const recordSupplierUpdate = async (
   if (esc.status !== "open") return { kind: "already_resolved" };
 
   // Resolve update attachments before any write: every id must be a
-  // supplier-uploaded row on THIS escalation's ticket — an id from another
-  // ticket/tenant (or a merchant upload) fails the update outright rather
-  // than silently dropping out.
+  // supplier-uploaded row bound to THIS escalation — an id from another
+  // ticket/tenant, a merchant upload, or a file uploaded against a different
+  // escalation on the same ticket fails the update outright rather than
+  // silently dropping out.
   const attachmentIds = [...new Set(input.attachmentIds ?? [])];
   const attachmentRows =
     attachmentIds.length === 0
@@ -536,6 +563,7 @@ export const recordSupplierUpdate = async (
               eq(ticketAttachments.tenantId, input.tenantId),
               eq(ticketAttachments.ticketId, esc.ticketId),
               eq(ticketAttachments.source, "supplier"),
+              eq(ticketAttachments.escalationId, input.escalationId),
               inArray(ticketAttachments.id, attachmentIds),
             ),
           );

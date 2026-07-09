@@ -398,6 +398,46 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     expect(crossSource.status).toBe(400);
     expect(await crossSource.json()).toEqual({ error: "attachment_not_found" });
 
+    // Nor is a file the SAME supplier uploaded for a DIFFERENT escalation on
+    // this ticket: uploads bind to the escalation they were made against, so a
+    // second escalation can't re-send the first one's files by id.
+    const { id: otherEscId } = await insertEscalation(raw.db, {
+      tenantId,
+      ticketId,
+      supplierId: supplier!.id,
+      problem: "A second, unrelated escalation on the same ticket",
+      orderRef: "#2002",
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+    const otherUpload = await fetch(
+      `${baseUrl}/dashboard/supplier/tickets/${otherEscId}/attachments?filename=other.png`,
+      {
+        method: "POST",
+        headers: {
+          ...headers(supplierUuid, "wh@acme.com", tenantId),
+          "content-type": "image/png",
+        },
+        body: png,
+      },
+    );
+    expect(otherUpload.status).toBe(200);
+    const otherFile = (await otherUpload.json()) as {
+      attachment: { id: string };
+    };
+    const crossEscalation = await post(
+      `/dashboard/supplier/tickets/${escId}/update`,
+      { note: "with the other escalation's file", attachmentIds: [otherFile.attachment.id] },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(crossEscalation.status).toBe(400);
+    expect(await crossEscalation.json()).toEqual({
+      error: "attachment_not_found",
+    });
+
     // The real update, referencing the supplier's own upload.
     const update = await post(
       `/dashboard/supplier/tickets/${escId}/update`,
@@ -410,6 +450,49 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       tenantId,
     );
     expect(update.status).toBe(200);
+
+    // The supplier can see the files they sent: the resolved escalation's
+    // detail projection carries them, so the portal's own chat bubble can
+    // render them instead of silently dropping them.
+    const detail = await get(
+      `/dashboard/supplier/tickets/${escId}`,
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(detail.status).toBe(200);
+    const detailBody = (await detail.json()) as {
+      attachments: ReadonlyArray<{
+        id: string;
+        filename: string;
+        contentType: string;
+        sizeBytes: number;
+      }>;
+    };
+    expect(detailBody.attachments).toEqual([
+      {
+        id: uploaded.attachment.id,
+        filename: "replacement-label.png",
+        contentType: "image/png",
+        sizeBytes: png.length,
+      },
+    ]);
+    // Storage keys never cross the portal boundary.
+    expect(JSON.stringify(detailBody)).not.toContain("upload/");
+
+    // The other escalation's own view shows only its own file.
+    const otherDetail = await get(
+      `/dashboard/supplier/tickets/${otherEscId}`,
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    const otherBody = (await otherDetail.json()) as {
+      attachments: ReadonlyArray<{ id: string }>;
+    };
+    expect(otherBody.attachments.map((a) => a.id)).toEqual([
+      otherFile.attachment.id,
+    ]);
 
     const [ticketRow] = await raw.db
       .select({ context: tickets.context })

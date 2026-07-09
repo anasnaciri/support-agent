@@ -41,6 +41,7 @@ const toRecord = (row: TicketAttachmentRow): TicketAttachmentRecord => ({
   sizeBytes: row.sizeBytes,
   storageKey: row.storageKey,
   uploadedBy: row.uploadedBy,
+  escalationId: row.escalationId,
   createdAt: row.createdAt,
 });
 
@@ -68,6 +69,7 @@ export const TicketAttachmentStoreLive = Layer.effect(
               sizeBytes: input.sizeBytes,
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
+              escalationId: input.escalationId ?? null,
             })
             .returning(),
         );

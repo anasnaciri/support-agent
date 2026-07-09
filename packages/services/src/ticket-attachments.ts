@@ -30,6 +30,12 @@ export interface RecordTicketAttachmentInput {
    * suppliers, null for connector-ingested customer attachments.
    */
   readonly uploadedBy?: string | null;
+  /**
+   * The supplier escalation this file was uploaded against — supplier uploads
+   * only. Scopes the update's id validation to one escalation and drives the
+   * portal's "files you sent" view.
+   */
+  readonly escalationId?: string | null;
 }
 
 export interface TicketAttachmentRecord {
@@ -42,6 +48,7 @@ export interface TicketAttachmentRecord {
   readonly sizeBytes: number;
   readonly storageKey: string;
   readonly uploadedBy: string | null;
+  readonly escalationId: string | null;
   readonly createdAt: Date;
 }
 
@@ -119,6 +126,7 @@ export const TicketAttachmentStoreTest = (
               sizeBytes: input.sizeBytes,
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
+              escalationId: input.escalationId ?? null,
               createdAt: new Date(),
             };
             rows.push(row);

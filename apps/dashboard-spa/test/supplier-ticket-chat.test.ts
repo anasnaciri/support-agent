@@ -18,6 +18,14 @@ const detail = {
   createdAt: "2026-06-28T09:15:00.000Z",
   note: null,
   proposedResolution: null,
+  attachments: [],
+} as const;
+
+const label = {
+  id: "att-1",
+  filename: "replacement-label.pdf",
+  contentType: "application/pdf",
+  sizeBytes: 2048,
 } as const;
 
 describe("supplierEscalationIdFromPathname", () => {
@@ -82,6 +90,31 @@ describe("supplierChatMessages", () => {
       note: "draft note that was never posted",
     });
     expect(messages).toHaveLength(1);
+  });
+
+  it("carries the files the supplier sent on their own outbound message", () => {
+    const messages = supplierChatMessages({
+      ...detail,
+      status: "resolved",
+      note: "Label attached.",
+      attachments: [label],
+    });
+    expect(messages[1]?.attachments).toEqual([label]);
+    // The support team's request never claims the supplier's files.
+    expect(messages[0]?.attachments).toEqual([]);
+  });
+
+  it("shows no files on a resolved escalation the supplier sent none for", () => {
+    const messages = supplierChatMessages({ ...detail, status: "resolved" });
+    expect(messages[1]?.attachments).toEqual([]);
+  });
+
+  it("never shows uploaded files while the escalation is still open", () => {
+    // Files staged by an upload but never submitted (abandoned draft) must not
+    // surface as though the supplier had already answered.
+    const messages = supplierChatMessages({ ...detail, attachments: [label] });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.attachments).toEqual([]);
   });
 });
 

@@ -332,10 +332,19 @@ export interface SupplierEscalationListItemView {
   readonly status: string;
   readonly createdAt: string;
 }
+export interface SupplierEscalationAttachmentView {
+  readonly id: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+}
+
 export interface SupplierEscalationDetailView
   extends SupplierEscalationListItemView {
   readonly note: string | null;
   readonly proposedResolution: string | null;
+  /** Files the supplier sent with their update. */
+  readonly attachments: ReadonlyArray<SupplierEscalationAttachmentView>;
 }
 
 // ============================================================
