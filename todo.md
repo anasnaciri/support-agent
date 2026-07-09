@@ -371,6 +371,31 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 - [x] Dark-mode email paper treatment is adaptive: only inbound HTML with its
       own colors gets a light paper surface.
 - [x] Connector health metadata is rendered in integrations when already present.
+- [x] Outbound attachments (2026-07-09): `ConversationReply.attachments` is now
+      actually encoded on send in all three connectors (Gmail multipart/mixed,
+      Graph draft fileAttachment POSTs, SMTP nodemailer attachments + Sent-copy
+      MIME). Connectors resolve storageKey→bytes via `BlobStorage` at send time
+      (`resolveOutboundAttachments`; missing blob → `ConversationSendFailed`,
+      retriable, never a silent drop). Conversation Lives + router now REQUIRE
+      `BlobStorage`; both bootstraps provide the existing blob layer.
+- [x] Attachment uploads (2026-07-09): `ticket_attachments` index table
+      (migration 0039) + `TicketAttachmentStore` (Tag in services, Live in db,
+      Test layer). Everything outside the trust boundary references rows by
+      opaque id; `getByIds` resolves strictly within (tenant, ticket).
+      SECURITY: `conversation.reply` / `ask_customer` tool schemas no longer
+      accept raw `storageKey` from the LLM (was a cross-tenant blob
+      exfiltration primitive once sends encode attachments) — they take
+      `attachmentIds`, resolved via the store (worker provides the Live).
+      Merchant: composer Attach button → raw-bytes upload endpoint
+      (image/png,jpeg,gif,webp + pdf, magic-byte sniff, 10 MiB cap, per-route
+      11 MiB bodyLimit) → ids on manual reply + merged into Edit-and-Approve
+      overrides. Supplier: portal update form uploads scoped to the OPEN
+      escalation; `recordSupplierUpdate` validates ids (source='supplier', own
+      ticket), stamps `context.supplierUpdate.attachments`, event payload
+      carries `{id, filename}`; runtime prompt lists trusted ids + fenced
+      untrusted filenames so the agent forwards files via
+      `conversation.reply` `attachmentIds`. Context card shows "Supplier
+      files"; GET `/dashboard/tickets/:id/attachments` lists a ticket's index.
 
 ### Shopify, Orders, Refunds, Discounts, And Tracking
 
@@ -876,20 +901,32 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       built). Constraints discovered: `fetchThread` messages always carry
       `attachments: []` in all three connectors (only the Gmail webhook
       ingestion path uploads image bytes to R2 and stamps `MessageAttachment`
-      onto the published `InboundMessage`; nothing persists the storageKey —
+      onto the published `InboundMessage`; nothing persisted the storageKey —
       `image_hashes` keeps only the phash), and Gmail `attachmentId` is NOT
       stable across message fetches, so storage keys cannot be recomputed from
-      a fresh thread fetch. Plan: (1) persist a `ticket_attachments` index row
-      (tenant, ticket, provider messageId, filename, contentType, sizeBytes,
-      storageKey, hasExif) in the worker where the inbound message binds to a
-      ticket, sharing the tx per the outbox invariant; (2) authz'd
-      `GET /dashboard/tickets/:id/attachments/:attachmentId/url` in apps/api
-      returning a short-TTL `BlobStorage.presignGetUrl` (ApiLayer must provide
-      BlobStorage); (3) thread route joins index rows onto projected messages
-      by message id, contract gains an attachment `id`; SPA badge becomes a
-      button → lightbox `<img>` for image/*. Gmail-only until Graph/IMAP
-      ingest attachments; pre-existing blobs have no index rows (no backfill
-      source — event payloads aren't stored).
+      a fresh thread fetch. UPDATE 2026-07-09: the `ticket_attachments` table +
+      `TicketAttachmentStore` landed with the upload feature (ApiLayer provides
+      both the store and BlobStorage), so what remains is: (1) INBOUND
+      indexing — write `source='inbound'` rows in the worker where the inbound
+      message binds to a ticket, sharing the tx per the outbox invariant
+      (uploads already index themselves); (2) authz'd
+      `GET /dashboard/tickets/:id/attachments/:attachmentId/url` returning a
+      short-TTL `BlobStorage.presignGetUrl`; (3) thread route joins index rows
+      onto projected messages by message id; SPA badge becomes a button →
+      lightbox `<img>` for image/*. Gmail-only until Graph/IMAP ingest
+      attachments; pre-existing blobs have no index rows (no backfill source —
+      event payloads aren't stored).
+- [ ] Composer: offer EXISTING ticket attachments (e.g. the supplier's file) in
+      a picker when writing a manual reply — GET
+      `/dashboard/tickets/:id/attachments` already serves the index, but the
+      composer only stages fresh uploads today.
+- [ ] Orphaned upload GC: removing a staged chip (or abandoning a draft) leaves
+      the blob + `ticket_attachments` row on the ticket forever. Harmless
+      (ticket-scoped, cascade-deleted with the tenant/ticket) but worth a
+      retention sweep alongside the ticket-archival job eventually.
+- [ ] Supplier portal: resolved-escalation view doesn't show the files the
+      supplier sent (they're in `context.supplierUpdate.attachments` and the
+      merchant context card, but the supplier's own chat bubble omits them).
 - [x] `ApprovalSignalsStrip` / `ApprovalCard` now merge risk flags via
       `buildRiskFlagBadges` + the shared self-contained `riskFlagChipText`
       (duplicate-photo hits collapse to one counted chip), matching the context
