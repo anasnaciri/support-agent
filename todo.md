@@ -27,6 +27,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       the composer picker still reads the ticket-level attachment index.
       Verified with focused conversation/retry/thread regressions and
       `pnpm build`.
+- [x] Bundle approval reply rows have attachment controls (2026-07-09): when
+      multiple approvals were pending, the ticket rendered `BundleApprovalBar`
+      instead of `ChatComposer`, so the bundled `conversation.reply` textarea
+      had no `Attach` button or `Ticket files` picker. Fixed by adding the same
+      raw upload + ticket-file staging controls to bundle reply rows and by
+      sending edited reply inputs, including staged `attachmentIds`, through
+      both per-row Accept and whole-bundle Approve all. Verified with the
+      bundle attachment regression, attachment-picker tests, dashboard SPA
+      build, and `pnpm build`.
 - [x] Harden first-look tracking failures for order-status / scenario replies
       (discovered 2026-07-08): production ticket
       `12626e22-d367-40aa-950b-f3065406a711` initially stamped

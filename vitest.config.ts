@@ -1,6 +1,12 @@
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./apps/dashboard-spa", import.meta.url)),
+    },
+  },
   test: {
     include: [
       "packages/**/test/**/*.test.ts",
