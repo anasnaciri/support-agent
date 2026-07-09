@@ -1,5 +1,5 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   TicketAttachmentStore,
@@ -42,6 +42,7 @@ const toRecord = (row: TicketAttachmentRow): TicketAttachmentRecord => ({
   storageKey: row.storageKey,
   uploadedBy: row.uploadedBy,
   escalationId: row.escalationId,
+  usedAt: row.usedAt,
   createdAt: row.createdAt,
 });
 
@@ -133,6 +134,37 @@ export const TicketAttachmentStoreLive = Layer.effect(
         return rows.map(toRecord);
       });
 
-    return TicketAttachmentStore.of({ record, getByIds, listForTicket });
+    const markUsed = (
+      tenantId: TenantId,
+      ticketId: TicketId,
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<void, TicketAttachmentStoreError> =>
+      Effect.gen(function* () {
+        if (ids.length === 0) return;
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "markUsed",
+          db
+            .update(ticketAttachments)
+            .set({ usedAt: new Date() })
+            .where(
+              and(
+                eq(ticketAttachments.tenantId, tenantId),
+                eq(ticketAttachments.ticketId, ticketId),
+                inArray(ticketAttachments.id, [...ids]),
+                // Keep the FIRST use: re-sends and retries must not push the
+                // timestamp forward (and the sweep only cares about NULL).
+                isNull(ticketAttachments.usedAt),
+              ),
+            ),
+        );
+      });
+
+    return TicketAttachmentStore.of({
+      record,
+      getByIds,
+      listForTicket,
+      markUsed,
+    });
   }),
 );

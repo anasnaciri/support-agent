@@ -23,11 +23,13 @@ import { and, eq, inArray, lt } from "drizzle-orm";
 import {
   approvals,
   auditLog,
+  ticketAttachments,
   tickets,
   ticketStateTransitions,
   DbClient,
   tenants,
 } from "@support-agent/db";
+import { BlobStorage } from "@support-agent/services";
 
 export const RESOLVED_CASE_ARCHIVE_AFTER_DAYS = 30;
 export const ARCHIVED_CASE_DELETE_AFTER_MONTHS = 12;
@@ -41,6 +43,13 @@ export interface SweepTenantResult {
   readonly deletedTickets: number;
   readonly deletedAuditRows: number;
   readonly deletedApprovals: number;
+  /**
+   * Blob keys of the deleted tickets' attachments. `ticket_attachments` rows
+   * cascade away with the ticket, taking the only pointer to the object with
+   * them — so the keys are captured inside the transaction and the caller
+   * deletes the blobs after it commits.
+   */
+  readonly deletedAttachmentKeys: ReadonlyArray<string>;
 }
 
 export interface SweepTenantFailure {
@@ -169,8 +178,21 @@ export const sweepTenant = (
               deletedTickets: 0,
               deletedAuditRows: 0,
               deletedApprovals: 0,
+              deletedAttachmentKeys: [],
             } satisfies SweepTenantResult;
           }
+
+          // Capture attachment blob keys BEFORE the ticket delete cascades
+          // their index rows away — afterwards nothing points at the objects.
+          const attachmentRows = await tx
+            .select({ storageKey: ticketAttachments.storageKey })
+            .from(ticketAttachments)
+            .where(
+              and(
+                eq(ticketAttachments.tenantId, tenantId),
+                inArray(ticketAttachments.ticketId, deleteIds),
+              ),
+            );
 
           // 3. Cascaded delete in FK-safe order.
           const deletedApprovals = await tx
@@ -202,6 +224,7 @@ export const sweepTenant = (
             deletedTickets: deletedTickets.length,
             deletedAuditRows: deletedAudit.length,
             deletedApprovals: deletedApprovals.length,
+            deletedAttachmentKeys: attachmentRows.map((r) => r.storageKey),
           } satisfies SweepTenantResult;
         }),
       catch: (cause) =>
@@ -219,12 +242,18 @@ export interface SweepAllTenantsOptions {
  * isolated via `Effect.either` so a single broken tenant can't poison
  * the pass — the cron logs the error and continues. Returns the per-
  * tenant outcomes for the caller to summarise into logs / metrics.
+ *
+ * Attachment blobs of deleted tickets are removed AFTER the tenant's
+ * transaction commits: a failed blob delete must not roll back a completed
+ * retention deletion. A leaked blob is logged and otherwise harmless — nothing
+ * references it, and it is no longer reachable through any ticket.
  */
 export const sweepAllTenants = (
   opts: SweepAllTenantsOptions = {},
-): Effect.Effect<ReadonlyArray<SweepResult>, never, DbClient> =>
+): Effect.Effect<ReadonlyArray<SweepResult>, never, DbClient | BlobStorage> =>
   Effect.gen(function* () {
     const db = yield* DbClient;
+    const blob = yield* BlobStorage;
     const now = (opts.now ?? (() => new Date()))();
 
     // Stream tenants — even a few thousand rows is fine to fetch in one
@@ -249,6 +278,15 @@ export const sweepAllTenants = (
         Effect.either,
       );
       if (result._tag === "Right") {
+        for (const key of result.right.deletedAttachmentKeys) {
+          const removed = yield* blob.delete(key).pipe(Effect.either);
+          if (removed._tag === "Left") {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[retention-sweep] tenant=${tenantId} blob delete failed for ${key}: ${String(removed.left)}`,
+            );
+          }
+        }
         out.push(result.right);
       } else {
         out.push({ kind: "failed", tenantId, error: result.left.message });

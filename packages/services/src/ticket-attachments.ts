@@ -49,6 +49,8 @@ export interface TicketAttachmentRecord {
   readonly storageKey: string;
   readonly uploadedBy: string | null;
   readonly escalationId: string | null;
+  /** When the file was consumed into a sent reply or a supplier update. */
+  readonly usedAt: Date | null;
   readonly createdAt: Date;
 }
 
@@ -98,6 +100,16 @@ export class TicketAttachmentStore extends Context.Tag("TicketAttachmentStore")<
       ReadonlyArray<TicketAttachmentRecord>,
       TicketAttachmentStoreError
     >;
+    /**
+     * Stamp `usedAt` on rows that just became part of a durable artifact (an
+     * outgoing reply's attachment list). Idempotent — an already-used row keeps
+     * its first timestamp. Scoped to (tenant, ticket) like `getByIds`.
+     */
+    readonly markUsed: (
+      tenantId: TenantId,
+      ticketId: TicketId,
+      ids: ReadonlyArray<string>,
+    ) => Effect.Effect<void, TicketAttachmentStoreError>;
   }
 >() {}
 
@@ -127,6 +139,7 @@ export const TicketAttachmentStoreTest = (
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
               escalationId: input.escalationId ?? null,
+              usedAt: null,
               createdAt: new Date(),
             };
             rows.push(row);
@@ -142,6 +155,21 @@ export const TicketAttachmentStoreTest = (
           }),
         listForTicket: (tenantId, ticketId) =>
           Effect.sync(() => scoped(tenantId, ticketId)),
+        markUsed: (tenantId, ticketId, ids) =>
+          Effect.sync(() => {
+            const wanted = new Set(ids);
+            for (let i = 0; i < rows.length; i++) {
+              const r = rows[i]!;
+              if (
+                r.tenantId === tenantId &&
+                r.ticketId === ticketId &&
+                wanted.has(r.id) &&
+                r.usedAt === null
+              ) {
+                rows[i] = { ...r, usedAt: new Date() };
+              }
+            }
+          }),
       });
     }),
   );

@@ -12,6 +12,7 @@ import {
 import {
   ConversationServiceTest,
   makeConversationServiceTest,
+  TicketAttachmentStore,
   TicketAttachmentStoreTest,
   TimerService,
   TimerServiceDbError,
@@ -670,6 +671,7 @@ describe("draft attachmentIds resolution", () => {
     storageKey: "upload/t1/c-att/label.pdf",
     uploadedBy: "supplier-user",
     escalationId: "esc-1",
+    usedAt: null,
     createdAt: new Date("2026-07-01T00:00:00Z"),
     ...over,
   });
@@ -678,9 +680,11 @@ describe("draft attachmentIds resolution", () => {
     const { layer, handle } = makeConversationServiceTest({
       threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
     });
+    const storeLayer = TicketAttachmentStoreTest(rows);
     return {
       handle,
-      layer: Layer.mergeAll(layer, TicketAttachmentStoreTest(rows)),
+      storeLayer,
+      layer: Layer.mergeAll(layer, storeLayer),
     };
   };
 
@@ -717,6 +721,38 @@ describe("draft attachmentIds resolution", () => {
         sizeBytes: 3,
       },
     ]);
+  });
+
+  // `usedAt` after running the tool. The store Test layer is rebuilt per
+  // `Effect.provide`, so the send and the read must share one provide.
+  const usedAtAfterReply = async (
+    ids: ReadonlyArray<string>,
+  ): Promise<Date | null | undefined> => {
+    const { layer } = env([attachmentRow()]);
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (
+            conversationReply.execute(
+              replyInput(ids) as never,
+              baseCtx("c-att"),
+            ) as Effect.Effect<unknown, unknown, never>
+          ).pipe(Effect.either);
+          const store = yield* TicketAttachmentStore;
+          return yield* store.listForTicket(tenantId, TicketId("c-att"));
+        }),
+        layer,
+      ),
+    );
+    return rows[0]?.usedAt;
+  };
+
+  it("marks a sent attachment as used so the GC sweep never reclaims it", async () => {
+    expect(await usedAtAfterReply(["att-1"])).toBeInstanceOf(Date);
+  });
+
+  it("leaves an unresolvable id unused — a rejected draft sends nothing", async () => {
+    expect(await usedAtAfterReply(["att-1", "nope"])).toBeNull();
   });
 
   it("rejects an id belonging to another ticket (no cross-ticket blob reach)", async () => {

@@ -1382,6 +1382,11 @@ export const handleDashboardTicketReply = async (
       if (attachmentRows.length !== attachmentIds.length) {
         return { kind: "error" as const, error: "attachment_not_found" };
       }
+      // These bytes now belong to an outgoing message — keep the GC sweep off
+      // them even if the send below fails and the merchant retries.
+      yield* attachmentStore
+        .markUsed(tenantId, ticketId, attachmentIds)
+        .pipe(Effect.orElseSucceed(() => undefined));
       const sent = yield* conversation
         .reply(tenantId, {
           threadId: ThreadId(threadId),

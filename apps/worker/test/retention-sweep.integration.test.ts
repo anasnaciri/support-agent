@@ -3,7 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { ApprovalRiskLevel } from "@support-agent/agent-core";
-import { TenantRepository } from "@support-agent/services";
+import {
+  BlobStorage,
+  BlobStorageTest,
+  TenantRepository,
+} from "@support-agent/services";
 import {
   DbClient,
   DbClientLive,
@@ -42,10 +46,14 @@ describeIfDb("retention sweep (Live, integration)", () => {
   // the consumer and the producer so tests can yield either.
   const dbLayer = DbClientLive({ databaseUrl: databaseUrl! });
   const tenantRepoWithDb = TenantRepositoryLive.pipe(Layer.provide(dbLayer));
-  const cronLayer = Layer.mergeAll(tenantRepoWithDb, dbLayer);
+  // `sweepAllTenants` deletes the deleted tickets' attachment blobs, so the
+  // cron layer must carry BlobStorage — the real cron gets it from
+  // `runtimeLayer`, which exposes it at the top level.
+  const cronLayer = Layer.mergeAll(tenantRepoWithDb, dbLayer, BlobStorageTest());
 
-  const runLive = <A, E>(eff: Effect.Effect<A, E, DbClient | TenantRepository>) =>
-    Effect.runPromise(Effect.provide(eff, cronLayer).pipe(Effect.scoped));
+  const runLive = <A, E>(
+    eff: Effect.Effect<A, E, DbClient | TenantRepository | BlobStorage>,
+  ) => Effect.runPromise(Effect.provide(eff, cronLayer).pipe(Effect.scoped));
 
   beforeAll(async () => {
     if (!raw) return;

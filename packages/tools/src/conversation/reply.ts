@@ -122,6 +122,10 @@ export const MAX_DRAFT_ATTACHMENTS = 8;
  * resolve strictly within (tenant, ticket), so a hallucinated or injected
  * id can never reach another tenant's — or even another ticket's — blob.
  * Raw storage keys are deliberately NOT accepted at this boundary.
+ *
+ * Resolving also stamps the rows as used, which is what keeps the attachment
+ * GC sweep off them: from here the bytes belong to an outgoing message, and a
+ * failed send is retried against the same blob.
  */
 export const resolveDraftAttachmentIds = (
   tenantId: TenantId,
@@ -161,6 +165,9 @@ export const resolveDraftAttachmentIds = (
         }),
       );
     }
+    yield* store.markUsed(tenantId, ticketId, unique).pipe(
+      Effect.mapError((e) => new ToolOutputInvalid({ tool, issues: [e._tag] })),
+    );
     return rows.map(toMessageAttachment);
   });
 

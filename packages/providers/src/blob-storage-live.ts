@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -130,6 +131,25 @@ export const BlobStorageLive = Layer.effect(
               ? new BlobNotFound({ key })
               : new BlobStorageFailed({ key, cause }),
         }),
+
+      // Idempotent: R2's DeleteObject already returns 204 for a key that isn't
+      // there, but some S3-compatible impls 404 — either way a retried
+      // retention sweep must not fail on a blob it deleted last pass.
+      delete: (key: string): Effect.Effect<void, BlobStorageError> =>
+        Effect.tryPromise({
+          try: async () => {
+            await client.send(
+              new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }),
+            );
+          },
+          catch: (cause) => ({ cause }),
+        }).pipe(
+          Effect.catchAll(({ cause }) =>
+            isNoSuchKey(cause)
+              ? Effect.void
+              : Effect.fail(new BlobStorageFailed({ key, cause })),
+          ),
+        ),
     });
   }),
 );

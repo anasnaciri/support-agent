@@ -8,6 +8,10 @@
 
 import { Effect } from "effect";
 import { sweepAllTenants, type SweepResult } from "./retention-sweep.js";
+import {
+  gcAllTenantAttachments,
+  type AttachmentGcResult,
+} from "./attachment-gc.js";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
 
@@ -88,6 +92,27 @@ export const registerRetentionSweep = async (
             `[retention-sweep] tenant=${f.tenantId} failed: ${f.error}`,
           );
         }
+
+        // Second pass on the same daily cron: reclaim uploads nobody ever sent
+        // (a staged chip removed, a supplier update abandoned). Independent of
+        // the ticket sweep above — a live ticket keeps accumulating orphans.
+        const gc = await Effect.runPromise(
+          Effect.provide(gcAllTenantAttachments(), opts.runtimeLayer).pipe(
+            Effect.catchAllCause(
+              (cause): Effect.Effect<ReadonlyArray<AttachmentGcResult>> => {
+                // eslint-disable-next-line no-console
+                console.error("[attachment-gc] pass crashed:", cause);
+                return Effect.succeed([]);
+              },
+            ),
+          ),
+        );
+        const reclaimed = gc.reduce((n, r) => n + r.reclaimed, 0);
+        const gcFailed = gc.reduce((n, r) => n + r.failed, 0);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[attachment-gc] pass complete: tenants=${gc.length} reclaimed=${reclaimed} failed_blobs=${gcFailed}`,
+        );
       }
     },
   );

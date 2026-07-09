@@ -64,6 +64,10 @@ export interface BlobGetResult {
  * stream bytes through ourselves) can use to fetch the object
  * directly. Today the only Live impl is R2 — a future Supabase /
  * filesystem layer would implement the same shape.
+ *
+ * `delete` is IDEMPOTENT: removing a key that isn't there succeeds.
+ * Retention sweeps re-run over the same keys after a partial failure,
+ * and an already-gone blob is the outcome they wanted.
  */
 export class BlobStorage extends Context.Tag("BlobStorage")<
   BlobStorage,
@@ -78,6 +82,7 @@ export class BlobStorage extends Context.Tag("BlobStorage")<
       key: string,
       ttlSeconds: number,
     ) => Effect.Effect<string, BlobStorageError>;
+    readonly delete: (key: string) => Effect.Effect<void, BlobStorageError>;
   }
 >() {}
 
@@ -101,6 +106,8 @@ export interface BlobTestFixtures {
     key: string,
     ttlSeconds: number,
   ) => Effect.Effect<string, BlobStorageError>;
+  /** Full override for `delete`. */
+  readonly delete?: (key: string) => Effect.Effect<void, BlobStorageError>;
 }
 
 /**
@@ -136,6 +143,12 @@ export const BlobStorageTest = (fixtures: BlobTestFixtures = {}) => {
           return fixtures.presignGetUrl(key, ttlSeconds);
         if (!store.has(key)) return Effect.fail(new BlobNotFound({ key }));
         return Effect.succeed(`memory://${key}?ttl=${ttlSeconds}`);
+      },
+      delete: (key) => {
+        if (fixtures.delete) return fixtures.delete(key);
+        // Idempotent, like the R2 impl: a missing key is not an error.
+        store.delete(key);
+        return Effect.void;
       },
     }),
   );

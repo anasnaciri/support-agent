@@ -867,6 +867,13 @@ export const ticketAttachments = pgTable(
     sizeBytes: integer("size_bytes").notNull(),
     storageKey: text("storage_key").notNull(),
     uploadedBy: text("uploaded_by"),
+    /**
+     * When the file was consumed into something durable — sent on a customer
+     * reply, or bound into a supplier's posted update. NULL means "uploaded,
+     * never used": an orphan the attachment GC sweep may reclaim once it ages
+     * out.
+     */
+    usedAt: timestamp("used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

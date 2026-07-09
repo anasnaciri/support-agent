@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
@@ -585,6 +585,21 @@ export const recordSupplierUpdate = async (
         resolvedAt: new Date(),
       })
       .where(eq(ticketSupplierEscalations.id, input.escalationId));
+
+    // The posted update is a durable reference to these files (ticket context
+    // + the agent's forwarding prompt), so the GC sweep must leave them alone.
+    // Same tx as the update itself: a file is "used" iff the update committed.
+    if (attachmentIds.length > 0) {
+      await tx
+        .update(ticketAttachments)
+        .set({ usedAt: new Date() })
+        .where(
+          and(
+            inArray(ticketAttachments.id, attachmentIds),
+            isNull(ticketAttachments.usedAt),
+          ),
+        );
+    }
 
     const ticketRows = await tx
       .select({ status: tickets.status, context: tickets.context })
