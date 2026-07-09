@@ -13,6 +13,8 @@ import {
   handleDashboardTicketDetail,
   handleDashboardTicketEvents,
   handleDashboardTicketReply,
+  handleDashboardTicketAttachmentUpload,
+  handleDashboardTicketAttachments,
   handleDashboardEditTicketDetails,
   handleDashboardEditShippingAddress,
   handleDashboardEscalateSupplier,
@@ -344,6 +346,21 @@ export const registerDashboardRoutes = (
     "Send a human-drafted customer reply while driving a taken-over ticket",
     handleDashboardTicketReply,
     "tickets.reply",
+  );
+  dashboardGet(
+    "/dashboard/tickets/:id/attachments",
+    "The ticket's attachment index (uploads + ingested files)",
+    handleDashboardTicketAttachments,
+    "tickets.view",
+  );
+  dashboardPost(
+    "/dashboard/tickets/:id/attachments",
+    "Upload an attachment (raw bytes) to use in replies from this ticket",
+    handleDashboardTicketAttachmentUpload,
+    "tickets.reply",
+    // Global cap is 1 MiB; attachments follow the ingestion cap (10 MiB)
+    // plus headroom.
+    { bodyLimit: 11 * 1024 * 1024 },
   );
   dashboardGet(
     "/dashboard/tickets/:id/refund-context",

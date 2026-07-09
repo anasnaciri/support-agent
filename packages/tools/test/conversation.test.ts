@@ -12,9 +12,11 @@ import {
 import {
   ConversationServiceTest,
   makeConversationServiceTest,
+  TicketAttachmentStoreTest,
   TimerService,
   TimerServiceDbError,
   TimerServiceTest,
+  type TicketAttachmentRecord,
 } from "@support-agent/services";
 import {
   conversationAskCustomer,
@@ -651,5 +653,149 @@ describe("conversation.ask_customer tool", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       expect(handle.sent).toHaveLength(1);
     });
+  });
+});
+
+describe("draft attachmentIds resolution", () => {
+  const attachmentRow = (
+    over: Partial<TicketAttachmentRecord> = {},
+  ): TicketAttachmentRecord => ({
+    id: "att-1",
+    tenantId,
+    ticketId: TicketId("c-att"),
+    source: "supplier",
+    filename: "label.pdf",
+    contentType: "application/pdf",
+    sizeBytes: 3,
+    storageKey: "upload/t1/c-att/label.pdf",
+    uploadedBy: "supplier-user",
+    createdAt: new Date("2026-07-01T00:00:00Z"),
+    ...over,
+  });
+
+  const env = (rows: ReadonlyArray<TicketAttachmentRecord>) => {
+    const { layer, handle } = makeConversationServiceTest({
+      threads: new Map([[`${tenantId}:thread-1`, seedThread("thread-1")]]),
+    });
+    return {
+      handle,
+      layer: Layer.mergeAll(layer, TicketAttachmentStoreTest(rows)),
+    };
+  };
+
+  const replyInput = (attachmentIds: ReadonlyArray<string>) => ({
+    threadId: "thread-1",
+    to: [{ name: "Jane Doe", email: "customer@example.com" }],
+    subject: null,
+    bodyText: "Here is the label.",
+    bodyHtml: null,
+    attachmentIds,
+    inReplyToMessageId: null,
+    draftId: "d-att",
+  });
+
+  it("resolves ids to storage-backed attachments on the outbound reply", async () => {
+    const { layer, handle } = env([attachmentRow()]);
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          replyInput(["att-1"]) as never,
+          baseCtx("c-att"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(1);
+    const sent = handle.sent[0]!.input;
+    expect(sent.attachments).toEqual([
+      {
+        filename: "label.pdf",
+        contentType: "application/pdf",
+        storageKey: "upload/t1/c-att/label.pdf",
+        sizeBytes: 3,
+      },
+    ]);
+  });
+
+  it("rejects an id belonging to another ticket (no cross-ticket blob reach)", async () => {
+    const { layer, handle } = env([
+      attachmentRow({ ticketId: TicketId("other-ticket") }),
+    ]);
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          replyInput(["att-1"]) as never,
+          baseCtx("c-att"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.issues).toEqual(["attachment_not_found:att-1"]);
+      }
+    }
+    expect(handle.sent).toHaveLength(0);
+  });
+
+  it("rejects unknown ids without sending", async () => {
+    const { layer, handle } = env([]);
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          replyInput(["nope"]) as never,
+          baseCtx("c-att"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(0);
+  });
+
+  it("caps the number of attachments per reply", async () => {
+    const rows = Array.from({ length: 9 }, (_, i) =>
+      attachmentRow({ id: `att-${i}` }),
+    );
+    const { layer, handle } = env(rows);
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationReply.execute(
+          replyInput(rows.map((r) => r.id)) as never,
+          baseCtx("c-att"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        layer,
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(0);
+  });
+
+  it("ask_customer resolves attachmentIds the same way", async () => {
+    const { layer, handle } = env([attachmentRow()]);
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        conversationAskCustomer.execute(
+          {
+            threadId: "thread-1",
+            to: [{ name: "Jane Doe", email: "customer@example.com" }],
+            subject: null,
+            bodyText: "Is this the right label?",
+            bodyHtml: null,
+            attachmentIds: ["att-1"],
+            draftId: "d-ask-att",
+          } as never,
+          baseCtx("c-att"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        Layer.mergeAll(layer, TimerServiceTest),
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]!.input.attachments).toHaveLength(1);
   });
 });

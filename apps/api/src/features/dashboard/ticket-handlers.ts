@@ -4,6 +4,8 @@ import {
   applyApprovalDecision,
   ApprovalService,
   AuditLogService,
+  BlobStorage,
+  TicketAttachmentStore,
   TicketRepository,
   ConnectorCredentialStore,
   ConversationService,
@@ -13,6 +15,7 @@ import {
   normalizeBlockedSenderInput,
   ShopifyService,
   TenantRepository,
+  toMessageAttachment,
   TrackingService,
   parseThreadId,
   namespaceThreadId,
@@ -100,6 +103,11 @@ import {
   normalizeCustomerName,
   normalizeCustomerPhone,
 } from "./ticket-details-input.js";
+import {
+  toAttachmentSummary,
+  uploadStorageKey,
+  validateAttachmentUpload,
+} from "./attachment-upload.js";
 import { makePgBossApprovalPublisher } from "../approvals/endpoints.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
@@ -1303,6 +1311,12 @@ export const handleDashboardTicketReply = async (
   const bodyText = typeof body["bodyText"] === "string" ? body["bodyText"] : "";
   const bodyHtml =
     typeof body["bodyHtml"] === "string" ? (body["bodyHtml"] as string) : null;
+  // Opaque ticket-attachment ids (from the upload endpoint); resolved below
+  // strictly within this tenant + ticket. Cap mirrors the ingestion limit.
+  const attachmentIds = [...new Set(strList(body, "attachmentIds"))];
+  if (attachmentIds.length > 8) {
+    return sendJson(res, 400, { error: "too_many_attachments" });
+  }
   const tenantId = TenantId(auth.tenantId);
   const ticketId = TicketId(id);
   const userId = auth.userId;
@@ -1361,6 +1375,13 @@ export const handleDashboardTicketReply = async (
               : null;
           })();
       if (!target) return { kind: "error" as const, error: "no_recipient" };
+      const attachmentStore = yield* TicketAttachmentStore;
+      const attachmentRows = yield* attachmentStore
+        .getByIds(tenantId, ticketId, attachmentIds)
+        .pipe(Effect.orElseSucceed(() => []));
+      if (attachmentRows.length !== attachmentIds.length) {
+        return { kind: "error" as const, error: "attachment_not_found" };
+      }
       const sent = yield* conversation
         .reply(tenantId, {
           threadId: ThreadId(threadId),
@@ -1370,7 +1391,7 @@ export const handleDashboardTicketReply = async (
           subject: null,
           bodyText,
           bodyHtml,
-          attachments: [],
+          attachments: attachmentRows.map(toMessageAttachment),
           inReplyToMessageId: target.inReplyToMessageId,
           draftId,
         })
@@ -1462,6 +1483,108 @@ export const handleDashboardTicketReply = async (
             ? 502
             : 409; // not_in_takeover | no_thread
   return sendJson(res, status, outcome);
+};
+
+// POST /dashboard/tickets/:id/attachments — raw-bytes upload (the file's own
+// Content-Type on the request, filename in ?filename=). Validates against the
+// image/pdf allowlist with a magic-byte sniff, stores bytes in BlobStorage,
+// and indexes a ticket_attachments row. The response carries the row id — the
+// only handle the client ever passes back (reply / approve requests).
+export const handleDashboardTicketAttachmentUpload = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+  const { filename } = req.query as { filename?: string };
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const validation = validateAttachmentUpload({
+    filename,
+    contentType: req.headers["content-type"],
+    bytes,
+  });
+  if (!validation.ok) return sendJson(res, 400, { error: validation.error });
+
+  const tenantId = TenantId(auth.tenantId);
+  const ticketId = TicketId(id);
+  const userId = auth.userId;
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const tickets = yield* TicketRepository;
+        const ticket = yield* tickets.getById(ticketId, tenantId).pipe(Effect.either);
+        if (ticket._tag === "Left") return { kind: "not_found" as const };
+        const blob = yield* BlobStorage;
+        const store = yield* TicketAttachmentStore;
+        const storageKey = uploadStorageKey(
+          auth.tenantId,
+          id,
+          randomUUID(),
+          validation.ext,
+        );
+        yield* blob.put({
+          tenantId,
+          key: storageKey,
+          bytes,
+          contentType: validation.contentType,
+        });
+        const record = yield* store.record({
+          tenantId,
+          ticketId,
+          source: "merchant",
+          filename: validation.filename,
+          contentType: validation.contentType,
+          sizeBytes: bytes.length,
+          storageKey,
+          uploadedBy: userId,
+        });
+        return { kind: "ok" as const, record };
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.succeed({ kind: "store_failed" as const, cause }),
+        ),
+      ),
+      layer,
+    ),
+  );
+  if (outcome.kind === "not_found") {
+    return sendJson(res, 404, { error: "ticket_not_found" });
+  }
+  if (outcome.kind === "store_failed") {
+    req.log.error({ err: opaqueCause(outcome.cause) }, "attachment upload failed");
+    return sendJson(res, 502, { error: "upload_failed" });
+  }
+  return sendJson(res, 200, { attachment: toAttachmentSummary(outcome.record) });
+};
+
+// GET /dashboard/tickets/:id/attachments — the ticket's attachment index
+// (merchant + supplier uploads and ingested inbound files), oldest first.
+// Backs the composer's picker so a teammate can attach an already-uploaded
+// file (e.g. the supplier's label) without re-uploading it.
+export const handleDashboardTicketAttachments = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id } = req.params as { id: string };
+  const rows = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const store = yield* TicketAttachmentStore;
+        return yield* store.listForTicket(TenantId(auth.tenantId), TicketId(id));
+      }).pipe(Effect.orElseSucceed(() => null)),
+      layer,
+    ),
+  );
+  if (rows === null) return sendJson(res, 502, { error: "list_failed" });
+  return sendJson(res, 200, { attachments: rows.map(toAttachmentSummary) });
 };
 
 // A conversation.reply approval's stored input (the manager-approved draft).

@@ -47,23 +47,32 @@ export const makeDashboardRoutes = (app: FastifyInstance, ctx: RouteContext) => 
   };
 
   // Mutations. No response serializer (default JSON.stringify) so the
-  // discriminated result/Date fields pass through untouched.
+  // discriminated result/Date fields pass through untouched. `opts.bodyLimit`
+  // raises the per-route body cap above the global 1 MiB (attachment uploads).
   const dashboardPost = (
     path: string,
     summary: string,
     handler: ApiHandler,
     permission?: RbacPermissionId,
+    opts?: { readonly bodyLimit?: number },
   ): void => {
-    app.post(path, { schema: { tags: ["dashboard"], summary } }, async (req, res) => {
-      if (
-        permission &&
-        !(await enforceDashboardPermission(cfg, layer, req, res, permission))
-      ) {
+    app.post(
+      path,
+      {
+        schema: { tags: ["dashboard"], summary },
+        ...(opts?.bodyLimit ? { bodyLimit: opts.bodyLimit } : {}),
+      },
+      async (req, res) => {
+        if (
+          permission &&
+          !(await enforceDashboardPermission(cfg, layer, req, res, permission))
+        ) {
+          return res;
+        }
+        await handler(cfg, layer, req, res);
         return res;
-      }
-      await handler(cfg, layer, req, res);
-      return res;
-    });
+      },
+    );
   };
 
   return { dashboardGet, dashboardPost };

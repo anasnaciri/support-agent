@@ -16,6 +16,7 @@ import {
   ShopifyService,
   TenantAgentOverridesService,
   TenantRepository,
+  TicketAttachmentStore,
   TrackingConfig,
   TrackingService,
   TrackingServiceNoProvider,
@@ -36,6 +37,7 @@ import {
   ShopifyAppProvisioningStoreLive,
   TenantAgentOverridesServiceLive,
   TenantRepositoryLive,
+  TicketAttachmentStoreLive,
   TransactionRunnerLive,
 } from "@support-agent/db";
 import {
@@ -634,6 +636,11 @@ export const buildApiLayers = (cfg: ApiConfig) => {
         Layer.provide(Layer.succeed(TrackingConfig, { apiKey: trackingApiKey })),
       )
     : TrackingServiceNoProvider;
+  // Ticket-attachment index (upload endpoints + manual-reply attachment
+  // resolution). DB-backed.
+  const ticketAttachments = TicketAttachmentStoreLive.pipe(
+    Layer.provide(dbLayer),
+  );
   return Layer.mergeAll(
     store,
     accountOpenrouterStore,
@@ -653,6 +660,7 @@ export const buildApiLayers = (cfg: ApiConfig) => {
     knowledge,
     urlFetch,
     tracking,
+    ticketAttachments,
   );
 };
 
@@ -674,7 +682,8 @@ export type ApiLayer = Layer.Layer<
   | CustomAgentService
   | KnowledgeBaseService
   | UrlFetchService
-  | TrackingService,
+  | TrackingService
+  | TicketAttachmentStore,
   never,
   never
 >;

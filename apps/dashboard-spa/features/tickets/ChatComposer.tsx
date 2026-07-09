@@ -4,15 +4,24 @@ import {
   useQueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { Check, ChevronDown, SendHorizontal, Sparkles, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Paperclip,
+  SendHorizontal,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { BorderBeam } from "border-beam";
 import type {
   ModelsResponse,
+  TicketAttachmentSummary,
   TicketConversationThreadResult,
 } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
+import { formatAttachmentSize } from "@/lib/ticket-timeline";
 import {
   OPTIMISTIC_MESSAGE_ID_PREFIX,
   appendOptimisticReply,
@@ -69,6 +78,22 @@ const rephraseErrorText = (kind: string): string => {
   if (kind === "no_llm") return "Connect an AI provider in settings to rephrase.";
   if (kind === "empty_input") return "Write a draft first, then rephrase it.";
   return "Couldn't rephrase the draft. Please try again.";
+};
+
+// Mirrors the server allowlist so a wrong pick fails in the picker, not after
+// a 10 MB upload. The server re-validates (with a magic-byte sniff) regardless.
+const ATTACHMENT_ACCEPT =
+  "image/png,image/jpeg,image/gif,image/webp,application/pdf";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 8;
+
+const uploadErrorText = (error: string): string => {
+  if (error === "unsupported_type")
+    return "Only images (PNG, JPEG, GIF, WEBP) and PDFs can be attached.";
+  if (error === "too_large") return "Attachments are limited to 10 MB.";
+  if (error === "content_mismatch")
+    return "That file's contents don't match its type, so it can't be attached.";
+  return "Couldn't upload the attachment. Please try again.";
 };
 
 function RephraseModelPicker({
@@ -154,6 +179,42 @@ export function ChatComposer({
   const [selectedModel, setSelectedModel] = useState<string | null>(
     models?.rephraseModel ?? null,
   );
+  // Files staged for THIS message. Each is already uploaded + indexed on the
+  // ticket; send/approve passes only their ids (storage keys never reach the
+  // client). Removing a chip just unstages it — the upload stays on the ticket.
+  const [attachments, setAttachments] = useState<TicketAttachmentSummary[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const picked = [...files];
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (attachments.length + picked.length > MAX_ATTACHMENTS) {
+      setError(`A reply can carry at most ${MAX_ATTACHMENTS} attachments.`);
+      return;
+    }
+    if (picked.some((f) => f.size > MAX_ATTACHMENT_BYTES)) {
+      setError(uploadErrorText("too_large"));
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      for (const file of picked) {
+        const result = await api.uploadTicketAttachment(ctx, ticketId, file);
+        if (result.kind === "rejected") {
+          setError(uploadErrorText(result.error));
+          return;
+        }
+        setAttachments((prev) => [...prev, result.attachment]);
+      }
+    } catch {
+      setError(uploadErrorText("failed"));
+    } finally {
+      setUploading(false);
+    }
+  };
   const theme = useThemePreference();
   const systemPrefersDark = useSystemPrefersDark();
   const approvalId = mode.kind === "approval" ? mode.approvalId : "";
@@ -172,7 +233,13 @@ export function ChatComposer({
     workspaceId,
     ticketId,
     action: "reply",
-    mutationFn: () => api.sendReply(ctx, ticketId, text),
+    mutationFn: () =>
+      api.sendReply(
+        ctx,
+        ticketId,
+        text,
+        attachments.map((a) => a.id),
+      ),
     onMutate: async () => {
       const key = qk.ticketThread(workspaceId, ticketId);
       // Stop any in-flight thread refetch from clobbering the placeholder.
@@ -197,20 +264,39 @@ export function ChatComposer({
       if (rollback) qc.setQueryData(rollback.key, rollback.previous);
     },
     onDone: (kind) => {
-      if (kind === "sent") setText("");
+      if (kind === "sent") {
+        setText("");
+        setAttachments([]);
+      }
     },
   });
 
   // Edit-and-Approve: merge the edited bodyText onto the approval's original
   // proposedInput so the shape stays valid for the gated tool (no extra fetch —
-  // the ticket detail already carries proposedInput). Non-reply approvals send no
-  // override and run against the original at resume time.
+  // the ticket detail already carries proposedInput). Files staged here are
+  // appended to the draft's own attachmentIds; the tool re-validates every id
+  // within this ticket at resume time. Non-reply approvals send no override
+  // and run against the original at resume time.
   const approvedInput = (): unknown => {
     if (mode.kind !== "approval") return undefined;
     const p = mode.proposedInput;
-    return p && typeof p === "object" && "bodyText" in (p as object)
-      ? { ...(p as Record<string, unknown>), bodyText: text }
-      : undefined;
+    if (!p || typeof p !== "object" || !("bodyText" in (p as object))) {
+      return undefined;
+    }
+    const record = p as Record<string, unknown>;
+    const draftIds = Array.isArray(record["attachmentIds"])
+      ? (record["attachmentIds"] as unknown[]).filter(
+          (x): x is string => typeof x === "string",
+        )
+      : [];
+    const mergedIds = [
+      ...new Set([...draftIds, ...attachments.map((a) => a.id)]),
+    ];
+    return {
+      ...record,
+      bodyText: text,
+      ...(mergedIds.length > 0 ? { attachmentIds: mergedIds } : {}),
+    };
   };
   const approveM = useApprovalDecision({
     workspaceId,
@@ -305,7 +391,8 @@ export function ChatComposer({
 
   const empty = text.trim().length === 0;
   const showPicker = Boolean(models?.connected && models.entries.length > 0);
-  const busy = approveM.isPending || rejectM.isPending || sendM.isPending;
+  const busy =
+    approveM.isPending || rejectM.isPending || sendM.isPending || uploading;
   const placeholder =
     mode.kind === "approval"
       ? "Edit the drafted reply before approving…"
@@ -346,8 +433,55 @@ export function ChatComposer({
             placeholder={placeholder}
             className="min-h-[64px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />
+          {attachments.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 px-3 pb-1.5">
+              {attachments.map((a) => (
+                <span
+                  key={a.id}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs"
+                >
+                  <Paperclip className="size-3 shrink-0" aria-hidden />
+                  <span className="max-w-[14rem] truncate">{a.filename}</span>
+                  <span className="text-muted-foreground">
+                    {formatAttachmentSize(a.sizeBytes)}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${a.filename}`}
+                    onClick={() =>
+                      setAttachments((prev) =>
+                        prev.filter((x) => x.id !== a.id),
+                      )
+                    }
+                    className="ml-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex items-center gap-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ATTACHMENT_ACCEPT}
+                multiple
+                className="hidden"
+                onChange={(e) => void onPickFiles(e.target.files)}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || attachments.length >= MAX_ATTACHMENTS}
+                title="Attach an image or PDF to send with this reply"
+              >
+                <Paperclip aria-hidden />
+                {uploading ? "Uploading…" : "Attach"}
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
@@ -400,7 +534,7 @@ export function ChatComposer({
                 type="button"
                 size="icon"
                 onClick={() => sendM.mutate()}
-                disabled={empty || sendM.isPending}
+                disabled={empty || sendM.isPending || uploading}
                 aria-label="Send reply"
                 title="Send this reply to the customer on the existing email thread"
               >

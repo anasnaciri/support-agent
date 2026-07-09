@@ -52,6 +52,7 @@ import {
   SupplierEscalationServiceLive,
   ReplyDeliveryServiceLive,
   ImageHashStoreLive,
+  TicketAttachmentStoreLive,
   ProcessedEventStoreLive,
   ProcessedMessageStoreLive,
   ToolExecutionStoreLive,
@@ -674,6 +675,10 @@ export const buildWorker = async (
     // Duplicate-photo fraud guard. DbClient-backed; satisfied by the
     // dbLayer provide below. The runtime picks it up via serviceOption.
     ImageHashStoreLive,
+    // Draft-attachment resolution: conversation.reply / ask_customer resolve
+    // LLM-passed `attachmentIds` to storage keys through this store (tenant+
+    // ticket scoped). DbClient-backed; satisfied by the dbLayer provide below.
+    TicketAttachmentStoreLive,
     // Exposed at the top level (not just provided INTO consumers) so the
     // conversation-connector crons — imap-poll, gmail-watch-renewal,
     // graph-subscription-renewal — can resolve it directly against

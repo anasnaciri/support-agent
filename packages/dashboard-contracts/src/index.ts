@@ -243,6 +243,24 @@ export interface DashboardConversationAttachment {
   readonly sizeBytes: number;
 }
 
+/**
+ * An attachment indexed on a ticket (uploaded by a teammate or supplier, or
+ * ingested from an inbound customer message). `id` is the only handle
+ * clients ever pass back — storage keys stay server-side.
+ */
+export interface TicketAttachmentSummary {
+  readonly id: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+  readonly source: "inbound" | "supplier" | "merchant";
+  readonly createdAt: string;
+}
+
+export interface TicketAttachmentUploadResponse {
+  readonly attachment: TicketAttachmentSummary;
+}
+
 export interface DashboardConversationMessage {
   readonly id: string;
   readonly direction: "inbound" | "outbound";

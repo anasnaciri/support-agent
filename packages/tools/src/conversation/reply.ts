@@ -4,8 +4,15 @@ import {
   defineTool,
   ToolOutputInvalid,
   type ConversationThread,
+  type MessageAttachment,
+  type TenantId,
+  type TicketId,
 } from "@support-agent/agent-core";
-import { ConversationService } from "@support-agent/services";
+import {
+  ConversationService,
+  TicketAttachmentStore,
+  toMessageAttachment,
+} from "@support-agent/services";
 
 const Participant = Schema.Struct({
   name: Schema.NullOr(Schema.String),
@@ -105,6 +112,58 @@ export const participantEmails = (
   return set;
 };
 
+/** Per-message attachment cap — mirrors the inbound ingestion limit. */
+export const MAX_DRAFT_ATTACHMENTS = 8;
+
+/**
+ * Resolve draft `attachmentIds` (opaque `ticket_attachments` row ids — the
+ * only attachment reference the LLM or an edit-and-approve override may
+ * pass) to the `MessageAttachment[]` a connector encodes. SECURITY: ids
+ * resolve strictly within (tenant, ticket), so a hallucinated or injected
+ * id can never reach another tenant's — or even another ticket's — blob.
+ * Raw storage keys are deliberately NOT accepted at this boundary.
+ */
+export const resolveDraftAttachmentIds = (
+  tenantId: TenantId,
+  ticketId: TicketId,
+  ids: ReadonlyArray<string> | undefined,
+  tool: string,
+): Effect.Effect<
+  ReadonlyArray<MessageAttachment>,
+  ToolOutputInvalid,
+  TicketAttachmentStore
+> =>
+  Effect.gen(function* () {
+    const unique = [...new Set(ids ?? [])];
+    if (unique.length === 0) return [];
+    if (unique.length > MAX_DRAFT_ATTACHMENTS) {
+      return yield* Effect.fail(
+        new ToolOutputInvalid({
+          tool,
+          issues: [`too_many_attachments:max_${MAX_DRAFT_ATTACHMENTS}`],
+        }),
+      );
+    }
+    const store = yield* TicketAttachmentStore;
+    const rows = yield* store.getByIds(tenantId, ticketId, unique).pipe(
+      Effect.mapError(
+        (e) => new ToolOutputInvalid({ tool, issues: [e._tag] }),
+      ),
+    );
+    if (rows.length !== unique.length) {
+      const found = new Set(rows.map((r) => r.id));
+      return yield* Effect.fail(
+        new ToolOutputInvalid({
+          tool,
+          issues: unique
+            .filter((id) => !found.has(id))
+            .map((id) => `attachment_not_found:${id}`),
+        }),
+      );
+    }
+    return rows.map(toMessageAttachment);
+  });
+
 export const requireConversationMailbox = (
   mailbox: string | undefined,
   tool: string,
@@ -124,16 +183,10 @@ const Input = Schema.Struct({
   subject: Schema.NullOr(Schema.String),
   bodyText: Schema.String,
   bodyHtml: Schema.NullOr(Schema.String),
-  attachments: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        filename: Schema.String,
-        contentType: Schema.String,
-        storageKey: Schema.String,
-        sizeBytes: Schema.Number,
-      }),
-    ),
-  ),
+  // Opaque ticket-attachment ids (from the ticket's attachment list — e.g.
+  // files a supplier or teammate uploaded). NEVER raw storage keys: ids are
+  // resolved server-side within this ticket only.
+  attachmentIds: Schema.optional(Schema.Array(Schema.String)),
   inReplyToMessageId: Schema.NullOr(Schema.String),
   draftId: Schema.String,
 });
@@ -147,7 +200,7 @@ const Output = Schema.Struct({
 export const conversationReply = defineTool({
   name: "conversation.reply",
   description:
-    "Send a customer-facing reply on an existing thread. Threading is handled by `threadId` — the same connector that delivered the inbound message is the one that sends the reply, so the customer sees a natural continuation in their inbox / portal. Set `subject` to null to inherit the thread subject (`Re: <original>`). Recipients in `to` MUST already participate in the thread — off-thread addresses are rejected. Choose a stable `draftId` for the reply and reuse it if you retry the same send. Permission policy: `ask` by default — every reply requires a human approval until the agent has earned trust per-tenant.",
+    "Send a customer-facing reply on an existing thread. Threading is handled by `threadId` — the same connector that delivered the inbound message is the one that sends the reply, so the customer sees a natural continuation in their inbox / portal. Set `subject` to null to inherit the thread subject (`Re: <original>`). Recipients in `to` MUST already participate in the thread — off-thread addresses are rejected. To attach files that are on this ticket (e.g. a photo or document the supplier provided, listed in your context with their attachment ids), pass their ids in `attachmentIds`. Choose a stable `draftId` for the reply and reuse it if you retry the same send. Permission policy: `ask` by default — every reply requires a human approval until the agent has earned trust per-tenant.",
   displayDescription:
     "When a customer writes in, the agent drafts and sends the reply on the existing email thread.",
   tenantControl: "permission-toggle",
@@ -181,6 +234,12 @@ export const conversationReply = defineTool({
       // still owns it.
       const subject =
         input.subject ?? (thread ? replySubject(thread.subject) : null);
+      const attachments = yield* resolveDraftAttachmentIds(
+        ctx.tenantId,
+        ctx.ticketId,
+        input.attachmentIds,
+        "conversation.reply",
+      );
       const sent = yield* convo
         .reply(ctx.tenantId, {
           threadId: ThreadId(input.threadId),
@@ -189,7 +248,7 @@ export const conversationReply = defineTool({
           subject,
           bodyText: input.bodyText,
           bodyHtml: input.bodyHtml,
-          attachments: input.attachments ?? [],
+          attachments,
           inReplyToMessageId: input.inReplyToMessageId,
           draftId: input.draftId,
         })

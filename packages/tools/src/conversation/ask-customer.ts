@@ -9,6 +9,7 @@ import {
   assertRecipientsInThread,
   replySubject,
   requireConversationMailbox,
+  resolveDraftAttachmentIds,
 } from "./reply.js";
 
 const Participant = Schema.Struct({
@@ -22,16 +23,9 @@ const Input = Schema.Struct({
   subject: Schema.NullOr(Schema.String),
   bodyText: Schema.String,
   bodyHtml: Schema.NullOr(Schema.String),
-  attachments: Schema.optional(
-    Schema.Array(
-      Schema.Struct({
-        filename: Schema.String,
-        contentType: Schema.String,
-        storageKey: Schema.String,
-        sizeBytes: Schema.Number,
-      }),
-    ),
-  ),
+  // Opaque ticket-attachment ids; resolved server-side within this ticket
+  // only (see conversation.reply).
+  attachmentIds: Schema.optional(Schema.Array(Schema.String)),
   remindAfterHours: Schema.optional(Schema.Number),
   draftId: Schema.String,
 });
@@ -81,6 +75,12 @@ export const conversationAskCustomer = defineTool({
       // connector a second read of the same thread); see conversation.reply.
       const subject =
         input.subject ?? (thread ? replySubject(thread.subject) : null);
+      const attachments = yield* resolveDraftAttachmentIds(
+        ctx.tenantId,
+        ctx.ticketId,
+        input.attachmentIds,
+        "conversation.ask_customer",
+      );
       const sent = yield* convo
         .askCustomer(ctx.tenantId, {
           threadId: ThreadId(input.threadId),
@@ -89,7 +89,7 @@ export const conversationAskCustomer = defineTool({
           subject,
           bodyText: input.bodyText,
           bodyHtml: input.bodyHtml,
-          attachments: input.attachments ?? [],
+          attachments,
           ...(remindAfterHours !== undefined ? { remindAfterHours } : {}),
           draftId: input.draftId,
         })

@@ -12,6 +12,7 @@ import type {
   ApprovalsListResult,
   AuditEntry,
   AuditFilter,
+  TicketAttachmentSummary,
   TicketConversationThreadResult,
   TicketDetail,
   TicketEventsResult,
@@ -1188,14 +1189,67 @@ export const api = {
     ctx: CallCtx,
     ticketId: string,
     bodyText: string,
+    attachmentIds: ReadonlyArray<string> = [],
   ): Promise<{ readonly kind: string }> => {
     const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/reply`, {
       method: "POST",
-      body: { bodyText },
+      body:
+        attachmentIds.length > 0 ? { bodyText, attachmentIds } : { bodyText },
       ctx,
     });
     return (body as { kind: string } | null) ?? { kind: "error" };
   },
+
+  // Upload a file (raw bytes, the file's own content type) onto a ticket so it
+  // can ride a reply. Returns the indexed attachment summary; the id is what
+  // reply / approve requests reference. 400 bodies surface as a typed error
+  // kind for the composer to explain.
+  uploadTicketAttachment: async (
+    ctx: CallCtx,
+    ticketId: string,
+    file: File,
+  ): Promise<
+    | { readonly kind: "uploaded"; readonly attachment: TicketAttachmentSummary }
+    | { readonly kind: "rejected"; readonly error: string }
+  > => {
+    const doUpload = () =>
+      fetch(
+        `${apiBase()}/dashboard/tickets/${encodeURIComponent(ticketId)}/attachments?filename=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            ...(ctx.workspaceId ? { "x-workspace-id": ctx.workspaceId } : {}),
+          },
+          body: file,
+        },
+      );
+    let res = await doUpload();
+    if (res.status === 401 && (await tryRefresh())) res = await doUpload();
+    if (res.status === 401) throw new UnauthorizedError();
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        attachment: TicketAttachmentSummary;
+      };
+      return { kind: "uploaded", attachment: body.attachment };
+    }
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    return { kind: "rejected", error: body?.error ?? `status_${res.status}` };
+  },
+
+  // The ticket's attachment index (uploads + supplier files) for the
+  // composer's picker.
+  ticketAttachments: async (
+    ctx: CallCtx,
+    ticketId: string,
+  ): Promise<{ readonly attachments: ReadonlyArray<TicketAttachmentSummary> }> =>
+    okBody(
+      `/tickets/${encodeURIComponent(ticketId)}/attachments`,
+      ctx,
+    ) as Promise<{ readonly attachments: ReadonlyArray<TicketAttachmentSummary> }>,
 
   // Persist the workspace "Rephrase with AI" model (blank string clears it →
   // the rephrase handler falls back to its default). Gated on settings.agents.
