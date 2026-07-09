@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { TicketId, TenantId, type DomainEvent } from "@support-agent/agent-core";
 import {
+  BlobStorage,
   ShopifyService,
+  TicketAttachmentStore,
   makeEnqueuedWorkflowEvent,
 } from "@support-agent/services";
 import {
@@ -28,7 +30,12 @@ import { resolveOrderForContext } from "../dashboard/shopify-panels.js";
 import { describeShopifyError } from "../dashboard/shopify-error-detail.js";
 import { updateSupplierTracking } from "./supplier-tracking.js";
 import { type ApiConfig, type ApiLayer } from "../../bootstrap.js";
-import { bodyStr, sendJson } from "../../platform/http.js";
+import { bodyStr, parseJsonBody, sendJson, strList } from "../../platform/http.js";
+import {
+  toAttachmentSummary,
+  uploadStorageKey,
+  validateAttachmentUpload,
+} from "../dashboard/attachment-upload.js";
 import {
   authenticateDashboard,
   authenticateSupplier,
@@ -129,6 +136,11 @@ export const handleSupplierUpdate = async (
   const note = bodyStr(req, "note");
   if (!note) return sendJson(res, 400, { error: "invalid_request" });
   const proposedResolution = bodyStr(req, "proposedResolution") ?? null;
+  // Ids of files the supplier uploaded for this update (attachments endpoint).
+  const attachmentIds = [...new Set(strList(parseJsonBody(req), "attachmentIds"))];
+  if (attachmentIds.length > 8) {
+    return sendJson(res, 400, { error: "too_many_attachments" });
+  }
 
   const outcome = await runWithDb(layer, async (db) => {
     const supplier = await getSupplierForUser(db, auth.tenantId, userId);
@@ -139,6 +151,7 @@ export const handleSupplierUpdate = async (
       escalationId: id,
       note,
       proposedResolution,
+      attachmentIds,
       actorUuid: userId,
     });
     return { kind: "recorded" as const, result, supplierId: supplier.id };
@@ -153,6 +166,9 @@ export const handleSupplierUpdate = async (
   }
   if (result.kind === "already_resolved") {
     return sendJson(res, 409, { error: "already_resolved" });
+  }
+  if (result.kind === "attachment_not_found") {
+    return sendJson(res, 400, { error: "attachment_not_found" });
   }
 
   // ALWAYS publish, not just when the status flipped: a supplier's answer must
@@ -170,6 +186,9 @@ export const handleSupplierUpdate = async (
         supplierId: outcome.supplierId,
         note,
         proposedResolution,
+        ...(result.attachments.length > 0
+          ? { attachments: result.attachments }
+          : {}),
         escalationId: id,
       },
     });
@@ -191,6 +210,88 @@ export const handleSupplierUpdate = async (
     ok: true,
     resumed: result.resumed,
     ticked: true,
+  });
+};
+
+// POST /dashboard/supplier/tickets/:id/attachments — raw-bytes upload scoped to
+// the supplier's OWN OPEN escalation (`:id` = escalation id; 404 for a foreign
+// one, 409 once resolved). Same allowlist/sniff/caps as the merchant upload.
+// The returned id is what the supplier's update submission references — the
+// agent later forwards the file to the customer via conversation.reply.
+export const handleSupplierAttachmentUpload = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateSupplier(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
+  const userId = auth.userId;
+  const { id } = req.params as { id: string };
+  const { filename } = req.query as { filename?: string };
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const validation = validateAttachmentUpload({
+    filename,
+    contentType: req.headers["content-type"],
+    bytes,
+  });
+  if (!validation.ok) return sendJson(res, 400, { error: validation.error });
+
+  const escalation = await runWithDb(layer, async (db) => {
+    const supplier = await getSupplierForUser(db, auth.tenantId, userId);
+    if (!supplier) return null;
+    return getEscalationForSupplier(db, supplier.id, id);
+  });
+  if (!escalation) return sendJson(res, 404, { error: "not_found" });
+  if (escalation.status !== "open") {
+    return sendJson(res, 409, { error: "already_resolved" });
+  }
+
+  const tenantId = TenantId(auth.tenantId);
+  const ticketId = TicketId(escalation.ticketId);
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const blob = yield* BlobStorage;
+        const store = yield* TicketAttachmentStore;
+        const storageKey = uploadStorageKey(
+          auth.tenantId,
+          escalation.ticketId,
+          randomUUID(),
+          validation.ext,
+        );
+        yield* blob.put({
+          tenantId,
+          key: storageKey,
+          bytes,
+          contentType: validation.contentType,
+        });
+        const record = yield* store.record({
+          tenantId,
+          ticketId,
+          source: "supplier",
+          filename: validation.filename,
+          contentType: validation.contentType,
+          sizeBytes: bytes.length,
+          storageKey,
+          uploadedBy: userId,
+        });
+        return { kind: "ok" as const, record };
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.succeed({ kind: "store_failed" as const, cause }),
+        ),
+      ),
+      layer,
+    ),
+  );
+  if (outcome.kind === "store_failed") {
+    req.log.error({ err: String(outcome.cause) }, "supplier attachment upload failed");
+    return sendJson(res, 502, { error: "upload_failed" });
+  }
+  return sendJson(res, 200, {
+    attachment: toAttachmentSummary(outcome.record),
   });
 };
 

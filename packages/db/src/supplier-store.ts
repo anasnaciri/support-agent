@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import type { WorkspaceRow } from "./dashboard-reads.js";
 import {
   approvals,
   auditLog,
+  ticketAttachments,
   ticketStateTransitions,
   ticketSupplierEscalations,
   tickets,
@@ -431,6 +432,12 @@ export interface RecordSupplierUpdateInput {
   readonly escalationId: string;
   readonly note: string;
   readonly proposedResolution: string | null;
+  /**
+   * `ticket_attachments` ids the supplier uploaded for this update. Each must
+   * be a `source='supplier'` row on the escalation's own ticket — anything
+   * else fails the whole update (`attachment_not_found`).
+   */
+  readonly attachmentIds?: ReadonlyArray<string>;
   /** The supplier's decision UUID, for the audit actor. */
   readonly actorUuid: string;
 }
@@ -441,9 +448,15 @@ export type RecordSupplierUpdateResult =
       readonly ticketId: string;
       /** True when the ticket was flipped waiting_for_supplier → in_progress. */
       readonly resumed: boolean;
+      /** Validated update attachments (id + filename), for the event payload. */
+      readonly attachments: ReadonlyArray<{
+        readonly id: string;
+        readonly filename: string;
+      }>;
     }
   | { readonly kind: "not_found" }
-  | { readonly kind: "already_resolved" };
+  | { readonly kind: "already_resolved" }
+  | { readonly kind: "attachment_not_found" };
 
 /**
  * The statuses a supplier update flips back to `in_progress`. A ticket can escape
@@ -504,6 +517,36 @@ export const recordSupplierUpdate = async (
   if (!esc) return { kind: "not_found" };
   if (esc.status !== "open") return { kind: "already_resolved" };
 
+  // Resolve update attachments before any write: every id must be a
+  // supplier-uploaded row on THIS escalation's ticket — an id from another
+  // ticket/tenant (or a merchant upload) fails the update outright rather
+  // than silently dropping out.
+  const attachmentIds = [...new Set(input.attachmentIds ?? [])];
+  const attachmentRows =
+    attachmentIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: ticketAttachments.id,
+            filename: ticketAttachments.filename,
+          })
+          .from(ticketAttachments)
+          .where(
+            and(
+              eq(ticketAttachments.tenantId, input.tenantId),
+              eq(ticketAttachments.ticketId, esc.ticketId),
+              eq(ticketAttachments.source, "supplier"),
+              inArray(ticketAttachments.id, attachmentIds),
+            ),
+          );
+  if (attachmentRows.length !== attachmentIds.length) {
+    return { kind: "attachment_not_found" };
+  }
+  const attachments = attachmentRows.map((r) => ({
+    id: r.id,
+    filename: r.filename,
+  }));
+
   const resumed = await db.transaction(async (tx) => {
     await tx
       .update(ticketSupplierEscalations)
@@ -534,6 +577,7 @@ export const recordSupplierUpdate = async (
           supplierId: input.supplierId,
           note: input.note,
           proposedResolution: input.proposedResolution,
+          ...(attachments.length > 0 ? { attachments } : {}),
         },
       };
       if (willResume) {
@@ -613,7 +657,7 @@ export const recordSupplierUpdate = async (
     return willResume;
   });
 
-  return { kind: "recorded", ticketId: esc.ticketId, resumed };
+  return { kind: "recorded", ticketId: esc.ticketId, resumed, attachments };
 };
 
 // ---------------------------------------------------------------------------

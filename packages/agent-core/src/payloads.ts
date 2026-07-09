@@ -107,10 +107,23 @@ export interface TicketInput {
   readonly metadata: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * A file the supplier uploaded alongside their update. `id` is a
+ * `ticket_attachments` row id — the only handle that travels; the agent
+ * passes it to `conversation.reply`'s `attachmentIds` to forward the file
+ * to the customer. `filename` is supplier-controlled (untrusted display).
+ */
+export interface SupplierUpdateAttachment {
+  readonly id: string;
+  readonly filename: string;
+}
+
 export interface SupplierUpdate {
   readonly supplierId: string;
   readonly note: string;
   readonly proposedResolution: string | null;
+  /** Files uploaded with this update (absent for legacy events / no files). */
+  readonly attachments?: ReadonlyArray<SupplierUpdateAttachment>;
   /**
    * The escalation this update answers. Scopes the runtime's tool-execution
    * dedup marker per escalation, so a ticket escalated twice can reply to each

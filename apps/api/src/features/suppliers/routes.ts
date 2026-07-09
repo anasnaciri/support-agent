@@ -3,6 +3,7 @@ import type { RouteContext } from "../../platform/context.js";
 import { makeSupplierRoutes } from "../../auth/supplier-routes.js";
 import { makeDashboardRoutes } from "../../auth/dashboard-routes.js";
 import {
+  handleSupplierAttachmentUpload,
   handleSupplierTicket,
   handleSupplierTickets,
   handleSupplierInvite,
@@ -52,6 +53,15 @@ export const registerSupplierRoutes = (
     "Post a supplier update + resolve the escalation",
     handleSupplierUpdate,
     "supplier.tickets.respond",
+  );
+  supplierPost(
+    "/dashboard/supplier/tickets/:id/attachments",
+    "Upload a file (raw bytes) to send with a supplier update",
+    handleSupplierAttachmentUpload,
+    "supplier.tickets.respond",
+    // Global cap is 1 MiB; attachments follow the ingestion cap (10 MiB)
+    // plus headroom.
+    { bodyLimit: 11 * 1024 * 1024 },
   );
   supplierPost(
     "/dashboard/supplier/tickets/:id/tracking",

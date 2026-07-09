@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   approvals,
   auditLog,
+  ticketAttachments,
   ticketSupplierEscalations,
   tickets,
   createInvitation,
@@ -321,6 +322,119 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
       tenantId,
     );
     expect(missing.status).toBe(404);
+  });
+
+  // Supplier attachments: upload scoped to the supplier's own OPEN escalation,
+  // then the update submission binds validated ids into the escalation's
+  // context (and the event payload). Depends on the supplier binding created
+  // by the e2e test above.
+  it("uploads files to an open escalation and binds them to the update", async () => {
+    if (!raw) return;
+    const supplier = await getSupplierByEmail(raw.db, tenantId, "wh@acme.com");
+    expect(supplier).not.toBeNull();
+    const ticketId = randomUUID();
+    await raw.db.insert(tickets).values({
+      id: ticketId,
+      tenantId,
+      channel: "email",
+      status: "waiting_for_supplier",
+      currentAgentId: "missing-package-agent",
+      context: { customerEmail: "cust@example.com" },
+    });
+    const { id: escId } = await insertEscalation(raw.db, {
+      tenantId,
+      ticketId,
+      supplierId: supplier!.id,
+      problem: "Damaged item — send replacement label",
+      orderRef: "#2002",
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+    });
+
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("bytes"),
+    ]);
+    const upload = await fetch(
+      `${baseUrl}/dashboard/supplier/tickets/${escId}/attachments?filename=replacement-label.png`,
+      {
+        method: "POST",
+        headers: {
+          ...headers(supplierUuid, "wh@acme.com", tenantId),
+          "content-type": "image/png",
+        },
+        body: png,
+      },
+    );
+    expect(upload.status).toBe(200);
+    const uploaded = (await upload.json()) as {
+      attachment: { id: string; source: string; filename: string };
+    };
+    expect(uploaded.attachment.source).toBe("supplier");
+
+    // A merchant-side upload on the same ticket is NOT referencable by the
+    // supplier's update (source scoping) — the whole update is rejected.
+    const [merchantRow] = await raw.db
+      .insert(ticketAttachments)
+      .values({
+        id: randomUUID(),
+        tenantId,
+        ticketId,
+        source: "merchant",
+        filename: "internal.png",
+        contentType: "image/png",
+        sizeBytes: 5,
+        storageKey: `upload/${tenantId}/${ticketId}/internal.png`,
+      })
+      .returning({ id: ticketAttachments.id });
+    const crossSource = await post(
+      `/dashboard/supplier/tickets/${escId}/update`,
+      { note: "with someone else's file", attachmentIds: [merchantRow!.id] },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(crossSource.status).toBe(400);
+    expect(await crossSource.json()).toEqual({ error: "attachment_not_found" });
+
+    // The real update, referencing the supplier's own upload.
+    const update = await post(
+      `/dashboard/supplier/tickets/${escId}/update`,
+      {
+        note: "Replacement shipped; label attached.",
+        attachmentIds: [uploaded.attachment.id],
+      },
+      supplierUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(update.status).toBe(200);
+
+    const [ticketRow] = await raw.db
+      .select({ context: tickets.context })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    const supplierUpdate = (ticketRow?.context as Record<string, unknown>)[
+      "supplierUpdate"
+    ] as { attachments?: ReadonlyArray<{ id: string; filename: string }> };
+    expect(supplierUpdate.attachments).toEqual([
+      { id: uploaded.attachment.id, filename: "replacement-label.png" },
+    ]);
+
+    // Upload onto the now-resolved escalation is refused.
+    const late = await fetch(
+      `${baseUrl}/dashboard/supplier/tickets/${escId}/attachments?filename=late.png`,
+      {
+        method: "POST",
+        headers: {
+          ...headers(supplierUuid, "wh@acme.com", tenantId),
+          "content-type": "image/png",
+        },
+        body: png,
+      },
+    );
+    expect(late.status).toBe(409);
   });
 
   // The agent must ALWAYS be re-engaged by a supplier update, even when the

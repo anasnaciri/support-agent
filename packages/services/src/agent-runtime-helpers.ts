@@ -600,6 +600,21 @@ export const buildInitialMessages = (
         }`,
       )}`,
     );
+    // Files the supplier uploaded with the update. The ids are trusted
+    // runtime-validated handles (ticket-scoped rows); the filenames are
+    // supplier-controlled, so they stay inside an untrusted fence. The agent
+    // forwards a file by passing its id in conversation.reply attachmentIds —
+    // ids resolve only within this ticket, so a prompt-injected id can at
+    // worst re-attach a file already on the ticket.
+    const updateAttachments = event.payload.attachments ?? [];
+    if (updateAttachments.length > 0) {
+      const ids = updateAttachments.map((a) => a.id).join(", ");
+      parts.push(
+        `The supplier also uploaded ${updateAttachments.length} file(s) for the customer. To include them in your reply, pass these attachment ids in conversation.reply's attachmentIds: ${ids}. Filenames (untrusted): ${wrapUntrusted(
+          updateAttachments.map((a) => a.filename).join(", "),
+        )}`,
+      );
+    }
     if (ticketRow.threadId) {
       parts.push(
         "Send the customer reply with conversation.reply, using the threadId and customer address from the header above.",

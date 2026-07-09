@@ -126,6 +126,7 @@ const CARD_KEYS: ReadonlySet<string> = new Set([
   "notes",
   "supplierNote",
   "supplierProposedResolution",
+  "supplierAttachments",
 ]);
 
 /** Normalize an order ref for equality: trim, strip a leading #, lowercase. */
@@ -309,6 +310,22 @@ export const buildContextRows = (
       text: supplierProposedResolution,
       multiline: true,
     });
+  // Files the supplier uploaded with the update ({ id, filename }[]); only
+  // the filenames matter to the operator — ids are internal handles.
+  const supplierAttachments = supplierUpdate
+    ? supplierUpdate["attachments"]
+    : null;
+  if (Array.isArray(supplierAttachments) && supplierAttachments.length > 0) {
+    const names = supplierAttachments
+      .map((a) => (a && typeof a === "object" ? asString((a as Record<string, unknown>)["filename"]) : null))
+      .filter((n): n is string => n !== null && n.length > 0);
+    if (names.length > 0)
+      rows.push({
+        key: "supplierAttachments",
+        label: "Supplier files",
+        text: names.join(", "),
+      });
+  }
 
   // Anything the agent or runtime stamped that has no bespoke row above —
   // humanize the key and stringify the value so it's never silently hidden,

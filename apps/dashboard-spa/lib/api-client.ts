@@ -1387,6 +1387,8 @@ export const api = {
     input: {
       readonly note: string;
       readonly proposedResolution?: string | null;
+      /** Ids from uploadSupplierAttachment, sent along with the update. */
+      readonly attachmentIds?: ReadonlyArray<string>;
     },
   ): Promise<CallResult> =>
     call(`/supplier/tickets/${encodeURIComponent(id)}/update`, {
@@ -1395,6 +1397,44 @@ export const api = {
       ctx,
       on403: "return",
     }),
+
+  // Upload a file (raw bytes) for a supplier update — scoped to the supplier's
+  // own open escalation. Mirrors uploadTicketAttachment.
+  uploadSupplierAttachment: async (
+    ctx: CallCtx,
+    escalationId: string,
+    file: File,
+  ): Promise<
+    | { readonly kind: "uploaded"; readonly attachment: TicketAttachmentSummary }
+    | { readonly kind: "rejected"; readonly error: string }
+  > => {
+    const doUpload = () =>
+      fetch(
+        `${apiBase()}/dashboard/supplier/tickets/${encodeURIComponent(escalationId)}/attachments?filename=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            ...(ctx.workspaceId ? { "x-workspace-id": ctx.workspaceId } : {}),
+          },
+          body: file,
+        },
+      );
+    let res = await doUpload();
+    if (res.status === 401 && (await tryRefresh())) res = await doUpload();
+    if (res.status === 401) throw new UnauthorizedError();
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        attachment: TicketAttachmentSummary;
+      };
+      return { kind: "uploaded", attachment: body.attachment };
+    }
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    return { kind: "rejected", error: body?.error ?? `status_${res.status}` };
+  },
 
   supplierUpdateTracking: (
     ctx: CallCtx,

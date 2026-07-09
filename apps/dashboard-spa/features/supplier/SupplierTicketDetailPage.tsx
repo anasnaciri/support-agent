@@ -1,13 +1,16 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
   Pencil,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { TicketAttachmentSummary } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
@@ -34,6 +37,22 @@ import { Button } from "@/components/ui/button";
 
 /** Width reserved for the context card's invisible column (card + gutters). */
 const CONTEXT_COLUMN = "md:w-80";
+
+// Mirrors the server allowlist so a wrong pick fails at the picker; the
+// server re-validates (magic-byte sniff) regardless.
+const ATTACHMENT_ACCEPT =
+  "image/png,image/jpeg,image/gif,image/webp,application/pdf";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 8;
+
+const uploadErrorMessage = (error: string): string => {
+  if (error === "unsupported_type")
+    return "Only images (PNG, JPEG, GIF, WEBP) and PDFs can be attached.";
+  if (error === "too_large") return "Files are limited to 10 MB.";
+  if (error === "content_mismatch")
+    return "That file's contents don't match its type, so it can't be attached.";
+  return "Couldn't upload the file. Please try again.";
+};
 
 const formatDateTime = (date: string): string =>
   date.slice(0, 16).replace("T", " ");
@@ -222,6 +241,40 @@ export function SupplierTicketDetailPage() {
   const [note, setNote] = useState("");
   const [proposedResolution, setProposedResolution] = useState("");
   const [contextOpen, setContextOpen] = useState(true);
+  // Files staged for this update — uploaded immediately, referenced by id on
+  // submit. The support agent can forward them to the customer.
+  const [attachments, setAttachments] = useState<TicketAttachmentSummary[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const picked = [...files];
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (attachments.length + picked.length > MAX_ATTACHMENTS) {
+      toast.warning(`An update can carry at most ${MAX_ATTACHMENTS} files.`);
+      return;
+    }
+    if (picked.some((f) => f.size > MAX_ATTACHMENT_BYTES)) {
+      toast.warning(uploadErrorMessage("too_large"));
+      return;
+    }
+    setUploading(true);
+    try {
+      for (const file of picked) {
+        const result = await api.uploadSupplierAttachment(ctx, id, file);
+        if (result.kind === "rejected") {
+          toast.warning(uploadErrorMessage(result.error));
+          return;
+        }
+        setAttachments((prev) => [...prev, result.attachment]);
+      }
+    } catch {
+      toast.warning(uploadErrorMessage("failed"));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const { data: detail, isLoading } = useQuery({
     queryKey: qk.supplierTicket(ctx.workspaceId, id),
@@ -234,6 +287,9 @@ export function SupplierTicketDetailPage() {
       api.supplierUpdate(ctx, id, {
         note,
         proposedResolution: proposedResolution.trim() ? proposedResolution : null,
+        ...(attachments.length > 0
+          ? { attachmentIds: attachments.map((a) => a.id) }
+          : {}),
       }),
     onSuccess: (res) => {
       if (res.status !== 200) {
@@ -405,6 +461,33 @@ export function SupplierTicketDetailPage() {
                   for them, not the customer.
                 </p>
               </div>
+              {attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {attachments.map((a) => (
+                    <span
+                      key={a.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-0.5 text-xs"
+                    >
+                      <Paperclip className="size-3 shrink-0" aria-hidden />
+                      <span className="max-w-[14rem] truncate">
+                        {a.filename}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${a.filename}`}
+                        onClick={() =>
+                          setAttachments((prev) =>
+                            prev.filter((x) => x.id !== a.id),
+                          )
+                        }
+                        className="ml-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <X className="size-3" aria-hidden />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="flex items-end gap-3">
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <Label htmlFor="proposedResolution">
@@ -419,7 +502,25 @@ export function SupplierTicketDetailPage() {
                     placeholder="e.g. reship, refund, wait 3 days"
                   />
                 </div>
-                <Button type="submit" disabled={update.isPending}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ATTACHMENT_ACCEPT}
+                  multiple
+                  className="hidden"
+                  onChange={(e) => void onPickFiles(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || attachments.length >= MAX_ATTACHMENTS}
+                  title="Attach a photo or document (label, invoice, proof of delivery)"
+                >
+                  <Paperclip aria-hidden />
+                  {uploading ? "Uploading…" : "Attach"}
+                </Button>
+                <Button type="submit" disabled={update.isPending || uploading}>
                   {update.isPending ? "Submitting…" : "Submit update"}
                 </Button>
               </div>

@@ -73,19 +73,29 @@ export const makeSupplierRoutes = (app: FastifyInstance, ctx: RouteContext) => {
     );
   };
 
+  // `opts.bodyLimit` raises the per-route cap above the global 1 MiB
+  // (attachment uploads).
   const supplierPost = (
     path: string,
     summary: string,
     handler: ApiHandler,
     permission: RbacPermissionId,
+    opts?: { readonly bodyLimit?: number },
   ): void => {
-    app.post(path, { schema: { tags: ["supplier"], summary } }, async (req, res) => {
-      if (!(await enforceSupplierPermission(cfg, layer, req, res, permission))) {
+    app.post(
+      path,
+      {
+        schema: { tags: ["supplier"], summary },
+        ...(opts?.bodyLimit ? { bodyLimit: opts.bodyLimit } : {}),
+      },
+      async (req, res) => {
+        if (!(await enforceSupplierPermission(cfg, layer, req, res, permission))) {
+          return res;
+        }
+        await handler(cfg, layer, req, res);
         return res;
-      }
-      await handler(cfg, layer, req, res);
-      return res;
-    });
+      },
+    );
   };
 
   return { supplierGet, supplierPost };
