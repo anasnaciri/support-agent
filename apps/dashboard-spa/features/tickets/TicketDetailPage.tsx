@@ -797,6 +797,8 @@ export function TicketDetailPage() {
                     reason: "no_thread",
                   }
                 }
+                workspaceId={ctx.workspaceId}
+                ticketId={id}
               />
             </div>
           </ChatScrollArea>

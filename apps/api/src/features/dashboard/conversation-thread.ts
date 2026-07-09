@@ -186,10 +186,42 @@ export const stripQuotedText = (text: string): string => {
   return lines.join("\n").trim();
 };
 
+/**
+ * One row of the ticket's attachment index, narrowed to what the thread
+ * projection needs. `messageId` is set for files that arrived on an inbound
+ * message; uploads staged for a reply carry null and never appear in a bubble.
+ */
+export interface ThreadAttachmentIndexRow {
+  readonly id: string;
+  readonly messageId: string | null;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+}
+
+/**
+ * Project a connector thread for the dashboard, merging in the ticket's
+ * attachment index.
+ *
+ * Connectors report `attachments: []` on a fetched thread, and Gmail's
+ * per-message attachmentId is not stable across fetches, so the index — written
+ * once when the message bound to the ticket — is the only source of previewable
+ * files. Rows are matched onto messages by the provider message id they
+ * arrived on. An attachment a connector DOES report (no index row) keeps its
+ * metadata with a null id: visible as an inert badge, not previewable.
+ */
 export const projectConversationThread = (
   thread: ConversationThread,
+  attachmentIndex: ReadonlyArray<ThreadAttachmentIndexRow> = [],
 ): DashboardConversationThread => {
   const seenMessageIds = new Set<string>();
+  const indexByMessage = new Map<string, ThreadAttachmentIndexRow[]>();
+  for (const row of attachmentIndex) {
+    if (!row.messageId) continue;
+    const bucket = indexByMessage.get(row.messageId);
+    if (bucket) bucket.push(row);
+    else indexByMessage.set(row.messageId, [row]);
+  }
   return {
     subject: thread.subject,
     participants: thread.participants.map(({ name, email }) => ({ name, email })),
@@ -208,13 +240,16 @@ export const projectConversationThread = (
             ? sanitizeEmailHtml(message.bodyHtml)
             : null,
           sentAt: message.sentAt.toISOString(),
-          attachments: message.attachments.map(
-            ({ filename, contentType, sizeBytes }) => ({
-              filename,
-              contentType,
-              sizeBytes,
-            }),
-          ),
+          // Indexed files win: they carry the id the preview endpoint needs.
+          // Fall back to whatever the connector reported (id null, inert).
+          attachments: (
+            indexByMessage.get(message.id) ?? message.attachments
+          ).map((attachment) => ({
+            id: "id" in attachment ? attachment.id : null,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            sizeBytes: attachment.sizeBytes,
+          })),
         },
       ];
     }),

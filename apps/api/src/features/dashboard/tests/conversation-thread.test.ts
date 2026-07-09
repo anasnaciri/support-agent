@@ -79,6 +79,7 @@ describe("dashboard conversation thread", () => {
           sentAt: "2026-06-11T10:30:00.000Z",
           attachments: [
             {
+              id: null,
               filename: "photo.jpg",
               contentType: "image/jpeg",
               sizeBytes: 2048,
@@ -86,6 +87,74 @@ describe("dashboard conversation thread", () => {
           ],
         },
       ],
+    });
+  });
+
+  // Previews: connectors report `attachments: []` on a fetched thread (and
+  // Gmail's attachmentId is not stable anyway), so the ticket's attachment
+  // INDEX is what supplies previewable files. Rows carry the message they
+  // arrived on; matching them onto the projected message gives the SPA an
+  // opaque id it can exchange for a signed URL.
+  describe("attachment index merge", () => {
+    const bare = (messageId: string): ConversationThread => ({
+      threadId,
+      subject: "Return request",
+      participants: [{ name: "Customer", email: "customer@example.com" }],
+      messages: [
+        {
+          id: messageId,
+          threadId,
+          direction: "inbound",
+          from: { name: "Customer", email: "customer@example.com" },
+          to: [{ name: null, email: "support@example.com" }],
+          subject: "Return request",
+          bodyText: "Please help",
+          bodyHtml: null,
+          sentAt: new Date("2026-06-11T10:30:00.000Z"),
+          // What every connector actually returns today.
+          attachments: [],
+        },
+      ],
+    });
+
+    const indexed = (messageId: string) => [
+      {
+        id: "att-1",
+        messageId,
+        filename: "damage.jpg",
+        contentType: "image/jpeg",
+        sizeBytes: 4096,
+      },
+    ];
+
+    it("attaches indexed files to the message they arrived on", () => {
+      const out = projectConversationThread(bare("message-1"), indexed("message-1"));
+      expect(out.messages[0]?.attachments).toEqual([
+        {
+          id: "att-1",
+          filename: "damage.jpg",
+          contentType: "image/jpeg",
+          sizeBytes: 4096,
+        },
+      ]);
+    });
+
+    it("leaves a message untouched when the index has nothing for it", () => {
+      const out = projectConversationThread(bare("message-1"), indexed("message-2"));
+      expect(out.messages[0]?.attachments).toEqual([]);
+    });
+
+    it("ignores index rows that belong to no message (unsent uploads)", () => {
+      const out = projectConversationThread(bare("message-1"), [
+        { ...indexed("message-1")[0]!, messageId: null },
+      ]);
+      expect(out.messages[0]?.attachments).toEqual([]);
+    });
+
+    it("works with no index at all (back-compat)", () => {
+      expect(projectConversationThread(bare("message-1")).messages[0]?.attachments).toEqual(
+        [],
+      );
     });
   });
 

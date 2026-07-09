@@ -1249,6 +1249,29 @@ export const api = {
     return { kind: "rejected", error: body?.error ?? `status_${res.status}` };
   },
 
+  // A short-lived signed URL for one attachment. The blob is fetched by the
+  // browser straight from storage, so bytes never stream through the API.
+  // Not cached — the URL expires in minutes.
+  ticketAttachmentUrl: (
+    ctx: CallCtx,
+    ticketId: string,
+    attachmentId: string,
+  ): Promise<{
+    readonly url: string;
+    readonly expiresInSeconds: number;
+    readonly filename: string;
+    readonly contentType: string;
+  }> =>
+    okBody(
+      `/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}/url`,
+      ctx,
+    ) as Promise<{
+      readonly url: string;
+      readonly expiresInSeconds: number;
+      readonly filename: string;
+      readonly contentType: string;
+    }>,
+
   // The ticket's attachment index (uploads + supplier files) for the
   // composer's picker.
   ticketAttachments: async (

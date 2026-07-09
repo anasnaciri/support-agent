@@ -5,16 +5,15 @@ import type {
   DashboardConversationParticipant,
 } from "@support-agent/dashboard-contracts";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import {
   chatBubbleChromeClass,
   conversationThreadUnavailableView,
-  formatAttachmentSize,
 } from "@/lib/ticket-timeline";
 import { isOptimisticMessage } from "@/lib/optimistic-reply";
+import { MessageAttachments } from "./AttachmentPreview";
 
 const formatDateTime = (date: string): string =>
   date.slice(0, 16).replace("T", " ");
@@ -22,7 +21,15 @@ const formatDateTime = (date: string): string =>
 const senderLabel = (p: DashboardConversationParticipant): string =>
   p.name && p.name.length > 0 ? p.name : p.email;
 
-const Bubble = ({ message }: { readonly message: DashboardConversationMessage }) => {
+const Bubble = ({
+  message,
+  workspaceId,
+  ticketId,
+}: {
+  readonly message: DashboardConversationMessage;
+  readonly workspaceId: string;
+  readonly ticketId: string;
+}) => {
   const outbound = message.direction === "outbound";
   // An optimistic (not-yet-confirmed) reply pulses and reads "Sending…" until the
   // real message replaces it on refetch (or is rolled back on failure).
@@ -71,22 +78,12 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
             {message.bodyText || "(empty message)"}
           </p>
         )}
-        {message.attachments.length > 0 ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {message.attachments.map((attachment, index) => (
-              <Badge
-                key={`${message.id}-attachment-${index}`}
-                variant="outline"
-                className={cn(
-                  "font-normal",
-                  outbound && "border-primary-foreground/40 text-primary-foreground",
-                )}
-              >
-                {attachment.filename} · {formatAttachmentSize(attachment.sizeBytes)}
-              </Badge>
-            ))}
-          </div>
-        ) : null}
+        <MessageAttachments
+          workspaceId={workspaceId}
+          ticketId={ticketId}
+          attachments={message.attachments}
+          outbound={outbound}
+        />
       </div>
     </div>
   );
@@ -100,8 +97,12 @@ const Bubble = ({ message }: { readonly message: DashboardConversationMessage })
  */
 export const ChatThread = ({
   result,
+  workspaceId,
+  ticketId,
 }: {
   readonly result: TicketConversationThreadResult;
+  readonly workspaceId: string;
+  readonly ticketId: string;
 }) => {
   if (result.status === "unavailable") {
     const view = conversationThreadUnavailableView(result.reason);
@@ -133,7 +134,12 @@ export const ChatThread = ({
   return (
     <div className="flex flex-col gap-4">
       {result.thread.messages.map((message) => (
-        <Bubble key={message.id} message={message} />
+        <Bubble
+          key={message.id}
+          message={message}
+          workspaceId={workspaceId}
+          ticketId={ticketId}
+        />
       ))}
     </div>
   );

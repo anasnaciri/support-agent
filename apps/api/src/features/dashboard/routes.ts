@@ -15,6 +15,7 @@ import {
   handleDashboardTicketReply,
   handleDashboardTicketAttachmentUpload,
   handleDashboardTicketAttachments,
+  handleDashboardTicketAttachmentUrl,
   handleDashboardEditTicketDetails,
   handleDashboardEditShippingAddress,
   handleDashboardEscalateSupplier,
@@ -351,6 +352,12 @@ export const registerDashboardRoutes = (
     "/dashboard/tickets/:id/attachments",
     "The ticket's attachment index (uploads + ingested files)",
     handleDashboardTicketAttachments,
+    "tickets.view",
+  );
+  dashboardGet(
+    "/dashboard/tickets/:id/attachments/:attachmentId/url",
+    "A short-lived signed URL for one of the ticket's attachments (preview)",
+    handleDashboardTicketAttachmentUrl,
     "tickets.view",
   );
   dashboardPost(

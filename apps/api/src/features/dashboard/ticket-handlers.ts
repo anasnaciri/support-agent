@@ -216,6 +216,13 @@ export const handleDashboardTicketConversationThread = async (
         const connections = yield* connectorStore.listForTenant(
           TenantId(auth.tenantId),
         );
+        // The ticket's attachment index supplies previewable files: connectors
+        // report none on a fetched thread. Best-effort — a store hiccup costs
+        // the previews, not the conversation.
+        const attachmentStore = yield* TicketAttachmentStore;
+        const attachmentIndex = yield* attachmentStore
+          .listForTicket(TenantId(auth.tenantId), TicketId(id))
+          .pipe(Effect.orElseSucceed(() => []));
         const threadResult = yield* resolveTicketConversationThread(
           ticketRow.mailbox,
           provider,
@@ -236,7 +243,10 @@ export const handleDashboardTicketConversationThread = async (
               resolution.ok
                 ? {
                     status: "available" as const,
-                    thread: projectConversationThread(resolution.thread),
+                    thread: projectConversationThread(
+                      resolution.thread,
+                      attachmentIndex,
+                    ),
                   }
                 : {
                     status: "unavailable" as const,
@@ -1590,6 +1600,92 @@ export const handleDashboardTicketAttachments = async (
   );
   if (rows === null) return sendJson(res, 502, { error: "list_failed" });
   return sendJson(res, 200, { attachments: rows.map(toAttachmentSummary) });
+};
+
+/**
+ * How long a preview URL stays valid. Long enough for the browser to load the
+ * image (and for the manager to open the lightbox they just clicked), short
+ * enough that a URL copied out of devtools or a proxy log is worthless within
+ * minutes. Blobs are fetched by the browser directly; bytes never stream
+ * through the API.
+ */
+export const ATTACHMENT_URL_TTL_SECONDS = 300;
+
+/**
+ * `ticket_attachments.id` is a uuid column, so a non-uuid path segment would
+ * reach the cast and surface as a Postgres error (a 502 + an error log line for
+ * what is really just an id that resolves to nothing). Shape-check first.
+ */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+// GET /dashboard/tickets/:id/attachments/:attachmentId/url — a short-lived
+// signed URL for one attachment. The id is resolved strictly within
+// (tenant, ticket) by the store, so a tampered id can never mint a URL for
+// another tenant's — or another ticket's — blob.
+//
+// NOTE: the signed URL necessarily embeds the object's path (that is what is
+// being signed). The invariant is that a storage key is never ACCEPTED from a
+// client — ids are the only inbound handle — not that the key is unguessable.
+export const handleDashboardTicketAttachmentUrl = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const { id, attachmentId } = req.params as {
+    id: string;
+    attachmentId: string;
+  };
+  if (!UUID_RE.test(attachmentId)) {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  const tenantId = TenantId(auth.tenantId);
+  const ticketId = TicketId(id);
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const tickets = yield* TicketRepository;
+        const ticket = yield* tickets
+          .getById(ticketId, tenantId)
+          .pipe(Effect.either);
+        if (ticket._tag === "Left") return { kind: "not_found" as const };
+        const store = yield* TicketAttachmentStore;
+        const rows = yield* store.getByIds(tenantId, ticketId, [attachmentId]);
+        const row = rows[0];
+        if (!row) return { kind: "not_found" as const };
+        const blob = yield* BlobStorage;
+        const url = yield* blob.presignGetUrl(
+          row.storageKey,
+          ATTACHMENT_URL_TTL_SECONDS,
+        );
+        return { kind: "ok" as const, url, row };
+      }).pipe(
+        Effect.catchAll((cause) =>
+          Effect.succeed({ kind: "failed" as const, cause }),
+        ),
+      ),
+      layer,
+    ),
+  );
+  if (outcome.kind === "not_found") {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  if (outcome.kind === "failed") {
+    req.log.error(
+      { err: String(outcome.cause) },
+      "attachment url presign failed",
+    );
+    return sendJson(res, 502, { error: "presign_failed" });
+  }
+  return sendJson(res, 200, {
+    url: outcome.url,
+    expiresInSeconds: ATTACHMENT_URL_TTL_SECONDS,
+    filename: outcome.row.filename,
+    contentType: outcome.row.contentType,
+  });
 };
 
 // A conversation.reply approval's stored input (the manager-approved draft).

@@ -171,4 +171,89 @@ describeIfDb("apps/api — /dashboard ticket attachment endpoints (integration)"
     );
     expect(res.status).toBe(404);
   });
+
+  // Previews: the thread renders an <img> against a short-lived signed URL.
+  // The blob is never streamed through the API, and the storage key it is
+  // minted from never reaches the client.
+  describe("GET /dashboard/tickets/:id/attachments/:attachmentId/url", () => {
+    const uploadOne = async (filename: string): Promise<string> => {
+      const res = await upload(
+        `/dashboard/tickets/${ticketId}/attachments?filename=${filename}`,
+        png,
+        "image/png",
+      );
+      const body = (await res.json()) as { attachment: { id: string } };
+      return body.attachment.id;
+    };
+
+    it("mints a short-TTL signed URL for an attachment on this ticket", async () => {
+      const id = await uploadOne("preview.png");
+      const res = await fetch(
+        `${baseUrl}/dashboard/tickets/${ticketId}/attachments/${id}/url`,
+        { headers: dashboardAuthHeaders(orgId) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        url: string;
+        expiresInSeconds: number;
+        contentType: string;
+        filename: string;
+      };
+      expect(body.url).toContain("memory://"); // BlobStorageTest's presign shape
+      expect(body.expiresInSeconds).toBeGreaterThan(0);
+      expect(body.expiresInSeconds).toBeLessThanOrEqual(300);
+      expect(body.contentType).toBe("image/png");
+      expect(body.filename).toBe("preview.png");
+    });
+
+    it("404s for an attachment id from another ticket (no cross-ticket reach)", async () => {
+      const id = await uploadOne("mine.png");
+      // Same tenant, different ticket → the id must not resolve.
+      const otherTicket = randomUUID();
+      await raw!.db.insert(tickets).values({
+        id: otherTicket,
+        tenantId,
+        channel: "email",
+        status: "new",
+        currentAgentId: "support-triage",
+        context: {},
+      });
+      const res = await fetch(
+        `${baseUrl}/dashboard/tickets/${otherTicket}/attachments/${id}/url`,
+        { headers: dashboardAuthHeaders(orgId) },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("404s for an unknown attachment id", async () => {
+      const res = await fetch(
+        `${baseUrl}/dashboard/tickets/${ticketId}/attachments/${randomUUID()}/url`,
+        { headers: dashboardAuthHeaders(orgId) },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    // A non-UUID id used to reach the `uuid` column cast and surface as a
+    // Postgres error → 502 "our fault" + an error log line per request. It is
+    // simply an id that resolves to nothing.
+    it("404s (not 502) for a malformed attachment id", async () => {
+      for (const bogus of ["not-a-uuid", "..%2F..%2Fetc%2Fpasswd", "1"]) {
+        const res = await fetch(
+          `${baseUrl}/dashboard/tickets/${ticketId}/attachments/${bogus}/url`,
+          { headers: dashboardAuthHeaders(orgId) },
+        );
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "not_found" });
+      }
+    });
+
+    it("404s when the ticket belongs to another workspace", async () => {
+      const id = await uploadOne("mine2.png");
+      const res = await fetch(
+        `${baseUrl}/dashboard/tickets/${foreignTicketId}/attachments/${id}/url`,
+        { headers: dashboardAuthHeaders(otherOrgId) },
+      );
+      expect(res.status).toBe(404);
+    });
+  });
 });

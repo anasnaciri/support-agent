@@ -238,6 +238,14 @@ export interface DashboardConversationParticipant {
 }
 
 export interface DashboardConversationAttachment {
+  /**
+   * The `ticket_attachments` row id, when the file is indexed on the ticket —
+   * exchange it at `/dashboard/tickets/:id/attachments/:attachmentId/url` for
+   * a short-lived signed URL to preview or download it. `null` for an
+   * attachment a connector reported but we never stored bytes for; those show
+   * as an inert badge.
+   */
+  readonly id: string | null;
   readonly filename: string;
   readonly contentType: string;
   readonly sizeBytes: number;
