@@ -929,6 +929,23 @@ export interface ResolutionPolicyView {
 // ============================================================
 
 /**
+ * `fulfillmentTrackingInfoUpdate` accepts ANY ONE of Shopify's three
+ * fulfillment-order write scopes. We request only the two that can apply to
+ * this app: `write_merchant_managed_fulfillment_orders` (the merchant created
+ * the fulfillment) and `write_third_party_fulfillment_orders` (a supplier /
+ * 3PL did). The third, `write_assigned_fulfillment_orders`, is for apps
+ * registered as a Shopify fulfillment service — which this app is not — so
+ * requesting it would widen the merchant's consent screen for nothing.
+ */
+export const SHOPIFY_FULFILLMENT_TRACKING_SCOPES = [
+  "write_merchant_managed_fulfillment_orders",
+  "write_third_party_fulfillment_orders",
+] as const;
+
+export const SHOPIFY_FULFILLMENT_TRACKING_PERMISSION =
+  "fulfill_and_ship_orders" as const;
+
+/**
  * Whether `required` is covered by the `granted` scope list for a provider.
  * The single source of truth for both the runtime permission precheck
  * (`@support-agent/services`) and the dashboard's integrations capability grid.

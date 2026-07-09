@@ -1,6 +1,7 @@
 import type { Permission } from "@support-agent/agent-core";
 import {
   isConnectorScopeGranted,
+  SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
   type AgentDto,
   type AgentOverrideRow,
   type CatalogResponse,
@@ -193,6 +194,8 @@ export const capabilitiesForProvider = (
  *    pickup-locations tool, so it isn't repeated here.
  *  - The post-connect knowledge-base import job reads `read_legal_policies`
  *    (shipping/refund policies) and `read_online_store_pages` (About/Contact/FAQ).
+ *  - Supplier portal tracking edits call `fulfillmentTrackingInfoUpdate`,
+ *    which needs fulfillment-order write scopes.
  */
 const PLATFORM_CAPABILITIES: Readonly<
   Record<string, ReadonlyArray<ConnectorCapability>>
@@ -207,6 +210,11 @@ const PLATFORM_CAPABILITIES: Readonly<
       tool: "platform:shopify.policy_import",
       label: "Import store policies & pages",
       scopes: ["read_legal_policies", "read_online_store_pages"],
+    },
+    {
+      tool: "platform:shopify.supplier_tracking",
+      label: "Update shipment tracking from supplier portal",
+      scopes: SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
     },
   ],
 };

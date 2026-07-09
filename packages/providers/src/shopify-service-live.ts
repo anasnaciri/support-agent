@@ -947,7 +947,7 @@ type OrderUpdatePayload = {
 // GET_FULFILLMENT_QUERY so the payload reuses `mapFulfillment`. NOTE the
 // payload's `userErrors` is Shopify's base `UserError` — selecting `code`
 // would invalidate the whole mutation (same trap as `orderUpdate` above).
-// Gated by `write_fulfillments`.
+// Gated by Shopify fulfillment-order write scopes.
 const FULFILLMENT_TRACKING_UPDATE_MUTATION = `
   mutation FulfillmentTrackingInfoUpdate($fulfillmentId: ID!, $trackingInfoInput: FulfillmentTrackingInput!, $notifyCustomer: Boolean) {
     fulfillmentTrackingInfoUpdate(

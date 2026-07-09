@@ -119,6 +119,12 @@ export const trackingEditFeedback = (
         message:
           "This order has several shipments and we can't tell which one you mean, so the tracking number wasn't changed. Include it in your update below instead.",
       };
+    case "shopify_permission_required":
+      return {
+        kind: "error",
+        message:
+          "The store connection doesn't allow tracking changes yet, so the tracking number wasn't changed. Include it in your update below instead.",
+      };
     default:
       return {
         kind: "error",

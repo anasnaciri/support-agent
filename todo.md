@@ -919,11 +919,34 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       notify-and-proceed is enforced after gated supplier actions.
 - [ ] Keep supplier access binding-based; never fall back to org membership for
       supplier portal authorization.
-- [ ] Supplier tracking edit needs the `write_fulfillments` Shopify scope —
-      add it to the Partner Dashboard "Required access scopes" (pilot custom
-      apps + SaaS app). Stores that haven't re-authorized surface the failure
-      as a sanitized 502 toast; consider a capability-grid row like
-      `read_inventory`'s.
+- [x] Supplier tracking edit Shopify access fixed in code (2026-07-09): the
+      old follow-up named obsolete `write_fulfillments`, which was never in ANY
+      scope list — so the portal's tracking edit could never have been
+      authorized on any install. Current Shopify `fulfillmentTrackingInfoUpdate`
+      takes any ONE of `write_assigned_fulfillment_orders` /
+      `write_merchant_managed_fulfillment_orders` /
+      `write_third_party_fulfillment_orders`, plus the Shopify staff-user
+      permission `fulfill_and_ship_orders`. We request only the latter two —
+      `write_assigned_fulfillment_orders` is for apps registered as a Shopify
+      fulfillment service, which this app is not. Added them to
+      `DEFAULT_SHOPIFY_SCOPES` + `shopify.app.toml`, added a Shopify capability
+      grid row ("Update shipment tracking from supplier portal"), and classify
+      that denial as `shopify_permission_required` so the supplier sees a
+      stable "store connection doesn't allow tracking changes yet" message
+      instead of a generic retry. Verified with focused API/SPA regressions,
+      dashboard-contracts build, SPA build, and `pnpm build`.
+- [ ] Deploy updated Shopify app scopes, then reauthorize connected stores.
+      NOTE `DEFAULT_SHOPIFY_SCOPES` and `shopify.app.toml` request NOTHING at
+      install time — `buildInstallUrl` sends no `scope=` param, so Shopify reads
+      the app-config scopes. The toml only binds once `shopify app deploy` runs
+      (which overwrites the dev dashboard); otherwise the dashboard field is the
+      live value and the toml is documentation. Per-tenant pilot apps each have
+      their own app + own dashboard — the toml points at one `client_id` only,
+      so there is no fan-out and each pilot app must be updated individually.
+      Existing tokens keep failing until the merchant re-grants (Shopify
+      auto-prompts on the next install visit), and the authorizing staff user
+      must hold `fulfill_and_ship_orders` — a user permission, not a scope, so
+      no config change can grant it.
 
 ### Dashboard And SPA
 

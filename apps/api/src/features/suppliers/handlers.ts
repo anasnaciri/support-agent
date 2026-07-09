@@ -428,7 +428,8 @@ export const handleSupplierTracking = async (
   const status =
     outcome.kind === "saved"
       ? 200
-      : outcome.kind === "update_failed"
+      : outcome.kind === "update_failed" ||
+          outcome.kind === "shopify_permission_required"
         ? 502
         : 409;
   return sendJson(

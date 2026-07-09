@@ -216,10 +216,15 @@ describe("platformCapabilitiesForProvider", () => {
   it("surfaces Shopify features that use scopes no agent tool declares", () => {
     const caps = platformCapabilitiesForProvider("shopify");
     // Restock needs write_inventory (no tool claims it); policy/page import
-    // needs both read_legal_policies and read_online_store_pages.
+    // needs both read_legal_policies and read_online_store_pages; supplier
+    // tracking edits need fulfillment-order write scopes.
     expect(caps.map((c) => c.scopes)).toEqual([
       ["write_inventory"],
       ["read_legal_policies", "read_online_store_pages"],
+      [
+        "write_merchant_managed_fulfillment_orders",
+        "write_third_party_fulfillment_orders",
+      ],
     ]);
   });
 

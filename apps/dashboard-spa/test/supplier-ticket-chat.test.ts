@@ -160,4 +160,19 @@ describe("trackingEditFeedback", () => {
     expect(fb.message).not.toContain("ShopifyAuthFailed");
     expect(trackingEditFeedback(500, null).kind).toBe("error");
   });
+
+  it("explains a store permission issue without asking the supplier to retry", () => {
+    const fb = trackingEditFeedback(502, {
+      kind: "shopify_permission_required",
+      requiredScopes: [
+        "write_merchant_managed_fulfillment_orders",
+        "write_third_party_fulfillment_orders",
+      ],
+      requiredPermission: "fulfill_and_ship_orders",
+    });
+    expect(fb.kind).toBe("error");
+    expect(fb.message).toMatch(/store connection/i);
+    expect(fb.message).toMatch(/update below/i);
+    expect(fb.message).not.toMatch(/try again/i);
+  });
 });

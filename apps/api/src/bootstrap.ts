@@ -55,6 +55,7 @@ import {
   TrackingServiceLive,
   UrlFetchServiceLive,
 } from "@support-agent/providers";
+import { SHOPIFY_FULFILLMENT_TRACKING_SCOPES } from "@support-agent/dashboard-contracts";
 import { workosJwksUrl } from "./auth/dashboard-jwt.js";
 
 // ============================================================
@@ -109,6 +110,13 @@ export interface ShopifyAppConfig {
  *                             install without them still gets the refund modal,
  *                             just without restocking — it must re-OAuth to
  *                             grant them.
+ *      - `write_merchant_managed_fulfillment_orders` /
+ *        `write_third_party_fulfillment_orders` → supplier portal tracking
+ *                             edits via Shopify fulfillmentTrackingInfoUpdate,
+ *                             which takes any ONE of these. Shopify also
+ *                             requires the authorizing staff user to hold the
+ *                             `fulfill_and_ship_orders` user permission — not
+ *                             a scope, so no config here can grant it.
  *      - `read_legal_policies` → post-connect shop-policy import (seeds the
  *                             knowledge base with the store's shipping +
  *                             refund policy text). Not tied to a tool — the
@@ -135,6 +143,7 @@ export const DEFAULT_SHOPIFY_SCOPES: ReadonlyArray<string> = [
   "read_locations",
   "read_inventory",
   "write_inventory",
+  ...SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
 ];
 
 export interface GoogleAppConfig {

@@ -80,7 +80,16 @@ embedded = false
 # getOrderRefundContext reads the suggested restock location, and refundOrder
 # restocks the returned units through refundCreate. Best-effort — an install
 # without them still gets the refund modal, minus restocking, until re-OAuth.
-scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations,read_inventory,write_inventory"
+#
+# write_merchant_managed_fulfillment_orders / write_third_party_fulfillment_orders
+# → supplier portal tracking edits via fulfillmentTrackingInfoUpdate, which
+# accepts any ONE of Shopify's three fulfillment-order write scopes. We skip the
+# third (`write_assigned_fulfillment_orders`): it is for apps registered as a
+# Shopify fulfillment service, which this app is not. Shopify ALSO requires the
+# installing/admin user to hold the `fulfill_and_ship_orders` user permission —
+# that is a staff permission inside the merchant's admin, not an app scope, so
+# no config here can grant it.
+scopes = "read_orders,read_customers,read_products,write_orders,write_discounts,read_legal_policies,read_online_store_pages,read_locations,read_inventory,write_inventory,write_merchant_managed_fulfillment_orders,write_third_party_fulfillment_orders"
 
 [auth]
 redirect_urls = [

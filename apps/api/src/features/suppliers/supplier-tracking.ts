@@ -21,6 +21,11 @@
 // only an order with exactly ONE fulfillment is safe to update; anything
 // else is ambiguous and refused rather than guessed.
 
+import {
+  SHOPIFY_FULFILLMENT_TRACKING_PERMISSION,
+  SHOPIFY_FULFILLMENT_TRACKING_SCOPES,
+} from "@support-agent/dashboard-contracts";
+
 /** The projection of a Shopify fulfillment the picking logic needs. */
 export interface SupplierFulfillmentView {
   readonly id: string;
@@ -43,6 +48,13 @@ export type UpdateSupplierTrackingOutcome =
   | { readonly kind: "order_not_found" }
   | { readonly kind: "no_fulfillment" }
   | { readonly kind: "ambiguous_fulfillment" }
+  | {
+      readonly kind: "shopify_permission_required";
+      readonly requiredScopes: ReadonlyArray<
+        (typeof SHOPIFY_FULFILLMENT_TRACKING_SCOPES)[number]
+      >;
+      readonly requiredPermission: typeof SHOPIFY_FULFILLMENT_TRACKING_PERMISSION;
+    }
   | { readonly kind: "update_failed"; readonly error: string };
 
 export interface UpdateSupplierTrackingOptions {
@@ -89,6 +101,19 @@ const pickFulfillment = (
   return "ambiguous";
 };
 
+const shopifyPermissionDenied = (message: string): boolean => {
+  const m = message.toLowerCase();
+  return (
+    m.includes("fulfillmenttrackinginfoupdate") &&
+    (m.includes("access denied") ||
+      m.includes("required access") ||
+      m.includes(SHOPIFY_FULFILLMENT_TRACKING_PERMISSION) ||
+      SHOPIFY_FULFILLMENT_TRACKING_SCOPES.some((scope) =>
+        m.includes(scope),
+      ))
+  );
+};
+
 export const updateSupplierTracking = async (
   opts: UpdateSupplierTrackingOptions,
 ): Promise<UpdateSupplierTrackingOutcome> => {
@@ -112,9 +137,17 @@ export const updateSupplierTracking = async (
       trackingCompany,
     });
   } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause);
+    if (shopifyPermissionDenied(error)) {
+      return {
+        kind: "shopify_permission_required",
+        requiredScopes: [...SHOPIFY_FULFILLMENT_TRACKING_SCOPES],
+        requiredPermission: SHOPIFY_FULFILLMENT_TRACKING_PERMISSION,
+      };
+    }
     return {
       kind: "update_failed",
-      error: cause instanceof Error ? cause.message : String(cause),
+      error,
     };
   }
 

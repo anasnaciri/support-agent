@@ -411,8 +411,10 @@ export class ShopifyService extends Context.Tag("ShopifyService")<
      * not an agent tool, so no `PermissionService` consultation — the
      * supplier-portal permission gate covers it. Returns the fulfillment
      * as Shopify stored it. Maps `userErrors` → `FulfillmentUpdateFailed`;
-     * structural failures reuse the existing `ShopifyError` tags. Needs
-     * the `write_fulfillments` scope.
+     * structural failures reuse the existing `ShopifyError` tags. Needs one
+     * of Shopify's fulfillment-order write scopes; the app requests all three
+     * supported variants so merchant-managed, assigned-service, and third-party
+     * fulfillment orders are covered.
      */
     readonly updateFulfillmentTracking: (
       tenantId: TenantId,

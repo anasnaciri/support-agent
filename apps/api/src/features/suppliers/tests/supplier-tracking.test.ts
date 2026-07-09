@@ -151,6 +151,31 @@ describe("updateSupplierTracking — failure ordering", () => {
     expect(recorded).toHaveLength(0);
   });
 
+  // The message is Shopify's verbatim denial: it names all THREE fulfillment
+  // -order write scopes as alternatives, including the `assigned` one we
+  // deliberately don't request. We must still classify it, and report back only
+  // the scopes this app actually asks for.
+  it("classifies Shopify fulfillment permission denials", async () => {
+    const { opts, recorded } = harness({
+      update: () =>
+        Promise.reject(
+          new Error(
+            "Shopify rejected the request: Access denied for fulfillmentTrackingInfoUpdate field. Required access: `write_assigned_fulfillment_orders` access scope, `write_merchant_managed_fulfillment_orders` access scope or `write_third_party_fulfillment_orders` access scope. Also: The user must have fulfill_and_ship_orders permission.",
+          ),
+        ),
+    });
+    const outcome = await updateSupplierTracking(opts);
+    expect(outcome).toEqual({
+      kind: "shopify_permission_required",
+      requiredScopes: [
+        "write_merchant_managed_fulfillment_orders",
+        "write_third_party_fulfillment_orders",
+      ],
+      requiredPermission: "fulfill_and_ship_orders",
+    });
+    expect(recorded).toHaveLength(0);
+  });
+
   it("bookkeeping failure never fails a completed store write", async () => {
     const { opts } = harness({
       recordUpdated: () => Promise.reject(new Error("db down")),
