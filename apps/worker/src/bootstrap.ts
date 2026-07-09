@@ -22,6 +22,7 @@ import {
   type ApprovalService,
   type AuditLogService,
   type BlobStorage,
+  type TicketAttachmentStore,
   type TicketLifecycleWriter,
   type TicketRepository,
   type ConnectorConnection,
@@ -118,6 +119,10 @@ export interface WorkerBootstrap {
     | KnowledgeBaseService
     | TransactionRunner
     | BlobStorage
+    // Exposed at the top level (not just provided INTO the runtime) so the
+    // reply-delivery retry cron can resolve a stored draft's attachments and
+    // bind them to the message it re-sends.
+    | TicketAttachmentStore
     | OrgDirectoryService
     | PlatformMailService
     | ApprovalLinkConfig

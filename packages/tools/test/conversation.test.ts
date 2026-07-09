@@ -671,6 +671,7 @@ describe("draft attachmentIds resolution", () => {
     storageKey: "upload/t1/c-att/label.pdf",
     uploadedBy: "supplier-user",
     escalationId: "esc-1",
+    messageId: null,
     usedAt: null,
     createdAt: new Date("2026-07-01T00:00:00Z"),
     ...over,
@@ -749,6 +750,53 @@ describe("draft attachmentIds resolution", () => {
 
   it("marks a sent attachment as used so the GC sweep never reclaims it", async () => {
     expect(await usedAtAfterReply(["att-1"])).toBeInstanceOf(Date);
+  });
+
+  // Without this the file is on the ticket but belongs to no message, so the
+  // thread has nothing to hang it under and the sent attachment is invisible.
+  it("binds a sent attachment to the message it went out on", async () => {
+    const { layer, handle } = env([attachmentRow()]);
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* conversationReply.execute(
+            replyInput(["att-1"]) as never,
+            baseCtx("c-att"),
+          ) as Effect.Effect<unknown, unknown, never>;
+          const store = yield* TicketAttachmentStore;
+          return yield* store.listForTicket(tenantId, TicketId("c-att"));
+        }),
+        layer,
+      ),
+    );
+    // The id the connector reported for the send is the id fetchThread will
+    // report for that same message, so the projection can join on it.
+    expect(handle.sent).toHaveLength(1);
+    expect(rows[0]?.messageId).toBe(handle.sent[0]!.result.id);
+  });
+
+  it("leaves messageId null when the send fails — nothing went out", async () => {
+    const { layer } = env([attachmentRow()]);
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* (
+            conversationReply.execute(
+              // A recipient off the thread is refused before the send.
+              {
+                ...replyInput(["att-1"]),
+                to: [{ name: "Stranger", email: "stranger@elsewhere.com" }],
+              } as never,
+              baseCtx("c-att"),
+            ) as Effect.Effect<unknown, unknown, never>
+          ).pipe(Effect.either);
+          const store = yield* TicketAttachmentStore;
+          return yield* store.listForTicket(tenantId, TicketId("c-att"));
+        }),
+        layer,
+      ),
+    );
+    expect(rows[0]?.messageId).toBeNull();
   });
 
   it("leaves an unresolvable id unused — a rejected draft sends nothing", async () => {

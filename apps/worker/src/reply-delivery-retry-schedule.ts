@@ -35,8 +35,10 @@ import {
   TicketLifecycleWriter,
   TicketRepository,
   ConversationService,
+  TicketAttachmentStore,
   REPLY_DELIVERY_FAILED_FLAG,
   nextReplyDeliveryBackoffMs,
+  toMessageAttachment,
 } from "@support-agent/services";
 import type { PgBoss } from "./queue.js";
 import type { WorkerBootstrap } from "./bootstrap.js";
@@ -120,9 +122,13 @@ const participantsOf = (raw: unknown): ReadonlyArray<MessageParticipant> =>
     : [];
 
 /** Re-send a stored draft through the connector. Returns the send outcome. */
-const reSendEffect = (
+export const reSendEffect = (
   d: DueReplyDelivery,
-): Effect.Effect<ReplySendOutcome, never, ConversationService | TicketRepository> =>
+): Effect.Effect<
+  ReplySendOutcome,
+  never,
+  ConversationService | TicketRepository | TicketAttachmentStore
+> =>
   Effect.gen(function* () {
     const tickets = yield* TicketRepository;
     // Guard: only auto-retry while the ticket is still parked on this failure.
@@ -134,6 +140,20 @@ const reSendEffect = (
 
     const convo = yield* ConversationService;
     const draft = (d.draft ?? {}) as Record<string, unknown>;
+    // The stored draft may have promised files. Re-resolve its ids within
+    // (tenant, ticket) and re-send them: delivering the retry WITHOUT the
+    // attachment would send the customer a message referring to a file they
+    // never receive.
+    const attachmentStore = yield* TicketAttachmentStore;
+    const attachmentIds = Array.isArray(draft["attachmentIds"])
+      ? draft["attachmentIds"].filter((x): x is string => typeof x === "string")
+      : [];
+    const attachmentRows = yield* attachmentStore
+      .getByIds(TenantId(d.tenantId), TicketId(d.ticketId), attachmentIds)
+      .pipe(Effect.orElseSucceed(() => []));
+    if (attachmentRows.length !== attachmentIds.length) {
+      return { error: "attachment_not_found" } as ReplySendOutcome;
+    }
     const base = {
       threadId: ThreadId(String(draft["threadId"] ?? "")),
       ...(d.mailbox ? { mailbox: d.mailbox } : {}),
@@ -145,7 +165,7 @@ const reSendEffect = (
       bodyText: typeof draft["bodyText"] === "string" ? (draft["bodyText"] as string) : "",
       bodyHtml:
         typeof draft["bodyHtml"] === "string" ? (draft["bodyHtml"] as string) : null,
-      attachments: [],
+      attachments: attachmentRows.map(toMessageAttachment),
       draftId: String(draft["draftId"] ?? d.draftId),
     };
     const send =
@@ -159,7 +179,24 @@ const reSendEffect = (
                 : null,
           });
     return yield* send.pipe(
-      Effect.map((): ReplySendOutcome => "sent"),
+      Effect.flatMap((sent) =>
+        Effect.gen(function* () {
+          // The reply finally went out — record what it carried so the thread
+          // renders the files under this message. Best-effort bookkeeping.
+          yield* attachmentStore
+            .markUsed(TenantId(d.tenantId), TicketId(d.ticketId), attachmentIds)
+            .pipe(Effect.orElseSucceed(() => undefined));
+          yield* attachmentStore
+            .bindToMessage(
+              TenantId(d.tenantId),
+              TicketId(d.ticketId),
+              attachmentIds,
+              sent.id,
+            )
+            .pipe(Effect.orElseSucceed(() => undefined));
+          return "sent" as ReplySendOutcome;
+        }),
+      ),
       Effect.catchAll((e) =>
         Effect.succeed({
           error:

@@ -9,6 +9,7 @@ import {
   assertRecipientsInThread,
   replySubject,
   requireConversationMailbox,
+  bindSentAttachments,
   resolveDraftAttachmentIds,
 } from "./reply.js";
 
@@ -94,6 +95,14 @@ export const conversationAskCustomer = defineTool({
           draftId: input.draftId,
         })
         .pipe(Effect.mapError((e) => toToolOutputInvalid(e._tag)));
+      // Same as conversation.reply: tie the files to the message that carried
+      // them so the thread can render them under that bubble.
+      yield* bindSentAttachments(
+        ctx.tenantId,
+        ctx.ticketId,
+        input.attachmentIds,
+        sent.id,
+      );
       if (
         remindAfterHours !== undefined &&
         Number.isFinite(remindAfterHours) &&

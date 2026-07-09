@@ -171,6 +171,30 @@ export const resolveDraftAttachmentIds = (
     return rows.map(toMessageAttachment);
   });
 
+/**
+ * Bind the attachments a reply carried to the message it went out as. The
+ * `messageId` must be the id `fetchThread` will report for that message —
+ * see each connector's `send`.
+ *
+ * Best-effort by construction: the reply is already delivered by the time this
+ * runs, so a store failure must not surface as a tool error. The runtime would
+ * retry the tool and send the customer a second copy.
+ */
+export const bindSentAttachments = (
+  tenantId: TenantId,
+  ticketId: TicketId,
+  ids: ReadonlyArray<string> | undefined,
+  messageId: string,
+): Effect.Effect<void, never, TicketAttachmentStore> =>
+  Effect.gen(function* () {
+    const unique = [...new Set(ids ?? [])];
+    if (unique.length === 0 || !messageId) return;
+    const store = yield* TicketAttachmentStore;
+    yield* store
+      .bindToMessage(tenantId, ticketId, unique, messageId)
+      .pipe(Effect.catchAll(() => Effect.void));
+  });
+
 export const requireConversationMailbox = (
   mailbox: string | undefined,
   tool: string,
@@ -268,6 +292,16 @@ export const conversationReply = defineTool({
               }),
           ),
         );
+      // The reply is out. Tie its files to it so the thread renders them under
+      // that bubble. Best-effort: the customer already has the attachment, and
+      // a bookkeeping failure must not turn a delivered reply into a tool error
+      // (which the runtime would retry, re-sending the message).
+      yield* bindSentAttachments(
+        ctx.tenantId,
+        ctx.ticketId,
+        input.attachmentIds,
+        sent.id,
+      );
       return {
         id: sent.id,
         threadId: sent.threadId,

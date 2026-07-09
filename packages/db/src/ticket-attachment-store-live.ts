@@ -193,12 +193,40 @@ export const TicketAttachmentStoreLive = Layer.effect(
         );
       });
 
+    const bindToMessage = (
+      tenantId: TenantId,
+      ticketId: TicketId,
+      ids: ReadonlyArray<string>,
+      messageId: string,
+    ): Effect.Effect<void, TicketAttachmentStoreError> =>
+      Effect.gen(function* () {
+        if (ids.length === 0 || messageId.length === 0) return;
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "bindToMessage",
+          db
+            .update(ticketAttachments)
+            .set({ messageId })
+            .where(
+              and(
+                eq(ticketAttachments.tenantId, tenantId),
+                eq(ticketAttachments.ticketId, ticketId),
+                inArray(ticketAttachments.id, [...ids]),
+                // First binding wins — an inbound file keeps the message it
+                // arrived on even when a reply forwards it back out.
+                isNull(ticketAttachments.messageId),
+              ),
+            ),
+        );
+      });
+
     return TicketAttachmentStore.of({
       record,
       recordInbound,
       getByIds,
       listForTicket,
       markUsed,
+      bindToMessage,
     });
   }),
 );

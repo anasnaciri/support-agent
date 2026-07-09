@@ -1411,12 +1411,19 @@ export const handleDashboardTicketReply = async (
           draftId,
         })
         .pipe(Effect.either);
-      return sent._tag === "Left"
-        ? { kind: "error" as const, error: sent.left._tag }
-        : {
-            kind: "ok" as const,
-            sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
-          };
+      if (sent._tag === "Left") {
+        return { kind: "error" as const, error: sent.left._tag };
+      }
+      // Tie the files to the message that carried them so the thread renders
+      // them under this reply's bubble. Best-effort — the reply is delivered;
+      // bookkeeping must not fail the request.
+      yield* attachmentStore
+        .bindToMessage(tenantId, ticketId, attachmentIds, sent.right.id)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      return {
+        kind: "ok" as const,
+        sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
+      };
     }).pipe(
       Effect.catchAll((e) =>
         Effect.succeed({
@@ -1699,9 +1706,11 @@ interface DecodedApprovedReply {
   readonly bodyHtml: string | null;
   readonly inReplyToMessageId: string | null;
   readonly draftId: string;
+  /** Opaque `ticket_attachments` ids the approved draft promised to carry. */
+  readonly attachmentIds: ReadonlyArray<string>;
 }
 
-const decodeApprovedReply = (input: unknown): DecodedApprovedReply | null => {
+export const decodeApprovedReply = (input: unknown): DecodedApprovedReply | null => {
   if (!input || typeof input !== "object") return null;
   const o = input as Record<string, unknown>;
   const threadId = typeof o["threadId"] === "string" ? o["threadId"] : null;
@@ -1729,6 +1738,11 @@ const decodeApprovedReply = (input: unknown): DecodedApprovedReply | null => {
     inReplyToMessageId:
       typeof o["inReplyToMessageId"] === "string" ? o["inReplyToMessageId"] : null,
     draftId,
+    // Ids only — never a raw storage key, and never trusted: they are re-resolved
+    // within (tenant, ticket) before the send.
+    attachmentIds: Array.isArray(o["attachmentIds"])
+      ? o["attachmentIds"].filter((x): x is string => typeof x === "string")
+      : [],
   };
 };
 
@@ -1777,6 +1791,17 @@ export const handleDashboardResendApproval = async (
       }
       const mailbox = ticketRow.right.mailbox;
       if (!mailbox) return { kind: "error" as const, error: "no_mailbox" };
+      // The approved draft may have promised files. Re-resolve its ids within
+      // (tenant, ticket) — the stored input is not a trust boundary — and send
+      // them. Sending the reply WITHOUT them would deliver a message that
+      // refers to an attachment the customer never receives.
+      const attachmentStore = yield* TicketAttachmentStore;
+      const attachmentRows = yield* attachmentStore
+        .getByIds(tenantId, ticketId, reply.attachmentIds)
+        .pipe(Effect.orElseSucceed(() => []));
+      if (attachmentRows.length !== reply.attachmentIds.length) {
+        return { kind: "error" as const, error: "attachment_not_found" };
+      }
       const sent = yield* conversation
         .reply(tenantId, {
           threadId: ThreadId(reply.threadId),
@@ -1785,17 +1810,24 @@ export const handleDashboardResendApproval = async (
           subject: reply.subject,
           bodyText: reply.bodyText,
           bodyHtml: reply.bodyHtml,
-          attachments: [],
+          attachments: attachmentRows.map(toMessageAttachment),
           inReplyToMessageId: reply.inReplyToMessageId,
           draftId: reply.draftId,
         })
         .pipe(Effect.either);
-      return sent._tag === "Left"
-        ? { kind: "error" as const, error: sent.left._tag }
-        : {
-            kind: "ok" as const,
-            sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
-          };
+      if (sent._tag === "Left") {
+        return { kind: "error" as const, error: sent.left._tag };
+      }
+      yield* attachmentStore
+        .markUsed(tenantId, ticketId, reply.attachmentIds)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      yield* attachmentStore
+        .bindToMessage(tenantId, ticketId, reply.attachmentIds, sent.right.id)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      return {
+        kind: "ok" as const,
+        sent: { id: sent.right.id, sentAt: sent.right.sentAt.toISOString() },
+      };
     }).pipe(
       Effect.catchAll((e) =>
         Effect.succeed({

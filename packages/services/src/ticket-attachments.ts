@@ -126,6 +126,22 @@ export class TicketAttachmentStore extends Context.Tag("TicketAttachmentStore")<
       ticketId: TicketId,
       ids: ReadonlyArray<string>,
     ) => Effect.Effect<void, TicketAttachmentStoreError>;
+    /**
+     * Bind rows to the conversation message they just went out on, so the
+     * thread can render them under that bubble. `messageId` must be the id the
+     * connector reports for this message in `fetchThread` — the projection
+     * joins on it.
+     *
+     * First binding wins: a row already tied to a message (an inbound file, or
+     * a file sent on an earlier reply) keeps that message. A file therefore
+     * appears under exactly one bubble even if it rides several replies.
+     */
+    readonly bindToMessage: (
+      tenantId: TenantId,
+      ticketId: TicketId,
+      ids: ReadonlyArray<string>,
+      messageId: string,
+    ) => Effect.Effect<void, TicketAttachmentStoreError>;
   }
 >() {}
 
@@ -211,6 +227,22 @@ export const TicketAttachmentStoreTest = (
                 r.usedAt === null
               ) {
                 rows[i] = { ...r, usedAt: new Date() };
+              }
+            }
+          }),
+        bindToMessage: (tenantId, ticketId, ids, messageId) =>
+          Effect.sync(() => {
+            if (!messageId) return;
+            const wanted = new Set(ids);
+            for (let i = 0; i < rows.length; i++) {
+              const r = rows[i]!;
+              if (
+                r.tenantId === tenantId &&
+                r.ticketId === ticketId &&
+                wanted.has(r.id) &&
+                r.messageId === null
+              ) {
+                rows[i] = { ...r, messageId };
               }
             }
           }),
