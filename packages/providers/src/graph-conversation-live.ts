@@ -24,6 +24,7 @@ import {
   graphAddDraftAttachment,
   graphCreateReplyDraft,
   graphGetConversation,
+  graphFindSentMessageId,
   graphSendDraft,
   graphUpdateDraftBody,
 } from "./graph-http.js";
@@ -275,8 +276,25 @@ export const makeGraphConversation = (
           catch: (cause) =>
             mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
         });
+        // The draft id dies with the draft: Graph mints a new id when the item
+        // lands in Sent Items, and `buildThread` filters drafts out. Resolve
+        // the sent copy so callers get an id that actually appears in the
+        // thread (the attachment→bubble binding joins on it). Best-effort:
+        // Sent Items is eventually consistent, and the reply is already
+        // delivered — a miss falls back to the draft id rather than failing.
+        const sentId = created.internetMessageId
+          ? yield* Effect.tryPromise({
+              try: () =>
+                graphFindSentMessageId({
+                  token: conn.accessToken,
+                  internetMessageId: created.internetMessageId!,
+                  ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+                }),
+              catch: (cause) => cause,
+            }).pipe(Effect.orElseSucceed(() => null))
+          : null;
         return {
-          id: created.id,
+          id: sentId ?? created.id,
           threadId: draft.threadId,
           sentAt: new Date(),
         };

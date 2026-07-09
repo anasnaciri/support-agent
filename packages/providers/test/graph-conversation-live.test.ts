@@ -223,13 +223,26 @@ describe("GraphConversationLive — reply", () => {
   it("replies to the latest inbound message and explicitly sets customer recipients", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
+      // After the send, the connector resolves the SENT copy by the
+      // internetMessageId the draft was created with. Match on the FILTER,
+      // not the substring — `$select` also names internetMessageId.
+      if (url.includes(`$filter=${encodeURIComponent("internetMessageId eq")}`)) {
+        expect(url).toContain(encodeURIComponent("<imid-9@outlook>"));
+        return conversationList([
+          { id: "sent-9", isDraft: false, conversationId: "conv-1" },
+        ]);
+      }
       if (url.includes("/me/messages?$filter")) {
         return conversationList([oneInboundMessage, laterOutboundMessage]);
       }
       if (url.endsWith("/createReply")) {
         expect(url).toContain("/me/messages/m-1/createReply");
         expect(url).not.toContain("/me/messages/m-2/createReply");
-        return okJson({ id: "draft-9", conversationId: "conv-1" });
+        return okJson({
+          id: "draft-9",
+          conversationId: "conv-1",
+          internetMessageId: "<imid-9@outlook>",
+        });
       }
       if (method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as {
@@ -275,8 +288,60 @@ describe("GraphConversationLive — reply", () => {
         }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({})))),
       ),
     );
-    expect(sent.id).toBe("draft-9");
+    // The DRAFT's id is useless downstream: `buildThread` filters drafts out,
+    // so nothing that joins on a thread message id can ever match it. Graph
+    // moves the item to Sent Items on send and gives it a NEW id; that is the
+    // one callers need (e.g. binding a reply's attachments to its bubble).
+    expect(sent.id).toBe("sent-9");
     expect(sent.threadId).toBe("conv-1");
+  });
+
+  it("falls back to the draft id when the sent copy can't be resolved yet", async () => {
+    // Sent Items is eventually consistent. A miss must not fail the send —
+    // the reply is already delivered.
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes(`$filter=${encodeURIComponent("internetMessageId eq")}`)) {
+        return conversationList([]); // Sent Items hasn't caught up.
+      }
+      if (url.includes("/me/messages?$filter")) {
+        return conversationList([oneInboundMessage]);
+      }
+      if (url.endsWith("/createReply")) {
+        return okJson({
+          id: "draft-9",
+          conversationId: "conv-1",
+          internetMessageId: "<imid-9@outlook>",
+        });
+      }
+      if (method === "PATCH") return okJson({ id: "draft-9" });
+      if (url.endsWith("/send")) return noContent();
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("conv-1"),
+            to: [{ name: "Jane", email: "jane@example.com" }],
+            subject: null,
+            bodyText: "We shipped it yesterday.",
+            bodyHtml: null,
+            attachments: [],
+            inReplyToMessageId: null,
+            draftId: "d-1",
+          }),
+        ),
+        GraphConversationLive({
+          clientId: "cid",
+          clientSecret: "csec",
+          fetchImpl,
+        }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({})))),
+      ),
+    );
+    expect(sent.id).toBe("draft-9");
   });
 
   it("attaches resolved blobs to the draft before sending", async () => {

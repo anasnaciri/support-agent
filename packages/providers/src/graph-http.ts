@@ -307,10 +307,18 @@ export const graphGetConversation = async (
   return buildThread(raw, opts.conversationId, opts.mailbox);
 };
 
-/** Create a reply draft on a message; returns the new draft's id. */
+/**
+ * Create a reply draft on a message. Returns the draft's id AND the
+ * `internetMessageId` Graph assigned it — the draft id is discarded when the
+ * message moves to Sent Items on send, but the internetMessageId survives, so
+ * it is the only handle on the sent copy (`graphFindSentMessageId`).
+ */
 export const graphCreateReplyDraft = async (
   opts: GraphHttpCallOptions & { readonly messageId: string },
-): Promise<{ readonly id: string }> => {
+): Promise<{
+  readonly id: string;
+  readonly internetMessageId: string | null;
+}> => {
   const raw = (await graphFetch({
     method: "POST",
     path: `/me/messages/${encodeURIComponent(opts.messageId)}/createReply`,
@@ -318,7 +326,32 @@ export const graphCreateReplyDraft = async (
     body: {},
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   })) as RawGraphMessage;
-  return { id: raw.id };
+  return { id: raw.id, internetMessageId: raw.internetMessageId ?? null };
+};
+
+/**
+ * The id of the SENT copy of a message, looked up by its `internetMessageId`.
+ * `null` when Sent Items has not caught up yet (Graph is eventually
+ * consistent), or when only the draft still matches.
+ *
+ * Needed because sending a draft mints a new item id, and `buildThread`
+ * filters drafts out — so a caller holding the draft id holds an id that
+ * appears in no thread.
+ */
+export const graphFindSentMessageId = async (
+  opts: GraphHttpCallOptions & { readonly internetMessageId: string },
+): Promise<string | null> => {
+  const filter = `internetMessageId eq '${opts.internetMessageId.replace(/'/g, "''")}'`;
+  const path =
+    `/me/messages?$filter=${encodeURIComponent(filter)}` +
+    `&$select=${encodeURIComponent("id,isDraft")}&$top=5`;
+  const raw = (await graphFetch({
+    path,
+    token: opts.token,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  })) as RawMessageList;
+  const sent = (raw.value ?? []).find((m) => m.isDraft !== true);
+  return sent?.id ?? null;
 };
 
 /** Replace a reply draft's body and recipients with the approved values. */
