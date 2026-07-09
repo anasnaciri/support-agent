@@ -11,6 +11,7 @@ import {
 import {
   buildInitialMessages,
   renderThreadTranscript,
+  shouldPrefetchThread,
 } from "../src/agent-runtime.js";
 
 const textOf = (messages: ReturnType<typeof buildInitialMessages>): string => {
@@ -543,6 +544,105 @@ describe("buildInitialMessages — ticket.resumed with an inlined thread transcr
       }),
     );
     expect(text).toContain("conversation.fetch_thread");
+  });
+});
+
+// Prod ticket 4746d9d6 (2026-07-09): a `supplier.updated` tick re-entered the
+// agent loop with NO thread transcript — the prefetch was gated on
+// `ticket.resumed` alone. The agent re-engaged blind and burned turns 1-2
+// re-hunting the order (`find_customer_order`, `get_customer`) before it could
+// act. The comment justifying the resume prefetch ("the agent starts blind —
+// there's no inbound payload") is equally true of a supplier update: the supplier
+// note is not the customer conversation. A supplier responding is exactly the
+// moment the agent must recall what it already promised the customer.
+describe("shouldPrefetchThread", () => {
+  it("prefetches on ticket.resumed (a manager handed the ticket back)", () => {
+    expect(shouldPrefetchThread("ticket.resumed")).toBe(true);
+  });
+
+  it("prefetches on supplier.updated (the agent re-engages blind)", () => {
+    expect(shouldPrefetchThread("supplier.updated")).toBe(true);
+  });
+
+  it("does NOT prefetch on events that carry their own message payload", () => {
+    // These build their prompt from the inbound payload; a fetch would be a
+    // wasted connector round trip on the hot path.
+    expect(shouldPrefetchThread("ticket.created")).toBe(false);
+    expect(shouldPrefetchThread("customer.replied")).toBe(false);
+    expect(shouldPrefetchThread("message.received")).toBe(false);
+  });
+
+  it("does NOT prefetch on manual.takeover (the agent loop never runs)", () => {
+    // The ticket is in `human_takeover`, so the runtime holds every event
+    // before it reaches the loop.
+    expect(shouldPrefetchThread("manual.takeover")).toBe(false);
+  });
+});
+
+describe("buildInitialMessages — supplier.updated with an inlined thread transcript", () => {
+  const supplierEvent: DomainEvent = {
+    type: "supplier.updated",
+    ticketId: TicketId("c-1"),
+    payload: {
+      supplierId: "sup-1",
+      note: "reshipped under tracking 1ST04125178926",
+      proposedResolution: null,
+    },
+  } as never;
+
+  const transcript =
+    "[2026-06-01T00:00:00.000Z] Customer <jane@example.com>\n" +
+    "Where is order #1008?\n\n" +
+    "[2026-06-02T00:00:00.000Z] You (support) <support@merchant.com>\n" +
+    "We are looking into it and will update you shortly.";
+
+  it("inlines the prefetched transcript so the agent recalls what it already promised", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: { customerEmail: "jane@example.com" },
+        threadTranscript: transcript,
+      }),
+    );
+    expect(text).toContain("Where is order #1008?");
+    expect(text).toContain("We are looking into it");
+  });
+
+  it("fences the transcript AND the supplier note as untrusted", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: { customerEmail: "jane@example.com" },
+        threadTranscript: transcript,
+      }),
+    );
+    // The trusted thread header still precedes every fenced block.
+    const open = text.indexOf(UNTRUSTED_OPEN);
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("threadId=gmail:abc")).toBeLessThan(open);
+    // Customer-authored transcript content never escapes a fence.
+    expect(text.lastIndexOf("Where is order #1008?")).toBeLessThan(
+      text.lastIndexOf(UNTRUSTED_CLOSE),
+    );
+    // The supplier note is still fenced and still must be rewritten.
+    expect(text).toContain("reshipped under tracking 1ST04125178926");
+    expect(text).toContain("do NOT quote the supplier's note verbatim");
+  });
+
+  it("omits the transcript block entirely when the prefetch found nothing", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: { customerEmail: "jane@example.com" },
+        threadTranscript: null,
+      }),
+    );
+    expect(text).not.toContain("Conversation so far");
+    // Still steers to the customer reply — the existing behavior is preserved.
+    expect(text).toContain("conversation.reply");
   });
 });
 

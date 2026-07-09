@@ -93,6 +93,7 @@ import {
   inboundCustomerName,
   inboundCustomerPhone,
   renderThreadTranscript,
+  shouldPrefetchThread,
   executionKeyFor,
   toolCallTimeoutMs,
   deliveryScopeFor,
@@ -1507,15 +1508,17 @@ const AgentRuntimeLayer = Layer.effect(
             entryBase = applyResolutionAgentEntry(entryBase, resolutionPolicy);
           }
           let agent: AgentConfig = withScenario(entryBase, working.context);
-          // On a resume (dashboard retry / restart-from-triage / hand-back) the
-          // agent starts blind — there's no inbound payload. Pre-fetch the full
-          // thread so it re-orients on the ACTUAL conversation and what was
-          // already done, instead of being told to fetch it itself (triage has
-          // no such tool). Best-effort: a connector hiccup or a lean layer
-          // without ConversationService falls back to the fetch directive.
+          // Some ticks re-enter the agent loop with no inbound customer message —
+          // a resume (dashboard retry / restart-from-triage / hand-back), or a
+          // supplier responding on a parked ticket. The agent starts blind, so
+          // pre-fetch the full thread and let it re-orient on the ACTUAL
+          // conversation and what was already done, instead of being told to
+          // fetch it itself (triage has no such tool). See `shouldPrefetchThread`.
+          // Best-effort: a connector hiccup or a lean layer without
+          // ConversationService falls back to the fetch directive.
           let resumeTranscript: string | null = null;
           if (
-            event.type === "ticket.resumed" &&
+            shouldPrefetchThread(event.type) &&
             working.threadId &&
             working.mailbox &&
             Option.isSome(maybeConversation)

@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ConversationThread,
   type DomainEvent,
+  type DomainEventType,
   type InboundMessage,
   type ThreadId,
   wrapUntrusted,
@@ -414,6 +415,25 @@ export const inboundCustomerPhone = (
   return null;
 };
 
+/**
+ * Which events re-enter the agent loop WITHOUT an inbound customer message, and
+ * therefore need the thread pre-fetched so the agent can re-orient on the actual
+ * conversation instead of starting blind.
+ *
+ * `ticket.resumed` — a manager handed the ticket back; there is no payload at all.
+ * `supplier.updated` — the payload is the SUPPLIER's note, not the customer
+ *   conversation. Without the thread the agent cannot recall what it already
+ *   promised the customer (prod ticket 4746d9d6: it re-hunted the order across
+ *   two turns before it could act).
+ *
+ * Everything else either carries its own message payload (`ticket.created`,
+ * `customer.replied`, `message.received`) or never reaches the loop at all
+ * (`manual.takeover` parks the ticket in `human_takeover`, where the runtime
+ * holds every event).
+ */
+export const shouldPrefetchThread = (event: DomainEventType): boolean =>
+  event === "ticket.resumed" || event === "supplier.updated";
+
 export const buildInitialMessages = (
   event: DomainEvent,
   ticketRow: {
@@ -421,9 +441,9 @@ export const buildInitialMessages = (
     readonly threadId: ThreadId | null;
     readonly context: Record<string, unknown>;
     /**
-     * The full thread transcript, pre-fetched by the runtime on a
-     * `ticket.resumed` tick (see `renderThreadTranscript`). When present it is
-     * inlined so even an agent WITHOUT the `conversation.fetch_thread` tool
+     * The full thread transcript, pre-fetched by the runtime on the ticks
+     * `shouldPrefetchThread` selects (see `renderThreadTranscript`). When present
+     * it is inlined so even an agent WITHOUT the `conversation.fetch_thread` tool
      * (support-triage) re-orients on the real conversation. Absent/null on a
      * connector hiccup or a lean layer → the agent is told to fetch it itself.
      */
@@ -591,6 +611,20 @@ export const buildInitialMessages = (
     );
     if (ticketSubject) {
       parts.push(`Subject: ${ticketSubject}`);
+    }
+    // If the runtime pre-fetched the thread, inline the whole conversation
+    // (customer messages AND replies we already sent), fenced as untrusted. The
+    // supplier's note only makes sense against what the customer asked and what
+    // we already promised them; without this the agent re-engages blind and
+    // re-derives the ticket from the supplier note alone (prod 4746d9d6). Placed
+    // BEFORE the supplier update so the prompt reads oldest-first.
+    const transcript = ticketRow.threadTranscript?.trim();
+    if (transcript) {
+      parts.push(
+        `Conversation so far (oldest first — includes replies already sent):\n${wrapUntrusted(
+          transcript,
+        )}`,
+      );
     }
     const proposed = event.payload.proposedResolution;
     parts.push(
