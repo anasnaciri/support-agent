@@ -930,12 +930,40 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - Gmail-only today: `imap-poll` and the Graph webhook never put inbound
         attachments on the payload, so no other connector creates index rows.
       - Pre-existing blobs have no index rows (no backfill source).
-      - Outbound sent attachments have `message_id = NULL` (the send path never
-        records the provider message id back onto the row), so they do NOT show
-        under the outbound bubble yet. Open follow-up.
-- [ ] Stamp the provider message id onto attachment rows when an outbound reply
-      sends, so sent files render under their own bubble (today `message_id` is
-      null for merchant/supplier uploads and they never appear in the thread).
+- [x] Sent files render under their own bubble (2026-07-09, `f9861ed` +
+      `1ec1cad`). Every send path stamps `message_id` via
+      `TicketAttachmentStore.bindToMessage(…, sent.id)` — the id `fetchThread`
+      reports for that message, which is what the projection joins on. Call
+      sites: `resolveDraftAttachmentIds`' callers (`conversation.reply`,
+      `ask_customer`, via the shared `bindSentAttachments`), the manual reply
+      handler, the resend-approval handler, and the reply-delivery retry cron.
+      Binding is BEST-EFFORT everywhere: the reply is already delivered, and a
+      tool error would make the runtime retry and send the customer a 2nd copy.
+      - First binding wins (`WHERE message_id IS NULL`), so an inbound file
+        keeps the message it arrived on when a reply forwards it back out.
+        CONSEQUENCE: a file attached to two different replies renders only
+        under the first. A true many-to-many needs a join table — see below.
+      - PREREQUISITE, found while wiring it: `GraphConversationLive.send`
+        returned the reply DRAFT's id. Graph mints a new id when the item moves
+        to Sent Items and `buildThread` filters drafts out, so that id appears
+        in no thread — the join would have silently never matched for Outlook.
+        `send` now resolves the sent copy via the draft's `internetMessageId`
+        (best-effort; Sent Items is eventually consistent, miss → draft id).
+        Gmail (`raw.id`) and IMAP (RFC Message-ID) already agreed both ways.
+      - TWO SILENT DATA-LOSS BUGS fixed in the same slice — both sent
+        `attachments: []`, delivering a reply that referred to a file the
+        customer never got: (1) `decodeApprovedReply` dropped `attachmentIds`,
+        so resending an approved-but-never-sent reply lost them; (2) the
+        reply-delivery retry cron re-sent a stored draft without them. Both now
+        re-resolve the ids within (tenant, ticket) — stored input is NOT a trust
+        boundary — and refuse the delivery if an id no longer resolves.
+      - `TicketAttachmentStore` is now on the worker's top-level runtime layer
+        (the retry cron resolves against it directly).
+- [ ] Attachment↔message is one-to-many, not many-to-many: a file re-sent on a
+      second reply stays bound to the first message and renders only there. If
+      merchants re-send the same file often (the composer's "Ticket files"
+      picker makes it one click), replace `ticket_attachments.message_id` with a
+      `ticket_attachment_messages` join table.
 - [ ] `tsc -b` does NOT typecheck `apps/dashboard-spa` or any `*.test.ts`.
       A broken prop reference in the SPA passed `pnpm build` AND the Vite build
       (esbuild strips types without checking). Use
