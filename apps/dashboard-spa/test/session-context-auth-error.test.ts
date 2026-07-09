@@ -112,4 +112,14 @@ describe("pickActiveWorkspaceForPath", () => {
 
     expect(active?.id).toBe("merchant-1");
   });
+
+  it("falls back to the normal active workspace when a supplier route has no supplier workspace", () => {
+    const active = pickActiveWorkspaceForPath(
+      [workspace("merchant-1", "merchant")],
+      undefined,
+      "/supplier/tickets",
+    );
+
+    expect(active?.id).toBe("merchant-1");
+  });
 });

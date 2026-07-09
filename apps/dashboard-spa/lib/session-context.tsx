@@ -110,7 +110,8 @@ export const pickActiveWorkspaceForPath = (
   const stored = storedId ? workspaces.find((w) => w.id === storedId) : null;
   if (pathname.startsWith("/supplier")) {
     if (stored?.kind === "supplier") return stored;
-    return workspaces.find((w) => w.kind === "supplier") ?? stored ?? null;
+    const supplier = workspaces.find((w) => w.kind === "supplier");
+    if (supplier) return supplier;
   }
   return (pickActiveWorkspace(workspaces, storedId) as UnifiedWorkspace | null);
 };

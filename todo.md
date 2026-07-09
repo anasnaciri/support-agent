@@ -23,8 +23,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       your summary", and never reach `/supplier/tickets`. Fixed the SPA session
       bootstrap to prefer a supplier workspace on `/supplier/*` routes, even
       when the stored workspace is merchant, while preserving normal merchant
-      defaults elsewhere. Verified with the focused session-context regression,
-      dashboard SPA build, and `pnpm build`.
+      defaults elsewhere; if no supplier workspace exists, the supplier route
+      falls back to the normal active workspace so RBAC handles accidental visits
+      cleanly. Verified with the focused session-context regression, dashboard
+      SPA build, and `pnpm build`.
 - [x] Ticket attachments can render under every message that carried them
       (2026-07-09): `ticket_attachments.message_id` made attachment↔message
       effectively one-to-many, so re-sending the same ticket file in a later
