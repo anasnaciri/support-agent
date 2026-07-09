@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   useMutation,
+  useQuery,
   useQueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
+  Files,
   Paperclip,
   SendHorizontal,
   Sparkles,
@@ -21,6 +23,10 @@ import type {
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
+import {
+  attachmentPickerState,
+  attachmentSourceLabel,
+} from "@/lib/attachment-picker";
 import { formatAttachmentSize } from "@/lib/ticket-timeline";
 import {
   OPTIMISTIC_MESSAGE_ID_PREFIX,
@@ -95,6 +101,81 @@ const uploadErrorText = (error: string): string => {
     return "That file's contents don't match its type, so it can't be attached.";
   return "Couldn't upload the attachment. Please try again.";
 };
+
+/**
+ * Attach a file that already lives on this ticket — the file a supplier sent
+ * back, a customer's photo, or something the team uploaded on an earlier
+ * reply. Staging one costs no upload: the reply carries its existing id.
+ */
+function TicketFilePicker({
+  available,
+  atCapacity,
+  onPick,
+  disabled,
+}: {
+  readonly available: ReadonlyArray<TicketAttachmentSummary>;
+  readonly atCapacity: boolean;
+  readonly onPick: (attachment: TicketAttachmentSummary) => void;
+  readonly disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title="Attach a file already on this ticket"
+      >
+        <Files aria-hidden />
+        Ticket files
+      </Button>
+      {open ? (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div className="absolute bottom-full left-0 z-20 mb-1 max-h-64 w-80 overflow-auto rounded-md border border-border bg-card p-1 shadow-md">
+            {atCapacity ? (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                This reply is already carrying the maximum number of
+                attachments.
+              </p>
+            ) : null}
+            {available.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                disabled={atCapacity}
+                onClick={() => {
+                  onPick(a);
+                  setOpen(false);
+                }}
+                className="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+              >
+                <Paperclip
+                  className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{a.filename}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {attachmentSourceLabel(a.source)} ·{" "}
+                    {formatAttachmentSize(a.sizeBytes)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 function RephraseModelPicker({
   entries,
@@ -172,6 +253,7 @@ export function ChatComposer({
   processing,
 }: ChatComposerProps) {
   const ctx = { workspaceId };
+  const qc = useQueryClient();
   const [text, setText] = useState(
     mode.kind === "approval" ? mode.draftBody : "",
   );
@@ -185,6 +267,20 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<TicketAttachmentSummary[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Files already indexed on this ticket (supplier answers, customer photos,
+  // earlier uploads) — offered in the picker so forwarding one costs no upload.
+  const indexQ = useQuery({
+    queryKey: qk.ticketAttachments(workspaceId, ticketId),
+    queryFn: () => api.ticketAttachments(ctx, ticketId),
+    // A locked composer can't attach anything — don't fetch the index for it.
+    enabled: mode.kind !== "locked",
+  });
+  const picker = attachmentPickerState({
+    index: indexQ.data?.attachments ?? [],
+    staged: attachments,
+    max: MAX_ATTACHMENTS,
+  });
 
   const onPickFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -209,6 +305,11 @@ export function ChatComposer({
         }
         setAttachments((prev) => [...prev, result.attachment]);
       }
+      // The upload is indexed on the ticket the moment it lands, so refresh the
+      // picker: unstaging a chip must leave the file reachable again.
+      void qc.invalidateQueries({
+        queryKey: qk.ticketAttachments(workspaceId, ticketId),
+      });
     } catch {
       setError(uploadErrorText("failed"));
     } finally {
@@ -222,7 +323,6 @@ export function ChatComposer({
   // Optimistic send: drop a pulsing outbound bubble into the thread cache the
   // instant Send is pressed, then either keep it (the ticket refetch on success
   // swaps in the real message) or roll the cache back if the request fails.
-  const qc = useQueryClient();
   const sendM = useTicketMutation<
     void,
     {
@@ -482,6 +582,14 @@ export function ChatComposer({
                 <Paperclip aria-hidden />
                 {uploading ? "Uploading…" : "Attach"}
               </Button>
+              {picker.show ? (
+                <TicketFilePicker
+                  available={picker.available}
+                  atCapacity={picker.atCapacity}
+                  onPick={(a) => setAttachments((prev) => [...prev, a])}
+                  disabled={uploading}
+                />
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"

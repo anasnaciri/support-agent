@@ -21,6 +21,8 @@ export const qk = {
     ["tickets", w, f, page, limit] as const,
   ticket: (w: string, id: string) => ["ticket", w, id] as const,
   ticketThread: (w: string, id: string) => ["ticket", w, id, "thread"] as const,
+  ticketAttachments: (w: string, id: string) =>
+    ["ticket", w, id, "attachments"] as const,
   ticketShopify: (w: string, id: string) => ["ticket", w, id, "shopify"] as const,
   ticketTracking: (w: string, id: string) => ["ticket", w, id, "tracking"] as const,
   ticketEvents: (w: string, id: string) => ["ticket-events", w, id] as const,
