@@ -487,6 +487,23 @@ export const LLMServiceLive = Layer.effect(
               ...(usage ? { usage } : {}),
             } satisfies LLMDecision;
           }
+          // No tool call AND nothing to say is not a decision — it's a provider
+          // that returned an unusable response (prod ticket 4746d9d6: OpenRouter
+          // handed back blank text with a zeroed usage block mid-run). Mapping it
+          // to `final_message` makes an empty completion indistinguishable from
+          // the agent deliberately stopping, which strands the tick: the
+          // autonomous-loop guard then parks the ticket in `human_takeover` with
+          // nothing drafted. Fail instead, so the runtime treats it as a retryable
+          // LLMError and pg-boss re-samples with backoff.
+          //
+          // Keyed on blank text only. Zero-token usage is the same symptom but a
+          // worse signal — a provider that under-reports usage would turn every
+          // valid final message into a retry storm.
+          if (!result.text || result.text.trim() === "") {
+            return yield* Effect.fail(
+              new ProviderUnavailable({ provider: cred.provider }),
+            );
+          }
           return {
             type: "final_message",
             text: result.text,

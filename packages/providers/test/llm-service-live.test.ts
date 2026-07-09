@@ -402,6 +402,111 @@ describe("LLMServiceLive — decision mapping", () => {
   });
 });
 
+// Regression: prod ticket 4746d9d6 (2026-07-09). A `supplier.updated` tick ran
+// three good turns, then OpenRouter/gemini-3.5-flash returned a response with no
+// tool calls, blank text, and a ZEROED usage block (`inputTokens: 0` on a prompt
+// that had been ~6.7k tokens the turn before — the prompt was never billed, so the
+// model never saw it). The live layer mapped that straight to `final_message`, the
+// runtime's `autonomous_no_action` guard correctly refused to silently resolve, and
+// the ticket parked in `human_takeover` without a draft. "Retry last step" re-sampled
+// and succeeded.
+//
+// An empty completion is a TRANSIENT PROVIDER FAILURE, not a deliberate decision to
+// stop and say nothing. It must surface as a retryable `LLMError` (the runtime maps
+// anything that isn't credential/credits/context/safety to a retryable Failed, so
+// pg-boss retries with backoff) instead of a decision the agent loop acts on.
+//
+// The guard keys on BLANK TEXT, not on zero-token usage: a provider that simply
+// omits usage counts must not start failing on valid final messages.
+describe("LLMServiceLive — empty completions are transient failures", () => {
+  it("fails with ProviderUnavailable when there are no tool calls and text is empty", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "",
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    const err = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    expect(err).toBeInstanceOf(ProviderUnavailable);
+  });
+
+  it("fails when the model returns whitespace-only text and no tool calls", async () => {
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "   \n\t ",
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    const err = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    expect(err).toBeInstanceOf(ProviderUnavailable);
+  });
+
+  it("fails when the SDK omits `text` entirely and there are no tool calls", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [] });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    const err = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    expect(err).toBeInstanceOf(ProviderUnavailable);
+  });
+
+  it("carries the resolved provider on the error so the runtime can report it", async () => {
+    generateText.mockResolvedValueOnce({ toolCalls: [], text: "" });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag !== "Failure") return;
+    const err = exit.cause._tag === "Fail" ? exit.cause.error : null;
+    expect((err as ProviderUnavailable).provider).toBe("openrouter");
+  });
+
+  it("still returns final_message for real text reported with zero-token usage", async () => {
+    // Usage counts are NOT the signal — only blank text is. A provider that
+    // under-reports usage must not turn a valid reply into a retry storm.
+    generateText.mockResolvedValueOnce({
+      toolCalls: [],
+      text: "Your order shipped Tuesday.",
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.type).toBe("final_message");
+  });
+
+  it("still returns a tool_call when text is blank but a tool call is present", async () => {
+    // Models routinely emit an empty text part alongside a tool call.
+    generateText.mockResolvedValueOnce({
+      toolCalls: [
+        {
+          toolCallId: "call-1",
+          toolName: "ticket.update_status",
+          input: { to: "resolved" },
+        },
+      ],
+      text: "",
+    });
+    const exit = await runWith(
+      Effect.flatMap(LLMService, (s) => s.runToolCalling(baseRequest)),
+    );
+    expect(exit._tag).toBe("Success");
+    if (exit._tag !== "Success") return;
+    expect(exit.value.type).toBe("tool_call");
+  });
+});
+
 // Regression tests for the Anthropic-specific fixes that landed during
 // the 2026-05-16 live demo. Anthropic's API rejects dot-containing tool
 // names (regex `^[a-zA-Z0-9_-]{1,128}$`), and OpenRouter routes Anthropic
