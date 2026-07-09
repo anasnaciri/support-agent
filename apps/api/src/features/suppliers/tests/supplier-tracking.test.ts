@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { ShopifyResponseInvalid } from "@support-agent/agent-core";
+import { describeShopifyError } from "../../dashboard/shopify-error-detail.js";
 import {
   updateSupplierTracking,
   type SupplierFulfillmentView,
@@ -174,6 +176,29 @@ describe("updateSupplierTracking — failure ordering", () => {
       requiredPermission: "fulfill_and_ship_orders",
     });
     expect(recorded).toHaveLength(0);
+  });
+
+  // The classifier reads a STRING, but the handler builds that string by
+  // running the typed ShopifyError through `describeShopifyError` and
+  // rethrowing it as a plain Error. Compose the real transform here so
+  // reformatting `describeShopifyError` can't silently downgrade this denial
+  // back to a generic "update_failed" (which tells the supplier to retry
+  // forever against a store connection that can never accept the write).
+  it("a real Shopify denial still classifies after describeShopifyError", async () => {
+    const shopifyMessage =
+      "Access denied for fulfillmentTrackingInfoUpdate field. Required access: `write_assigned_fulfillment_orders` access scope, `write_merchant_managed_fulfillment_orders` access scope or `write_third_party_fulfillment_orders` access scope. Also: The user must have fulfill_and_ship_orders permission.";
+    const { opts } = harness({
+      update: () =>
+        Promise.reject(
+          new Error(
+            describeShopifyError(
+              new ShopifyResponseInvalid({ message: shopifyMessage }),
+            ),
+          ),
+        ),
+    });
+    const outcome = await updateSupplierTracking(opts);
+    expect(outcome.kind).toBe("shopify_permission_required");
   });
 
   it("bookkeeping failure never fails a completed store write", async () => {
