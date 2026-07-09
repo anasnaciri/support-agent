@@ -897,25 +897,50 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
-- [ ] Attachment previews in the ticket thread (design settled 2026-07-08, not
-      built). Constraints discovered: `fetchThread` messages always carry
-      `attachments: []` in all three connectors (only the Gmail webhook
-      ingestion path uploads image bytes to R2 and stamps `MessageAttachment`
-      onto the published `InboundMessage`; nothing persisted the storageKey —
-      `image_hashes` keeps only the phash), and Gmail `attachmentId` is NOT
-      stable across message fetches, so storage keys cannot be recomputed from
-      a fresh thread fetch. UPDATE 2026-07-09: the `ticket_attachments` table +
-      `TicketAttachmentStore` landed with the upload feature (ApiLayer provides
-      both the store and BlobStorage), so what remains is: (1) INBOUND
-      indexing — write `source='inbound'` rows in the worker where the inbound
-      message binds to a ticket, sharing the tx per the outbox invariant
-      (uploads already index themselves); (2) authz'd
-      `GET /dashboard/tickets/:id/attachments/:attachmentId/url` returning a
-      short-TTL `BlobStorage.presignGetUrl`; (3) thread route joins index rows
-      onto projected messages by message id; SPA badge becomes a button →
-      lightbox `<img>` for image/*. Gmail-only until Graph/IMAP ingest
-      attachments; pre-existing blobs have no index rows (no backfill source —
-      event payloads aren't stored).
+- [x] Attachment previews in the ticket thread (2026-07-09, `f662d2b` +
+      `c61e2ea`). Three legs, as designed:
+      1. INBOUND indexing (`f662d2b`): the runtime writes `source='inbound'`
+         rows where `message.received` / `customer.replied` binds to a ticket —
+         same tx as the ticket create + `event.received` audit, best-effort like
+         the neighbouring `recordMessageId`. Rows carry `message_id`
+         (migration 0042). Idempotent on `(tenant_id, storage_key)` UNIQUE +
+         `onConflictDoNothing` (`recordInbound`, separate from `record` because
+         it returns no row): a redelivered Pub/Sub push replays the identical
+         payload. This is the ONLY place the storageKey→ticket mapping is ever
+         persisted (payloads aren't stored; Gmail's attachmentId is unstable
+         across fetches), so `AgentRuntime` REQUIRES `TicketAttachmentStore` —
+         deliberately not `Effect.serviceOption`, since a missing layer would
+         silently orphan every uploaded blob. Widening its R forced 7 test
+         layer compositions to provide `TicketAttachmentStoreTest()`; that is
+         the point.
+      2. `GET /dashboard/tickets/:id/attachments/:attachmentId/url` (`c61e2ea`):
+         5-minute `presignGetUrl` (`ATTACHMENT_URL_TTL_SECONDS`), id resolved
+         within (tenant, ticket) via `getByIds`, gated on `tickets.view`. The
+         browser fetches the blob directly — bytes never stream through the API.
+         The signed URL DOES embed the object path (that's what's signed); the
+         invariant is that a storage key is never *accepted* from a client.
+      3. Thread join + SPA (`c61e2ea`): `projectConversationThread(thread,
+         attachmentIndex)` matches index rows onto messages by message id;
+         `DashboardConversationAttachment` gained `id: string | null` (null =
+         connector named it, we hold no bytes → inert badge). SPA
+         `AttachmentPreview.tsx`: images → thumbnail + lightbox, other stored
+         files → open on click (no URL signed per render), errors → inert badge.
+         `attachmentPreviewKind` refuses to inline `image/svg+xml` (script-
+         capable; can only arrive from a connector, not the upload allowlist).
+      - Gmail-only today: `imap-poll` and the Graph webhook never put inbound
+        attachments on the payload, so no other connector creates index rows.
+      - Pre-existing blobs have no index rows (no backfill source).
+      - Outbound sent attachments have `message_id = NULL` (the send path never
+        records the provider message id back onto the row), so they do NOT show
+        under the outbound bubble yet. Open follow-up.
+- [ ] Stamp the provider message id onto attachment rows when an outbound reply
+      sends, so sent files render under their own bubble (today `message_id` is
+      null for merchant/supplier uploads and they never appear in the thread).
+- [ ] `tsc -b` does NOT typecheck `apps/dashboard-spa` or any `*.test.ts`.
+      A broken prop reference in the SPA passed `pnpm build` AND the Vite build
+      (esbuild strips types without checking). Use
+      `npx tsc --noEmit -p apps/dashboard-spa/tsconfig.json`. Consider wiring
+      that into `ci:local`.
 - [x] Composer: offer EXISTING ticket attachments in a picker (2026-07-09,
       `44dde5d`). `ChatComposer` reads the ticket attachment index
       (`qk.ticketAttachments`) and offers every unstaged file behind a "Ticket
