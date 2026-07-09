@@ -25,6 +25,7 @@ import {
   listUnsentSupplierEscalations,
   makeDbClient,
   recordSupplierUpdate,
+  rolePermissions,
   suppliers,
   tenants,
 } from "../src/index.js";
@@ -209,6 +210,27 @@ describeIfDb("supplier-store", () => {
     );
     expect(tenantIds).toContain(tenantA);
     expect(tenantIds).not.toContain(tenantB);
+  });
+
+  it("ensureSupplierRole repairs legacy supplier.cases permissions after the ticket rename", async () => {
+    const tenantId = await seedTenant();
+    const roleId = await ensureSupplierRole(db, tenantId);
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+    await db.insert(rolePermissions).values([
+      { roleId, permissionId: "supplier.cases.view" },
+      { roleId, permissionId: "supplier.cases.respond" },
+    ]);
+
+    await ensureSupplierRole(db, tenantId);
+
+    const perms = await db
+      .select({ permissionId: rolePermissions.permissionId })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.roleId, roleId));
+    expect(perms.map((p) => p.permissionId).sort()).toEqual([
+      "supplier.tickets.respond",
+      "supplier.tickets.view",
+    ]);
   });
 
   it("lists ONLY a supplier's own open escalations with the minimal privacy projection", async () => {

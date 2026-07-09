@@ -17,6 +17,22 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Diagnose Elva Labs supplier redirect for `anasncri@gmail.com`
+      (2026-07-09): production data showed the user is correctly bound as a
+      supplier to both `477168f6-a0cc-4f52-b1a9-70d28ac4c42f` (Elva Labs) and
+      `4f685543-53d4-4a8b-a73c-71eb6155d1b4`, but Elva's persisted Supplier
+      role still grants legacy `supplier.cases.view/respond` permissions from
+      before the case→ticket rename. Current API/SPA gates require
+      `supplier.tickets.view/respond`, so the supplier client gate redirects to
+      `/`. Added migration `0044_supplier_ticket_permissions` to map old ids to
+      current ids, and made `ensureSupplierRole` remove stale supplier-case
+      permissions before ensuring the current supplier-ticket permissions.
+      Verified with a red/green supplier-store integration regression, local
+      migration, and `pnpm build`. Production repair was not applied in-session:
+      the approval reviewer rejected the live RBAC write because the user had
+      asked for diagnosis rather than explicitly approving a production data
+      mutation; deploy/run the migration or explicitly approve the narrow repair
+      to restore Elva immediately.
 - [x] Supplier portal deep links select a supplier workspace (2026-07-09):
       suppliers with both a merchant/default workspace and a supplier binding
       could land on `/`, fire the merchant Today summary, see "Couldn’t load

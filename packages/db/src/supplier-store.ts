@@ -36,6 +36,10 @@ const SUPPLIER_PERMISSION_IDS = [
   "supplier.tickets.view",
   "supplier.tickets.respond",
 ] as const;
+const LEGACY_SUPPLIER_PERMISSION_IDS = [
+  "supplier.cases.view",
+  "supplier.cases.respond",
+] as const;
 
 const supplierRoleId = async (
   db: DrizzleDb,
@@ -73,6 +77,14 @@ export const ensureSupplierRole = async (
       .onConflictDoNothing();
     roleId = (await supplierRoleId(db, tenantId)) ?? id;
   }
+  await db
+    .delete(rolePermissions)
+    .where(
+      and(
+        eq(rolePermissions.roleId, roleId),
+        inArray(rolePermissions.permissionId, LEGACY_SUPPLIER_PERMISSION_IDS),
+      ),
+    );
   await db
     .insert(rolePermissions)
     .values(
