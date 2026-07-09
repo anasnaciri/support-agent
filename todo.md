@@ -52,16 +52,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       (untrusted-fenced, oldest-first, before the supplier note). Confirmed
       `manual.takeover` needs no transcript — it parks the ticket in
       `human_takeover`, where the runtime holds every event before the loop.
-- [ ] `supplier.updated` prompt still omits `boundOrderDirective` and
-      `ticketFactsHeader`, which every other agent-facing branch of
-      `buildInitialMessages` injects (`ticket.created`, `customer.replied`,
-      `message.received`, `ticket.resumed` all do). This is the *other* half of
-      why ticket `4746d9d6` re-hunted the order on the supplier tick: without the
-      directive the agent never sees the canonical bound order GID and re-searches
-      by customer instead of loading by id. Adding the transcript masks the
-      symptom; injecting the bound-order directive fixes the cause. Deliberately
-      left out of the transcript slice to keep it one logical change — own slice,
-      agent-visible prompt change.
+- [x] `supplier.updated` prompt injects the bound-order directive + ticket-facts
+      header (2026-07-09): it was the only agent-facing branch of
+      `buildInitialMessages` that injected neither, while `ticket.created`,
+      `customer.replied`, `message.received` and `ticket.resumed` all do. This
+      was the *other* half of why ticket `4746d9d6` re-hunted the order on the
+      supplier tick — without the directive the agent never saw the canonical
+      bound order GID, so it re-searched by customer (`find_customer_order` →
+      `get_customer`) instead of loading by id. The transcript masked that
+      symptom; the directive fixes the cause. Precedence mirrors every sibling
+      branch: `orderIdentityDirective || boundOrderDirective`, so an unverified
+      order/customer mismatch still challenges before it discloses (a supplier
+      tick ends in a customer-facing reply, so the identity gate applies there
+      too). Both stay OUTSIDE the untrusted fence, pinned by tests.
 - [x] Diagnose Elva Labs supplier redirect for `anasncri@gmail.com`
       (2026-07-09): production data showed the user is correctly bound as a
       supplier to both `477168f6-a0cc-4f52-b1a9-70d28ac4c42f` (Elva Labs) and

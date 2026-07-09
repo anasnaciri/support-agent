@@ -646,6 +646,102 @@ describe("buildInitialMessages — supplier.updated with an inlined thread trans
   });
 });
 
+// Prod ticket 4746d9d6 (2026-07-09), second half. The `supplier.updated` branch
+// was the ONLY agent-facing branch of buildInitialMessages that injected neither
+// the bound-order directive nor the ticket-facts header — `ticket.created`,
+// `customer.replied`, `message.received` and `ticket.resumed` all do. Without the
+// directive the agent never saw the canonical bound order GID, so on the supplier
+// tick it re-searched by customer (`find_customer_order` → `get_customer`) instead
+// of loading the order by id. Precedence matches every sibling branch: the identity
+// gate wins over the bound-order hint when both apply.
+describe("buildInitialMessages — supplier.updated directives + facts", () => {
+  const supplierEvent = (): DomainEvent =>
+    ({
+      type: "supplier.updated",
+      ticketId: TicketId("c-1"),
+      payload: {
+        supplierId: "sup-1",
+        note: "reshipped",
+        proposedResolution: null,
+      },
+    }) as never;
+
+  it("injects the bound-order directive so the agent loads by GID, not by search", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent(), {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          customerEmail: "jane@example.com",
+          identifiedOrderId: "gid://shopify/Order/1008",
+        },
+        threadTranscript: null,
+      }),
+    );
+    expect(text).toContain("gid://shopify/Order/1008");
+    expect(text).toContain("do NOT search for the order again");
+    // Runtime-authored → must stay OUTSIDE the untrusted fence.
+    expect(text.indexOf("gid://shopify/Order/1008")).toBeLessThan(
+      text.indexOf(UNTRUSTED_OPEN),
+    );
+  });
+
+  it("injects the ticket facts header outside the fence", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent(), {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          customerEmail: "jane@example.com",
+          classification: "where_is_order",
+          requestedResolution: "refund",
+        },
+        threadTranscript: null,
+      }),
+    );
+    expect(text).toContain("Ticket facts known to the system");
+    expect(text).toContain("classification=where_is_order");
+    expect(text).toContain("requestedResolution=refund");
+    expect(text.indexOf("Ticket facts known to the system")).toBeLessThan(
+      text.indexOf(UNTRUSTED_OPEN),
+    );
+  });
+
+  it("lets the identity gate take precedence over the bound-order hint", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent(), {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {
+          classification: "where_is_order",
+          riskFlags: ["order_customer_mismatch"],
+          identifiedOrderId: "gid://shopify/Order/1008",
+          customerEmail: "sue@example.com",
+          pendingOrderEmail: "suee@example.com",
+        },
+        threadTranscript: null,
+      }),
+    );
+    // Same precedence as every sibling branch: challenge before disclosing.
+    expect(text).toContain("Possible identity mismatch");
+    expect(text).not.toContain("do NOT search for the order again");
+  });
+
+  it("stays silent on a ticket with no established facts", () => {
+    const text = textOf(
+      buildInitialMessages(supplierEvent(), {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: {},
+        threadTranscript: null,
+      }),
+    );
+    expect(text).not.toContain("Ticket facts known to the system");
+    expect(text).not.toContain("do NOT search for the order again");
+    expect(text).not.toContain("Possible identity mismatch");
+  });
+});
+
 describe("buildInitialMessages — ticket facts header (act on all info)", () => {
   const messageReceived = (bodyText: string): DomainEvent =>
     ({

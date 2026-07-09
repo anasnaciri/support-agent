@@ -612,6 +612,23 @@ export const buildInitialMessages = (
     if (ticketSubject) {
       parts.push(`Subject: ${ticketSubject}`);
     }
+    // Trusted, outside the fence — same pair (and same precedence) every other
+    // agent-facing branch injects. The identity gate wins over the bound-order
+    // hint: a supplier tick still ends in a customer-facing reply, so an
+    // unverified order/customer mismatch must challenge before it discloses.
+    // Without the bound-order directive the agent never sees the canonical GID
+    // and re-searches by customer instead of loading by id (prod 4746d9d6:
+    // `find_customer_order` → `get_customer` burned turns 1-2 of the tick).
+    const directive =
+      orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
+      boundOrderDirective(ticketRow.context);
+    if (directive) {
+      parts.push(directive);
+    }
+    const facts = ticketFactsHeader(ticketRow.context);
+    if (facts) {
+      parts.push(facts);
+    }
     // If the runtime pre-fetched the thread, inline the whole conversation
     // (customer messages AND replies we already sent), fenced as untrusted. The
     // supplier's note only makes sense against what the customer asked and what
