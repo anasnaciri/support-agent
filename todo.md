@@ -17,6 +17,51 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Empty LLM completions are retryable, not decisions (2026-07-09):
+      production ticket `4746d9d6-9931-4645-944a-f1036949d78c` took a
+      `supplier.updated` tick, ran three good turns
+      (`ticket.update_context`, `find_customer_order`, `get_customer`), then
+      OpenRouter/`google/gemini-3.5-flash` returned a response with no tool
+      calls, blank text, and a ZEROED usage block — `inputTokens: 0` on a prompt
+      that was ~6.7k tokens the turn before, i.e. never billed, so the model
+      never saw it. `llm-service-live.ts` mapped that straight to
+      `final_message`; the runtime's `autonomous_no_action` guard then correctly
+      refused to silently resolve and parked the ticket in `human_takeover` with
+      no draft. "Retry last step" re-sampled and succeeded, which is what
+      identified it as transient. Fixed: an empty completion (no tool calls AND
+      blank/whitespace/absent text) now fails with `ProviderUnavailable`, which
+      the runtime maps to a retryable `Failed` so pg-boss re-samples with
+      backoff. Deliberately keyed on blank TEXT, not zero-token usage — a
+      provider that under-reports usage must not turn valid final messages into
+      a retry storm. Verified with red/green provider regressions and full
+      `pnpm test` (2893 passing).
+      - The `autonomous_no_action` guard was NOT at fault and must not be
+        loosened: it is the thing that stopped a live customer ticket from being
+        closed with nothing sent.
+- [x] `supplier.updated` ticks re-engage the agent with the thread transcript
+      (2026-07-09): the prefetch at the top of the tick was gated on
+      `event.type === "ticket.resumed"` alone, so a supplier responding put the
+      agent back in the loop blind — the payload is the SUPPLIER's note, not the
+      customer conversation. On ticket `4746d9d6` the agent burned turns 1-2
+      re-hunting the order (`find_customer_order` → `get_customer`) before it
+      could act; the retry tick, which DID get the transcript, went straight to
+      `get_order` and had a draft queued by turn 2 (turn-0 prompt 6,615 vs 7,208
+      tokens — the gap is the missing transcript). Extracted the gate into the
+      pure, unit-tested `shouldPrefetchThread(eventType)` and widened it to
+      `supplier.updated`; `buildInitialMessages` now inlines the transcript
+      (untrusted-fenced, oldest-first, before the supplier note). Confirmed
+      `manual.takeover` needs no transcript — it parks the ticket in
+      `human_takeover`, where the runtime holds every event before the loop.
+- [ ] `supplier.updated` prompt still omits `boundOrderDirective` and
+      `ticketFactsHeader`, which every other agent-facing branch of
+      `buildInitialMessages` injects (`ticket.created`, `customer.replied`,
+      `message.received`, `ticket.resumed` all do). This is the *other* half of
+      why ticket `4746d9d6` re-hunted the order on the supplier tick: without the
+      directive the agent never sees the canonical bound order GID and re-searches
+      by customer instead of loading by id. Adding the transcript masks the
+      symptom; injecting the bound-order directive fixes the cause. Deliberately
+      left out of the transcript slice to keep it one logical change — own slice,
+      agent-visible prompt change.
 - [x] Diagnose Elva Labs supplier redirect for `anasncri@gmail.com`
       (2026-07-09): production data showed the user is correctly bound as a
       supplier to both `477168f6-a0cc-4f52-b1a9-70d28ac4c42f` (Elva Labs) and
