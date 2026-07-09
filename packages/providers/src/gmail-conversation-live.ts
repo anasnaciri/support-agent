@@ -16,11 +16,13 @@ import {
   type ThreadId,
 } from "@support-agent/agent-core";
 import {
+  BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
   type ConnectorConnection,
   type ConversationServiceShape,
 } from "@support-agent/services";
+import { resolveOutboundAttachments } from "./outbound-attachments.js";
 import {
   buildGmailMime,
   GmailHttpError,
@@ -116,9 +118,14 @@ const mapHttpError = (
  */
 export const makeGmailConversation = (
   cfg: GmailProviderConfig,
-): Effect.Effect<ConversationServiceShape, never, ConnectorCredentialStore> =>
+): Effect.Effect<
+  ConversationServiceShape,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> =>
   Effect.gen(function* () {
       const store = yield* ConnectorCredentialStore;
+      const blob = yield* BlobStorage;
       const skew = cfg.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
 
       // Fetch the live token, refreshing first if expired (or close to).
@@ -291,6 +298,11 @@ export const makeGmailConversation = (
             inReplyToMessageId ??= rfcIds.at(-1) ?? null;
           }
 
+          const attachments = yield* resolveOutboundAttachments(
+            blob,
+            draft.attachments,
+            draft.draftId,
+          );
           const mime = buildGmailMime({
             from: { name: null, email: conn.shopDomain },
             to: draft.to,
@@ -300,6 +312,7 @@ export const makeGmailConversation = (
             inReplyToMessageId,
             references,
             messageId: dedupMessageId,
+            attachments,
           });
           const result = yield* Effect.tryPromise({
             try: () =>
@@ -356,5 +369,8 @@ export const makeGmailConversation = (
  */
 export const GmailConversationLive = (
   cfg: GmailProviderConfig,
-): Layer.Layer<ConversationService, never, ConnectorCredentialStore> =>
-  Layer.effect(ConversationService, makeGmailConversation(cfg));
+): Layer.Layer<
+  ConversationService,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> => Layer.effect(ConversationService, makeGmailConversation(cfg));

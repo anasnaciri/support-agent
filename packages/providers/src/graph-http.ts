@@ -349,6 +349,29 @@ export const graphUpdateDraftBody = async (
   });
 };
 
+/** Attach a file to a reply draft before sending (fileAttachment, base64). */
+export const graphAddDraftAttachment = async (
+  opts: GraphHttpCallOptions & {
+    readonly draftId: string;
+    readonly filename: string;
+    readonly contentType: string;
+    readonly bytes: Uint8Array;
+  },
+): Promise<void> => {
+  await graphFetch({
+    method: "POST",
+    path: `/me/messages/${encodeURIComponent(opts.draftId)}/attachments`,
+    token: opts.token,
+    body: {
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: opts.filename,
+      contentType: opts.contentType,
+      contentBytes: Buffer.from(opts.bytes).toString("base64"),
+    },
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+};
+
 /** Send a previously-created draft. */
 export const graphSendDraft = async (
   opts: GraphHttpCallOptions & { readonly draftId: string },

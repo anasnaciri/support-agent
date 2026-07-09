@@ -872,6 +872,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       being invisible (it was filtered out of `CARD_KEYS` and would have
       JSON-dumped via the fallback). Internal `supplierId` deliberately hidden.
 - [ ] Surface canceled approval count after restart-from-triage.
+- [ ] Attachment previews in the ticket thread (design settled 2026-07-08, not
+      built). Constraints discovered: `fetchThread` messages always carry
+      `attachments: []` in all three connectors (only the Gmail webhook
+      ingestion path uploads image bytes to R2 and stamps `MessageAttachment`
+      onto the published `InboundMessage`; nothing persists the storageKey —
+      `image_hashes` keeps only the phash), and Gmail `attachmentId` is NOT
+      stable across message fetches, so storage keys cannot be recomputed from
+      a fresh thread fetch. Plan: (1) persist a `ticket_attachments` index row
+      (tenant, ticket, provider messageId, filename, contentType, sizeBytes,
+      storageKey, hasExif) in the worker where the inbound message binds to a
+      ticket, sharing the tx per the outbox invariant; (2) authz'd
+      `GET /dashboard/tickets/:id/attachments/:attachmentId/url` in apps/api
+      returning a short-TTL `BlobStorage.presignGetUrl` (ApiLayer must provide
+      BlobStorage); (3) thread route joins index rows onto projected messages
+      by message id, contract gains an attachment `id`; SPA badge becomes a
+      button → lightbox `<img>` for image/*. Gmail-only until Graph/IMAP
+      ingest attachments; pre-existing blobs have no index rows (no backfill
+      source — event payloads aren't stored).
 - [x] `ApprovalSignalsStrip` / `ApprovalCard` now merge risk flags via
       `buildRiskFlagBadges` + the shared self-contained `riskFlagChipText`
       (duplicate-photo hits collapse to one counted chip), matching the context

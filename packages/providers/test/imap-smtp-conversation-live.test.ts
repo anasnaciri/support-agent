@@ -8,8 +8,11 @@ import {
   type AskCustomerDraft,
   type ConversationReply,
 } from "@support-agent/agent-core";
+import { Layer } from "effect";
 import {
+  BlobStorageTest,
   ConnectorCredentialStoreTest,
+  type BlobGetResult,
   type ConnectorConnection,
   type ConversationServiceShape,
 } from "@support-agent/services";
@@ -73,11 +76,19 @@ const run = <A, E>(
   ops: ImapSmtpOps,
   conns: ReadonlyArray<ConnectorConnection>,
   use: (svc: ConversationServiceShape) => Effect.Effect<A, E>,
+  blobSeed: Readonly<Record<string, BlobGetResult>> = {},
 ) =>
   Effect.runPromiseExit(
     makeImapSmtpConversation({ opsFactory: () => ops })
       .pipe(Effect.flatMap((svc) => use(svc)))
-      .pipe(Effect.provide(ConnectorCredentialStoreTest(conns))),
+      .pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConnectorCredentialStoreTest(conns),
+            BlobStorageTest({ seed: blobSeed }),
+          ),
+        ),
+      ),
   );
 
 describe("makeImapSmtpConversation — fetchThread", () => {
@@ -152,6 +163,58 @@ describe("makeImapSmtpConversation — reply / askCustomer", () => {
     expect(sendArg.references).toEqual(["m1@host"]);
     expect(sendArg.from.email).toBe(mailbox);
     expect(sendArg.idempotencyKey).toBe("d-1");
+  });
+
+  it("resolves draft attachments from BlobStorage and hands them to SMTP send", async () => {
+    const bytes = new Uint8Array([7, 8, 9]);
+    const send = vi.fn(async () => ({ messageId: "sent-att@host" }));
+    const ops = fakeOps({ send });
+    const exit = await run(
+      ops,
+      [conn()],
+      (svc) =>
+        svc.reply(tenantId, {
+          ...reply,
+          attachments: [
+            {
+              filename: "invoice.pdf",
+              contentType: "application/pdf",
+              storageKey: "upload/t/tk/invoice.pdf",
+              sizeBytes: 3,
+            },
+          ],
+          draftId: "d-att",
+        }),
+      {
+        "upload/t/tk/invoice.pdf": { bytes, contentType: "application/pdf" },
+      },
+    );
+    expect(exit._tag).toBe("Success");
+    const sendArg = (send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendArg.attachments).toHaveLength(1);
+    expect(sendArg.attachments[0].filename).toBe("invoice.pdf");
+    expect(sendArg.attachments[0].bytes).toEqual(bytes);
+  });
+
+  it("fails the send when an attachment blob is missing", async () => {
+    const send = vi.fn(async () => ({ messageId: "never@host" }));
+    const ops = fakeOps({ send });
+    const exit = await run(ops, [conn()], (svc) =>
+      svc.reply(tenantId, {
+        ...reply,
+        attachments: [
+          {
+            filename: "gone.pdf",
+            contentType: "application/pdf",
+            storageKey: "upload/t/tk/gone.pdf",
+            sizeBytes: 3,
+          },
+        ],
+        draftId: "d-gone",
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("skips the pre-send read when the subject is already provided", async () => {

@@ -13,6 +13,7 @@ import {
   type ThreadId,
 } from "@support-agent/agent-core";
 import {
+  BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
   type ConversationServiceShape,
@@ -26,6 +27,7 @@ import {
   type ImapSmtpOps,
   type RawImapMessage,
 } from "./imap-smtp.js";
+import { resolveOutboundAttachments } from "./outbound-attachments.js";
 
 // ============================================================
 // Provider config (boot-time)
@@ -58,9 +60,14 @@ const replySubject = (subject: string): string => {
  */
 export const makeImapSmtpConversation = (
   cfg: ImapSmtpProviderConfig = {},
-): Effect.Effect<ConversationServiceShape, never, ConnectorCredentialStore> =>
+): Effect.Effect<
+  ConversationServiceShape,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> =>
   Effect.gen(function* () {
     const store = yield* ConnectorCredentialStore;
+    const blob = yield* BlobStorage;
     const opsFactory = cfg.opsFactory ?? makeImapSmtpOps;
 
     const resolve = (
@@ -148,6 +155,11 @@ export const makeImapSmtpConversation = (
             ? [root, normalisedInReplyTo]
             : [root];
 
+        const attachments = yield* resolveOutboundAttachments(
+          blob,
+          draft.attachments,
+          draft.draftId,
+        );
         const sent = yield* Effect.tryPromise({
           try: () =>
             ops.send({
@@ -158,6 +170,7 @@ export const makeImapSmtpConversation = (
               html: draft.bodyHtml,
               inReplyTo: normalisedInReplyTo,
               references,
+              ...(attachments.length > 0 ? { attachments } : {}),
               idempotencyKey: draft.draftId,
             }),
           catch: (cause): ConversationError =>
@@ -187,5 +200,8 @@ export const makeImapSmtpConversation = (
  */
 export const ImapSmtpConversationLive = (
   cfg: ImapSmtpProviderConfig = {},
-): Layer.Layer<ConversationService, never, ConnectorCredentialStore> =>
-  Layer.effect(ConversationService, makeImapSmtpConversation(cfg));
+): Layer.Layer<
+  ConversationService,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> => Layer.effect(ConversationService, makeImapSmtpConversation(cfg));

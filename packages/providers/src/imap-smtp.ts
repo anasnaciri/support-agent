@@ -22,6 +22,11 @@ import type {
 } from "@support-agent/agent-core";
 import { ThreadId as makeThreadId } from "@support-agent/agent-core";
 import type { ConnectorConnection } from "@support-agent/services";
+import {
+  encodeBase64Lines,
+  sanitizeMimeFilename,
+  type OutboundAttachment,
+} from "./outbound-attachments.js";
 
 // ============================================================
 // Config + wire types
@@ -79,6 +84,8 @@ export interface ImapSendInput {
   readonly html: string | null;
   readonly inReplyTo: string | null;
   readonly references: ReadonlyArray<string>;
+  /** Resolved attachment bytes; encoded by SMTP send + the Sent-folder copy. */
+  readonly attachments?: ReadonlyArray<OutboundAttachment>;
   /** Stable key for retrying the same logical outbound draft. */
   readonly idempotencyKey?: string;
 }
@@ -490,27 +497,51 @@ const buildSentMime = (
   }
   lines.push("MIME-Version: 1.0");
 
-  if (input.html) {
-    const boundary = `=_support_agent_${normaliseMessageId(messageId).replace(
-      /[^a-zA-Z0-9]/g,
-      "",
-    )}`;
-    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
-    lines.push("");
-    lines.push(`--${boundary}`);
-    lines.push('Content-Type: text/plain; charset="UTF-8"');
-    lines.push("");
-    lines.push(input.text);
-    lines.push(`--${boundary}`);
-    lines.push('Content-Type: text/html; charset="UTF-8"');
-    lines.push("");
-    lines.push(input.html);
-    lines.push(`--${boundary}--`);
-  } else {
-    lines.push('Content-Type: text/plain; charset="UTF-8"');
-    lines.push("");
-    lines.push(input.text);
+  const idSlug = normaliseMessageId(messageId).replace(/[^a-zA-Z0-9]/g, "");
+  const pushBody = (out: Array<string>): void => {
+    if (input.html) {
+      const boundary = `=_support_agent_${idSlug}`;
+      out.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+      out.push("");
+      out.push(`--${boundary}`);
+      out.push('Content-Type: text/plain; charset="UTF-8"');
+      out.push("");
+      out.push(input.text);
+      out.push(`--${boundary}`);
+      out.push('Content-Type: text/html; charset="UTF-8"');
+      out.push("");
+      out.push(input.html);
+      out.push(`--${boundary}--`);
+    } else {
+      out.push('Content-Type: text/plain; charset="UTF-8"');
+      out.push("");
+      out.push(input.text);
+    }
+  };
+
+  const attachments = input.attachments ?? [];
+  if (attachments.length === 0) {
+    pushBody(lines);
+    return Buffer.from(lines.join("\r\n"), "utf8");
   }
+
+  // Sent copy must mirror what SMTP delivered: multipart/mixed with the
+  // body first, then each attachment base64-encoded.
+  const mixedBoundary = `=_support_agent_mixed_${idSlug}`;
+  lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+  lines.push("");
+  lines.push(`--${mixedBoundary}`);
+  pushBody(lines);
+  for (const attachment of attachments) {
+    const filename = sanitizeMimeFilename(attachment.filename);
+    lines.push(`--${mixedBoundary}`);
+    lines.push(`Content-Type: ${attachment.contentType}; name="${filename}"`);
+    lines.push("Content-Transfer-Encoding: base64");
+    lines.push(`Content-Disposition: attachment; filename="${filename}"`);
+    lines.push("");
+    lines.push(encodeBase64Lines(attachment.bytes));
+  }
+  lines.push(`--${mixedBoundary}--`);
   return Buffer.from(lines.join("\r\n"), "utf8");
 };
 
@@ -815,6 +846,15 @@ export const makeImapSmtpOps = (
         ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
         ...(input.references.length > 0
           ? { references: input.references.slice() }
+          : {}),
+        ...(input.attachments && input.attachments.length > 0
+          ? {
+              attachments: input.attachments.map((a) => ({
+                filename: a.filename,
+                contentType: a.contentType,
+                content: Buffer.from(a.bytes),
+              })),
+            }
           : {}),
       });
       const acceptedId = normaliseMessageId(info.messageId ?? messageId) || messageId;

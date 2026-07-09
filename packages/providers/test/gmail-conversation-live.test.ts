@@ -9,6 +9,7 @@ import {
   type ConversationReply,
 } from "@support-agent/agent-core";
 import {
+  BlobStorageTest,
   ConnectorCredentialStore,
   ConversationService,
 } from "@support-agent/services";
@@ -124,7 +125,7 @@ describe("GmailConversationLive — fetchThread", () => {
       clientSecret: "csec",
       fetchImpl: (async () =>
         okJson({ id: "t-1", messages: [] })) as unknown as typeof fetch,
-    }).pipe(Layer.provide(store));
+    }).pipe(Layer.provide(Layer.mergeAll(store, BlobStorageTest({}))));
     await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -162,7 +163,7 @@ describe("GmailConversationLive — fetchThread", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
     const thread = await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -182,7 +183,7 @@ describe("GmailConversationLive — fetchThread", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(emptyStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(emptyStore(), BlobStorageTest({}))));
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -224,7 +225,7 @@ describe("GmailConversationLive — reply", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
     const input: ConversationReply = {
       threadId: ThreadId("t-1"),
       to: [{ name: null, email: "jane@example.com" }],
@@ -306,7 +307,7 @@ describe("GmailConversationLive — reply", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
 
     const sent = await Effect.runPromise(
       Effect.provide(
@@ -382,7 +383,7 @@ describe("GmailConversationLive — reply", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
     const sent = await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -427,7 +428,7 @@ describe("GmailConversationLive — reply", () => {
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
     const sent = await Effect.runPromise(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>
@@ -448,13 +449,116 @@ describe("GmailConversationLive — reply", () => {
     expect(sent.id).toBe("sent-77");
   });
 
+  it("encodes draft attachments into the outbound MIME from BlobStorage", async () => {
+    const bytes = new Uint8Array([0xca, 0xfe, 0xba, 0xbe]);
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes("/threads/t-1")) {
+        return okJson({ id: "t-1", messages: [] });
+      }
+      const body = JSON.parse(String(init.body)) as { raw: string };
+      const decoded = Buffer.from(
+        body.raw.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString("utf8");
+      expect(decoded).toContain("Content-Type: multipart/mixed");
+      expect(decoded).toContain(
+        'Content-Disposition: attachment; filename="damage-photo.png"',
+      );
+      expect(decoded).toContain(Buffer.from(bytes).toString("base64"));
+      return okJson({ id: "sent-att", threadId: "t-1" });
+    });
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          seededStore(),
+          BlobStorageTest({
+            seed: {
+              "upload/t/tk/damage-photo.png": {
+                bytes,
+                contentType: "image/png",
+              },
+            },
+          }),
+        ),
+      ),
+    );
+    const sent = await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("t-1"),
+            to: [{ name: null, email: "jane@example.com" }],
+            subject: "Re: Hi",
+            bodyText: "Photo attached.",
+            bodyHtml: null,
+            attachments: [
+              {
+                filename: "damage-photo.png",
+                contentType: "image/png",
+                storageKey: "upload/t/tk/damage-photo.png",
+                sizeBytes: 4,
+              },
+            ],
+            inReplyToMessageId: "prior-msg",
+            draftId: "d-att",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(sent.id).toBe("sent-att");
+  });
+
+  it("fails the send when an attachment blob is missing (no silent drop)", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes("/threads/t-1")) {
+        return okJson({ id: "t-1", messages: [] });
+      }
+      throw new Error("send should not be reached");
+    });
+    const layer = GmailConversationLive({
+      clientId: "cid",
+      clientSecret: "csec",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) =>
+          s.reply(tenantId, {
+            threadId: ThreadId("t-1"),
+            to: [{ name: null, email: "jane@example.com" }],
+            subject: "Re: Hi",
+            bodyText: "Photo attached.",
+            bodyHtml: null,
+            attachments: [
+              {
+                filename: "gone.png",
+                contentType: "image/png",
+                storageKey: "upload/t/tk/gone.png",
+                sizeBytes: 4,
+              },
+            ],
+            inReplyToMessageId: "prior-msg",
+            draftId: "d-gone",
+          }),
+        ),
+        layer,
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+
   it("maps a 401 from Gmail onto ConversationAuthFailed", async () => {
     const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
     const layer = GmailConversationLive({
       clientId: "cid",
       clientSecret: "csec",
       fetchImpl: fetchImpl as unknown as typeof fetch,
-    }).pipe(Layer.provide(seededStore()));
+    }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({}))));
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.flatMap(ConversationService, (s) =>

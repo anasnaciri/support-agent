@@ -8,6 +8,7 @@ import {
   type ConversationReply,
 } from "@support-agent/agent-core";
 import {
+  BlobStorageTest,
   ConnectorCredentialStore,
   ConversationService,
 } from "@support-agent/services";
@@ -139,7 +140,7 @@ const runFetchThread = (
         clientId: "cid",
         clientSecret: "csec",
         fetchImpl,
-      }).pipe(Layer.provide(store)),
+      }).pipe(Layer.provide(Layer.mergeAll(store, BlobStorageTest({})))),
     ),
   );
 
@@ -271,10 +272,92 @@ describe("GraphConversationLive — reply", () => {
           clientId: "cid",
           clientSecret: "csec",
           fetchImpl,
-        }).pipe(Layer.provide(seededStore())),
+        }).pipe(Layer.provide(Layer.mergeAll(seededStore(), BlobStorageTest({})))),
       ),
     );
     expect(sent.id).toBe("draft-9");
     expect(sent.threadId).toBe("conv-1");
+  });
+
+  it("attaches resolved blobs to the draft before sending", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const calls: Array<string> = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (url.includes("/me/messages?$filter")) {
+        return conversationList([oneInboundMessage, laterOutboundMessage]);
+      }
+      if (url.endsWith("/createReply")) {
+        calls.push("createReply");
+        return okJson({ id: "draft-9", conversationId: "conv-1" });
+      }
+      if (method === "PATCH") {
+        calls.push("patch");
+        return okJson({ id: "draft-9" });
+      }
+      if (url.endsWith("/attachments")) {
+        calls.push("attachments");
+        const body = JSON.parse(String(init?.body)) as {
+          "@odata.type": string;
+          name: string;
+          contentType: string;
+          contentBytes: string;
+        };
+        expect(body["@odata.type"]).toBe("#microsoft.graph.fileAttachment");
+        expect(body.name).toBe("label.pdf");
+        expect(body.contentType).toBe("application/pdf");
+        expect(body.contentBytes).toBe(Buffer.from(bytes).toString("base64"));
+        return okJson({ id: "att-1" });
+      }
+      if (url.endsWith("/send")) {
+        calls.push("send");
+        return noContent();
+      }
+      throw new Error(`unexpected ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const input: ConversationReply = {
+      threadId: ThreadId("conv-1"),
+      to: [{ name: "Jane", email: "jane@example.com" }],
+      subject: null,
+      bodyText: "Label attached.",
+      bodyHtml: null,
+      attachments: [
+        {
+          filename: "label.pdf",
+          contentType: "application/pdf",
+          storageKey: "upload/t/tk/label.pdf",
+          sizeBytes: 3,
+        },
+      ],
+      inReplyToMessageId: null,
+      draftId: "d-2",
+    };
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.flatMap(ConversationService, (s) => s.reply(tenantId, input)),
+        GraphConversationLive({
+          clientId: "cid",
+          clientSecret: "csec",
+          fetchImpl,
+        }).pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              seededStore(),
+              BlobStorageTest({
+                seed: {
+                  "upload/t/tk/label.pdf": {
+                    bytes,
+                    contentType: "application/pdf",
+                  },
+                },
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(calls).toEqual(["createReply", "patch", "attachments", "send"]);
   });
 });

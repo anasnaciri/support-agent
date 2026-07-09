@@ -9,6 +9,7 @@ import {
 } from "@support-agent/agent-core";
 import {
   TicketRepository,
+  BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
   isConversationProvider,
@@ -247,7 +248,11 @@ export const ConversationRouterLive = <RFallback = never>(
   builders: ReadonlyArray<
     readonly [
       ConnectorProvider,
-      Effect.Effect<ConversationServiceShape, never, ConnectorCredentialStore>,
+      Effect.Effect<
+        ConversationServiceShape,
+        never,
+        ConnectorCredentialStore | BlobStorage
+      >,
     ]
   >,
   legacyResolver?: Effect.Effect<
@@ -258,7 +263,7 @@ export const ConversationRouterLive = <RFallback = never>(
 ): Layer.Layer<
   ConversationService,
   never,
-  ConnectorCredentialStore | RFallback
+  ConnectorCredentialStore | BlobStorage | RFallback
 > =>
   Layer.effect(
     ConversationService,

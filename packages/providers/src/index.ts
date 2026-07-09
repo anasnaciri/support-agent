@@ -12,6 +12,7 @@ export * from "./graph-conversation-live.js";
 export * from "./imap-smtp.js";
 export * from "./imap-smtp-conversation-live.js";
 export * from "./conversation-router-live.js";
+export * from "./outbound-attachments.js";
 export * from "./gmail-attachments.js";
 export * from "./image-exif.js";
 export * from "./image-phash.js";

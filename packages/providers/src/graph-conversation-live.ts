@@ -14,17 +14,20 @@ import {
   type ThreadId,
 } from "@support-agent/agent-core";
 import {
+  BlobStorage,
   ConnectorCredentialStore,
   ConversationService,
   type ConversationServiceShape,
 } from "@support-agent/services";
 import {
   GraphHttpError,
+  graphAddDraftAttachment,
   graphCreateReplyDraft,
   graphGetConversation,
   graphSendDraft,
   graphUpdateDraftBody,
 } from "./graph-http.js";
+import { resolveOutboundAttachments } from "./outbound-attachments.js";
 import { refreshGraphToken } from "./graph-token.js";
 
 // ============================================================
@@ -94,9 +97,14 @@ const mapHttpError = (
  */
 export const makeGraphConversation = (
   cfg: GraphProviderConfig,
-): Effect.Effect<ConversationServiceShape, never, ConnectorCredentialStore> =>
+): Effect.Effect<
+  ConversationServiceShape,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> =>
   Effect.gen(function* () {
     const store = yield* ConnectorCredentialStore;
+    const blob = yield* BlobStorage;
     const skew = cfg.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS;
 
     // Freshest access token + the connection record (for the mailbox address).
@@ -234,6 +242,29 @@ export const makeGraphConversation = (
           catch: (cause) =>
             mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
         });
+        // Attachments go on the draft BEFORE the send — resolve every blob
+        // first so a missing one fails the send without a half-attached draft
+        // going out.
+        const attachments = yield* resolveOutboundAttachments(
+          blob,
+          draft.attachments,
+          draft.draftId,
+        );
+        yield* Effect.forEach(attachments, (attachment) =>
+          Effect.tryPromise({
+            try: () =>
+              graphAddDraftAttachment({
+                token: conn.accessToken,
+                draftId: created.id,
+                filename: attachment.filename,
+                contentType: attachment.contentType,
+                bytes: attachment.bytes,
+                ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl } : {}),
+              }),
+            catch: (cause) =>
+              mapHttpError(cause, { tenantId, threadId: draft.threadId, draftId: draft.draftId }),
+          }),
+        );
         yield* Effect.tryPromise({
           try: () =>
             graphSendDraft({
@@ -265,5 +296,8 @@ export const makeGraphConversation = (
  */
 export const GraphConversationLive = (
   cfg: GraphProviderConfig,
-): Layer.Layer<ConversationService, never, ConnectorCredentialStore> =>
-  Layer.effect(ConversationService, makeGraphConversation(cfg));
+): Layer.Layer<
+  ConversationService,
+  never,
+  ConnectorCredentialStore | BlobStorage
+> => Layer.effect(ConversationService, makeGraphConversation(cfg));

@@ -568,10 +568,18 @@ export const buildApiLayers = (cfg: ApiConfig) => {
       : []),
     ...([["imap", makeImapSmtpConversation()]] as const),
   ];
+  // BlobStorage: Live over R2 when R2_* env is set (Gmail webhook uploads
+  // image attachments here; connectors read blobs back to encode outbound
+  // attachments); in-memory Test layer otherwise — dev + integration tests
+  // that exercise these paths without R2 still work, they just store bytes
+  // in process memory.
+  const blob = process.env["R2_BUCKET"]
+    ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
+    : BlobStorageTest({});
   const conversation = ConversationRouterLive(
     connectorBuilders,
     makeTicketProviderResolver,
-  ).pipe(Layer.provide(Layer.mergeAll(store, ticketRepo)));
+  ).pipe(Layer.provide(Layer.mergeAll(store, ticketRepo, blob)));
   // ApprovalServiceLive lets `/approvals/:id/approve|reject` mark the
   // row decided in the same Live impl the runtime uses to create them.
   const approvals = ApprovalServiceLive.pipe(Layer.provide(dbLayer));
@@ -580,14 +588,6 @@ export const buildApiLayers = (cfg: ApiConfig) => {
   // human-sent reply shows in the ticket timeline). Non-redacted default —
   // matches the existing dashboard read/write paths.
   const audit = AuditLogServiceLive.pipe(Layer.provide(dbLayer));
-  // BlobStorage: Live over R2 when R2_* env is set (Gmail webhook
-  // uploads image attachments here so the runtime / LLM can read them
-  // back); in-memory Test layer otherwise — dev + integration tests
-  // that exercise the webhook without R2 still work, they just store
-  // bytes in process memory.
-  const blob = process.env["R2_BUCKET"]
-    ? BlobStorageLive.pipe(Layer.provide(BlobStorageConfigFromEnv))
-    : BlobStorageTest({});
   // LLMService for one-shot dashboard AI actions (e.g. "Rephrase with AI" on a
   // manual reply draft). BYOK: the resolver reads the per-tenant provider + key
   // from the same encrypted credential stores Shopify/Gmail OAuth writes to, so

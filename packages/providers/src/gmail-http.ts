@@ -19,6 +19,11 @@ import type {
   ThreadId,
 } from "@support-agent/agent-core";
 import { ThreadId as makeThreadId } from "@support-agent/agent-core";
+import {
+  encodeBase64Lines,
+  sanitizeMimeFilename,
+  type OutboundAttachment,
+} from "./outbound-attachments.js";
 
 // ============================================================
 // Errors
@@ -618,6 +623,11 @@ export interface OutboundMimeOptions {
    * one as before.
    */
   readonly messageId?: string | null;
+  /**
+   * Resolved attachment bytes (see `resolveOutboundAttachments`). Present →
+   * the message becomes `multipart/mixed` with the body as its first part.
+   */
+  readonly attachments?: ReadonlyArray<OutboundAttachment>;
 }
 
 // SECURITY (S8): `to[].email` / display names are LLM-influenced. Anything
@@ -675,24 +685,50 @@ export const buildGmailMime = (opts: OutboundMimeOptions): string => {
   }
   lines.push("MIME-Version: 1.0");
 
-  if (opts.bodyHtml) {
-    const boundary = `=_${Math.random().toString(36).slice(2)}`;
-    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
-    lines.push("");
-    lines.push(`--${boundary}`);
-    lines.push('Content-Type: text/plain; charset="UTF-8"');
-    lines.push("");
-    lines.push(opts.bodyText);
-    lines.push(`--${boundary}`);
-    lines.push('Content-Type: text/html; charset="UTF-8"');
-    lines.push("");
-    lines.push(opts.bodyHtml);
-    lines.push(`--${boundary}--`);
-  } else {
-    lines.push('Content-Type: text/plain; charset="UTF-8"');
-    lines.push("");
-    lines.push(opts.bodyText);
+  const pushBody = (out: Array<string>): void => {
+    if (opts.bodyHtml) {
+      const boundary = `=_${Math.random().toString(36).slice(2)}`;
+      out.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+      out.push("");
+      out.push(`--${boundary}`);
+      out.push('Content-Type: text/plain; charset="UTF-8"');
+      out.push("");
+      out.push(opts.bodyText);
+      out.push(`--${boundary}`);
+      out.push('Content-Type: text/html; charset="UTF-8"');
+      out.push("");
+      out.push(opts.bodyHtml);
+      out.push(`--${boundary}--`);
+    } else {
+      out.push('Content-Type: text/plain; charset="UTF-8"');
+      out.push("");
+      out.push(opts.bodyText);
+    }
+  };
+
+  const attachments = opts.attachments ?? [];
+  if (attachments.length === 0) {
+    pushBody(lines);
+    return encodeBase64Url(lines.join("\r\n"));
   }
+
+  // Attachments present: multipart/mixed with the (possibly alternative)
+  // body as the first part, then one base64 part per attachment.
+  const mixedBoundary = `=_mixed_${Math.random().toString(36).slice(2)}`;
+  lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+  lines.push("");
+  lines.push(`--${mixedBoundary}`);
+  pushBody(lines);
+  for (const attachment of attachments) {
+    const filename = sanitizeMimeFilename(attachment.filename);
+    lines.push(`--${mixedBoundary}`);
+    lines.push(`Content-Type: ${attachment.contentType}; name="${filename}"`);
+    lines.push("Content-Transfer-Encoding: base64");
+    lines.push(`Content-Disposition: attachment; filename="${filename}"`);
+    lines.push("");
+    lines.push(encodeBase64Lines(attachment.bytes));
+  }
+  lines.push(`--${mixedBoundary}--`);
   return encodeBase64Url(lines.join("\r\n"));
 };
 

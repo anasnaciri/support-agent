@@ -520,6 +520,9 @@ export const buildWorker = async (
             Layer.mergeAll(
               ConnectorCredentialStoreLive(encryptionKeys!),
               TicketRepositoryLive.pipe(Layer.provide(dbLayer)),
+              // Connectors read attachment blobs back to encode outbound
+              // attachments (Gmail MIME / Graph fileAttachment / SMTP).
+              blob,
             ),
           ),
         )
