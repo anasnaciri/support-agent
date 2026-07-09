@@ -17,6 +17,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Supplier portal deep links select a supplier workspace (2026-07-09):
+      suppliers with both a merchant/default workspace and a supplier binding
+      could land on `/`, fire the merchant Today summary, see "Couldn’t load
+      your summary", and never reach `/supplier/tickets`. Fixed the SPA session
+      bootstrap to prefer a supplier workspace on `/supplier/*` routes, even
+      when the stored workspace is merchant, while preserving normal merchant
+      defaults elsewhere. Verified with the focused session-context regression,
+      dashboard SPA build, and `pnpm build`.
 - [x] Ticket attachments can render under every message that carried them
       (2026-07-09): `ticket_attachments.message_id` made attachment↔message
       effectively one-to-many, so re-sending the same ticket file in a later

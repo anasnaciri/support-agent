@@ -102,6 +102,19 @@ export const shouldStartLoginForAuthError = (error: unknown): boolean =>
 
 export type WorkspaceBootstrapRedirectTarget = "/onboarding" | "/no-access";
 
+export const pickActiveWorkspaceForPath = (
+  workspaces: ReadonlyArray<UnifiedWorkspace>,
+  storedId: string | undefined,
+  pathname: string,
+): UnifiedWorkspace | null => {
+  const stored = storedId ? workspaces.find((w) => w.id === storedId) : null;
+  if (pathname.startsWith("/supplier")) {
+    if (stored?.kind === "supplier") return stored;
+    return workspaces.find((w) => w.kind === "supplier") ?? stored ?? null;
+  }
+  return (pickActiveWorkspace(workspaces, storedId) as UnifiedWorkspace | null);
+};
+
 export const workspaceBootstrapRedirectTarget = (input: {
   readonly bootstrapReady: boolean;
   readonly listsSettled: boolean;
@@ -176,8 +189,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [merchantWorkspaces, supplierWorkspaces, isMerchant],
   );
   const active = useMemo(
-    () => pickActiveWorkspace(workspaces, storedId) as UnifiedWorkspace | null,
-    [workspaces, storedId],
+    () => pickActiveWorkspaceForPath(workspaces, storedId, pathname),
+    [workspaces, storedId, pathname],
   );
   const activeIsSupplier = active?.kind === "supplier";
 

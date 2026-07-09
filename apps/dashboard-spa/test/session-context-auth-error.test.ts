@@ -2,9 +2,22 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError, UnauthorizedError } from "../lib/errors";
 import {
+  pickActiveWorkspaceForPath,
   shouldStartLoginForAuthError,
   workspaceBootstrapRedirectTarget,
 } from "../lib/session-context";
+import type { UnifiedWorkspace } from "@support-agent/dashboard-contracts";
+
+const workspace = (
+  id: string,
+  kind: UnifiedWorkspace["kind"],
+): UnifiedWorkspace => ({
+  id,
+  kind,
+  name: id,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  shopifyDomain: null,
+});
 
 describe("shouldStartLoginForAuthError", () => {
   it("starts login only for a real unauthenticated session", () => {
@@ -66,5 +79,37 @@ describe("workspaceBootstrapRedirectTarget", () => {
         merchantProbeLoading: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe("pickActiveWorkspaceForPath", () => {
+  it("selects the supplier workspace when a supplier portal deep link has no stored workspace", () => {
+    const active = pickActiveWorkspaceForPath(
+      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      undefined,
+      "/supplier/tickets",
+    );
+
+    expect(active?.id).toBe("supplier-1");
+  });
+
+  it("overrides a stored merchant workspace on supplier portal routes", () => {
+    const active = pickActiveWorkspaceForPath(
+      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      "merchant-1",
+      "/supplier/tickets",
+    );
+
+    expect(active?.id).toBe("supplier-1");
+  });
+
+  it("keeps the normal default selection on merchant routes", () => {
+    const active = pickActiveWorkspaceForPath(
+      [workspace("merchant-1", "merchant"), workspace("supplier-1", "supplier")],
+      undefined,
+      "/",
+    );
+
+    expect(active?.id).toBe("merchant-1");
   });
 });
