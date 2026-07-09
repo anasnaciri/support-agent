@@ -5,6 +5,7 @@ import {
   TicketAttachmentStore,
   TicketAttachmentStoreDbError,
   type RecordTicketAttachmentInput,
+  type TicketAttachmentMessageBindingRecord,
   type TicketAttachmentRecord,
   type TicketAttachmentSource,
   type TicketAttachmentStoreError,
@@ -17,7 +18,11 @@ import {
 } from "@support-agent/agent-core";
 import { CurrentTxRef, DbClient } from "./db-client.js";
 import type { DrizzleDb } from "./client.js";
-import { ticketAttachments, type TicketAttachmentRow } from "./schema.js";
+import {
+  ticketAttachmentMessages,
+  ticketAttachments,
+  type TicketAttachmentRow,
+} from "./schema.js";
 
 const useDb = (defaultDb: DrizzleDb): Effect.Effect<DrizzleDb> =>
   FiberRef.get(CurrentTxRef).pipe(Effect.map((tx) => tx ?? defaultDb));
@@ -42,9 +47,27 @@ const toRecord = (row: TicketAttachmentRow): TicketAttachmentRecord => ({
   storageKey: row.storageKey,
   uploadedBy: row.uploadedBy,
   escalationId: row.escalationId,
-  messageId: row.messageId,
+  messageId: null,
   usedAt: row.usedAt,
   createdAt: row.createdAt,
+});
+
+const toMessageBindingRecord = (row: {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly ticketId: string;
+  readonly messageId: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+}): TicketAttachmentMessageBindingRecord => ({
+  id: row.id,
+  tenantId: makeTenantId(row.tenantId),
+  ticketId: makeTicketId(row.ticketId),
+  messageId: row.messageId,
+  filename: row.filename,
+  contentType: row.contentType,
+  sizeBytes: row.sizeBytes,
 });
 
 export const TicketAttachmentStoreLive = Layer.effect(
@@ -72,11 +95,26 @@ export const TicketAttachmentStoreLive = Layer.effect(
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
               escalationId: input.escalationId ?? null,
-              messageId: input.messageId ?? null,
             })
             .returning(),
         );
-        return toRecord(rows[0]!);
+        const record = toRecord(rows[0]!);
+        if (input.messageId) {
+          yield* wrap(
+            "record.bindMessage",
+            db
+              .insert(ticketAttachmentMessages)
+              .values({
+                tenantId: input.tenantId,
+                ticketId: input.ticketId,
+                attachmentId: record.id,
+                messageId: input.messageId,
+              })
+              .onConflictDoNothing(),
+          );
+          return { ...record, messageId: input.messageId };
+        }
+        return record;
       });
 
     const recordInbound = (
@@ -101,11 +139,53 @@ export const TicketAttachmentStoreLive = Layer.effect(
                 storageKey: input.storageKey,
                 uploadedBy: input.uploadedBy ?? null,
                 escalationId: input.escalationId ?? null,
-                messageId: input.messageId ?? null,
               })),
             )
             // A redelivered `message.received` re-indexes the same blobs; the
             // first writer keeps the row (ticket_attachments_tenant_key_uniq).
+            .onConflictDoNothing(),
+        );
+        const withMessage = inputs.filter((input) => input.messageId);
+        if (withMessage.length === 0) return;
+        const rows = yield* wrap(
+          "recordInbound.lookupBindings",
+          db
+            .select({
+              id: ticketAttachments.id,
+              tenantId: ticketAttachments.tenantId,
+              ticketId: ticketAttachments.ticketId,
+              storageKey: ticketAttachments.storageKey,
+            })
+            .from(ticketAttachments)
+            .where(
+              inArray(
+                ticketAttachments.storageKey,
+                withMessage.map((input) => input.storageKey),
+              ),
+            ),
+        );
+        const byStorageKey = new Map(
+          rows.map((row) => [`${row.tenantId}:${row.storageKey}`, row]),
+        );
+        const values = withMessage.flatMap((input) => {
+          const row = byStorageKey.get(`${input.tenantId}:${input.storageKey}`);
+          return row && input.messageId
+            ? [
+                {
+                  tenantId: row.tenantId,
+                  ticketId: row.ticketId,
+                  attachmentId: row.id,
+                  messageId: input.messageId,
+                },
+              ]
+            : [];
+        });
+        if (values.length === 0) return;
+        yield* wrap(
+          "recordInbound.bindMessages",
+          db
+            .insert(ticketAttachmentMessages)
+            .values(values)
             .onConflictDoNothing(),
         );
       });
@@ -167,6 +247,50 @@ export const TicketAttachmentStoreLive = Layer.effect(
         return rows.map(toRecord);
       });
 
+    const listMessageBindingsForTicket = (
+      tenantId: TenantId,
+      ticketId: TicketId,
+    ): Effect.Effect<
+      ReadonlyArray<TicketAttachmentMessageBindingRecord>,
+      TicketAttachmentStoreError
+    > =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "listMessageBindingsForTicket",
+          db
+            .select({
+              id: ticketAttachments.id,
+              tenantId: ticketAttachments.tenantId,
+              ticketId: ticketAttachments.ticketId,
+              messageId: ticketAttachmentMessages.messageId,
+              filename: ticketAttachments.filename,
+              contentType: ticketAttachments.contentType,
+              sizeBytes: ticketAttachments.sizeBytes,
+            })
+            .from(ticketAttachmentMessages)
+            .innerJoin(
+              ticketAttachments,
+              and(
+                eq(ticketAttachments.id, ticketAttachmentMessages.attachmentId),
+                eq(ticketAttachments.tenantId, ticketAttachmentMessages.tenantId),
+                eq(ticketAttachments.ticketId, ticketAttachmentMessages.ticketId),
+              ),
+            )
+            .where(
+              and(
+                eq(ticketAttachmentMessages.tenantId, tenantId),
+                eq(ticketAttachmentMessages.ticketId, ticketId),
+              ),
+            )
+            .orderBy(
+              ticketAttachmentMessages.createdAt,
+              ticketAttachmentMessages.messageId,
+            ),
+        );
+        return rows.map(toMessageBindingRecord);
+      });
+
     const markUsed = (
       tenantId: TenantId,
       ticketId: TicketId,
@@ -205,18 +329,16 @@ export const TicketAttachmentStoreLive = Layer.effect(
         yield* wrap(
           "bindToMessage",
           db
-            .update(ticketAttachments)
-            .set({ messageId })
-            .where(
-              and(
-                eq(ticketAttachments.tenantId, tenantId),
-                eq(ticketAttachments.ticketId, ticketId),
-                inArray(ticketAttachments.id, [...ids]),
-                // First binding wins — an inbound file keeps the message it
-                // arrived on even when a reply forwards it back out.
-                isNull(ticketAttachments.messageId),
-              ),
-            ),
+            .insert(ticketAttachmentMessages)
+            .values(
+              ids.map((id) => ({
+                tenantId,
+                ticketId,
+                attachmentId: id,
+                messageId,
+              })),
+            )
+            .onConflictDoNothing(),
         );
       });
 
@@ -225,6 +347,7 @@ export const TicketAttachmentStoreLive = Layer.effect(
       recordInbound,
       getByIds,
       listForTicket,
+      listMessageBindingsForTicket,
       markUsed,
       bindToMessage,
     });

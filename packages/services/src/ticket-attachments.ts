@@ -37,8 +37,8 @@ export interface RecordTicketAttachmentInput {
    */
   readonly escalationId?: string | null;
   /**
-   * The conversation message this file arrived on — inbound rows only. Uploads
-   * belong to an unsent reply and carry null.
+   * The conversation message this file arrived on. Stored as a message binding;
+   * uploads belong to an unsent reply and carry null.
    */
   readonly messageId?: string | null;
 }
@@ -54,11 +54,24 @@ export interface TicketAttachmentRecord {
   readonly storageKey: string;
   readonly uploadedBy: string | null;
   readonly escalationId: string | null;
-  /** The conversation message this file arrived on — inbound rows only. */
+  /**
+   * Deprecated projection of the first known message binding. New thread
+   * rendering should use `listMessageBindingsForTicket`.
+   */
   readonly messageId: string | null;
   /** When the file was consumed into a sent reply or a supplier update. */
   readonly usedAt: Date | null;
   readonly createdAt: Date;
+}
+
+export interface TicketAttachmentMessageBindingRecord {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly ticketId: TicketId;
+  readonly messageId: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
 }
 
 /** Project a stored row to the wire/send shape carried on a ConversationReply. */
@@ -117,6 +130,18 @@ export class TicketAttachmentStore extends Context.Tag("TicketAttachmentStore")<
       TicketAttachmentStoreError
     >;
     /**
+     * Return the attachment/message projection for a ticket thread. One
+     * attachment may appear here multiple times with different message ids when
+     * a merchant re-sends the same ticket file in later replies.
+     */
+    readonly listMessageBindingsForTicket: (
+      tenantId: TenantId,
+      ticketId: TicketId,
+    ) => Effect.Effect<
+      ReadonlyArray<TicketAttachmentMessageBindingRecord>,
+      TicketAttachmentStoreError
+    >;
+    /**
      * Stamp `usedAt` on rows that just became part of a durable artifact (an
      * outgoing reply's attachment list). Idempotent — an already-used row keeps
      * its first timestamp. Scoped to (tenant, ticket) like `getByIds`.
@@ -132,9 +157,9 @@ export class TicketAttachmentStore extends Context.Tag("TicketAttachmentStore")<
      * connector reports for this message in `fetchThread` — the projection
      * joins on it.
      *
-     * First binding wins: a row already tied to a message (an inbound file, or
-     * a file sent on an earlier reply) keeps that message. A file therefore
-     * appears under exactly one bubble even if it rides several replies.
+     * Idempotent per `(attachment, message)`: retries of the same send do not
+     * duplicate the projection, but a later send of the same attachment can
+     * bind it to the later message too.
      */
     readonly bindToMessage: (
       tenantId: TenantId,
@@ -153,6 +178,21 @@ export const TicketAttachmentStoreTest = (
     TicketAttachmentStore,
     Effect.sync(() => {
       const rows: TicketAttachmentRecord[] = [...seed];
+      const bindings: TicketAttachmentMessageBindingRecord[] = seed.flatMap((r) =>
+        r.messageId
+          ? [
+              {
+                id: r.id,
+                tenantId: r.tenantId,
+                ticketId: r.ticketId,
+                messageId: r.messageId,
+                filename: r.filename,
+                contentType: r.contentType,
+                sizeBytes: r.sizeBytes,
+              },
+            ]
+          : [],
+      );
       const scoped = (tenantId: TenantId, ticketId: TicketId) =>
         rows.filter(
           (r) => r.tenantId === tenantId && r.ticketId === ticketId,
@@ -176,6 +216,17 @@ export const TicketAttachmentStoreTest = (
               createdAt: new Date(),
             };
             rows.push(row);
+            if (row.messageId) {
+              bindings.push({
+                id: row.id,
+                tenantId: row.tenantId,
+                ticketId: row.ticketId,
+                messageId: row.messageId,
+                filename: row.filename,
+                contentType: row.contentType,
+                sizeBytes: row.sizeBytes,
+              });
+            }
             return row;
           }),
         recordInbound: (inputs) =>
@@ -188,7 +239,7 @@ export const TicketAttachmentStoreTest = (
                   r.storageKey === input.storageKey,
               );
               if (clash) continue;
-              rows.push({
+              const row: TicketAttachmentRecord = {
                 id: randomUUID(),
                 tenantId: input.tenantId,
                 ticketId: input.ticketId,
@@ -202,7 +253,19 @@ export const TicketAttachmentStoreTest = (
                 messageId: input.messageId ?? null,
                 usedAt: null,
                 createdAt: new Date(),
-              });
+              };
+              rows.push(row);
+              if (row.messageId) {
+                bindings.push({
+                  id: row.id,
+                  tenantId: row.tenantId,
+                  ticketId: row.ticketId,
+                  messageId: row.messageId,
+                  filename: row.filename,
+                  contentType: row.contentType,
+                  sizeBytes: row.sizeBytes,
+                });
+              }
             }
           }),
         getByIds: (tenantId, ticketId, ids) =>
@@ -215,6 +278,12 @@ export const TicketAttachmentStoreTest = (
           }),
         listForTicket: (tenantId, ticketId) =>
           Effect.sync(() => scoped(tenantId, ticketId)),
+        listMessageBindingsForTicket: (tenantId, ticketId) =>
+          Effect.sync(() =>
+            bindings.filter(
+              (r) => r.tenantId === tenantId && r.ticketId === ticketId,
+            ),
+          ),
         markUsed: (tenantId, ticketId, ids) =>
           Effect.sync(() => {
             const wanted = new Set(ids);
@@ -234,15 +303,26 @@ export const TicketAttachmentStoreTest = (
           Effect.sync(() => {
             if (!messageId) return;
             const wanted = new Set(ids);
-            for (let i = 0; i < rows.length; i++) {
-              const r = rows[i]!;
-              if (
-                r.tenantId === tenantId &&
-                r.ticketId === ticketId &&
-                wanted.has(r.id) &&
-                r.messageId === null
-              ) {
-                rows[i] = { ...r, messageId };
+            for (const r of scoped(tenantId, ticketId)) {
+              if (wanted.has(r.id)) {
+                const exists = bindings.some(
+                  (b) =>
+                    b.tenantId === tenantId &&
+                    b.ticketId === ticketId &&
+                    b.id === r.id &&
+                    b.messageId === messageId,
+                );
+                if (!exists) {
+                  bindings.push({
+                    id: r.id,
+                    tenantId: r.tenantId,
+                    ticketId: r.ticketId,
+                    messageId,
+                    filename: r.filename,
+                    contentType: r.contentType,
+                    sizeBytes: r.sizeBytes,
+                  });
+                }
               }
             }
           }),

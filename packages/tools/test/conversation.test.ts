@@ -764,7 +764,10 @@ describe("draft attachmentIds resolution", () => {
             baseCtx("c-att"),
           ) as Effect.Effect<unknown, unknown, never>;
           const store = yield* TicketAttachmentStore;
-          return yield* store.listForTicket(tenantId, TicketId("c-att"));
+          return yield* store.listMessageBindingsForTicket(
+            tenantId,
+            TicketId("c-att"),
+          );
         }),
         layer,
       ),
@@ -772,10 +775,15 @@ describe("draft attachmentIds resolution", () => {
     // The id the connector reported for the send is the id fetchThread will
     // report for that same message, so the projection can join on it.
     expect(handle.sent).toHaveLength(1);
-    expect(rows[0]?.messageId).toBe(handle.sent[0]!.result.id);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "att-1",
+        messageId: handle.sent[0]!.result.id,
+      }),
+    ]);
   });
 
-  it("leaves messageId null when the send fails — nothing went out", async () => {
+  it("does not bind a message when the send fails — nothing went out", async () => {
     const { layer } = env([attachmentRow()]);
     const rows = await Effect.runPromise(
       Effect.provide(
@@ -791,12 +799,43 @@ describe("draft attachmentIds resolution", () => {
             ) as Effect.Effect<unknown, unknown, never>
           ).pipe(Effect.either);
           const store = yield* TicketAttachmentStore;
-          return yield* store.listForTicket(tenantId, TicketId("c-att"));
+          return yield* store.listMessageBindingsForTicket(
+            tenantId,
+            TicketId("c-att"),
+          );
         }),
         layer,
       ),
     );
-    expect(rows[0]?.messageId).toBeNull();
+    expect(rows).toEqual([]);
+  });
+
+  it("binds the same attachment to each message that re-sends it", async () => {
+    const { layer } = env([attachmentRow()]);
+    const rows = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          yield* conversationReply.execute(
+            { ...replyInput(["att-1"]), draftId: "d-att-1" } as never,
+            baseCtx("c-att"),
+          ) as Effect.Effect<unknown, unknown, never>;
+          yield* conversationReply.execute(
+            { ...replyInput(["att-1"]), draftId: "d-att-2" } as never,
+            baseCtx("c-att"),
+          ) as Effect.Effect<unknown, unknown, never>;
+          const store = yield* TicketAttachmentStore;
+          return yield* store.listMessageBindingsForTicket(
+            tenantId,
+            TicketId("c-att"),
+          );
+        }),
+        layer,
+      ),
+    );
+    expect(rows.map((r) => ({ id: r.id, messageId: r.messageId }))).toEqual([
+      { id: "att-1", messageId: "sent-1" },
+      { id: "att-1", messageId: "sent-2" },
+    ]);
   });
 
   it("leaves an unresolvable id unused — a rejected draft sends nothing", async () => {

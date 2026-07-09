@@ -144,6 +144,38 @@ describe("dashboard conversation thread", () => {
       expect(out.messages[0]?.attachments).toEqual([]);
     });
 
+    it("renders the same indexed file under every message binding", () => {
+      const thread = {
+        ...bare("message-1"),
+        messages: [
+          ...bare("message-1").messages,
+          { ...bare("message-2").messages[0]!, id: "message-2" },
+        ],
+      };
+      const out = projectConversationThread(thread, [
+        ...indexed("message-1"),
+        ...indexed("message-2"),
+      ]);
+      expect(out.messages.map((m) => m.attachments)).toEqual([
+        [
+          {
+            id: "att-1",
+            filename: "damage.jpg",
+            contentType: "image/jpeg",
+            sizeBytes: 4096,
+          },
+        ],
+        [
+          {
+            id: "att-1",
+            filename: "damage.jpg",
+            contentType: "image/jpeg",
+            sizeBytes: 4096,
+          },
+        ],
+      ]);
+    });
+
     it("ignores index rows that belong to no message (unsent uploads)", () => {
       const out = projectConversationThread(bare("message-1"), [
         { ...indexed("message-1")[0]!, messageId: null },

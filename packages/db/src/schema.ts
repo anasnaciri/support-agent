@@ -862,12 +862,6 @@ export const ticketAttachments = pgTable(
       () => ticketSupplierEscalations.id,
       { onDelete: "cascade" },
     ),
-    /**
-     * The conversation message this file arrived on — `source='inbound'` rows
-     * only, so the ticket thread can render it under the right bubble. Uploads
-     * belong to a reply that hasn't been sent yet and carry null.
-     */
-    messageId: text("message_id"),
     filename: text("filename").notNull(),
     contentType: text("content_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -887,7 +881,6 @@ export const ticketAttachments = pgTable(
   (t) => [
     index("ticket_attachments_ticket_idx").on(t.ticketId),
     index("ticket_attachments_escalation_idx").on(t.escalationId),
-    index("ticket_attachments_message_idx").on(t.ticketId, t.messageId),
     // Idempotent inbound indexing: a redelivered `message.received` re-runs
     // the same tx with the same storage keys and must not add a second row.
     uniqueIndex("ticket_attachments_tenant_key_uniq").on(
@@ -903,6 +896,43 @@ export const ticketAttachments = pgTable(
 
 export type TicketAttachmentRow = typeof ticketAttachments.$inferSelect;
 export type TicketAttachmentInsert = typeof ticketAttachments.$inferInsert;
+
+/**
+ * Message-level projection for ticket attachments. The attachment row is the
+ * ticket-level blob index; this table records every conversation message that
+ * carried that file. Re-sending the same file in a later reply therefore adds a
+ * second row instead of moving the file off the first message.
+ */
+export const ticketAttachmentMessages = pgTable(
+  "ticket_attachment_messages",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    attachmentId: uuid("attachment_id")
+      .notNull()
+      .references(() => ticketAttachments.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.tenantId, t.ticketId, t.attachmentId, t.messageId],
+    }),
+    index("ticket_attachment_messages_message_idx").on(t.ticketId, t.messageId),
+    index("ticket_attachment_messages_attachment_idx").on(t.attachmentId),
+  ],
+);
+
+export type TicketAttachmentMessageRow =
+  typeof ticketAttachmentMessages.$inferSelect;
+export type TicketAttachmentMessageInsert =
+  typeof ticketAttachmentMessages.$inferInsert;
 
 export type TenantRow = typeof tenants.$inferSelect;
 export type TenantInsert = typeof tenants.$inferInsert;

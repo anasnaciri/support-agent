@@ -302,6 +302,13 @@
       "when": 1783958600000,
       "tag": "0042_attachment_message_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1783958700000,
+      "tag": "0043_attachment_message_join",
+      "breakpoints": true
     }
   ]
 }

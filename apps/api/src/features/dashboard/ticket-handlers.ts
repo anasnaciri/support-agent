@@ -221,7 +221,7 @@ export const handleDashboardTicketConversationThread = async (
         // the previews, not the conversation.
         const attachmentStore = yield* TicketAttachmentStore;
         const attachmentIndex = yield* attachmentStore
-          .listForTicket(TenantId(auth.tenantId), TicketId(id))
+          .listMessageBindingsForTicket(TenantId(auth.tenantId), TicketId(id))
           .pipe(Effect.orElseSucceed(() => []));
         const threadResult = yield* resolveTicketConversationThread(
           ticketRow.mailbox,

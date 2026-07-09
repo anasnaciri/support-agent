@@ -9,6 +9,7 @@ import {
   DbClientLive,
   makeDbClient,
   tenants,
+  ticketAttachmentMessages,
   ticketAttachments,
   TicketAttachmentStoreLive,
 } from "../src/index.js";
@@ -111,7 +112,23 @@ describeIfDb("TicketAttachmentStoreLive", () => {
               TenantId(tenantId),
               TicketId(ticketA),
             );
-            return { supplierPhoto, resolved, wrongTicket, listed };
+            yield* store.bindToMessage(
+              TenantId(tenantId),
+              TicketId(ticketA),
+              [merchantPhoto.id],
+              "sent-1",
+            );
+            yield* store.bindToMessage(
+              TenantId(tenantId),
+              TicketId(ticketA),
+              [merchantPhoto.id],
+              "sent-2",
+            );
+            const bindings = yield* store.listMessageBindingsForTicket(
+              TenantId(tenantId),
+              TicketId(ticketA),
+            );
+            return { supplierPhoto, resolved, wrongTicket, listed, bindings };
           }),
           layer,
         ),
@@ -129,7 +146,17 @@ describeIfDb("TicketAttachmentStoreLive", () => {
         "merchant",
         "supplier",
       ]);
+      expect(result.bindings.map((r) => [r.id, r.messageId])).toEqual([
+        [result.resolved[0]!.id, "sent-1"],
+        [result.resolved[0]!.id, "sent-2"],
+      ]);
     } finally {
+      await db
+        .delete(ticketAttachmentMessages)
+        .where(eq(ticketAttachmentMessages.tenantId, tenantId));
+      await db
+        .delete(ticketAttachmentMessages)
+        .where(eq(ticketAttachmentMessages.tenantId, otherTenantId));
       await db
         .delete(ticketAttachments)
         .where(eq(ticketAttachments.tenantId, tenantId));

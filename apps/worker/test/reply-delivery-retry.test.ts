@@ -129,8 +129,12 @@ describe("reSendEffect — attachments", () => {
             attempts: 1,
             maxAttempts: 6,
           } as never);
-          const after = yield* store.listForTicket(tenantId, ticket.id);
-          return { outcome, after, sent: convo.handle.sent };
+          const after = yield* store.listMessageBindingsForTicket(
+            tenantId,
+            ticket.id,
+          );
+          const indexed = yield* store.listForTicket(tenantId, ticket.id);
+          return { outcome, after, indexed, seeded, sent: convo.handle.sent };
         }),
         layer,
       ),
@@ -153,8 +157,13 @@ describe("reSendEffect — attachments", () => {
 
   it("binds the re-sent files to the message that finally carried them", async () => {
     const out = await run(true, (id) => [id]);
-    expect(out.after[0]?.messageId).toBe(out.sent[0]!.result.id);
-    expect(out.after[0]?.usedAt).toBeInstanceOf(Date);
+    expect(out.after).toEqual([
+      expect.objectContaining({
+        id: out.seeded?.id,
+        messageId: out.sent[0]!.result.id,
+      }),
+    ]);
+    expect(out.indexed[0]?.usedAt).toBeInstanceOf(Date);
   });
 
   it("refuses to deliver when a promised attachment no longer resolves", async () => {

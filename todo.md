@@ -17,6 +17,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Ticket attachments can render under every message that carried them
+      (2026-07-09): `ticket_attachments.message_id` made attachment↔message
+      effectively one-to-many, so re-sending the same ticket file in a later
+      reply left it visually bound only to the first message. Fixed by moving
+      message bindings into `ticket_attachment_messages`, backfilling existing
+      non-null bindings in migration `0043_attachment_message_join`, and having
+      the dashboard thread projection read the join-backed binding list while
+      the composer picker still reads the ticket-level attachment index.
+      Verified with focused conversation/retry/thread regressions and
+      `pnpm build`.
 - [x] Harden first-look tracking failures for order-status / scenario replies
       (discovered 2026-07-08): production ticket
       `12626e22-d367-40aa-950b-f3065406a711` initially stamped
