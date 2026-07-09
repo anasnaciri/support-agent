@@ -36,6 +36,11 @@ export interface RecordTicketAttachmentInput {
    * portal's "files you sent" view.
    */
   readonly escalationId?: string | null;
+  /**
+   * The conversation message this file arrived on — inbound rows only. Uploads
+   * belong to an unsent reply and carry null.
+   */
+  readonly messageId?: string | null;
 }
 
 export interface TicketAttachmentRecord {
@@ -49,6 +54,8 @@ export interface TicketAttachmentRecord {
   readonly storageKey: string;
   readonly uploadedBy: string | null;
   readonly escalationId: string | null;
+  /** The conversation message this file arrived on — inbound rows only. */
+  readonly messageId: string | null;
   /** When the file was consumed into a sent reply or a supplier update. */
   readonly usedAt: Date | null;
   readonly createdAt: Date;
@@ -79,6 +86,15 @@ export class TicketAttachmentStore extends Context.Tag("TicketAttachmentStore")<
     readonly record: (
       input: RecordTicketAttachmentInput,
     ) => Effect.Effect<TicketAttachmentRecord, TicketAttachmentStoreError>;
+    /**
+     * Index attachments that arrived on an inbound customer message. The bytes
+     * were already uploaded by the connector; this records where they live.
+     * IDEMPOTENT on (tenant, storageKey): a redelivered `message.received`
+     * re-runs the indexing tx with the same keys and must not duplicate rows.
+     */
+    readonly recordInbound: (
+      inputs: ReadonlyArray<RecordTicketAttachmentInput>,
+    ) => Effect.Effect<void, TicketAttachmentStoreError>;
     /**
      * Resolve attachment ids within one tenant + ticket. Ids that don't
      * exist or belong to another tenant/ticket are silently absent from the
@@ -139,11 +155,39 @@ export const TicketAttachmentStoreTest = (
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
               escalationId: input.escalationId ?? null,
+              messageId: input.messageId ?? null,
               usedAt: null,
               createdAt: new Date(),
             };
             rows.push(row);
             return row;
+          }),
+        recordInbound: (inputs) =>
+          Effect.sync(() => {
+            for (const input of inputs) {
+              // Mirrors Live's (tenant, storageKey) uniqueness.
+              const clash = rows.some(
+                (r) =>
+                  r.tenantId === input.tenantId &&
+                  r.storageKey === input.storageKey,
+              );
+              if (clash) continue;
+              rows.push({
+                id: randomUUID(),
+                tenantId: input.tenantId,
+                ticketId: input.ticketId,
+                source: input.source,
+                filename: input.filename,
+                contentType: input.contentType,
+                sizeBytes: input.sizeBytes,
+                storageKey: input.storageKey,
+                uploadedBy: input.uploadedBy ?? null,
+                escalationId: input.escalationId ?? null,
+                messageId: input.messageId ?? null,
+                usedAt: null,
+                createdAt: new Date(),
+              });
+            }
           }),
         getByIds: (tenantId, ticketId, ids) =>
           Effect.sync(() => {

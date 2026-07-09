@@ -14,6 +14,7 @@ import {
   AgentResolverTest,
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalServiceTest,
   AuditLogServiceTest,
@@ -114,7 +115,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
         ]),
       }),
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -200,7 +201,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
         lookup: () => Effect.fail(new NetworkError({ cause: "boom" })),
       }),
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(

@@ -42,6 +42,7 @@ const toRecord = (row: TicketAttachmentRow): TicketAttachmentRecord => ({
   storageKey: row.storageKey,
   uploadedBy: row.uploadedBy,
   escalationId: row.escalationId,
+  messageId: row.messageId,
   usedAt: row.usedAt,
   createdAt: row.createdAt,
 });
@@ -71,10 +72,42 @@ export const TicketAttachmentStoreLive = Layer.effect(
               storageKey: input.storageKey,
               uploadedBy: input.uploadedBy ?? null,
               escalationId: input.escalationId ?? null,
+              messageId: input.messageId ?? null,
             })
             .returning(),
         );
         return toRecord(rows[0]!);
+      });
+
+    const recordInbound = (
+      inputs: ReadonlyArray<RecordTicketAttachmentInput>,
+    ): Effect.Effect<void, TicketAttachmentStoreError> =>
+      Effect.gen(function* () {
+        if (inputs.length === 0) return;
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "recordInbound",
+          db
+            .insert(ticketAttachments)
+            .values(
+              inputs.map((input) => ({
+                id: randomUUID(),
+                tenantId: input.tenantId,
+                ticketId: input.ticketId,
+                source: input.source,
+                filename: input.filename,
+                contentType: input.contentType,
+                sizeBytes: input.sizeBytes,
+                storageKey: input.storageKey,
+                uploadedBy: input.uploadedBy ?? null,
+                escalationId: input.escalationId ?? null,
+                messageId: input.messageId ?? null,
+              })),
+            )
+            // A redelivered `message.received` re-indexes the same blobs; the
+            // first writer keeps the row (ticket_attachments_tenant_key_uniq).
+            .onConflictDoNothing(),
+        );
       });
 
     const getByIds = (
@@ -162,6 +195,7 @@ export const TicketAttachmentStoreLive = Layer.effect(
 
     return TicketAttachmentStore.of({
       record,
+      recordInbound,
       getByIds,
       listForTicket,
       markUsed,

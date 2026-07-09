@@ -39,6 +39,7 @@ import {
   type MerchantNotification,
 } from "./merchant-notification.js";
 import { ImageHashStore, type SimilarImageHit } from "./image-hash-store.js";
+import { TicketAttachmentStore } from "./ticket-attachments.js";
 import { ApprovalLinkConfig } from "./approval-link-config.js";
 import {
   buildApprovalNotification,
@@ -138,6 +139,11 @@ const AgentRuntimeLayer = Layer.effect(
   Effect.gen(function* () {
     const tickets = yield* TicketRepository;
     const audit = yield* AuditLogService;
+    // Persists where a customer's inbound files live. Required (not optional
+    // like ImageHashStore): the event payload holding their storage keys is
+    // never stored, so a missing layer would silently orphan every blob the
+    // connector uploads.
+    const attachmentStore = yield* TicketAttachmentStore;
     // Tenant-aware resolution: built-in agents first, then the tenant's
     // merchant-authored custom agents. Replaces direct AgentRegistry lookups so
     // a custom agent runs (and a deleted/disabled one fails safe to takeover).
@@ -337,6 +343,37 @@ const AgentRuntimeLayer = Layer.effect(
                   messageId: event.payload.messageId,
                   direction: "inbound",
                 })
+                .pipe(Effect.catchAll(() => Effect.void));
+            }
+            // Index the files the customer sent. The connector already uploaded
+            // the bytes and put their storage keys on the payload; this is the
+            // first moment they can be tied to a ticket, and the ONLY place
+            // that mapping is ever persisted (the event payload is not stored,
+            // and a fresh thread fetch cannot recompute the keys — Gmail's
+            // per-message attachmentId is not stable across fetches). Without
+            // it the blobs are unreachable forever. Best-effort, like
+            // recordMessageId: an indexing hiccup must not roll back the ticket
+            // create + audit it shares this tx with. Idempotent on the storage
+            // key, so a redelivered push re-indexes nothing.
+            if (
+              (event.type === "message.received" ||
+                event.type === "customer.replied") &&
+              event.payload.attachments.length > 0
+            ) {
+              yield* attachmentStore
+                .recordInbound(
+                  event.payload.attachments.map((a) => ({
+                    tenantId: row.tenantId,
+                    ticketId: row.id,
+                    source: "inbound" as const,
+                    filename: a.filename,
+                    contentType: a.contentType,
+                    sizeBytes: a.sizeBytes,
+                    storageKey: a.storageKey,
+                    uploadedBy: null,
+                    messageId: event.payload.messageId ?? null,
+                  })),
+                )
                 .pipe(Effect.catchAll(() => Effect.void));
             }
             return { row, wasCreated };

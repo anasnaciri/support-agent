@@ -18,6 +18,7 @@ import {
 import {
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   LLMServiceScripted,
   PlatformMailServiceTest,
@@ -101,7 +102,7 @@ describeIfDb("AgentRuntime + TransactionRunnerLive (audit-in-tx)", () => {
   // expose `envWithDb` (not just the AgentRuntime layer) to the outer
   // fiber via `Layer.merge`, and merge in dbLayer so tests can use it too.
   const envWithDb = env.pipe(Layer.provide(dbLayer));
-  const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(envWithDb));
+  const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(envWithDb, TicketAttachmentStoreTest())));
   const liveLayer = Layer.mergeAll(runtimeLayer, envWithDb, dbLayer);
 
   const run = <A, E>(

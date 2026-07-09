@@ -19,6 +19,7 @@ import { ticketUpdateContext } from "@support-agent/tools";
 import {
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalService,
   ApprovalServiceTest,
@@ -142,7 +143,7 @@ const buildLayer = (
     ProcessedMessageStoreTest,
     ToolExecutionStoreTest,
   );
-  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 };
 
 const customerReplied = (ticketId: string): DomainEvent => ({

@@ -14,6 +14,7 @@ import {
 import {
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalService,
   ApprovalServiceTest,
@@ -125,7 +126,7 @@ const buildLayer = (
     replyDelivery.layer,
   );
   return {
-    layer: Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env),
+    layer: Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env),
     handle: replyDelivery.handle,
   };
 };

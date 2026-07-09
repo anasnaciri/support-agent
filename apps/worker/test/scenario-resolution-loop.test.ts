@@ -23,6 +23,7 @@ import {
   AgentResolverTest,
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalService,
   ApprovalServiceTest,
@@ -122,7 +123,7 @@ const makeLayer = (
     tenantRepoDefault,
     ...extras,
   );
-  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 };
 
 const driveTicket = (
@@ -347,7 +348,7 @@ const seedAndResume = (actions: ReadonlyArray<QueuedAction>) => {
     tenantOverridesEmpty,
     tenantRepoDefault,
   );
-  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
   return Effect.runPromise(
     Effect.provide(
@@ -457,7 +458,7 @@ const driveScenarioTicket = (
       settingsByTenant: new Map([[TenantId(TENANT), settings]]),
     }),
   );
-  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
   return Effect.runPromise(
     Effect.provide(
@@ -617,7 +618,7 @@ const driveTriage = (
       settingsByTenant: new Map([[TenantId(TENANT), settings]]),
     }),
   );
-  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
   return Effect.runPromise(
     Effect.provide(
@@ -854,7 +855,7 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
         settingsByTenant: new Map([[TenantId(TENANT), settings]]),
       }),
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -958,7 +959,7 @@ const partialLayer = (
     tenantRepoDefault,
     ...extra,
   );
-  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 };
 
 const seedParkedTicket = (repo: typeof TicketRepository.Service, threadId = "thread-x") =>

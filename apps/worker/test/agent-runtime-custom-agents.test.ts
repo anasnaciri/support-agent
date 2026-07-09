@@ -13,6 +13,7 @@ import {
   AgentResolverTest,
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalService,
   ApprovalServiceTest,
@@ -82,7 +83,7 @@ const baseEnv = (
   );
 
 const withRuntime = (env: Layer.Layer<never, never, never> | ReturnType<typeof baseEnv>) =>
-  Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+  Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
 // A merchant-authored specialist that drafts a customer reply (gated to `ask`).
 const customReturns: AgentConfig = {

@@ -916,17 +916,55 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       lightbox `<img>` for image/*. Gmail-only until Graph/IMAP ingest
       attachments; pre-existing blobs have no index rows (no backfill source —
       event payloads aren't stored).
-- [ ] Composer: offer EXISTING ticket attachments (e.g. the supplier's file) in
-      a picker when writing a manual reply — GET
-      `/dashboard/tickets/:id/attachments` already serves the index, but the
-      composer only stages fresh uploads today.
-- [ ] Orphaned upload GC: removing a staged chip (or abandoning a draft) leaves
-      the blob + `ticket_attachments` row on the ticket forever. Harmless
-      (ticket-scoped, cascade-deleted with the tenant/ticket) but worth a
-      retention sweep alongside the ticket-archival job eventually.
-- [ ] Supplier portal: resolved-escalation view doesn't show the files the
-      supplier sent (they're in `context.supplierUpdate.attachments` and the
-      merchant context card, but the supplier's own chat bubble omits them).
+- [x] Composer: offer EXISTING ticket attachments in a picker (2026-07-09,
+      `44dde5d`). `ChatComposer` reads the ticket attachment index
+      (`qk.ticketAttachments`) and offers every unstaged file behind a "Ticket
+      files" button; picking one costs no upload (the reply carries its
+      existing opaque id). Offer/capacity rules are the pure
+      `lib/attachment-picker.ts` (`attachmentPickerState`): staged files drop
+      out, the 8-attachment cap counts fresh uploads + picked files together,
+      and the list renders unselectable at capacity rather than vanishing. A
+      fresh upload invalidates the index query so unstaging its chip leaves the
+      file reachable.
+- [x] Orphaned upload GC (2026-07-09, `20c31d3`). `ticket_attachments.used_at`
+      (migration 0041) is stamped when a file becomes part of something durable:
+      an outgoing reply (`resolveDraftAttachmentIds`, manual reply handler) or a
+      supplier's posted update (`recordSupplierUpdate`, IN its tx — used iff the
+      update committed). `apps/worker/src/attachment-gc.ts` reclaims rows that
+      stay NULL past 30 days, on the existing daily retention cron.
+      - Two retain-guards, both fail-safe: a PENDING approval on the ticket may
+        hold the ids in `proposedInput` (the tool body only marks them on
+        approve, and approval links live 30 days), and an OPEN escalation may
+        still receive the update that binds its uploads. Both use drizzle
+        `notExists()` — a hand-rolled sql`NOT EXISTS` does not qualify the
+        correlated columns (same trap as `dashboard-reads.ts`).
+      - `source='inbound'` rows are never swept: the message is their reference.
+      - Blob first, row second, and only for keys whose blob actually went away.
+        A crash between them leaves a row whose blob is gone → next pass
+        reclaims it idempotently. Reverse order would leak the object.
+      - ALSO fixed a pre-existing R2 leak: the retention sweep's ticket deletion
+        cascaded `ticket_attachments` away without deleting the objects. It now
+        captures storage keys INSIDE the tx and deletes blobs after commit
+        (best-effort; a failed delete logs and leaks, never rolls back).
+      - `BlobStorage` grew an idempotent `delete` (R2 `DeleteObjectCommand`;
+        NoSuchKey → success). Any new `BlobStorage.of({...})` must implement it.
+      - 0041 backfills `used_at = created_at` on existing rows: we can't tell
+        after the fact which were sent, and over-retaining beats deleting a blob
+        a live reply references.
+- [x] Supplier portal shows the files the supplier sent (2026-07-09, `0f1069b`).
+      `ticket_attachments.escalation_id` (migration 0040, nullable — merchant
+      and inbound rows carry none) is stamped at supplier-upload time;
+      `getEscalationForSupplier` projects that escalation's own files and the
+      supplier's chat bubble renders them (metadata only, storage keys stay
+      server-side). `supplierChatMessages` only attaches them to the RESOLVED
+      outbound bubble, so an upload staged against an abandoned draft never
+      reads as an answer.
+      - SECURITY tightening in the same slice: `recordSupplierUpdate` used to
+        accept any `source='supplier'` id on the ticket, so a SECOND escalation
+        could re-send the first one's files. Validation is now escalation-scoped.
+      - Pre-existing supplier rows keep a null `escalation_id` (they predate the
+        binding) and stay reachable via the ticket-context stamp their update
+        wrote; they will not appear in the portal's per-escalation view.
 - [x] `ApprovalSignalsStrip` / `ApprovalCard` now merge risk flags via
       `buildRiskFlagBadges` + the shared self-contained `riskFlagChipText`
       (duplicate-photo hits collapse to one counted chip), matching the context

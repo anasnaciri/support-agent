@@ -862,6 +862,12 @@ export const ticketAttachments = pgTable(
       () => ticketSupplierEscalations.id,
       { onDelete: "cascade" },
     ),
+    /**
+     * The conversation message this file arrived on — `source='inbound'` rows
+     * only, so the ticket thread can render it under the right bubble. Uploads
+     * belong to a reply that hasn't been sent yet and carry null.
+     */
+    messageId: text("message_id"),
     filename: text("filename").notNull(),
     contentType: text("content_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -881,6 +887,13 @@ export const ticketAttachments = pgTable(
   (t) => [
     index("ticket_attachments_ticket_idx").on(t.ticketId),
     index("ticket_attachments_escalation_idx").on(t.escalationId),
+    index("ticket_attachments_message_idx").on(t.ticketId, t.messageId),
+    // Idempotent inbound indexing: a redelivered `message.received` re-runs
+    // the same tx with the same storage keys and must not add a second row.
+    uniqueIndex("ticket_attachments_tenant_key_uniq").on(
+      t.tenantId,
+      t.storageKey,
+    ),
     check(
       "ticket_attachments_source_check",
       sql`${t.source} IN ('inbound','supplier','merchant')`,

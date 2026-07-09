@@ -29,6 +29,8 @@ import { ALL_TOOLS } from "@support-agent/tools";
 import {
   AgentRuntime,
   AgentRuntimeDefault,
+  TicketAttachmentStore,
+  TicketAttachmentStoreTest,
   ApprovalLinkConfig,
   ApprovalService,
   ApprovalServiceTest,
@@ -141,7 +143,7 @@ const tickEnv = Layer.mergeAll(
   tenantRepoDefault,
 );
 
-const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(tickEnv));
+const runtimeLayer = AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(tickEnv, TicketAttachmentStoreTest())));
 // Provide the inspection services on top of the runtime so the test can also
 // poke at the ticket + audit log after the tick.
 const fullLayer = Layer.merge(runtimeLayer, tickEnv);
@@ -390,7 +392,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -582,7 +584,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -720,7 +722,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -828,7 +830,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -918,7 +920,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1010,7 +1012,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1135,7 +1137,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1215,7 +1217,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1308,7 +1310,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1436,7 +1438,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -1608,7 +1610,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -1742,7 +1744,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -1922,7 +1924,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2072,7 +2074,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2149,7 +2151,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2253,7 +2255,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -2395,7 +2397,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -2545,7 +2547,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -2606,7 +2608,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2685,6 +2687,91 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
     expect(out.found?.context["classification"]).toBe("where_is_order");
   });
 
+  // The connector uploads a customer's images and puts their storage keys on
+  // the event payload. The payload is never persisted, and Gmail's per-message
+  // attachmentId is not stable across fetches, so the tick that binds the
+  // message to a ticket is the ONE chance to record where those blobs live.
+  it("indexes the files a customer sent, bound to the ticket and message", async () => {
+    const inboundWithFiles: DomainEvent = {
+      ...messageReceived("thread-files", "The item arrived broken — see photo."),
+      payload: {
+        ...(messageReceived("thread-files", "The item arrived broken — see photo.")
+          .payload as never),
+        attachments: [
+          {
+            filename: "damage.jpg",
+            contentType: "image/jpeg",
+            storageKey: "gmail/tenant-acme/msg-thread-files/att-1.jpg",
+            sizeBytes: 4096,
+          },
+        ],
+      },
+    } as DomainEvent;
+
+    const store = TicketAttachmentStoreTest();
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, orderStatusAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted([
+        ...triageScript,
+        { type: "final_message", text: "no-op resume" },
+      ]),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+      store,
+    );
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const attachments = yield* TicketAttachmentStore;
+
+          yield* runtime.handleEvent(inboundWithFiles);
+          const ticket = yield* repo.findByThreadId(
+            TenantId("tenant-acme"),
+            "thread-files" as never,
+          );
+          const first = yield* attachments.listForTicket(
+            TenantId("tenant-acme"),
+            ticket!.id,
+          );
+          // A redelivered Pub/Sub push replays the identical payload; the
+          // storage keys are the same, so nothing may be indexed twice.
+          yield* runtime.handleEvent(inboundWithFiles);
+          const afterReplay = yield* attachments.listForTicket(
+            TenantId("tenant-acme"),
+            ticket!.id,
+          );
+          return { first, afterReplay };
+        }),
+        layer,
+      ),
+    );
+
+    expect(out.first).toHaveLength(1);
+    expect(out.first[0]).toMatchObject({
+      source: "inbound",
+      filename: "damage.jpg",
+      contentType: "image/jpeg",
+      storageKey: "gmail/tenant-acme/msg-thread-files/att-1.jpg",
+      sizeBytes: 4096,
+      messageId: "msg-thread-files",
+      uploadedBy: null,
+    });
+    expect(out.afterReplay).toHaveLength(1);
+  });
+
   it("resumes the same ticket when a second message.received arrives on the same thread", async () => {
     // Two consecutive inbound messages on the same thread must produce
     // exactly ONE ticket row — that's the dedup guarantee Pub/Sub at-least-
@@ -2712,7 +2799,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2774,7 +2861,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2848,7 +2935,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -2923,7 +3010,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3032,7 +3119,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3120,7 +3207,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
     return Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -3233,7 +3320,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3350,7 +3437,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       imageHashLayer,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3517,7 +3604,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3713,7 +3800,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -3883,7 +3970,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -4036,7 +4123,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -4263,7 +4350,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantsWithSheet,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -4478,7 +4565,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -4647,7 +4734,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -4849,7 +4936,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5025,7 +5112,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5223,7 +5310,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -5391,7 +5478,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5505,7 +5592,7 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5611,7 +5698,7 @@ describe("AgentRuntime — BYOK hard-fail when tenant has no LLM key", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5706,7 +5793,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5762,7 +5849,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5811,7 +5898,7 @@ describe("AgentRuntime — per-tenant per-agent model override", () => {
       tenantRepoDefault,
     );
     const layer = Layer.merge(
-      AgentRuntimeDefault.pipe(Layer.provide(env)),
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
       env,
     );
 
@@ -5970,7 +6057,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
   };
 
   const runTick = (layer: Layer.Layer<AgentRuntime, never, never>) =>
@@ -6093,7 +6180,7 @@ describe("AgentRuntime — refund.create conditional permission", () => {
       tenantOverridesEmpty,
       tenantRepoDefault,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
 
     const out = await Effect.runPromise(
       Effect.provide(
@@ -6164,7 +6251,7 @@ describe("AgentRuntime — merchant notifications", () => {
       tenantRepoDefault,
       notifLayer as never,
     );
-    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    return Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
   };
 
   const replyCall: LLMDecision = {
@@ -6383,7 +6470,7 @@ describe("AgentRuntime — blocked senders", () => {
       tenantOverridesEmpty,
       tenantRepo,
     );
-    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(env)), env);
+    const layer = Layer.merge(AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))), env);
     return { layer, llmCalls };
   };
 
