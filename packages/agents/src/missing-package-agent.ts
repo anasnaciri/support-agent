@@ -18,20 +18,22 @@ import { ORDER_RESOLUTION_LINES } from "./order-resolution.js";
  *
  *   (B) shipped / `in_transit` → VERIFY with `tracking.lookup`, then:
  *       B1 a real carrier problem (status `exception` / failed-delivery scan /
- *          STALLED — no checkpoint in 7+ days per `daysSinceLastScan`, which a
- *          carrier reports as `in_transit` right up until someone asks)
+ *          STALLED — silent for as long as the store's whole delivery window,
+ *          which a carrier reports as `in_transit` right up until someone asks)
  *          → escalate to the supplier and wait for their answer;
  *       B2 moving normally → tell the customer it's shipped and can't be
  *          canceled, and offer a return-for-refund once it arrives. When
  *          `transitDays` is past the store's documented shipping window the
  *          parcel is LATE but still moving: same branch, but say so and ping
  *          the merchant rather than pretending it's on schedule;
- *       B3 can't verify (no tracking provider / unknown / no number, or both
- *          time scalars null) → ping the merchant AND escalate to the supplier
- *          (benefit of the doubt).
+ *       B3 can't verify (no tracking provider / unknown / no number, both time
+ *          scalars null, or the store documents no delivery window) → ping the
+ *          merchant AND escalate to the supplier (benefit of the doubt).
  *
- * The 7-day stall threshold is a default, not a tuned number — the scalars come
- * from `tracking.lookup`, so lateness needs no clock and no `createdAt` here.
+ * BOTH time thresholds come from the merchant's own shipping policy via
+ * `knowledge.search` — there is no hardcoded day count here. `transitDays` past
+ * the window is late; `daysSinceLastScan` reaching the window is stalled. The
+ * scalars are relative, so this needs no clock and no order `createdAt`.
  *
  *   (C) `unfulfilled` → never shipped from our side: offer to cancel + refund
  *       now OR fast-track the shipment.
@@ -84,9 +86,11 @@ export const missingPackageAgent: AgentConfig = {
     "",
     "  BRANCH B — Shipped / in transit (fulfillmentStatus is `in_transit` / `out_for_delivery` / `partial`, AND no `deliveredAt`). FIRST verify the delivery claim against the carrier, THEN pick a sub-branch.",
     "    VERIFY (do this ONCE before replying or escalating): if any fulfillment carries a tracking number, call `tracking.lookup` ONCE — `trackingNumber` = the first non-null tracking number across `fulfillments[]`, `carrier` = that fulfillment's `trackingCompany` (or null). Then call `ticket.update_context` ONCE with `liveTrackingStatus` set to the FULL `tracking.lookup` result — including `transitDays` and `daysSinceLastScan` — so a takeover operator sees the same carrier-side numbers you judged on. Read the result and choose B1 / B2 / B3:",
-    "    READING THE TWO TIME SCALARS on a `kind: \"live\"` result. `transitDays` = whole days the shipment has been in transit, per the carrier. `daysSinceLastScan` = whole days since the most recent checkpoint. Use these instead of doing date arithmetic yourself, and never call an order late merely because the customer said it was:",
-    "      • STALLED — `daysSinceLastScan` is 7 or more. The carrier has not scanned the parcel in a week or more, which is a real delivery problem EVEN WHEN `status` still reads `in_transit`. A moving parcel scans; a stalled one does not.",
-    "      • LATE — `transitDays` is past the store's documented shipping/delivery window. Call `knowledge.search` for that window BEFORE deciding a shipment is late; if the store documents no window, do not assert lateness.",
+    "    READING THE TWO TIME SCALARS on a `kind: \"live\"` result. `transitDays` = whole days the shipment has been in transit, per the carrier. `daysSinceLastScan` = whole days since the most recent checkpoint. Use these instead of doing date arithmetic yourself, and never call an order late merely because the customer said it was.",
+    "    GET THE WINDOW FIRST. There is no fixed number of days that counts as \"too long\" — only the store's own promise. Call `knowledge.search` ONCE for the store's shipping / delivery policy and read its stated delivery window (e.g. \"5-7 business days\", \"2-4 weeks for international\") BEFORE you choose between B1 and B2. Use the window that matches this order's destination when the policy gives more than one. Then:",
+    "      • LATE — `transitDays` is past that delivery window.",
+    "      • STALLED — `daysSinceLastScan` has reached the length of that whole delivery window. A parcel that has gone silent for as long as the store's entire promised delivery time is stuck, EVEN WHEN `status` still reads `in_transit`. A moving parcel scans; a stalled one does not.",
+    "      • If the store documents NO delivery window, do NOT invent one and do NOT fall back to a number of your own — you cannot confirm lateness or a stall, so treat the ticket as B3 and let a human and the supplier weigh in.",
     "      • Either scalar may be `null` when the carrier didn't report it. A `null` is NOT evidence the shipment is on time — you cannot confirm lateness or a stall from it, so do not tell the customer the order is on schedule. Judge on `status` + `lastScan` alone and, when the customer is complaining about a delay you cannot verify, treat it as B3.",
     "    B1 — REAL delivery problem: `tracking.lookup` returned `kind: \"live\"` with `status: \"exception\"`, OR a `lastScan.description` that indicates a failed / attempted / held / return-to-sender delivery, OR the shipment is STALLED per the rule above. The carrier cannot complete delivery on its own — this is the verified delivery-issue path (e.g. \"courier won't deliver\", or a parcel that stopped scanning). Call `supplier.escalate` ONCE (fields + reactions below). Do NOT also draft a customer reply.",
     "    B2 — Moving normally: `tracking.lookup` returned `kind: \"live\"` with `status` `in_transit` / `out_for_delivery` / `pending`, NO exception, and NOT stalled. The parcel is on its way, so the claim of a delivery failure is not (yet) supported — do NOT escalate. Call `conversation.reply` ONCE: tell the customer the order has shipped and is in transit (summarise the last scan + ETA from the result), so it can't be canceled now; if they'd still like a refund, they can return it to us after it arrives and we'll refund per the store's return policy (call `knowledge.search` for the return window/terms first).",

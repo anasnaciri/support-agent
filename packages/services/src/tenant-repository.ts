@@ -222,16 +222,18 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
-        "Verify the carrier status first with tracking.lookup. Treat it as a real delivery " +
-        "problem when the status is an exception, OR when the shipment has stalled — a high " +
-        "daysSinceLastScan means no carrier checkpoint in that many days, which is a stuck " +
-        "parcel even while the status still reads in transit. Judge 'late' from transitDays " +
-        "against the store's shipping window (knowledge.search), not from the customer's " +
-        "wording; when either number is null you cannot confirm lateness, so do not assert it. " +
-        "On a real delivery problem, escalate to the supplier to reship AND always send the " +
-        "customer a short reassuring reply in the same run — we are looking into it and will " +
-        "follow up — without promising a specific outcome yet. If genuinely lost and there is " +
-        "no supplier, offer a refund.",
+        "Verify the carrier status first with tracking.lookup. There is no fixed number of days " +
+        "that counts as too long — call knowledge.search for the store's shipping policy and use " +
+        "its stated delivery window. transitDays past that window is LATE. daysSinceLastScan " +
+        "reaching that window means the parcel has gone silent for as long as the whole promised " +
+        "delivery time — it is STALLED, a real delivery problem even while the status still reads " +
+        "in transit. Treat an exception status as a real delivery problem too. Never judge " +
+        "lateness from the customer's wording, and never invent a window: if the policy documents " +
+        "none, or either number is null, you cannot confirm lateness — say so rather than " +
+        "asserting the order is on schedule. On a real delivery problem, escalate to the supplier " +
+        "to reship AND always send the customer a short reassuring reply in the same run — we are " +
+        "looking into it and will follow up — without promising a specific outcome yet. If " +
+        "genuinely lost and there is no supplier, offer a refund.",
     },
     {
       key: "damaged_product",

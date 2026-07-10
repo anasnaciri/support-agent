@@ -94,6 +94,21 @@ describe("missing-package-agent config", () => {
     expect(p).toContain("liveTrackingStatus");
   });
 
+  it("anchors both time thresholds in the merchant's shipping policy", () => {
+    const p = missingPackageAgent.promptTemplate;
+    // No invented day-count. The merchant's documented delivery window is the
+    // ONLY source for "how long is too long" — for lateness (transitDays past
+    // the window) and for a stall (silent for as long as the whole window).
+    expect(p).not.toContain("7 or more");
+    expect(p).not.toMatch(/daysSinceLastScan` is \d/);
+    expect(p).toMatch(/stalled[\s\S]{0,600}delivery window/i);
+    // The window has to be fetched before B1-vs-B2 is decided, not just before
+    // the reply is worded.
+    expect(p).toMatch(/knowledge\.search[\s\S]{0,400}before[\s\S]{0,200}B1/i);
+    // An undocumented window must not be back-filled with a guess.
+    expect(p).toMatch(/no (documented )?delivery window[\s\S]{0,300}B3/i);
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([missingPackageAgent]);
     const resolved = await Effect.runPromise(
