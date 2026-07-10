@@ -49,12 +49,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `days_after_order` when `days_of_transit` is absent, so for a
         slow-fulfilling store it can measure *since order placed* rather than
         *since first scan*. Treat it as approximate.
-      - Follow-ups (not done): **seeded defaults only reach tenants who never
+      - `missing-package-agent` BRANCH B now reads both scalars too (2026-07-10):
+        B1 gains a STALLED trigger (`daysSinceLastScan >= 7` escalates even while
+        the carrier still says `in_transit` — a moving parcel scans, a stalled one
+        does not); B2 gains a LATE-BUT-MOVING path (`transitDays` past the store's
+        documented shipping window, per `knowledge.search`) that replies honestly
+        and spends the ticket's one `merchant.notify` instead of implying the
+        order is on schedule. A null scalar is explicitly *not* evidence of
+        timeliness — it routes to B3.
+      - **The 7-day stall threshold is a guess, not a tuned number.** It is the
+        only hardcoded constant in this work. Revisit once there is real carrier
+        data; slow international lanes may scan less often than weekly.
+      - Follow-up (not done): **seeded defaults only reach tenants who never
         saved a resolution policy** — existing tenants keep their old
         `delivery_issue` notes and gain nothing here. Decide whether to backfill
-        or surface the new guidance in the scenario editor. Also, the legacy
-        `missing-package-agent` (BRANCH B) still branches purely on `exception`
-        and never reads the new scalars.
+        or surface the new guidance in the scenario editor.
 
 - [x] De-flake `install.test.ts` "fails on tampered state" (2026-07-10). Fired
       ~1 run in 1024 in `ci:local`, unrelated to whatever was being committed.
