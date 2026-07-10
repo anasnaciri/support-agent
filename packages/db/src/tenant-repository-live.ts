@@ -2,6 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   decodeBlockedSenders,
+  decodeShippingProfile,
   decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -11,6 +12,7 @@ import {
   TenantRepositoryDbError,
   TenantSettings,
   type BlockedSenders,
+  type ShippingProfile,
   type DiscountPolicy,
   type DiscountPolicyMode,
   type LegalAcceptance,
@@ -220,6 +222,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly resolutionPolicy?: unknown;
                 readonly resolutionAgentEnabled?: unknown;
                 readonly blockedSenders?: unknown;
+                readonly shippingProfile?: unknown;
               }
             | null;
           const notificationEmail =
@@ -261,6 +264,11 @@ export const TenantRepositoryLive = Layer.effect(
           const blockedSenders = decodeBlockedSenders(
             settings?.blockedSenders,
           );
+          // Null for an unconfigured or half-written block — agents then fall
+          // back to knowledge.search for the delivery window.
+          const shippingProfile = decodeShippingProfile(
+            settings?.shippingProfile,
+          );
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -273,6 +281,7 @@ export const TenantRepositoryLive = Layer.effect(
             resolutionPolicy,
             resolutionAgentEnabled,
             blockedSenders,
+            shippingProfile,
           });
         }),
 
@@ -506,6 +515,33 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setBlockedSenders",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setShippingProfile: (tenantId, profile: ShippingProfile | null) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setRefundPolicy. A `null` profile
+          // writes JSON null into the block, which `decodeShippingProfile`
+          // reads back as "unconfigured" — that's the clear action.
+          const json = JSON.stringify({ shippingProfile: profile });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setShippingProfile",
                 cause,
               }),
           });

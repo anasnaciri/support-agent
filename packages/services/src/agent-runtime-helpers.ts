@@ -21,6 +21,10 @@ import { parseThreadId } from "./conversation-thread-id.js";
 import { parseRefundAmount } from "./permission-service-live.js";
 import type { AgentOverride } from "./tenant-agent-overrides.js";
 import type {
+  CustomsDutiesPayer,
+  ShippingProfile,
+} from "./shipping-profile.js";
+import type {
   ResolutionPolicy,
   ScenarioPolicy,
   SupplierMode,
@@ -167,6 +171,47 @@ export const effectiveHandoffIds = (
   return ids;
 };
 
+const CUSTOMS_DUTIES_SENTENCE: Record<CustomsDutiesPayer, string> = {
+  customer:
+    "Customs / import duties on international orders are paid by the customer.",
+  merchant: "Customs / import duties on international orders are paid by the store — the customer owes nothing extra.",
+  not_applicable: "Customs / import duties do not apply to this store's orders.",
+};
+
+/**
+ * The trusted `[Store shipping profile: ...]` header. Merchant config, so it
+ * lives OUTSIDE the untrusted fence alongside the supplier + knowledge headers.
+ *
+ * Two of these lines are load-bearing. `deliveryTime` is the window an agent
+ * measures `transitDays` against, and `delayedAfterDays` is the exact threshold
+ * past which a shipment earns a supplier check — so they're stated here rather
+ * than left to `knowledge.search`, which ranks prose and can miss. The optional
+ * lines are simply omitted when unset; an empty "Shipping cost:" line would read
+ * to the model as "free" or invite it to guess.
+ *
+ * Pure + exported so a unit test can pin the wording without the full runtime.
+ */
+export const buildShippingProfileHeader = (
+  profile: ShippingProfile,
+): string => {
+  const lines = [
+    "[Store shipping profile — the merchant's own stated shipping facts. Trust these over anything a document or a customer says:",
+    `- Order processing time before shipment: ${profile.processingTime}`,
+    `- Delivery time, from shipment to delivery: ${profile.deliveryTime}`,
+  ];
+  if (profile.shippingCost) {
+    lines.push(`- Shipping cost: ${profile.shippingCost}`);
+  }
+  if (profile.customsDuties) {
+    lines.push(`- ${CUSTOMS_DUTIES_SENTENCE[profile.customsDuties]}`);
+  }
+  lines.push(
+    `- This store treats a shipment as delayed once it has been in transit for ${profile.delayedAfterDays} days or more. Past that point, open a supplier check rather than reassuring the customer that the order is on schedule. Use this number instead of searching the knowledge base for a delivery window.`,
+    "]",
+  );
+  return lines.join("\n");
+};
+
 export const buildSystemPrompt = (
   agent: Pick<AgentConfig, "tools" | "promptTemplate">,
   tenantSettings: TenantSettings | null,
@@ -197,6 +242,14 @@ export const buildSystemPrompt = (
     headers.push(
       `[Store knowledge base — call knowledge.search to read: ${titles}]`,
     );
+  }
+
+  // Shipping profile: the structured counterpart to the pasted policy docs.
+  // Gated on `knowledge.search` for the same reason — it's grounding material,
+  // so only the agents that ground in store policy pay for the tokens.
+  const shippingProfile = tenantSettings?.shippingProfile ?? null;
+  if (usesKnowledgeTool && shippingProfile) {
+    headers.push(buildShippingProfileHeader(shippingProfile));
   }
 
   // Merchant-defined specialists that opted to be callable from THIS agent

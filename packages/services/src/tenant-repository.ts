@@ -2,6 +2,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { TenantId } from "@support-agent/agent-core";
 
 import type { BlockedSenders } from "./blocked-senders.js";
+import type { ShippingProfile } from "./shipping-profile.js";
 
 // ============================================================
 // TenantRepository
@@ -660,6 +661,17 @@ export class TenantSettings extends Data.Class<{
    * should fall back to `defaultBlockedSenders`.
    */
   readonly blockedSenders?: BlockedSenders;
+  /**
+   * The store's structured shipping facts — processing/delivery times, cost,
+   * customs, and the day count past which a shipment counts as delayed. Edited
+   * on the dashboard Knowledge base page. Optional on the class (existing
+   * construction sites don't ripple); the Live `getSettings` always populates it
+   * via `decodeShippingProfile`, which yields `null` for an unconfigured or
+   * half-written block. `null` means the agents fall back to searching the
+   * merchant's knowledge documents for a delivery window, as they did before
+   * this existed.
+   */
+  readonly shippingProfile?: ShippingProfile | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -761,6 +773,16 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setBlockedSenders: (
       tenantId: TenantId,
       blocked: BlockedSenders,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+
+    /**
+     * Replace the tenant's shipping profile. `null` clears it, sending agents
+     * back to `knowledge.search` for the delivery window. Same shallow JSONB
+     * merge as `setRefundPolicy` — unrelated settings are preserved.
+     */
+    readonly setShippingProfile: (
+      tenantId: TenantId,
+      profile: ShippingProfile | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -884,6 +906,17 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, blockedSenders: blocked }),
+        );
+        return Effect.void;
+      },
+      setShippingProfile: (tenantId, profile) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, shippingProfile: profile }),
         );
         return Effect.void;
       },
