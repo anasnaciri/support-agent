@@ -126,25 +126,49 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         (nullable), and `execute` passes `result.destinationCountry ?? null`
         through. `ticket.update_context`'s closed `liveTrackingStatus` schema
         mirrors it too, so a takeover operator sees the value the agent compared.
-      - The comparison is **prompt-level, not a runtime wall** — deliberately.
-        This is lower-stakes than the email identity gate (which IS a runtime
-        invariant, `no_silent_resolve_unverified_mismatch`): a wrong-destination
-        tracking number means a stale/mis-entered number, not a privacy breach.
-        `order-status-agent`, `missing-package-agent`, and
-        `scenario-resolution-agent` each got a block: when BOTH
-        `destinationCountry` and the order's `shippingAddress.country` are present
-        and they DIFFER, do not judge/summarise/escalate off that tracking —
-        `merchant.notify` and let a human check the fulfillment's number.
-        missing-package routes such a ticket to B3 (cannot verify).
-      - **Country granularity only.** 17track rarely exposes street-level
-        recipient detail, so a match means "same country", not "same address" —
-        the prompts say so. When either side is `null` the check is skipped
-        (not comparable); it is not evidence the tracking is correct.
+      - The comparison is now a **runtime flag, mirroring the email identity
+        gate** (upgraded 2026-07-10 from the initial prompt-only version). The
+        runtime — never the model — owns the check:
+        - **Stamp the order's country.** After a concrete order resolves
+          (`shopify.get_order` / `find_customer_order` single), the runtime
+          persists `context.orderShipCountry` from `shippingAddress.country`,
+          alongside the existing `identifiedOrderId` binding.
+        - **Compute the flag on the lookup.** `stampTrackingLookup` (the single
+          place the runtime already folds a `tracking.lookup` result into
+          context) now also calls `trackingDestinationMismatchFlag(dest,
+          orderShipCountry)` and, on a hit, appends `tracking_destination_mismatch`
+          to `riskFlags` (deduped). Pure helper, unit-tested; fail-OPEN when
+          either country is null/blank.
+        - **Enforce it two ways**, exactly like the email gate:
+          `shouldForceReplyApproval` forces any `conversation.reply` on a flagged
+          ticket to human approval (regardless of classification — this fires in
+          `delivery_issue`/scenario too, not just `where_is_order`), and a bare
+          `final_message` on a flagged ticket parks for human takeover
+          (`hasTrackingDestinationMismatch`) instead of auto-resolving.
+        - **Tell the agent.** `trackingDestinationDirective` injects a trusted
+          `[Tracking may not match this order: …]` header (outside the untrusted
+          fence) on the inbound / reply / resume ticks, same slot as
+          `orderIdentityDirective`. Dashboard chip via `riskFlagLabel` →
+          "Tracking may belong to a different order".
+        - **No customer-driven clear.** Unlike the email gate (a customer can
+          confirm their order email), the flag is **sticky** — only a human
+          taking the ticket over resolves it. `identityVerified` does NOT lift it.
+        - The three agents' prompt blocks stay as defense-in-depth (the email
+          gate keeps its prompt guidance too); the runtime is now the backstop.
+      - **Country granularity + representation caveat.** Both sides are country
+        *names* (Shopify `shippingAddress.country` vs 17track
+        `recipient_address.country`), compared normalized (trim / lowercase /
+        collapse whitespace). A match means "same country", not "same address".
+        Risk to watch: if the two providers ever disagree on representation
+        ("USA" vs "United States"), the flag false-positives and parks a healthy
+        ticket for a human — accepted as the safe direction, same fail-toward-human
+        tradeoff the email gate makes. Fail-open on any null keeps first-touch
+        and carrier-omits-country flows untouched.
       - No provider/17track change was needed — the field was already parsed.
         Watch: `TrackingPanel.tsx` still does `tracking.destinationCountry ??
         order.shippingAddress.country`, i.e. it *substitutes* the order's country
         when the carrier omits one. That's fine for display but means the panel
-        can't itself reveal a mismatch — the check lives in the agent, not the UI.
+        can't itself reveal a mismatch — the check lives in the runtime, not the UI.
 
 - [x] Store shipping profile — the merchant states the delay threshold
       (2026-07-10). Closes the "where does the number come from" hole the

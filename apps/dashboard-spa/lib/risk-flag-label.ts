@@ -19,6 +19,9 @@ export const riskFlagLabel = (flag: string): string => {
   if (flag === "order_customer_mismatch") {
     return "Order belongs to a different customer — identity unverified";
   }
+  if (flag === "tracking_destination_mismatch") {
+    return "Tracking may belong to a different order";
+  }
   if (flag === "reply_delivery_failed") {
     return "Reply didn't send — delivery failed";
   }

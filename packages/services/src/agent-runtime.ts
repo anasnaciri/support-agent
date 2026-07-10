@@ -107,6 +107,8 @@ import {
   applyResolutionAgentEntry,
   SCENARIO_RESOLUTION_AGENT_ID,
   hasUnverifiedOrderMismatch,
+  hasTrackingDestinationMismatch,
+  trackingDestinationMismatchFlag,
   orderContextRef,
   orderCustomerMismatchFlag,
   orderIdentityVerificationPatch,
@@ -219,12 +221,35 @@ const AgentRuntimeLayer = Layer.effect(
       if (toolName !== "tracking.lookup") return Effect.succeed(null);
       const { liveTrackingStatus: _liveTrackingStatus, ...rest } =
         ticket.context;
+      // Tracking-destination guard: when the carrier's recipient country for
+      // this lookup disagrees with the order's shipping country
+      // (`orderShipCountry`, stamped from a prior get_order), the tracking
+      // number probably belongs to a DIFFERENT order. Raise a sticky risk flag
+      // (deduped) so any customer reply is force-gated and a bare final_message
+      // parks for a human — the runtime backstop for the destination check, the
+      // sibling of the order/customer identity gate. Fail-open (null flag)
+      // leaves the ticket untouched.
+      const destFlag =
+        result._tag === "Right" &&
+        result.right &&
+        typeof result.right === "object"
+          ? trackingDestinationMismatchFlag(
+              (result.right as Record<string, unknown>)["destinationCountry"],
+              rest["orderShipCountry"],
+            )
+          : null;
+      const existingFlags = readRiskFlags(rest);
+      const flagPatch =
+        destFlag && !existingFlags.includes(destFlag)
+          ? { riskFlags: [...existingFlags, destFlag] }
+          : {};
       return tickets.update(ticket.id, {
         context: {
           ...rest,
           ...(result._tag === "Right"
             ? { liveTrackingStatus: result.right }
             : {}),
+          ...flagPatch,
         },
       });
     };
@@ -2347,14 +2372,31 @@ const AgentRuntimeLayer = Layer.effect(
                 const existingIsGid =
                   typeof existingOrderRef === "string" &&
                   existingOrderRef.startsWith("gid://shopify/Order/");
-                if (resolvedOrder && !existingIsGid) {
-                  const ref = orderContextRef(resolvedOrder);
-                  if (ref) {
+                if (resolvedOrder) {
+                  const patch: Record<string, unknown> = {};
+                  if (!existingIsGid) {
+                    const ref = orderContextRef(resolvedOrder);
+                    if (ref) patch["identifiedOrderId"] = ref;
+                  }
+                  // Persist the order's shipping country so a later
+                  // tracking.lookup can be checked against it (the
+                  // tracking-destination guard in `stampTrackingLookup`). The
+                  // order is the ticket's single order, so this is refreshed
+                  // from whichever concrete order resolved.
+                  const ship = resolvedOrder["shippingAddress"];
+                  const shipCountry =
+                    ship && typeof ship === "object"
+                      ? (ship as Record<string, unknown>)["country"]
+                      : null;
+                  if (typeof shipCountry === "string" && shipCountry.trim() !== "") {
+                    patch["orderShipCountry"] = shipCountry;
+                  }
+                  if (Object.keys(patch).length > 0) {
                     current = yield* tickets
                       .update(current.id, {
                         context: {
                           ...current.context,
-                          identifiedOrderId: ref,
+                          ...patch,
                         } as never,
                       })
                       .pipe(Effect.catchAll(() => Effect.succeed(current)));
@@ -2510,6 +2552,24 @@ const AgentRuntimeLayer = Layer.effect(
                   return {
                     type: "HumanTakeoverRequired",
                     reason: "unverified order/customer identity mismatch",
+                  } as const;
+                }
+                // GUARD: the runtime flagged that the looked-up tracking's
+                // destination country disagreed with the order's shipping
+                // country — the tracking probably belongs to a different order.
+                // Auto-resolving on a bare final_message would close the ticket
+                // having (at best) told the customer a status that isn't theirs.
+                // Park for a human to re-check the tracking number, mirroring the
+                // identity-mismatch backstop above.
+                if (hasTrackingDestinationMismatch(current.context)) {
+                  yield* escalateToHuman(
+                    current.id,
+                    "tracking_destination_mismatch_final_message",
+                    { turn, finalMessage: decision.text },
+                  );
+                  return {
+                    type: "HumanTakeoverRequired",
+                    reason: "tracking destination does not match the order",
                   } as const;
                 }
                 // Autonomous loop (slice 4c): nothing was queued AND no auto

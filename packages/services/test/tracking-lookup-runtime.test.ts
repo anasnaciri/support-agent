@@ -2,12 +2,15 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentId,
+  CustomerId,
   NetworkError,
+  OrderId,
   PermissionServiceDefault,
   TenantId,
   ToolRegistryWith,
   type AgentConfig,
   type LLMDecision,
+  type ShopifyOrder,
 } from "@support-agent/agent-core";
 import { ALL_TOOLS } from "../../tools/src/index.js";
 import {
@@ -49,6 +52,125 @@ const trackingAgent: AgentConfig = {
   handoffs: [],
   maxTurnsPerTick: 5,
   temperature: 0,
+};
+
+// A terminal (non-autonomous, no-handoff) agent: a bare final_message would
+// normally RESOLVE the ticket. Used to prove the tracking-destination guard
+// parks such a ticket for a human instead when the flag is set.
+const terminalTrackingAgent: AgentConfig = {
+  ...trackingAgent,
+  id: AgentId("terminal-tracking-agent"),
+  autonomousLoop: false,
+};
+
+const settingsFixture = () =>
+  new TenantSettings({
+    notificationEmail: null,
+    refundPolicy: defaultRefundPolicy,
+    discountPolicy: defaultDiscountPolicy,
+    retentionDays: 730,
+    supplierEscalationSheet: null,
+    legalAcceptance: null,
+  });
+
+const liveTracking = (destinationCountry: string | null) =>
+  TrackingServiceTest({
+    lookupByNumber: new Map([
+      [
+        "TRK-DEST",
+        {
+          kind: "live",
+          carrier: "UPS",
+          trackingNumber: "TRK-DEST",
+          status: "in_transit",
+          lastScan: {
+            occurredAt: new Date("2026-07-07T06:28:13.000Z"),
+            location: null,
+            description: "In transit",
+          },
+          estimatedDeliveryAt: null,
+          trackingUrl: "https://t.17track.net/en#nums=TRK-DEST",
+          transitDays: 5,
+          ...(destinationCountry !== null ? { destinationCountry } : {}),
+        },
+      ],
+    ]),
+  });
+
+const runTerminalTrackingTick = async (
+  seedContext: Record<string, unknown>,
+  destinationCountry: string | null,
+) => {
+  const script: ReadonlyArray<LLMDecision> = [
+    {
+      type: "tool_call",
+      callId: "track-1",
+      tool: "tracking.lookup",
+      input: { trackingNumber: "TRK-DEST", carrier: null },
+    },
+    { type: "final_message", text: "Tracking checked." },
+  ];
+  const env = Layer.mergeAll(
+    TicketRepositoryTest,
+    AuditLogServiceTest,
+    ApprovalServiceTest,
+    AgentResolverTest([terminalTrackingAgent]),
+    ToolRegistryWith(ALL_TOOLS),
+    PermissionServiceDefault,
+    LLMServiceScripted(script),
+    TransactionRunnerPassthrough,
+    ShopifyServiceTest({}),
+    ConversationServiceTest({}),
+    PlatformMailServiceTest({}),
+    TenantAgentOverridesServiceTest(),
+    TenantRepositoryTest({
+      settingsByTenant: new Map([[TENANT, settingsFixture()]]),
+    }),
+    Layer.succeed(ApprovalLinkConfig, {
+      baseUrl: "https://api.test.example",
+      signingKey: "test-signing-key",
+      ttlMs: 60_000,
+    }),
+    liveTracking(destinationCountry),
+  );
+  const layer = Layer.merge(
+    AgentRuntimeDefault.pipe(
+      Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+    ),
+    env,
+  );
+  return Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const repo = yield* TicketRepository;
+        const created = yield* repo.create({
+          tenantId: TENANT,
+          channel: "email",
+          currentAgentId: terminalTrackingAgent.id,
+          subject: "Where is my order?",
+          context: seedContext,
+        });
+        yield* runtime.handleEvent({
+          type: "customer.replied",
+          ticketId: created.id,
+          payload: {
+            threadId: "thread-x" as never,
+            messageId: "msg-1",
+            from: { name: null, email: "cust@example.com" },
+            to: [],
+            subject: "Re: Where is my order?",
+            bodyText: "Where is my order?",
+            bodyHtml: null,
+            receivedAt: new Date(),
+            attachments: [],
+          },
+        });
+        return yield* repo.getById(created.id);
+      }),
+      layer,
+    ),
+  );
 };
 
 describe("AgentRuntime tracking.lookup side effects", () => {
@@ -244,5 +366,148 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     );
 
     expect(out.context["liveTrackingStatus"]).toBeUndefined();
+  });
+
+  it("stamps tracking_destination_mismatch and parks when the carrier destination differs from the order's ship country", async () => {
+    const out = await runTerminalTrackingTick(
+      { orderShipCountry: "United States" },
+      "Germany",
+    );
+    expect(out.context["riskFlags"]).toContain("tracking_destination_mismatch");
+    // A terminal agent's bare final_message would normally resolve — the guard
+    // parks it for a human instead (mirrors the unverified-identity gate).
+    expect(out.status).toBe("human_takeover");
+  });
+
+  it("does not flag or park when the carrier destination matches the order's ship country", async () => {
+    const out = await runTerminalTrackingTick(
+      { orderShipCountry: "United States" },
+      "united states",
+    );
+    const flags = Array.isArray(out.context["riskFlags"])
+      ? (out.context["riskFlags"] as unknown[])
+      : [];
+    expect(flags).not.toContain("tracking_destination_mismatch");
+    expect(out.status).toBe("resolved");
+  });
+
+  it("does not flag when the order's ship country is unknown (fail open)", async () => {
+    const out = await runTerminalTrackingTick({}, "Germany");
+    const flags = Array.isArray(out.context["riskFlags"])
+      ? (out.context["riskFlags"] as unknown[])
+      : [];
+    expect(flags).not.toContain("tracking_destination_mismatch");
+    expect(out.status).toBe("resolved");
+  });
+
+  it("stamps orderShipCountry from shopify.get_order, then flags a mismatched tracking lookup", async () => {
+    const orderId = OrderId("gid://shopify/Order/9001");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#9001",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/1"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "10.00", currencyCode: "EUR" },
+      shippingAddress: {
+        name: "A Customer",
+        address1: "1 Berlin Str",
+        address2: null,
+        city: "Berlin",
+        province: null,
+        country: "Germany",
+        zip: "10115",
+        phone: null,
+      },
+      lineItems: [],
+      fulfillments: [],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "o1",
+        tool: "shopify.get_order",
+        input: { orderId: "gid://shopify/Order/9001" },
+      },
+      {
+        type: "tool_call",
+        callId: "track-1",
+        tool: "tracking.lookup",
+        input: { trackingNumber: "TRK-DEST", carrier: null },
+      },
+      { type: "final_message", text: "Checked." },
+    ];
+    const getOrderAgent: AgentConfig = {
+      ...terminalTrackingAgent,
+      id: AgentId("get-order-tracking-agent"),
+      tools: ["shopify.get_order", "tracking.lookup"],
+    };
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([getOrderAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      PlatformMailServiceTest({}),
+      TenantAgentOverridesServiceTest(),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TENANT, settingsFixture()]]),
+      }),
+      Layer.succeed(ApprovalLinkConfig, {
+        baseUrl: "https://api.test.example",
+        signingKey: "test-signing-key",
+        ttlMs: 60_000,
+      }),
+      liveTracking("United States"),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TENANT,
+            channel: "email",
+            currentAgentId: getOrderAgent.id,
+            subject: "Where is my order?",
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Where is my order?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+    expect(out.context["orderShipCountry"]).toBe("Germany");
+    expect(out.context["riskFlags"]).toContain("tracking_destination_mismatch");
+    expect(out.status).toBe("human_takeover");
   });
 });

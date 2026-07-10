@@ -29,6 +29,12 @@ describe("riskFlagLabel", () => {
       "Supplier could not be reached",
     );
   });
+
+  it("humanises the tracking-destination-mismatch guard flag", () => {
+    expect(riskFlagLabel("tracking_destination_mismatch")).toBe(
+      "Tracking may belong to a different order",
+    );
+  });
 });
 
 describe("buildRiskFlagBadges", () => {

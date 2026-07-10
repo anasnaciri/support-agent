@@ -365,6 +365,30 @@ const orderIdentityDirective = (
 };
 
 /**
+ * Trusted directive injected once the runtime has flagged a tracking-destination
+ * mismatch — the carrier's recipient country for the looked-up tracking number
+ * disagreed with the order's shipping country. Tells the agent (on this tick's
+ * next turn if it re-reads the header, or on a later tick / resume) that the live
+ * tracking it saw probably belongs to a DIFFERENT order. Security is NOT carried
+ * by this text: any `conversation.reply` is force-routed to human approval
+ * ({@link shouldForceReplyApproval}) and a bare `final_message` parks for a human
+ * ({@link hasTrackingDestinationMismatch}), so the model can't auto-send the
+ * wrong status. Returns "" for every non-flagged ticket. Stays OUTSIDE the
+ * untrusted fence — runtime-authored, not customer text.
+ */
+export const trackingDestinationDirective = (
+  context: Record<string, unknown>,
+): string => {
+  const flags = Array.isArray(context["riskFlags"])
+    ? (context["riskFlags"] as unknown[]).filter(
+        (f): f is string => typeof f === "string",
+      )
+    : [];
+  if (!flags.includes("tracking_destination_mismatch")) return "";
+  return `[Tracking may not match this order: the carrier's destination country for the tracking number differs from the country the order ships to, so the tracking status you looked up probably belongs to a DIFFERENT order. Do NOT summarise that tracking as this order's status or escalate off it. Tell the customer the tracking could not be confirmed for their order, and call merchant.notify so a human re-checks the fulfillment's tracking number.]`;
+};
+
+/**
  * Render a fetched conversation thread as a plain-text transcript, oldest
  * first, for inlining into a `ticket.resumed` prompt. Each line is labelled by
  * direction so the model can tell a customer message from a reply WE already
@@ -525,8 +549,11 @@ export const buildInitialMessages = (
     // the established ticket facts (trusted, outside the fence) so it acts on the
     // whole ticket, not just the newest line.
     const facts = ticketFactsHeader(ticketRow.context);
+    const trackingWarn = trackingDestinationDirective(ticketRow.context);
     const body = wrapUntrusted(event.payload.bodyText ?? "(empty reply)");
-    const preamble = [directive, facts].filter(Boolean).join("\n\n");
+    const preamble = [directive, trackingWarn, facts]
+      .filter(Boolean)
+      .join("\n\n");
     return [
       buildUserMessageFromInbound(
         preamble ? `${preamble}\n\n${body}` : body,
@@ -551,10 +578,13 @@ export const buildInitialMessages = (
       orderIdentityDirective(ticketRow.context, ticketRow.threadId) ||
       boundOrderDirective(ticketRow.context);
     const facts = ticketFactsHeader(ticketRow.context);
+    const trackingWarn = trackingDestinationDirective(ticketRow.context);
     const customerBlock = wrapUntrusted(
       `Subject: ${subject}\n\n${event.payload.bodyText}`,
     );
-    const trusted = [header, directive, facts].filter(Boolean).join("\n\n");
+    const trusted = [header, directive, trackingWarn, facts]
+      .filter(Boolean)
+      .join("\n\n");
     return [
       buildUserMessageFromInbound(
         `${trusted}\n\n${customerBlock}`,
@@ -602,6 +632,10 @@ export const buildInitialMessages = (
       boundOrderDirective(ticketRow.context);
     if (directive) {
       parts.push(directive);
+    }
+    const trackingWarn = trackingDestinationDirective(ticketRow.context);
+    if (trackingWarn) {
+      parts.push(trackingWarn);
     }
     // The full context blob is inlined below (fenced, since it also holds the
     // agent's free-text). Surface the trusted, closed-vocab subset here too so
@@ -1040,6 +1074,44 @@ export const normalizeEmailForMatch = (value: unknown): string | null => {
   return v === "" ? null : v;
 };
 
+/**
+ * Trim, lowercase, and collapse internal whitespace on a country string for
+ * comparison, or null if it isn't a usable string. Both sides we compare are
+ * country *names* (Shopify's `shippingAddress.country` and 17track's
+ * `recipient_address.country`), so a plain normalized-string equality is the
+ * conservative test — see {@link trackingDestinationMismatchFlag}.
+ */
+export const normalizeCountryForMatch = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase().replace(/\s+/g, " ");
+  return v === "" ? null : v;
+};
+
+/**
+ * Tracking-destination guard. Returns `"tracking_destination_mismatch"` when the
+ * carrier's own recipient country for a `tracking.lookup` result differs from the
+ * country the order ships to, else null — the signal that the tracking number
+ * probably belongs to a DIFFERENT order than the one this ticket is about, so its
+ * live status must not be summarised or escalated as this order's.
+ *
+ * Fails OPEN (null) whenever either side is missing or unusable: 17track often
+ * omits a recipient country, and only country granularity is available on both
+ * sides — so we raise the flag ONLY on a clear, both-known disagreement. The
+ * sibling of {@link orderCustomerMismatchFlag} for the delivery flows; unlike the
+ * identity gate this is not scoped to one classification (it arises in
+ * `delivery_issue` and scenario runs too). Pure + exported so the decision is
+ * unit-tested without the runtime.
+ */
+export const trackingDestinationMismatchFlag = (
+  trackingDestinationCountry: unknown,
+  orderShipCountry: unknown,
+): "tracking_destination_mismatch" | null => {
+  const dest = normalizeCountryForMatch(trackingDestinationCountry);
+  const ship = normalizeCountryForMatch(orderShipCountry);
+  if (dest === null || ship === null) return null;
+  return dest === ship ? null : "tracking_destination_mismatch";
+};
+
 /** A canonical Shopify order GID (`gid://shopify/Order/<n>`). */
 const isOrderGid = (v: unknown): v is string =>
   typeof v === "string" && v.startsWith("gid://shopify/Order/");
@@ -1162,6 +1234,20 @@ export const hasUnverifiedOrderMismatch = (
   context["identityVerified"] !== true;
 
 /**
+ * Whether the ticket carries a tracking-destination mismatch the runtime
+ * stamped (the carrier's recipient country disagreed with the order's shipping
+ * country). Unlike the order/customer identity gate there is NO customer-driven
+ * verification path — a customer can't attest to the carrier's data — so the flag
+ * is sticky until a human takes the ticket over. The runtime uses this both to
+ * force any customer reply through approval ({@link shouldForceReplyApproval})
+ * and to refuse to auto-resolve on a bare `final_message`. Pure + exported so the
+ * decision is unit-tested without the runtime.
+ */
+export const hasTrackingDestinationMismatch = (
+  context: Record<string, unknown>,
+): boolean => readRiskFlags(context).includes("tracking_destination_mismatch");
+
+/**
  * Order-status identity guard (the `where_is_order` flow). Returns
  * `"order_customer_mismatch"` when the looked-up order's customer email differs
  * from the ticket's bound (runtime-stamped) customer, else null. The sibling of
@@ -1266,6 +1352,11 @@ export const shouldForceReplyApproval = (
   context: Record<string, unknown>,
 ): boolean => {
   if (toolName !== "conversation.reply") return false;
+  // Tracking-destination mismatch: force human review of any customer reply,
+  // regardless of classification — the flag is raised in the delivery flows
+  // (delivery_issue via missing-package, scenario runs) as well as where_is_order,
+  // and the `identityVerified` clear belongs to the EMAIL gate, not this one.
+  if (hasTrackingDestinationMismatch(context)) return true;
   if (context["classification"] !== "where_is_order") return false;
   if (context["identityVerified"] === true) return false;
   return readRiskFlags(context).includes("order_customer_mismatch");

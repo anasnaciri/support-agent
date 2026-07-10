@@ -7,6 +7,9 @@ import {
   orderIdentityVerificationPatch,
   replyProvesOrderIdentity,
   shouldForceReplyApproval,
+  trackingDestinationMismatchFlag,
+  hasTrackingDestinationMismatch,
+  trackingDestinationDirective,
 } from "../src/agent-runtime.js";
 
 describe("ticketFactsHeader (act on all info — trusted established facts)", () => {
@@ -321,5 +324,85 @@ describe("shouldForceReplyApproval", () => {
       false,
     );
     expect(shouldForceReplyApproval("shopify.get_order", flagged)).toBe(false);
+  });
+
+  it("forces a reply on a tracking-destination mismatch regardless of classification", () => {
+    // The tracking-destination flag is raised in delivery flows that are not
+    // `where_is_order` (delivery_issue via missing-package, scenario runs), so
+    // it must gate the reply even when the identity-gate classification check
+    // would otherwise short-circuit to false. `identityVerified` is about the
+    // email gate and must NOT clear this one.
+    expect(
+      shouldForceReplyApproval("conversation.reply", {
+        classification: "delivery_issue",
+        riskFlags: ["tracking_destination_mismatch"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldForceReplyApproval("conversation.reply", {
+        classification: "delivery_issue",
+        riskFlags: ["tracking_destination_mismatch"],
+        identityVerified: true,
+      }),
+    ).toBe(true);
+    // Still only the customer-facing reply tool.
+    expect(
+      shouldForceReplyApproval("conversation.ask_customer", {
+        riskFlags: ["tracking_destination_mismatch"],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("trackingDestinationMismatchFlag", () => {
+  it("flags when the carrier destination country differs from the order's ship country", () => {
+    expect(
+      trackingDestinationMismatchFlag("Germany", "United States"),
+    ).toBe("tracking_destination_mismatch");
+  });
+
+  it("does not flag when the countries match (case-insensitive, whitespace-normalized)", () => {
+    expect(
+      trackingDestinationMismatchFlag("  united   states ", "United States"),
+    ).toBeNull();
+  });
+
+  it("fails open (null) when either side is missing or unusable", () => {
+    expect(trackingDestinationMismatchFlag(null, "United States")).toBeNull();
+    expect(trackingDestinationMismatchFlag("Germany", null)).toBeNull();
+    expect(trackingDestinationMismatchFlag("", "United States")).toBeNull();
+    expect(trackingDestinationMismatchFlag("Germany", "   ")).toBeNull();
+    expect(trackingDestinationMismatchFlag(42, {})).toBeNull();
+  });
+});
+
+describe("hasTrackingDestinationMismatch", () => {
+  it("is true only when the flag is present", () => {
+    expect(
+      hasTrackingDestinationMismatch({
+        riskFlags: ["tracking_destination_mismatch"],
+      }),
+    ).toBe(true);
+    expect(
+      hasTrackingDestinationMismatch({ riskFlags: ["order_customer_mismatch"] }),
+    ).toBe(false);
+    expect(hasTrackingDestinationMismatch({})).toBe(false);
+  });
+});
+
+describe("trackingDestinationDirective", () => {
+  it("returns empty for a ticket with no tracking-destination flag", () => {
+    expect(trackingDestinationDirective({})).toBe("");
+    expect(
+      trackingDestinationDirective({ riskFlags: ["order_customer_mismatch"] }),
+    ).toBe("");
+  });
+
+  it("warns the agent the tracking may belong to a different order", () => {
+    const d = trackingDestinationDirective({
+      riskFlags: ["tracking_destination_mismatch"],
+    });
+    expect(d.toLowerCase()).toContain("different order");
+    expect(d.toLowerCase()).toContain("merchant.notify");
   });
 });
