@@ -141,8 +141,20 @@ describe("shopify-install — signState / verifyState", () => {
   });
 
   it("fails on tampered state", () => {
-    const state = signState(key, "tenant-1");
-    const tampered = state.slice(0, -2) + "AA";
+    // Pin the nonce: with a random one this asserted on whatever bits the
+    // signature happened to land on. Tamper the FIRST character of the
+    // signature, not the last — a 32-byte HMAC is 43 base64url chars, so the
+    // final char holds 4 significant bits and 2 that decode to nothing.
+    // Rewriting it can leave the signature bytes identical, and the test then
+    // asserts that an untampered state fails to verify.
+    const state = signState(key, "tenant-1", "fixed-nonce");
+    expect(verifyState(key, state)).not.toBeNull();
+
+    const dot = state.lastIndexOf(".");
+    const head = state[dot + 1];
+    const tampered =
+      state.slice(0, dot + 1) + (head === "A" ? "B" : "A") + state.slice(dot + 2);
+    expect(tampered).not.toBe(state);
     expect(verifyState(key, tampered)).toBeNull();
   });
 
