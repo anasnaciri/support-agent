@@ -17,6 +17,66 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Delivery lateness is judged from carrier scalars, not customer wording
+      (2026-07-10). The `delivery_issue` scenario's `recognition` said "lost,
+      stuck in transit, or **very late**", but nothing in code ever measured
+      lateness: the scenario agent stamps `scenarioKey` from the customer's
+      message *before* any tool call, and the resolution branch pivoted only on
+      `tracking.lookup` returning `status: "exception"`. A parcel scanning
+      `in_transit` for six weeks read as "moving normally".
+      - Root cause: 17track returns `time_metrics.days_of_transit`, the provider
+        parsed it (`transitDays`), and the dashboard tracking card rendered it —
+        but `tracking.lookup`'s output schema omitted the field and `execute`
+        rebuilt its result field-by-field, so **the agent never saw it**. The
+        stale comment in `payloads.ts` said as much ("the agent-facing tool
+        ignores them").
+      - `tracking.lookup` live results now carry `transitDays` (provider
+        pass-through) and `daysSinceLastScan` (derived from `lastScan.occurredAt`
+        via Effect's default `Clock`, floored, clamped at 0 for carrier clock
+        skew). Both null when unknown. `ticket.update_context`'s closed
+        `liveTrackingStatus` schema mirrors both.
+      - **`checkpoints` stays dashboard-only, on purpose.** A long-haul parcel
+        carries dozens of near-identical scans; the derived `daysSinceLastScan`
+        captures the stuck-parcel signal for one number instead of thousands of
+        context tokens. Don't "fix" this by forwarding the array.
+      - The two scalars are *relative*, so no current-date header is needed in
+        `buildSystemPrompt` — an earlier plan to inject one, and to add order
+        `createdAt` to `get_order`, is **obsolete**. Don't do it.
+      - Seeded `delivery_issue` notes now name the test: `transitDays` against
+        the store's shipping window (`knowledge.search`), `daysSinceLastScan`
+        for a stall, and withhold the lateness claim when either is null.
+      - Caveat to watch: `transitDays` falls back to 17track's
+        `days_after_order` when `days_of_transit` is absent, so for a
+        slow-fulfilling store it can measure *since order placed* rather than
+        *since first scan*. Treat it as approximate.
+      - Follow-ups (not done): **seeded defaults only reach tenants who never
+        saved a resolution policy** — existing tenants keep their old
+        `delivery_issue` notes and gain nothing here. Decide whether to backfill
+        or surface the new guidance in the scenario editor. Also, the legacy
+        `missing-package-agent` (BRANCH B) still branches purely on `exception`
+        and never reads the new scalars.
+
+- [x] De-flake `install.test.ts` "fails on tampered state" (2026-07-10). Fired
+      ~1 run in 1024 in `ci:local`, unrelated to whatever was being committed.
+      - The test built its tampered string as `state.slice(0, -2) + "AA"`. When
+        the signature already ended in `AA` the "tampered" state was byte-identical
+        to the original, so `verifyState` correctly accepted it and the assertion
+        inverted.
+      - Subtlety that makes the obvious fix wrong: a 32-byte HMAC is 43 base64url
+        chars, and the **final char carries 4 significant bits + 2 that decode to
+        nothing**. `A` and `B` decode to the same byte. Flipping only the last
+        char changes the string while leaving the signature bytes untouched — it
+        still verifies. Tamper a char with 6 significant bits (we use the first
+        char of the signature segment) and pin the nonce via `signState`'s third
+        arg so there is no randomness left to flake on.
+      - Fallout, low severity, **not fixed**: `verifyState` therefore accepts
+        several non-canonical spellings of the same state (the ~4 final-char
+        variants sharing a top-nibble). Not a forgery risk — `timingSafeEqual`
+        runs over decoded bytes and still needs the signing key — and nothing
+        consumes the raw state string once, so no replay window widens. Would
+        only matter if some future code keys a nonce-dedup table off the raw
+        state string; canonicalize there, or reject non-canonical base64url.
+
 - [x] Order card action row: Refund / Cancel / Change address (2026-07-10). The
       ticket page's Order card gained a footer button row, rendered only once a
       real order resolves.
