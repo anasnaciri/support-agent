@@ -71,6 +71,21 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toContain("do not tell the customer it is simply shipped");
   });
 
+  it("reads the tracking time scalars and anchors them in the store's policy", () => {
+    const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
+    // Judge late/stuck from the carrier's own relative counters rather than
+    // doing date arithmetic or trusting the customer's wording.
+    expect(p).toContain("transitdays");
+    expect(p).toContain("dayssincelastscan");
+    // No invented day count — the merchant's documented delivery window is the
+    // only threshold, fetched via knowledge.search.
+    expect(p).toContain("delivery window");
+    expect(p).toContain("knowledge.search");
+    expect(p).not.toMatch(/\b(7|14|30)\s*(\+|or more)?\s*days\b/);
+    // Absence of a number is not evidence the parcel is fine.
+    expect(p).toMatch(/null[\s\S]{0,300}(not evidence|cannot confirm)/);
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([scenarioResolutionAgent]);
     const resolved = await Effect.runPromise(
