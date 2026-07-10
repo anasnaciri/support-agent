@@ -69,13 +69,38 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         still verifies. Tamper a char with 6 significant bits (we use the first
         char of the signature segment) and pin the nonce via `signState`'s third
         arg so there is no randomness left to flake on.
-      - Fallout, low severity, **not fixed**: `verifyState` therefore accepts
-        several non-canonical spellings of the same state (the ~4 final-char
-        variants sharing a top-nibble). Not a forgery risk — `timingSafeEqual`
-        runs over decoded bytes and still needs the signing key — and nothing
-        consumes the raw state string once, so no replay window widens. Would
-        only matter if some future code keys a nonce-dedup table off the raw
-        state string; canonicalize there, or reject non-canonical base64url.
+      - Fallout, **now fixed** (2026-07-10). Chasing the above surfaced a real
+        malleability in `verifyState`, wider than the final-char quirk that led
+        us to it. Node's base64 decoder *drops* characters outside the alphabet
+        rather than rejecting them, so junk injected anywhere in **either**
+        segment decodes away and the HMAC still passes: `sig` with a `!` or a
+        newline spliced in, trailing `==`, or `***` inside the payload segment
+        all verified. The variant set is unbounded, not ~4. (Corollary: the
+        `try/catch` around `fromB64url` was dead — `Buffer.from("!!!!",
+        "base64url")` returns an empty buffer, it never throws.)
+      - Never a forgery risk, for the reason the old note gave: junk vanishes at
+        decode, so the decoded bytes are unchanged, and altering those bytes
+        still demands the signing key. The risk was **replay**. An attacker
+        holding one valid state — and states ride in redirect URLs, so they leak
+        into `Referer` headers, proxy logs, and browser history — could mint
+        unlimited distinct raw strings that all verify to the same
+        `tenantId` + `nonce`. Against any dedup keyed on the raw string that is
+        a full bypass, no key needed.
+      - Fix: `verifyState` now requires each segment to be the canonical
+        encoding of its own bytes (re-encode the decoded buffer, compare to the
+        input segment). Regression test: "rejects non-canonical spellings of a
+        valid state".
+      - **Invariant** for anything that binds or dedups an OAuth state: key off
+        the **decoded** `nonce` returned by `verifyState`, never the raw state
+        string. `dashboard-auth-routes.ts:172` already does this (compares
+        `state.nonce` to the cookie) and is the pattern to copy.
+      - Adjacent, **confirmed present, not fixed**: `verifyGoogleInstallState`
+        (`mailbox/google-install.ts:88`) is a second copy of the same shape —
+        decode both segments, HMAC the decoded payload, no canonical check — so
+        it accepts the same junk-injected respellings. Its payload is JSON, so
+        `JSON.parse` rejects junk landing inside the *payload* segment, but the
+        signature segment is wide open. Same one-line fix; left alone to keep
+        this commit to the flake it came from.
 
 - [x] Order card action row: Refund / Cancel / Change address (2026-07-10). The
       ticket page's Order card gained a footer button row, rendered only once a
