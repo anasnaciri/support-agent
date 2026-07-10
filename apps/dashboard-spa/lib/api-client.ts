@@ -841,12 +841,6 @@ export const api = {
   ): Promise<CallResult> =>
     call("/resolution-policy", { method: "POST", body: { scenarios }, ctx }),
 
-  setResolutionAgentEnabled: (
-    ctx: CallCtx,
-    enabled: boolean,
-  ): Promise<CallResult> =>
-    call("/resolution-agent", { method: "POST", body: { enabled }, ctx }),
-
   // Sender blocklist (settings/blocked-senders). The add value is classified
   // server-side: an address blocks one sender, a domain blocks the whole
   // domain including subdomains.

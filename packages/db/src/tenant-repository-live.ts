@@ -220,7 +220,6 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly rephraseModel?: unknown;
                 readonly cancellationRestock?: unknown;
                 readonly resolutionPolicy?: unknown;
-                readonly resolutionAgentEnabled?: unknown;
                 readonly blockedSenders?: unknown;
                 readonly shippingProfile?: unknown;
               }
@@ -255,8 +254,6 @@ export const TenantRepositoryLive = Layer.effect(
           const resolutionPolicy = decodeResolutionPolicy(
             settings?.resolutionPolicy,
           );
-          const resolutionAgentEnabled =
-            settings?.resolutionAgentEnabled === true;
           // Default-true: only an explicit `false` disables restock-on-cancel.
           // Absent (older rows / never configured) ⇒ restock, the safe default
           // for stores that track inventory.
@@ -279,7 +276,6 @@ export const TenantRepositoryLive = Layer.effect(
             rephraseModel,
             cancellationRestock,
             resolutionPolicy,
-            resolutionAgentEnabled,
             blockedSenders,
             shippingProfile,
           });
@@ -465,30 +461,6 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setResolutionPolicy",
-                cause,
-              }),
-          });
-          if (result.length === 0) {
-            return yield* Effect.fail(new TenantNotFound({ tenantId }));
-          }
-        }),
-
-      setResolutionAgentEnabled: (tenantId, enabled: boolean) =>
-        Effect.gen(function* () {
-          const db = yield* pickDb;
-          const json = JSON.stringify({ resolutionAgentEnabled: enabled });
-          const result = yield* Effect.tryPromise({
-            try: () =>
-              db
-                .update(tenants)
-                .set({
-                  settings: sql`${tenants.settings} || ${json}::jsonb`,
-                })
-                .where(eq(tenants.id, tenantId))
-                .returning({ id: tenants.id }),
-            catch: (cause) =>
-              new TenantRepositoryDbError({
-                operation: "setResolutionAgentEnabled",
                 cause,
               }),
           });

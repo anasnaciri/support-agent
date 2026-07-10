@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Workflow } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ResolutionScenarioView } from "@support-agent/dashboard-contracts";
@@ -20,7 +20,6 @@ import {
   fieldName,
   parseResolutionForm,
 } from "@/lib/parse-resolution";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { GlassSwitch } from "@/components/ui/glass-switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,48 +45,6 @@ interface CustomCard {
   readonly formKey: string;
   /** The saved scenario this card edits, or null for a freshly-added one. */
   readonly initial: ResolutionScenarioView | null;
-}
-
-/**
- * On/off switch for routing new tickets to the resolution agent. Fires the toggle
- * mutation on change (no Save button); the page's resolution-policy query
- * invalidates so the status help text refreshes in place.
- */
-function ResolutionAgentToggle({ enabled }: { readonly enabled: boolean }) {
-  const ctx = useWorkspaceCtx();
-  const qc = useQueryClient();
-  const [checked, setChecked] = useState(enabled);
-  useEffect(() => setChecked(enabled), [enabled]);
-
-  const toggleM = useMutation({
-    mutationFn: (next: boolean) => api.setResolutionAgentEnabled(ctx, next),
-    onError: () => {
-      toast.warning("Something went wrong. Please try again.");
-    },
-    onSettled: () => {
-      void qc.invalidateQueries({
-        queryKey: qk.resolutionPolicy(ctx.workspaceId),
-      });
-    },
-  });
-
-  return (
-    <label className="flex cursor-pointer items-center gap-3">
-      <GlassSwitch
-        name="enabled"
-        checked={checked}
-        disabled={toggleM.isPending}
-        onChange={(e) => {
-          const next = e.currentTarget.checked;
-          setChecked(next);
-          toggleM.mutate(next);
-        }}
-      />
-      <span className="text-sm font-medium">
-        Route new tickets to the resolution agent
-      </span>
-    </label>
-  );
 }
 
 /**
@@ -433,31 +390,14 @@ export function ScenariosPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Scenarios</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          A single agent that resolves tickets end-to-end, steered by the
-          scenarios below. When it&apos;s on, triage routes a matching ticket to
-          it; it gathers what it needs, takes the actions you&apos;ve allowed,
-          and drafts the customer reply — pausing for your approval on anything
-          you marked <em>Ask me first</em>. Leave it off to keep today&apos;s
-          routing.
+          A single agent handles every incoming ticket end-to-end, steered by
+          the scenarios below. It reads the customer&apos;s message, picks the
+          scenario that fits, gathers what it needs, takes the actions
+          you&apos;ve allowed, and drafts the reply — pausing for your approval
+          on anything you marked <em>Ask me first</em>. A message that matches no
+          scenario is handed to you rather than guessed at.
         </p>
       </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Workflow className="size-4" aria-hidden />
-            Status
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <ResolutionAgentToggle enabled={policy.resolutionAgentEnabled} />
-          <p className="mt-2 text-xs text-muted-foreground">
-            {policy.resolutionAgentEnabled
-              ? "On — new matching tickets go to the resolution agent."
-              : "Off — tickets route to the built-in specialists as before."}
-          </p>
-        </CardContent>
-      </Card>
 
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Scenarios</h2>
@@ -469,14 +409,6 @@ export function ScenariosPage() {
           it.
         </p>
       </div>
-
-      {!policy.resolutionAgentEnabled ? (
-        <Alert variant="info">
-          <AlertDescription>
-            These settings take effect only while the resolution agent is on.
-          </AlertDescription>
-        </Alert>
-      ) : null}
 
       <ResolutionPolicyForm scenarios={policy.scenarios} />
     </div>

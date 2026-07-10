@@ -421,31 +421,22 @@ export const handleDashboardResolutionPolicy = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const { enabled, scenarios } = await Effect.runPromise(
+  const scenarios = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
         const settings = yield* repo.getSettings(TenantId(auth.tenantId));
         const policy = settings.resolutionPolicy ?? defaultResolutionPolicy;
-        return {
-          enabled: settings.resolutionAgentEnabled === true,
-          scenarios: policy.scenarios,
-        };
+        return policy.scenarios;
       }).pipe(
         Effect.catchAll(() =>
-          Effect.succeed({
-            enabled: false,
-            scenarios: defaultResolutionPolicy.scenarios,
-          }),
+          Effect.succeed(defaultResolutionPolicy.scenarios),
         ),
       ),
       layer,
     ),
   );
-  return sendJson(res, 200, {
-    resolutionAgentEnabled: enabled,
-    scenarios: scenarios.map(scenarioToView),
-  });
+  return sendJson(res, 200, { scenarios: scenarios.map(scenarioToView) });
 };
 
 // POST /dashboard/resolution-policy — save the scenario cards (built-in edits
@@ -474,30 +465,6 @@ export const handleDashboardSetResolutionPolicy = async (
     ),
   );
   return sendJson(res, 200, { ok: true });
-};
-
-// POST /dashboard/resolution-agent — toggle whether triage routes to the
-// scenario agent for this tenant.
-export const handleDashboardSetResolutionAgentEnabled = async (
-  cfg: ApiConfig,
-  layer: ApiLayer,
-  req: FastifyRequest,
-  res: FastifyReply,
-): Promise<FastifyReply> => {
-  const auth = await authenticateDashboard(cfg, layer, req);
-  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const body = parseJsonBody(req);
-  const enabled = body["enabled"] === true;
-  await Effect.runPromise(
-    Effect.provide(
-      Effect.gen(function* () {
-        const repo = yield* TenantRepository;
-        yield* repo.setResolutionAgentEnabled(TenantId(auth.tenantId), enabled);
-      }),
-      layer,
-    ),
-  );
-  return sendJson(res, 200, { ok: true, enabled });
 };
 
 // POST /dashboard/onboarding — create a tenant for the asserted org.

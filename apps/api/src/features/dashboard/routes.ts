@@ -58,7 +58,6 @@ import {
   handleDashboardOnboarding,
   handleDashboardResolutionPolicy,
   handleDashboardSetResolutionPolicy,
-  handleDashboardSetResolutionAgentEnabled,
   handleDashboardSettings,
   handleDashboardShopCurrency,
   handleDashboardTenant,
@@ -562,12 +561,6 @@ export const registerDashboardRoutes = (
     "/dashboard/resolution-policy",
     "Save the resolution-agent scenario playbooks",
     handleDashboardSetResolutionPolicy,
-    "settings.agents",
-  );
-  dashboardPost(
-    "/dashboard/resolution-agent",
-    "Toggle the resolution agent for new tickets",
-    handleDashboardSetResolutionAgentEnabled,
     "settings.agents",
   );
   dashboardPost(

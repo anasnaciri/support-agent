@@ -941,8 +941,6 @@ export interface ResolutionScenarioView {
 }
 
 export interface ResolutionPolicyView {
-  /** Whether triage routes new tickets to the scenario agent for this tenant. */
-  readonly resolutionAgentEnabled: boolean;
   readonly scenarios: ReadonlyArray<ResolutionScenarioView>;
 }
 

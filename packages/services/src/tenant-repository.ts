@@ -646,13 +646,6 @@ export class TenantSettings extends Data.Class<{
    */
   readonly resolutionPolicy?: ResolutionPolicy;
   /**
-   * Per-tenant A/B flag: when true, triage routes tickets to the new
-   * scenario-resolution agent instead of the legacy specialists. Optional;
-   * absent ⇒ false (legacy routing). Lets a merchant test the new agent then
-   * adopt or drop it.
-   */
-  readonly resolutionAgentEnabled?: boolean;
-  /**
    * Sender blocklist: inbound mail whose From or Reply-To matches an
    * entry is dropped before any ticket work (no ticket, no agent tick).
    * Optional on the class (existing construction sites don't ripple);
@@ -755,14 +748,6 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setResolutionPolicy: (
       tenantId: TenantId,
       policy: ResolutionPolicy,
-    ) => Effect.Effect<void, TenantRepositoryError>;
-    /**
-     * Toggle the per-tenant scenario-agent A/B flag. Same deep-merge semantics
-     * as `setRefundPolicy`.
-     */
-    readonly setResolutionAgentEnabled: (
-      tenantId: TenantId,
-      enabled: boolean,
     ) => Effect.Effect<void, TenantRepositoryError>;
     /**
      * Replace the tenant's sender blocklist (both lists at once). Values
@@ -884,17 +869,6 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, resolutionPolicy: policy }),
-        );
-        return Effect.void;
-      },
-      setResolutionAgentEnabled: (tenantId, enabled) => {
-        const prev = store.get(tenantId);
-        if (!prev) {
-          return Effect.fail(new TenantNotFound({ tenantId }));
-        }
-        store.set(
-          tenantId,
-          new TenantSettings({ ...prev, resolutionAgentEnabled: enabled }),
         );
         return Effect.void;
       },
