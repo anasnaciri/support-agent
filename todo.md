@@ -966,6 +966,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       before archive/delete, so reopened tickets are not archived or purged by a
       stale sweep selection.
 - [x] Test teardown purges leaked tenants in dependency order.
+- [x] `purgeLeakedTenants` takes an `onlyTenantIds` scope (2026-07-10), and its
+      own integration test uses it. Root cause of a long-standing "shared dev DB
+      pollution" flake that was really a live race, not stale rows: the purge
+      test snapshotted every tenant in the DB, dropped its own leaked id, and
+      called the real purge — which deletes every tenant absent from the
+      keep-list. Under vitest's default file parallelism that deletes tenants a
+      concurrent test file created after the snapshot. Both directions were
+      observed: `dedup-risk-flags` failed as the victim (its tenant + tickets
+      vanished mid-test), and `test-teardown-purge` failed as the aggressor on
+      `tickets_tenant_id_tenants_id_fk` when a concurrent insert landed between
+      its ticket delete and its tenant delete. `onlyTenantIds` narrows the purge
+      (a tenant is deleted only if it is in the scope AND absent from the
+      keep-list); it never overrides the keep-list. The unscoped form is now
+      reserved for `vitest.global-teardown.ts`, which runs after every file has
+      finished and so cannot race.
 - [x] API feature modules replaced the old large composition file.
 - [x] Agent runtime was decomposed into named phases while keeping stateful
       runtime behavior in one module.
@@ -1557,6 +1572,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
   open escalation row, not on `tickets.status`.
 - Path-B dashboard data arrives over JSON; Date-typed API fields must be coerced
   before calling Date methods.
+- Only `vitest.global-teardown.ts` may call `purgeLeakedTenants` by keep-list
+  alone. Tests share one dev database and run in parallel, so any purge issued
+  *during* the run must pass `onlyTenantIds` to bound it to rows that test
+  seeded.
 - `pnpm build` must be green before stopping.
 
 ---
