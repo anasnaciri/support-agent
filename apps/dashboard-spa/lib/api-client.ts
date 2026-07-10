@@ -8,6 +8,7 @@ import type {
   ApprovalDetail,
   ApprovalsFilter,
   RefundPolicyMode,
+  CustomsDutiesPayerView,
   DiscountPolicyMode,
   ApprovalsListResult,
   AuditEntry,
@@ -807,6 +808,18 @@ export const api = {
     restock: boolean,
   ): Promise<CallResult> =>
     call("/cancellation-restock", { method: "POST", body: { restock }, ctx }),
+
+  setShippingProfile: (
+    ctx: CallCtx,
+    input: {
+      readonly processingTime: string;
+      readonly deliveryTime: string;
+      readonly shippingCost: string | null;
+      readonly customsDuties: CustomsDutiesPayerView | null;
+      readonly delayedAfterDays: number;
+    },
+  ): Promise<CallResult> =>
+    call("/shipping-profile", { method: "POST", body: input, ctx }),
 
   setDiscountPolicy: (
     ctx: CallCtx,
