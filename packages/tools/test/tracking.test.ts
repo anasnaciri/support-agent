@@ -47,6 +47,91 @@ describe("tracking.lookup tool", () => {
     expect(typeof last?.["occurredAt"]).toBe("string");
   });
 
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  const liveFixture = (
+    over: Partial<{
+      lastScan: { occurredAt: Date; location: string | null; description: string } | null;
+      transitDays: number | null;
+    }>,
+  ) =>
+    TrackingServiceTest({
+      lookup: (_t, input) =>
+        Effect.succeed({
+          kind: "live",
+          carrier: "UPS",
+          trackingNumber: input.trackingNumber,
+          status: "in_transit",
+          lastScan:
+            "lastScan" in over
+              ? over.lastScan
+              : {
+                  occurredAt: new Date("2026-05-23T12:00:00.000Z"),
+                  location: "TEST",
+                  description: "In transit",
+                },
+          estimatedDeliveryAt: null,
+          trackingUrl: `https://t.17track.net/en#nums=${input.trackingNumber}`,
+          ...("transitDays" in over ? { transitDays: over.transitDays } : {}),
+        }),
+    });
+
+  const runLive = async (env: ReturnType<typeof liveFixture>) => {
+    const exit = await Effect.runPromiseExit(
+      Effect.provide(
+        trackingLookup.execute(
+          { trackingNumber: "LULU1000630903", carrier: null } as never,
+          baseCtx("c-track-days"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) throw new Error("expected success");
+    return exit.value as Record<string, unknown>;
+  };
+
+  it("surfaces the provider's transitDays on live results", async () => {
+    const result = await runLive(liveFixture({ transitDays: 44 }));
+    expect(result["transitDays"]).toBe(44);
+  });
+
+  it("nulls transitDays when the provider omits it", async () => {
+    const result = await runLive(liveFixture({}));
+    expect(result["transitDays"]).toBeNull();
+  });
+
+  it("derives daysSinceLastScan from the last scan's age", async () => {
+    const result = await runLive(
+      liveFixture({
+        lastScan: {
+          occurredAt: new Date(Date.now() - 19 * DAY_MS),
+          location: "HUB",
+          description: "Departed facility",
+        },
+      }),
+    );
+    expect(result["daysSinceLastScan"]).toBe(19);
+  });
+
+  it("nulls daysSinceLastScan when there is no last scan", async () => {
+    const result = await runLive(liveFixture({ lastScan: null }));
+    expect(result["daysSinceLastScan"]).toBeNull();
+  });
+
+  it("clamps daysSinceLastScan to 0 for a future-dated scan", async () => {
+    const result = await runLive(
+      liveFixture({
+        lastScan: {
+          occurredAt: new Date(Date.now() + 2 * DAY_MS),
+          location: "HUB",
+          description: "Clock skew",
+        },
+      }),
+    );
+    expect(result["daysSinceLastScan"]).toBe(0);
+  });
+
   it("passes through no_provider results verbatim", async () => {
     const env = TrackingServiceTest({
       lookup: (_t, input) =>

@@ -273,6 +273,23 @@ describe("ticket.update_context tool", () => {
     ).toThrow();
   });
 
+  it("preserves the lateness scalars inside liveTrackingStatus at decode time", () => {
+    // `transitDays` / `daysSinceLastScan` come straight off a tracking.lookup
+    // live result. They must survive the closed schema so a takeover operator
+    // sees the same two numbers the agent judged "late" / "stuck" on.
+    const decoded = Schema.decodeUnknownSync(ticketUpdateContext.inputSchema)({
+      liveTrackingStatus: {
+        kind: "live",
+        status: "in_transit",
+        transitDays: 44,
+        daysSinceLastScan: 19,
+      },
+    } as never) as Record<string, unknown>;
+    const lts = decoded["liveTrackingStatus"] as Record<string, unknown>;
+    expect(lts["transitDays"]).toBe(44);
+    expect(lts["daysSinceLastScan"]).toBe(19);
+  });
+
   it("strips unknown sub-keys inside liveTrackingStatus at decode time", () => {
     // The field is explicitly shaped, not an open map — so a poisoned
     // sub-key the model is tricked into adding never reaches the context

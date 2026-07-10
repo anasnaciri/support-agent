@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import { defineTool, ToolOutputInvalid } from "@support-agent/agent-core";
 import { TrackingService } from "@support-agent/services";
 
@@ -32,6 +32,14 @@ const Output = Schema.Union(
     lastScan: Schema.NullOr(ScanEvent),
     estimatedDeliveryAt: Schema.NullOr(Schema.String),
     trackingUrl: Schema.String,
+    // Two scalars that let an agent judge "late" / "stuck" without doing date
+    // arithmetic and without a current-date header. `transitDays` is the
+    // provider's own count for the whole journey; `daysSinceLastScan` is
+    // derived here from `lastScan.occurredAt` and says whether the parcel is
+    // still moving. A long transit that scanned yesterday is slow; a long
+    // transit whose last scan is weeks old is stuck. Both null when unknown.
+    transitDays: Schema.NullOr(Schema.Number),
+    daysSinceLastScan: Schema.NullOr(Schema.Number),
   }),
   Schema.Struct({
     kind: Schema.Literal("no_provider"),
@@ -42,10 +50,21 @@ const Output = Schema.Union(
   }),
 );
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whole days elapsed between a scan and now, floored. Clamped at 0 so a
+ * future-dated checkpoint (carrier clock skew is common on international
+ * handoffs) reads as "scanned just now" rather than a negative number the
+ * model would have to interpret.
+ */
+const daysSince = (occurredAtMs: number, nowMs: number): number =>
+  Math.max(0, Math.floor((nowMs - occurredAtMs) / DAY_MS));
+
 export const trackingLookup = defineTool({
   name: "tracking.lookup",
   description:
-    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up, the carrier isn't supported, or the upstream has not synced the newly registered number yet (still returns the tracking number + a public tracking URL the customer can follow). Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
+    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up, the carrier isn't supported, or the upstream has not synced the newly registered number yet (still returns the tracking number + a public tracking URL the customer can follow). A `live` result also carries `transitDays` (whole days the shipment has been in transit, per the carrier) and `daysSinceLastScan` (whole days since the most recent checkpoint) — use these to judge whether a shipment is late or stuck instead of computing dates yourself; either may be null when unknown. Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
@@ -71,6 +90,7 @@ export const trackingLookup = defineTool({
       // Map Date → ISO string at the boundary so the LLM sees stable
       // JSON. Other shape unchanged.
       if (result.kind === "live") {
+        const nowMs = yield* Clock.currentTimeMillis;
         return {
           kind: "live" as const,
           carrier: result.carrier,
@@ -86,6 +106,10 @@ export const trackingLookup = defineTool({
           estimatedDeliveryAt:
             result.estimatedDeliveryAt?.toISOString() ?? null,
           trackingUrl: result.trackingUrl,
+          transitDays: result.transitDays ?? null,
+          daysSinceLastScan: result.lastScan
+            ? daysSince(result.lastScan.occurredAt.getTime(), nowMs)
+            : null,
         };
       }
       return {

@@ -123,6 +123,10 @@ const Input = Schema.Struct({
       ),
       estimatedDeliveryAt: Schema.optional(Schema.NullOr(Schema.String)),
       trackingUrl: Schema.optional(Schema.String),
+      // Mirrors the two lateness scalars on a `tracking.lookup` live result, so
+      // a takeover operator sees the numbers the agent judged on.
+      transitDays: Schema.optional(Schema.NullOr(Schema.Number)),
+      daysSinceLastScan: Schema.optional(Schema.NullOr(Schema.Number)),
       reason: Schema.optional(
         Schema.Literal("no_api_key", "unsupported_carrier", "sync_pending"),
       ),

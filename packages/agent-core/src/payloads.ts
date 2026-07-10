@@ -194,10 +194,16 @@ export type TrackingLookup =
       readonly estimatedDeliveryAt: Date | null;
       readonly trackingUrl: string;
       // Richer fields surfaced by the dashboard's live tracking card. Optional
-      // (older callers + the test layer don't set them); the agent-facing tool
-      // ignores them, so adding them is backward-compatible.
+      // (older callers + the test layer don't set them).
       readonly originCountry?: string | null;
       readonly destinationCountry?: string | null;
+      /**
+       * Also forwarded to the agent by `tracking.lookup` — it is the cheap
+       * signal for "how late", and needs no clock on our side. `checkpoints`
+       * stays dashboard-only on purpose: a long-haul parcel carries dozens of
+       * near-identical scans, which would cost far more context than the
+       * derived `daysSinceLastScan` the tool computes from `lastScan`.
+       */
       readonly transitDays?: number | null;
       readonly checkpoints?: ReadonlyArray<TrackingScanEvent>;
     }
