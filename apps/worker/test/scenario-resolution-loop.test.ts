@@ -570,7 +570,11 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
 });
 
 // ------------------------------------------------------------
-// Slice 6 — triage routes to the scenario agent behind resolutionAgentEnabled.
+// The scenario agent is the entry point for EVERY tenant (2026-07-10). Inbound
+// tickets are created bound to support-triage, and the runtime swaps them to the
+// resolution agent unconditionally — no tenant flag, no triage classification
+// hop. The legacy specialists are still registered and reachable by handoff;
+// nothing routes to them on its own any more.
 // ------------------------------------------------------------
 const routingPolicy: ResolutionPolicy = {
   scenarios: [
@@ -586,20 +590,10 @@ const routingPolicy: ResolutionPolicy = {
   ],
 };
 
-const driveTriage = (
-  resolutionAgentEnabled: boolean,
+const driveWithSettings = (
+  settings: TenantSettings,
   script: ReadonlyArray<LLMDecision>,
 ) => {
-  const settings = new TenantSettings({
-    notificationEmail: null,
-    refundPolicy: defaultRefundPolicy,
-    discountPolicy: defaultDiscountPolicy,
-    retentionDays: 730,
-    supplierEscalationSheet: null,
-    legalAcceptance: null,
-    resolutionPolicy: routingPolicy,
-    resolutionAgentEnabled,
-  });
   const env = Layer.mergeAll(
     TicketRepositoryTest,
     AuditLogServiceTest,
@@ -660,9 +654,24 @@ const driveTriage = (
   );
 };
 
-describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => {
-  it("runs the resolution agent directly (no triage) when the flag is ON, persisting the binding", async () => {
-    const out = await driveTriage(true, [
+/** The common case: a tenant with one saved scenario. */
+const driveTriage = (script: ReadonlyArray<LLMDecision>) =>
+  driveWithSettings(
+    new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: routingPolicy,
+    }),
+    script,
+  );
+
+describe("resolution-agent-direct entry (every tenant, no flag)", () => {
+  it("runs the resolution agent directly (no triage), persisting the binding", async () => {
+    const out = await driveTriage([
       // No triage hop: the resolution agent runs from turn 0 and picks the
       // scenario itself, then queues a gated reply and stops.
       {
@@ -701,30 +710,33 @@ describe("resolution-agent-direct entry (behind resolutionAgentEnabled)", () => 
     expect(out.result.type).toBe("PausedWaitingForApproval");
   });
 
-  it("blocks a handoff to the scenario agent when the flag is OFF (legacy routing only)", async () => {
-    const out = await driveTriage(false, [
-      {
-        type: "tool_call",
-        callId: "t0",
-        tool: "ticket.update_context",
-        input: { classification: "refund_request", notes: "wants a refund" },
-      },
-      {
-        type: "tool_call",
-        callId: "t1",
-        tool: "agent.handoff",
-        input: {
-          targetAgent: "scenario-resolution-agent",
-          reason: "should be blocked when flag off",
+  it("routes a tenant that configured nothing at all, on the seeded built-in scenarios", async () => {
+    // No resolutionPolicy in settings and no opt-in flag anywhere — the shape a
+    // brand-new tenant has. It must still reach the resolution agent, on
+    // `defaultResolutionPolicy`, rather than falling back to triage.
+    const out = await driveWithSettings(
+      new TenantSettings({
+        notificationEmail: null,
+        refundPolicy: defaultRefundPolicy,
+        discountPolicy: defaultDiscountPolicy,
+        retentionDays: 730,
+        supplierEscalationSheet: null,
+        legalAcceptance: null,
+      }),
+      [
+        {
+          type: "tool_call",
+          callId: "s0",
+          tool: "ticket.update_context",
+          input: { scenarioKey: "refund_request", notes: "wants a refund" },
         },
-      },
-      { type: "final_message", text: "done" },
-    ]);
+        { type: "final_message", text: "Escalated." },
+      ],
+    );
 
-    // Flag off → scenario-resolution-agent is NOT in triage's handoffs → the
-    // handoff is rejected, so the ticket never bound to it. A routing agent that
-    // finishes without a successful handoff parks for a human.
-    expect(out.fetched.currentAgentId).toBe("support-triage");
+    expect(out.fetched.currentAgentId).toBe("scenario-resolution-agent");
+    // Nothing was sent to the customer, so the runtime parks it — but it parked
+    // from the RESOLUTION agent, which is the point.
     expect(out.result.type).toBe("HumanTakeoverRequired");
   });
 });
@@ -791,7 +803,6 @@ describe("SMOKE: resolution agent end-to-end (direct → queue → approve bundl
       supplierEscalationSheet: null,
       legalAcceptance: null,
       resolutionPolicy: smokePolicy,
-      resolutionAgentEnabled: true,
     });
 
     const script: ReadonlyArray<LLMDecision> = [

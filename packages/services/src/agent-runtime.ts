@@ -1452,20 +1452,26 @@ const AgentRuntimeLayer = Layer.effect(
             // (the clamping variant) is retained + tested for the resurface path.
             return scenario ? applyScenarioSteering(a, scenario) : a;
           };
-          // Resolution-agent-direct (2026-06-28): when the tenant has the
-          // resolution agent enabled, inbound tickets bound to the primary
+          // Resolution-agent-direct: inbound tickets bound to the primary
           // (support-triage) run the scenario-resolution-agent DIRECTLY — it
           // picks the matching scenario itself (sets `scenarioKey`) and resolves
-          // end-to-end. This replaces the old triage→handoff routing, whose
+          // end-to-end. This replaced the old triage→handoff routing, whose
           // brittle classification step intermittently silently-resolved tickets
           // (a weak triage model bailing to `final_message` instead of handing
-          // off). Flag off → legacy triage + specialist routing is untouched.
-          // (Supersedes `applyTriageScenarioRouting`, which is retained + tested
-          // for the resurface path but no longer wired in.)
-          const resolutionAgentOn =
-            tenantSettings?.resolutionAgentEnabled === true;
+          // off).
+          //
+          // Unconditional since 2026-07-10 — it was behind a per-tenant
+          // `resolutionAgentEnabled` flag, now removed. The scenario agent is
+          // THE entry point for every tenant. The legacy specialists are still
+          // registered and reachable by an explicit `agent.handoff`, but nothing
+          // routes to them on its own any more. (`applyTriageScenarioRouting`,
+          // the old triage-side variant, is retained + tested but unwired.)
+          //
+          // The swap is skipped when the resolution agent can't be resolved for
+          // this tenant, which leaves the ticket on triage — the one remaining
+          // path back to the legacy specialists, and the safe failure mode.
           let entryBase: AgentConfig = applyOverride(resolved, overrideMap);
-          if (resolutionAgentOn && (resolved.id as string) === "support-triage") {
+          if ((resolved.id as string) === "support-triage") {
             const resolutionAgent = yield* resolver.tryResolve(
               working.tenantId,
               makeAgentId(SCENARIO_RESOLUTION_AGENT_ID),
@@ -1501,10 +1507,7 @@ const AgentRuntimeLayer = Layer.effect(
           // The resolution agent picks the scenario itself — inject the scenario
           // menu whenever it runs as the entry point: the swap just above, OR a
           // resume where current_agent_id is already the resolution agent.
-          if (
-            resolutionAgentOn &&
-            (entryBase.id as string) === SCENARIO_RESOLUTION_AGENT_ID
-          ) {
+          if ((entryBase.id as string) === SCENARIO_RESOLUTION_AGENT_ID) {
             entryBase = applyResolutionAgentEntry(entryBase, resolutionPolicy);
           }
           let agent: AgentConfig = withScenario(entryBase, working.context);

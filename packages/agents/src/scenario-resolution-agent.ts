@@ -2,8 +2,11 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
 
 /**
  * The scenario-driven autonomous resolution agent (master-plan: scenario
- * agent). Reached by handoff from `support-triage` once triage picks the
- * scenario that applies (only when the tenant has `resolutionAgentEnabled`).
+ * agent). THE entry point for every inbound ticket, for every tenant: the
+ * runtime swaps `support-triage` for this agent at entry and injects the
+ * `[Resolution scenarios: ...]` menu so it picks the matching scenario itself.
+ * The legacy specialists remain registered and reachable by an explicit
+ * `agent.handoff`, but nothing routes to them automatically any more.
  *
  * Unlike the legacy specialists — each a narrow, hardcoded branch that drafts
  * one email and stops the moment the harness deems a tool terminal — this agent
@@ -27,7 +30,10 @@ import { AgentId, type AgentConfig } from "@support-agent/agent-core";
  * enabled, and `allow` vs `ask` for each) — see slice 5. This base prompt is
  * scenario-agnostic; it teaches the LOOP and defers the WHAT to that header.
  *
- * Mode is `subagent` — never a ticket's initial agent, only reached via handoff.
+ * Mode stays `subagent` even though it is now the de-facto entry agent: tickets
+ * are still CREATED bound to `support-triage` (the `primary`), and the runtime
+ * rebinds them here on the first tick. Keeping `primary` on triage is what makes
+ * "restart from triage" work — it rebinds to triage, re-enters, and swaps again.
  * `handoffs: []` — it is the terminal worker; there is nowhere to route onward.
  */
 export const scenarioResolutionAgent: AgentConfig = {

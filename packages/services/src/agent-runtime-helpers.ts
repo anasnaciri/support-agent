@@ -1462,10 +1462,11 @@ export const applyScenarioSteering = (
 export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
 
 /**
- * Re-route support-triage to the scenario-resolution-agent when the tenant has
- * the resolution agent enabled (slice 6). Pure + exported for unit testing;
- * the runtime gates the call on `resolutionAgentEnabled` and the agent being
- * triage. Returns a triage AgentConfig that:
+ * Re-route support-triage to the scenario-resolution-agent (slice 6). Retained
+ * and tested, but NO LONGER WIRED IN: the runtime now swaps triage for the
+ * resolution agent at entry (`applyResolutionAgentEntry`) rather than teaching
+ * triage to hand off to it. Pure + exported for unit testing. Returns a triage
+ * AgentConfig that:
  *   - adds `scenario-resolution-agent` to `handoffs` (so the handoff allowlist
  *     — effectiveHandoffIds — permits it), deduped;
  *   - appends a trusted routing header listing each scenario (key +
@@ -1524,9 +1525,10 @@ export const applyTriageScenarioRouting = (
  * not applied here; see todo "RESURFACE LATER: fine-grained per-scenario tool
  * control".
  *
- * No enabled scenarios → no-op (the agent runs on its base prompt). Pure +
- * exported for unit testing; the runtime gates the call on
- * `resolutionAgentEnabled` and the resolved agent being the primary entry.
+ * No enabled scenarios → no-op (the agent runs on its base prompt, whose "fits
+ * NONE of these scenarios" rule then parks the ticket for a human rather than
+ * guessing). Pure + exported for unit testing; the runtime calls this whenever
+ * the resolved agent is the resolution agent — for every tenant, since 2026-07-10.
  */
 export const applyResolutionAgentEntry = (
   agent: AgentConfig,
