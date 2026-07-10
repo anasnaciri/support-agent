@@ -103,6 +103,14 @@ export const verifyGoogleInstallState = (
     return null;
   }
 
+  // Node's base64 decoder drops characters outside the alphabet instead of
+  // rejecting them, so junk injected into either segment decodes away and the
+  // HMAC below still passes. Require each segment to be the canonical encoding
+  // of its own bytes, so one valid state cannot be respelled into unlimited
+  // distinct raw strings. Mirrors shopify/install.ts `verifyState`.
+  if (b64url(payloadBytes) !== encodedPayload) return null;
+  if (b64url(sig) !== encodedSig) return null;
+
   const payload = payloadBytes.toString("utf8");
   const expected = createHmac("sha256", signingKey).update(payload).digest();
   if (expected.length !== sig.length) return null;

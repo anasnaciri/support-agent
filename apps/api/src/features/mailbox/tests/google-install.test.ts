@@ -95,4 +95,31 @@ describe("Google install state", () => {
     });
     expect(verifyGoogleInstallState("wrong-secret", state)).toBeNull();
   });
+
+  it("rejects non-canonical spellings of a valid state", () => {
+    // Node's base64 decoder drops characters outside the alphabet instead of
+    // rejecting them, so junk spliced into a segment decodes away and the HMAC
+    // still passes — letting one valid state be respelled into unlimited raw
+    // strings without the signing key. See shopify/install.ts for the writeup.
+    const state = signGoogleInstallState("secret", {
+      tenantId: "tenant-1",
+      provider: "gmail",
+      nonce: "nonce-1",
+    });
+    const dot = state.lastIndexOf(".");
+    const payload = state.slice(0, dot);
+    const sig = state.slice(dot + 1);
+
+    const variants: ReadonlyArray<readonly [string, string]> = [
+      ["junk in sig", `${payload}.${sig.slice(0, 5)}!${sig.slice(5)}`],
+      ["padding on sig", `${payload}.${sig}==`],
+      ["newline in sig", `${payload}.${sig.slice(0, 5)}\n${sig.slice(5)}`],
+      ["junk in payload", `${payload.slice(0, 4)}***${payload.slice(4)}.${sig}`],
+    ];
+
+    for (const [label, variant] of variants) {
+      expect(variant, label).not.toBe(state);
+      expect(verifyGoogleInstallState("secret", variant), label).toBeNull();
+    }
+  });
 });
