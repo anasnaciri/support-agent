@@ -1013,6 +1013,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       keep-list); it never overrides the keep-list. The unscoped form is now
       reserved for `vitest.global-teardown.ts`, which runs after every file has
       finished and so cannot race.
+- [x] `connector-credential-store-live.integration.test.ts` derives every shop /
+      mailbox domain from a per-run tag (2026-07-10), closing the "connector-test
+      debris" flake. The active-shopify and active-mailbox unique indexes are
+      keyed on `(provider, shop_domain)` with no tenant column (a deliberate
+      cross-tenant guard: a shop/mailbox is actively connected to one tenant
+      only), so a run killed while an active row was live left a leftover that
+      rejected the next run's insert even under a fresh tenant. Per-run-unique
+      domains strand any leaked row on a name no later run writes; the index is
+      untouched. Reproduced red on a scratch DB by planting the debris, green
+      after the fix with the debris still present.
 - [x] API feature modules replaced the old large composition file.
 - [x] Agent runtime was decomposed into named phases while keeping stateful
       runtime behavior in one module.
