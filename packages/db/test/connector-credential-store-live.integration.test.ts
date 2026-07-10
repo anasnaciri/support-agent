@@ -26,6 +26,25 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
   const otherTenantId = randomUUID();
   const encryptionKey = randomBytes(32);
 
+  // The active-shopify and active-mailbox unique indexes are keyed on
+  // (provider, shop_domain) with NO tenant column — deliberately, since a shop
+  // or mailbox can be actively connected to only ONE tenant. So a fixed test
+  // domain is a shared global key: a run killed mid-suite leaves an active row
+  // that collides with the NEXT run's insert even though each run uses a fresh
+  // tenant (the "connector-test debris" flake). Per-run-unique domains close it
+  // — a leaked active row is stranded on a domain no later run ever writes.
+  const tag = randomUUID().slice(0, 8);
+  const shop = (label: string) => `${label}-${tag}.myshopify.com`;
+  const mbox = (label: string) => `${label}+${tag}@example.com`;
+  const DEMO = shop("demo-store");
+  const NO_SUCH = shop("no-such");
+  const DOOMED = shop("doomed-store");
+  const ROTATE = shop("rotate");
+  const MB_WRONG = mbox("wrong-mailbox");
+  const MB_RIGHT = mbox("right-mailbox");
+  const MB_GONE = mbox("gone-mailbox");
+  const MB_ONLY_A = mbox("only-a");
+
   const liveLayer = Layer.provide(
     ConnectorCredentialStoreLive(encryptionKey),
     DbClientLive({ databaseUrl: databaseUrl! }),
@@ -70,16 +89,12 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
         yield* store.put({
           tenantId: TenantId(tenantId),
           provider: "shopify",
-          shopDomain: "demo-store.myshopify.com",
+          shopDomain: DEMO,
           accessToken: "shpoa_super_secret",
           scopes: ["read_orders", "read_customers"],
           apiVersion: "2025-01",
         });
-        return yield* store.get(
-          TenantId(tenantId),
-          "shopify",
-          "demo-store.myshopify.com",
-        );
+        return yield* store.get(TenantId(tenantId), "shopify", DEMO);
       }),
     );
     expect(fetched.accessToken).toBe("shpoa_super_secret");
@@ -93,7 +108,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
       .select()
       .from(connectorConnections)
       .where(
-        sql`${connectorConnections.tenantId} = ${tenantId} AND ${connectorConnections.shopDomain} = 'demo-store.myshopify.com'`,
+        sql`${connectorConnections.tenantId} = ${tenantId} AND ${connectorConnections.shopDomain} = ${DEMO}`,
       );
     expect(rows).toHaveLength(1);
     const blob = rows[0]!.accessTokenEncrypted;
@@ -112,16 +127,12 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
         yield* store.put({
           tenantId: TenantId(tenantId),
           provider: "shopify",
-          shopDomain: "demo-store.myshopify.com",
+          shopDomain: DEMO,
           accessToken: "shpoa_rotated",
           scopes: ["read_orders"],
           apiVersion: "2025-04",
         });
-        return yield* store.get(
-          TenantId(tenantId),
-          "shopify",
-          "demo-store.myshopify.com",
-        );
+        return yield* store.get(TenantId(tenantId), "shopify", DEMO);
       }),
     );
     expect(fetched.accessToken).toBe("shpoa_rotated");
@@ -132,7 +143,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
       .select()
       .from(connectorConnections)
       .where(
-        sql`${connectorConnections.tenantId} = ${tenantId} AND ${connectorConnections.shopDomain} = 'demo-store.myshopify.com'`,
+        sql`${connectorConnections.tenantId} = ${tenantId} AND ${connectorConnections.shopDomain} = ${DEMO}`,
       );
     // Still exactly one row — upsert, not insert.
     expect(rows).toHaveLength(1);
@@ -142,11 +153,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const store = yield* ConnectorCredentialStore;
-        return yield* store.get(
-          TenantId(otherTenantId),
-          "shopify",
-          "no-such.myshopify.com",
-        );
+        return yield* store.get(TenantId(otherTenantId), "shopify", NO_SUCH);
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
@@ -163,20 +170,12 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
         yield* store.put({
           tenantId: TenantId(otherTenantId),
           provider: "shopify",
-          shopDomain: "doomed-store.myshopify.com",
+          shopDomain: DOOMED,
           accessToken: "shpoa_doomed",
           scopes: ["read_orders"],
         });
-        yield* store.revoke(
-          TenantId(otherTenantId),
-          "shopify",
-          "doomed-store.myshopify.com",
-        );
-        return yield* store.get(
-          TenantId(otherTenantId),
-          "shopify",
-          "doomed-store.myshopify.com",
-        );
+        yield* store.revoke(TenantId(otherTenantId), "shopify", DOOMED);
+        return yield* store.get(TenantId(otherTenantId), "shopify", DOOMED);
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
@@ -198,26 +197,22 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
         yield* store.put({
           tenantId: TenantId(tenantId),
           provider: "outlook",
-          shopDomain: "wrong-mailbox@example.com",
+          shopDomain: MB_WRONG,
           accessToken: "tok_wrong",
           scopes: ["Mail.ReadWrite"],
         });
-        yield* store.revoke(
-          TenantId(tenantId),
-          "outlook",
-          "wrong-mailbox@example.com",
-        );
+        yield* store.revoke(TenantId(tenantId), "outlook", MB_WRONG);
         yield* store.put({
           tenantId: TenantId(tenantId),
           provider: "outlook",
-          shopDomain: "right-mailbox@example.com",
+          shopDomain: MB_RIGHT,
           accessToken: "tok_right",
           scopes: ["Mail.ReadWrite"],
         });
         return yield* store.get(TenantId(tenantId), "outlook");
       }),
     );
-    expect(fetched.shopDomain).toBe("right-mailbox@example.com");
+    expect(fetched.shopDomain).toBe(MB_RIGHT);
     expect(fetched.status).toBe("active");
   });
 
@@ -228,15 +223,11 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
         yield* store.put({
           tenantId: TenantId(otherTenantId),
           provider: "outlook",
-          shopDomain: "gone-mailbox@example.com",
+          shopDomain: MB_GONE,
           accessToken: "tok_gone",
           scopes: ["Mail.ReadWrite"],
         });
-        yield* store.revoke(
-          TenantId(otherTenantId),
-          "outlook",
-          "gone-mailbox@example.com",
-        );
+        yield* store.revoke(TenantId(otherTenantId), "outlook", MB_GONE);
         return yield* store.get(TenantId(otherTenantId), "outlook");
       }),
     );
@@ -260,7 +251,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
       list.every((r) => r.tenantId === (tenantId as never)),
     ).toBe(true);
     expect(
-      list.some((r) => r.shopDomain === "demo-store.myshopify.com"),
+      list.some((r) => r.shopDomain === DEMO),
     ).toBe(true);
   });
 
@@ -311,7 +302,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           yield* store.put({
             tenantId: TenantId(rotationTenant),
             provider: "shopify",
-            shopDomain: "rotate.myshopify.com",
+            shopDomain: ROTATE,
             accessToken: "shpoa_pre_rotation",
             scopes: ["read_orders"],
           });
@@ -328,7 +319,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           return yield* store.get(
             TenantId(rotationTenant),
             "shopify",
-            "rotate.myshopify.com",
+            ROTATE,
           );
         }),
       );
@@ -347,7 +338,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           yield* store.patchTokens({
             tenantId: TenantId(rotationTenant),
             provider: "shopify",
-            shopDomain: "rotate.myshopify.com",
+            shopDomain: ROTATE,
             accessToken: "shpoa_post_rotation",
             tokenExpiresAt: null,
           });
@@ -364,7 +355,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           return yield* store.get(
             TenantId(rotationTenant),
             "shopify",
-            "rotate.myshopify.com",
+            ROTATE,
           );
         }),
       );
@@ -384,7 +375,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           yield* store.put({
             tenantId: TenantId(rotationTenant),
             provider: "outlook",
-            shopDomain: "only-a@example.com",
+            shopDomain: MB_ONLY_A,
             accessToken: "tok_only_a",
             scopes: ["Mail.ReadWrite"],
           });
@@ -399,7 +390,7 @@ describeIfDb("ConnectorCredentialStore (Live, integration)", () => {
           return yield* store.get(
             TenantId(rotationTenant),
             "outlook",
-            "only-a@example.com",
+            MB_ONLY_A,
           );
         }),
       );
