@@ -76,6 +76,24 @@ describe("missing-package-agent config", () => {
     expect(missingPackageAgent.promptTemplate).toContain("return it to us");
   });
 
+  it("routes a stalled shipment to B1 using the tracking.lookup scalars", () => {
+    const p = missingPackageAgent.promptTemplate;
+    // A parcel can be a real delivery problem without the carrier ever raising
+    // an exception: it just stops scanning. `daysSinceLastScan` is the signal,
+    // and it must reach B1 (escalate) rather than B2 (it's on its way).
+    expect(p).toContain("daysSinceLastScan");
+    expect(p).toContain("stalled");
+    // Lateness is judged against the store's documented shipping window, not
+    // the customer's wording.
+    expect(p).toContain("transitDays");
+    expect(p).toContain("knowledge.search");
+    // Both scalars are nullable — absence is not evidence of timeliness.
+    expect(p).toMatch(/null.*(cannot|do not|don't).*(confirm|assert)/is);
+    // The stamped context carries the scalars so a takeover operator sees the
+    // same numbers the agent judged on.
+    expect(p).toContain("liveTrackingStatus");
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([missingPackageAgent]);
     const resolved = await Effect.runPromise(
