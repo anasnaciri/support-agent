@@ -94,6 +94,16 @@ describe("missing-package-agent config", () => {
     expect(p).toContain("liveTrackingStatus");
   });
 
+  it("compares the tracking destination country against the order's shipping country", () => {
+    const p = missingPackageAgent.promptTemplate;
+    // A `destinationCountry` that disagrees with the order's shippingAddress
+    // country means the tracking number likely belongs to a different order —
+    // the agent must not judge the delivery state (or escalate) off it.
+    expect(p).toContain("destinationCountry");
+    expect(p).toContain("shippingAddress");
+    expect(p).toMatch(/destinationCountry[\s\S]{0,400}(differ|does not match|mismatch|different)/i);
+  });
+
   it("takes the delay threshold from the store shipping profile header when present", () => {
     const p = missingPackageAgent.promptTemplate;
     // The runtime injects `[Store shipping profile: ...]` for agents holding

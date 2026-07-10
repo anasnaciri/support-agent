@@ -32,6 +32,14 @@ const Output = Schema.Union(
     lastScan: Schema.NullOr(ScanEvent),
     estimatedDeliveryAt: Schema.NullOr(Schema.String),
     trackingUrl: Schema.String,
+    // The carrier's own recipient country for this shipment (from 17track's
+    // `recipient_address.country`), or null when the carrier doesn't report it.
+    // An agent compares this against the order's `shippingAddress.country` to
+    // catch a tracking number that belongs to a different order / destination
+    // than the one the ticket is about. Country-granular only — 17track rarely
+    // exposes street-level recipient detail — so a match is "same country",
+    // not "same address".
+    destinationCountry: Schema.NullOr(Schema.String),
     // Two scalars that let an agent judge "late" / "stuck" without doing date
     // arithmetic and without a current-date header. `transitDays` is the
     // provider's own count for the whole journey; `daysSinceLastScan` is
@@ -64,7 +72,7 @@ const daysSince = (occurredAtMs: number, nowMs: number): number =>
 export const trackingLookup = defineTool({
   name: "tracking.lookup",
   description:
-    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up, the carrier isn't supported, or the upstream has not synced the newly registered number yet (still returns the tracking number + a public tracking URL the customer can follow). A `live` result also carries `transitDays` (whole days the shipment has been in transit, per the carrier) and `daysSinceLastScan` (whole days since the most recent checkpoint) — use these to judge whether a shipment is late or stuck instead of computing dates yourself; either may be null when unknown. Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
+    "Look up the live carrier status for a shipment by tracking number. Returns a discriminated union: `kind: \"live\"` when an upstream tracking provider is configured (status / last scan / ETA / tracking URL), OR `kind: \"no_provider\"` when no provider is wired up, the carrier isn't supported, or the upstream has not synced the newly registered number yet (still returns the tracking number + a public tracking URL the customer can follow). A `live` result also carries `transitDays` (whole days the shipment has been in transit, per the carrier) and `daysSinceLastScan` (whole days since the most recent checkpoint) — use these to judge whether a shipment is late or stuck instead of computing dates yourself; either may be null when unknown. It also carries `destinationCountry` — the carrier's own recipient country for the shipment (country-granular, null when the carrier doesn't report it) — which you can compare against the order's `shippingAddress.country` to confirm the tracking number belongs to this order's destination. Use this after `shopify.get_order` when a fulfillment carries a tracking number; pass the carrier hint from `fulfillment.trackingCompany` to make detection deterministic. The tool NEVER fails for missing-provider — agents branch on `kind` in their reply prompt.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
@@ -106,6 +114,7 @@ export const trackingLookup = defineTool({
           estimatedDeliveryAt:
             result.estimatedDeliveryAt?.toISOString() ?? null,
           trackingUrl: result.trackingUrl,
+          destinationCountry: result.destinationCountry ?? null,
           transitDays: result.transitDays ?? null,
           daysSinceLastScan: result.lastScan
             ? daysSince(result.lastScan.occurredAt.getTime(), nowMs)

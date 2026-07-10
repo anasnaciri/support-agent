@@ -127,6 +127,9 @@ const Input = Schema.Struct({
       // a takeover operator sees the numbers the agent judged on.
       transitDays: Schema.optional(Schema.NullOr(Schema.Number)),
       daysSinceLastScan: Schema.optional(Schema.NullOr(Schema.Number)),
+      // Mirrors the carrier's recipient country, so an operator sees the
+      // destination the agent compared against the order's shipping country.
+      destinationCountry: Schema.optional(Schema.NullOr(Schema.String)),
       reason: Schema.optional(
         Schema.Literal("no_api_key", "unsupported_carrier", "sync_pending"),
       ),

@@ -50,6 +50,17 @@ describe("order-status-agent config", () => {
     expect(p).toContain("judgment");
   });
 
+  it("compares the tracking destination country against the order's shipping country", () => {
+    // A live tracking result carries the carrier's recipient country; when it
+    // disagrees with the order's shippingAddress country the number may belong
+    // to a different order, so the agent must not summarise it as this order's
+    // live status.
+    const p = orderStatusAgent.promptTemplate.toLowerCase();
+    expect(p).toContain("destinationcountry");
+    expect(p).toContain("shippingaddress");
+    expect(p).toMatch(/destinationcountry[\s\S]{0,400}(differ|does not match|mismatch|different)/);
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([orderStatusAgent]);
     const resolved = await Effect.runPromise(

@@ -290,6 +290,21 @@ describe("ticket.update_context tool", () => {
     expect(lts["daysSinceLastScan"]).toBe(19);
   });
 
+  it("preserves destinationCountry inside liveTrackingStatus at decode time", () => {
+    // Comes straight off a tracking.lookup live result. It must survive the
+    // closed schema so a takeover operator sees the carrier-side destination
+    // the agent compared against the order's shipping country.
+    const decoded = Schema.decodeUnknownSync(ticketUpdateContext.inputSchema)({
+      liveTrackingStatus: {
+        kind: "live",
+        status: "in_transit",
+        destinationCountry: "Germany",
+      },
+    } as never) as Record<string, unknown>;
+    const lts = decoded["liveTrackingStatus"] as Record<string, unknown>;
+    expect(lts["destinationCountry"]).toBe("Germany");
+  });
+
   it("strips unknown sub-keys inside liveTrackingStatus at decode time", () => {
     // The field is explicitly shaped, not an open map — so a poisoned
     // sub-key the model is tricked into adding never reaches the context

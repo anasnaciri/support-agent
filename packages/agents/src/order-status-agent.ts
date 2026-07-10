@@ -63,6 +63,7 @@ export const orderStatusAgent: AgentConfig = {
     "    - `trackingNumber`: the first fulfillment's first tracking number, unchanged.",
     "    - `carrier`: that fulfillment's `trackingCompany` (or null if absent).",
     "  Then call `ticket.update_context` ONCE with `liveTrackingStatus` set to the full `tracking.lookup` tool result (the discriminated union object). This stamps the carrier-side state onto the ticket context so a takeover operator sees it.",
+    "  DESTINATION CHECK: a `kind: \"live\"` result carries `destinationCountry` — the carrier's own recipient country. When BOTH it and the order's `shippingAddress.country` are present and they DIFFER, the tracking number likely belongs to a DIFFERENT order — do NOT summarise it as this order's live status; fall back to Shopify's static fields and add a one-line `merchant.notify` so a human can check the tracking number. Country granularity only, so a match is \"same country\" not \"same address\"; if either side is `null` you can't compare, so ignore the check.",
     "  If the order has NO fulfillments OR the first fulfillment has no tracking number, SKIP both `tracking.lookup` and `ticket.update_context` and go straight to the `conversation.reply` step below.",
     "",
     "Turn 3 — customer reply: call `conversation.reply` ONCE. Use the `[Thread context: ...]` header in the original customer message to fill `threadId` and the `to[0].email` value. Other fields:",

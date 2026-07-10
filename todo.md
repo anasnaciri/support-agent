@@ -114,6 +114,38 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `delivery_issue` notes and gain nothing here. Decide whether to backfill
         or surface the new guidance in the scenario editor.
 
+- [x] Tracking destination is checked against the order's shipping country
+      (2026-07-10). The agent can now confirm a `tracking.lookup` result belongs
+      to the order it's answering about, instead of summarising whatever the
+      tracking number returns.
+      - The domain `TrackingLookup` already carried `destinationCountry` (17track
+        `recipient_address.country`) and the live impl already populated it — but
+        it was **dashboard-only**: the tool's output schema omitted it, so the
+        agent never saw it (the same shape of gap the `transitDays` fix closed).
+        `tracking.lookup`'s live-arm output now projects `destinationCountry`
+        (nullable), and `execute` passes `result.destinationCountry ?? null`
+        through. `ticket.update_context`'s closed `liveTrackingStatus` schema
+        mirrors it too, so a takeover operator sees the value the agent compared.
+      - The comparison is **prompt-level, not a runtime wall** — deliberately.
+        This is lower-stakes than the email identity gate (which IS a runtime
+        invariant, `no_silent_resolve_unverified_mismatch`): a wrong-destination
+        tracking number means a stale/mis-entered number, not a privacy breach.
+        `order-status-agent`, `missing-package-agent`, and
+        `scenario-resolution-agent` each got a block: when BOTH
+        `destinationCountry` and the order's `shippingAddress.country` are present
+        and they DIFFER, do not judge/summarise/escalate off that tracking —
+        `merchant.notify` and let a human check the fulfillment's number.
+        missing-package routes such a ticket to B3 (cannot verify).
+      - **Country granularity only.** 17track rarely exposes street-level
+        recipient detail, so a match means "same country", not "same address" —
+        the prompts say so. When either side is `null` the check is skipped
+        (not comparable); it is not evidence the tracking is correct.
+      - No provider/17track change was needed — the field was already parsed.
+        Watch: `TrackingPanel.tsx` still does `tracking.destinationCountry ??
+        order.shippingAddress.country`, i.e. it *substitutes* the order's country
+        when the carrier omits one. That's fine for display but means the panel
+        can't itself reveal a mismatch — the check lives in the agent, not the UI.
+
 - [x] Store shipping profile — the merchant states the delay threshold
       (2026-07-10). Closes the "where does the number come from" hole the
       lateness work left open: agents were told to derive a delivery window from

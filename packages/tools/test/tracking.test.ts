@@ -53,6 +53,7 @@ describe("tracking.lookup tool", () => {
     over: Partial<{
       lastScan: { occurredAt: Date; location: string | null; description: string } | null;
       transitDays: number | null;
+      destinationCountry: string | null;
     }>,
   ) =>
     TrackingServiceTest({
@@ -73,6 +74,9 @@ describe("tracking.lookup tool", () => {
           estimatedDeliveryAt: null,
           trackingUrl: `https://t.17track.net/en#nums=${input.trackingNumber}`,
           ...("transitDays" in over ? { transitDays: over.transitDays } : {}),
+          ...("destinationCountry" in over
+            ? { destinationCountry: over.destinationCountry }
+            : {}),
         }),
     });
 
@@ -99,6 +103,18 @@ describe("tracking.lookup tool", () => {
   it("nulls transitDays when the provider omits it", async () => {
     const result = await runLive(liveFixture({}));
     expect(result["transitDays"]).toBeNull();
+  });
+
+  it("surfaces the provider's destinationCountry on live results", async () => {
+    const result = await runLive(
+      liveFixture({ destinationCountry: "Germany" }),
+    );
+    expect(result["destinationCountry"]).toBe("Germany");
+  });
+
+  it("nulls destinationCountry when the provider omits it", async () => {
+    const result = await runLive(liveFixture({}));
+    expect(result["destinationCountry"]).toBeNull();
   });
 
   it("derives daysSinceLastScan from the last scan's age", async () => {

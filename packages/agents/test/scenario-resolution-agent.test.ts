@@ -86,6 +86,17 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toMatch(/null[\s\S]{0,300}(not evidence|cannot confirm)/);
   });
 
+  it("compares the tracking destination country against the order's shipping country", () => {
+    const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
+    // A `destinationCountry` that disagrees with the order's shippingAddress
+    // country means the tracking number may belong to a different order — the
+    // agent must not reassure the customer off that shipment.
+    expect(p).toContain("destinationcountry");
+    expect(p).toContain("shippingaddress");
+    // Both-null is not comparable, so the check only fires when both are known.
+    expect(p).toMatch(/destinationcountry[\s\S]{0,400}(differ|does not match|mismatch|different)/);
+  });
+
   it("prefers the store shipping profile's stated delay threshold over searching for a window", () => {
     const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
     // The runtime injects `[Store shipping profile: ...]` when the merchant has
