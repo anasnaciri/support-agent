@@ -411,6 +411,55 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(after.length).toBe(0);
   });
 
+  it("POST /dashboard/shipping-profile round-trips through settings", async () => {
+    if (!raw) return;
+    const saved = await post("/dashboard/shipping-profile", {
+      processingTime: "  1–2 business days  ",
+      deliveryTime: "7–12 days",
+      shippingCost: "Free over $50",
+      customsDuties: "customer",
+      delayedAfterDays: 14,
+    });
+    expect(saved.status).toBe(200);
+
+    // Read back through the same endpoint the agent runtime's settings load
+    // uses, so this pins the JSONB `||` merge AND decodeShippingProfile.
+    const res = await get("/dashboard/settings");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly shippingProfile: Record<string, unknown> | null;
+      readonly refundPolicy: unknown;
+    };
+    expect(body.shippingProfile).toEqual({
+      processingTime: "1–2 business days",
+      deliveryTime: "7–12 days",
+      shippingCost: "Free over $50",
+      customsDuties: "customer",
+      delayedAfterDays: 14,
+    });
+    // The shallow merge must not have clobbered a sibling settings block.
+    expect(body.refundPolicy).toBeTruthy();
+  });
+
+  it("POST /dashboard/shipping-profile 400s on a missing or nonsense delay threshold", async () => {
+    if (!raw) return;
+    const bad = await post("/dashboard/shipping-profile", {
+      processingTime: "1 day",
+      deliveryTime: "5 days",
+      delayedAfterDays: 0,
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "invalid_delay_days" });
+
+    const blank = await post("/dashboard/shipping-profile", {
+      processingTime: "   ",
+      deliveryTime: "5 days",
+      delayedAfterDays: 7,
+    });
+    expect(blank.status).toBe(400);
+    expect(await blank.json()).toEqual({ error: "invalid_processing_time" });
+  });
+
   it("POST /dashboard/agents/:id/model 404s for an unknown agent, 400 on empty model", async () => {
     const unknown = await post("/dashboard/agents/nope/model", {
       model: "x",

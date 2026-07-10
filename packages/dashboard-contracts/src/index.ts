@@ -872,6 +872,26 @@ export interface BlockedSendersView {
   readonly domains: ReadonlyArray<string>;
 }
 
+/** Who settles customs / import duties on an international order. */
+export type CustomsDutiesPayerView = "customer" | "merchant" | "not_applicable";
+
+/**
+ * The store's structured shipping facts, edited on the Knowledge base page.
+ * `null` when the merchant hasn't filled the form — agents then fall back to
+ * searching the knowledge documents for a delivery window.
+ *
+ * `deliveryTime` and `delayedAfterDays` are the two the agents act on: the
+ * former is the window lateness is measured against, the latter the exact point
+ * past which a shipment earns a supplier check.
+ */
+export interface ShippingProfileView {
+  readonly processingTime: string;
+  readonly deliveryTime: string;
+  readonly shippingCost: string | null;
+  readonly customsDuties: CustomsDutiesPayerView | null;
+  readonly delayedAfterDays: number;
+}
+
 export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
@@ -884,6 +904,8 @@ export interface TenantSettingsView {
    * Defaults-on-read to true.
    */
   readonly cancellationRestock: boolean;
+  /** The store's shipping profile; `null` until the merchant configures one. */
+  readonly shippingProfile: ShippingProfileView | null;
 }
 
 // ============================================================

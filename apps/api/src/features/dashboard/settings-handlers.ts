@@ -5,6 +5,7 @@ import {
   CustomAgentService,
   decodeResolutionPolicyUpdate,
   defaultBlockedSenders,
+  decodeShippingProfile,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -14,6 +15,7 @@ import {
   TenantRepository,
   type BlockedSenderEntry,
   type BlockedSenders,
+  type ShippingProfile,
   type LegalAcceptance,
   type ScenarioPolicy,
 } from "@support-agent/services";
@@ -373,6 +375,7 @@ export const handleDashboardSettings = async (
             supplierEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
+            shippingProfile: null,
           } as const),
         ),
       ),
@@ -388,6 +391,8 @@ export const handleDashboardSettings = async (
     // Restock-on-cancel flag for the refund-policy page's "Order
     // cancellations" checkbox. Defaults-on-read in getSettings ⇒ true.
     cancellationRestock: settings.cancellationRestock !== false,
+    // Null until the merchant fills the Knowledge base page's shipping form.
+    shippingProfile: settings.shippingProfile ?? null,
   });
 };
 
@@ -763,6 +768,85 @@ export const handleDashboardAgentToolPermissionClear = async (
     ),
   );
   return sendJson(res, 200, { ok: true });
+};
+
+// ---- Shipping profile ----
+
+export type ShippingProfileInput =
+  | { readonly ok: true; readonly profile: ShippingProfile }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * Validate the shipping-profile form body. The three starred fields are
+ * required and each gets its own error code so the form can point at the field
+ * that failed; the optional ones degrade to `null` rather than rejecting the
+ * save (a stale customs enum from an old tab shouldn't cost the merchant their
+ * typing). Normalization — trim, cap, clamp — is delegated to
+ * `decodeShippingProfile`, the same decoder the agent runtime reads through, so
+ * what we persist is exactly what an agent will later see.
+ *
+ * Pure + exported for its own unit test.
+ */
+export const parseShippingProfileInput = (
+  body: Record<string, unknown>,
+): ShippingProfileInput => {
+  const processingTime = body["processingTime"];
+  if (typeof processingTime !== "string" || processingTime.trim() === "") {
+    return { ok: false, error: "invalid_processing_time" };
+  }
+  const deliveryTime = body["deliveryTime"];
+  if (typeof deliveryTime !== "string" || deliveryTime.trim() === "") {
+    return { ok: false, error: "invalid_delivery_time" };
+  }
+
+  // A number input round-trips as text through some clients, so accept both.
+  const rawDays = body["delayedAfterDays"];
+  const days =
+    typeof rawDays === "number"
+      ? rawDays
+      : typeof rawDays === "string" && rawDays.trim() !== ""
+        ? Number(rawDays)
+        : Number.NaN;
+  if (!Number.isInteger(days) || days < 1) {
+    return { ok: false, error: "invalid_delay_days" };
+  }
+
+  const profile = decodeShippingProfile({
+    processingTime,
+    deliveryTime,
+    shippingCost: body["shippingCost"],
+    customsDuties: body["customsDuties"],
+    delayedAfterDays: days,
+  });
+  // Unreachable given the guards above; a null here would mean the decoder and
+  // this validator disagree, which must not silently persist a broken profile.
+  if (!profile) return { ok: false, error: "invalid_profile" };
+  return { ok: true, profile };
+};
+
+// POST /dashboard/shipping-profile — replace the store's shipping profile.
+// Its own permission-gated endpoint; the profile is READ back through
+// /dashboard/settings alongside the other store policies.
+export const handleDashboardShippingProfileSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const parsed = parseShippingProfileInput(parseJsonBody(req));
+  if (!parsed.ok) return sendJson(res, 400, { error: parsed.error });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setShippingProfile(TenantId(auth.tenantId), parsed.profile);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true, shippingProfile: parsed.profile });
 };
 
 // ---- Blocked senders ----

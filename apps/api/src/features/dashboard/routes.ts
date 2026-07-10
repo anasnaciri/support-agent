@@ -44,6 +44,7 @@ import {
   handleDashboardAgentModelSet,
   handleDashboardBlockedSenders,
   handleDashboardBlockedSendersAdd,
+  handleDashboardShippingProfileSet,
   handleDashboardBlockedSendersRemove,
   handleDashboardAgentSystemPromptClear,
   handleDashboardAgentSystemPromptSet,
@@ -538,6 +539,12 @@ export const registerDashboardRoutes = (
     "Set the goodwill-coupon (discount) policy",
     handleDashboardDiscountPolicy,
     "settings.refund_policy",
+  );
+  dashboardPost(
+    "/dashboard/shipping-profile",
+    "Save the store's shipping profile",
+    handleDashboardShippingProfileSet,
+    "knowledge.manage",
   );
   dashboardPost(
     "/dashboard/blocked-senders/add",
