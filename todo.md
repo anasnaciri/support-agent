@@ -17,6 +17,38 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] The scenario-resolution agent is THE entry agent, for every tenant
+      (2026-07-10). The per-tenant `resolutionAgentEnabled` A/B flag is gone —
+      not defaulted to true, **removed**: settings field, `setResolutionAgentEnabled`
+      (Tag + Test layer + Live), `POST /dashboard/resolution-agent`, the
+      `ResolutionPolicyView.resolutionAgentEnabled` contract field, the
+      api-client method, and the /settings/scenarios Status toggle.
+      - Routing: `agent-runtime.ts` swaps `support-triage` → the resolution agent
+        at entry unconditionally, and always injects the `[Resolution scenarios]`
+        menu. The swap is still *conditional on resolving* the agent for the
+        tenant — a resolve miss leaves the ticket on triage, which is the one
+        remaining path to the legacy specialists and the safe failure mode.
+      - **The legacy specialists are not deleted.** They stay registered in
+        `ALL_AGENTS`, keep their tests, and remain reachable by an explicit
+        `agent.handoff`. Nothing routes to them on its own any more.
+      - Tickets are still CREATED bound to `support-triage` (`PRIMARY_AGENT_ID`
+        in `ticket-lifecycle-writer.ts`), and rebound on the first tick. That is
+        deliberate: "restart from triage" rebinds to triage, re-enters, and swaps
+        again. Don't "simplify" this by making the resolution agent the primary
+        without reworking that retry mode.
+      - **This flips behaviour for existing tenants who had the flag off.** The
+        stored `resolutionAgentEnabled` key in `tenants.settings` JSONB is now
+        ignored, not migrated away; it lingers harmlessly until someone writes a
+        cleanup. Reading it back would be a mistake.
+      - Watch: a tenant who disables *every* scenario now reaches the resolution
+        agent with no `[Resolution scenarios]` menu (`applyResolutionAgentEntry`
+        no-ops on an empty active list). The base prompt's "fits NONE of these →
+        merchant.notify and stop" rule parks the ticket for a human, which is the
+        right outcome, but it gets there without a menu to compare against.
+      - `apps/dashboard` (the obsolete Next app, excluded from `tsc -b` and
+        vitest) still references the removed contract field + api-client method.
+        Left alone deliberately; it is dead code.
+
 - [x] Delivery lateness is judged from carrier scalars, not customer wording
       (2026-07-10). The `delivery_issue` scenario's `recognition` said "lost,
       stuck in transit, or **very late**", but nothing in code ever measured
