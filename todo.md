@@ -47,6 +47,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         linked to the ticket — there is nothing to act on otherwise. RBAC
         (`refunds.issue`) is unchanged and still enforced server-side; "not
         gated" means no eligibility guess, not no authorization.
+      - No-order tickets show NO money button (2026-07-10). The Order card's
+        action row was already structurally safe (both `OrderPanel` no-order
+        branches return before rendering `actions`), but `IssueRefundCard` —
+        the agent's PATH-B refund recommendation — rendered off the audit trail
+        alone, so a ticket with a recommendation but no resolved order showed an
+        "Issue refund" button whose only possible outcome was `order_not_found`.
+        It is now gated on `order` like the rest.
       - **Refund shows in both places** (header + card) — deliberate, per
         request. `RefundDialog` gained a `size` prop so the card trigger matches
         its `sm` neighbors.

@@ -1043,7 +1043,10 @@ export function TicketDetailPage() {
             />
           ) : null}
 
-          {refundToIssue && refundToIssue.amount ? (
+          {/* The agent's refund recommendation is only actionable against a
+              real order — without one the button can only fail with
+              `order_not_found`, so don't offer it. */}
+          {order && refundToIssue && refundToIssue.amount ? (
             <IssueRefundCard
               workspaceId={ctx.workspaceId}
               ticketId={id}
