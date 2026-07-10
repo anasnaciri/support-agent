@@ -94,6 +94,16 @@ describe("missing-package-agent config", () => {
     expect(p).toContain("liveTrackingStatus");
   });
 
+  it("takes the delay threshold from the store shipping profile header when present", () => {
+    const p = missingPackageAgent.promptTemplate;
+    // The runtime injects `[Store shipping profile: ...]` for agents holding
+    // knowledge.search — this one does. Its stated day count is exact and must
+    // beat a window inferred from prose.
+    expect(p).toContain("[Store shipping profile");
+    expect(p).toMatch(/Store shipping profile[\s\S]{0,500}knowledge\.search/);
+    expect(p).not.toContain("7 or more");
+  });
+
   it("anchors both time thresholds in the merchant's shipping policy", () => {
     const p = missingPackageAgent.promptTemplate;
     // No invented day-count. The merchant's documented delivery window is the
@@ -102,9 +112,11 @@ describe("missing-package-agent config", () => {
     expect(p).not.toContain("7 or more");
     expect(p).not.toMatch(/daysSinceLastScan` is \d/);
     expect(p).toMatch(/stalled[\s\S]{0,600}delivery window/i);
-    // The window has to be fetched before B1-vs-B2 is decided, not just before
-    // the reply is worded.
-    expect(p).toMatch(/knowledge\.search[\s\S]{0,400}before[\s\S]{0,200}B1/i);
+    // The window has to be established before B1-vs-B2 is decided, not just
+    // before the reply is worded — from either source (profile header, else
+    // knowledge.search), so this pins the rule and not the sentence order.
+    expect(p).toMatch(/GET THE WINDOW FIRST[\s\S]{0,700}before[\s\S]{0,200}B1/i);
+    expect(p).toMatch(/GET THE WINDOW FIRST[\s\S]{0,700}knowledge\.search/i);
     // An undocumented window must not be back-filled with a guess.
     expect(p).toMatch(/no (documented )?delivery window[\s\S]{0,300}B3/i);
   });

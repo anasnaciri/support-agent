@@ -86,6 +86,18 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toMatch(/null[\s\S]{0,300}(not evidence|cannot confirm)/);
   });
 
+  it("prefers the store shipping profile's stated delay threshold over searching for a window", () => {
+    const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
+    // The runtime injects `[Store shipping profile: ...]` when the merchant has
+    // configured one. It carries an exact day count, so the agent must not go
+    // hunting through knowledge.search for a window that contradicts it.
+    expect(p).toContain("store shipping profile");
+    expect(p).toMatch(/shipping profile[\s\S]{0,400}knowledge\.search/);
+    // Still no invented constant — the number comes from the merchant either
+    // way, via the header when set or the policy documents when not.
+    expect(p).not.toMatch(/\b(7|14|30)\s*(\+|or more)?\s*days\b/);
+  });
+
   it("is registrable + resolvable through AgentRegistry", async () => {
     const layer = AgentRegistryWith([scenarioResolutionAgent]);
     const resolved = await Effect.runPromise(
