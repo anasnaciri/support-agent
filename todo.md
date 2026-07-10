@@ -17,6 +17,48 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] Damaged-product handling on the scenario-resolution agent + order-scoped
+      duplicate-photo guard (2026-07-10). The damaged-product specialist was
+      orphaned by the resolution-agent cutover; its photo logic now lives where
+      the default agent reads it, and the dedup guard no longer punishes a
+      legitimate re-send on the same order.
+      - **Scenario steering.** The built-in `damaged_product` scenario `notes`
+        (`tenant-repository.ts` `defaultResolutionPolicy`) now tell the agent to:
+        ask for photos with `conversation.ask_customer` when none are attached
+        (then stop); when photos ARE present, `shopify.get_product` for the
+        damaged line item and compare against its reference images, stamping
+        `productMatch` (match/mismatch/uncertain) via `ticket.update_context`;
+        on mismatch/uncertain, `merchant.notify` to flag it (never accuse/deny)
+        and draft a softened confirm-the-item reply; on `match`, prefer a
+        supplier replacement, refund only if no replacement. The scenario agent
+        already carries all those tools — this was steering, not wiring.
+        - Merchant-editable built-in: tenants with a persisted resolutionPolicy
+          that customized these notes keep theirs (read path + write normalizer
+          preserve sent `notes`); everyone else picks up the new default. Same
+          model as the `delivery_issue` notes update.
+      - **Order-scoped dedup.** `image_hashes` gains a nullable `order_id`
+        (migration `0045_image_hash_order_id.sql`, additive, no backfill).
+        `ImageHashStore` grew `orderId` on record/find/hit, a `bindOrder` (fills
+        NULLs once the order is known), and `listPhashesForTicket`. `matchSimilar`
+        suppresses a hit only when BOTH the lookup and the stored row know the
+        order AND they match — an un-bound row still hits (conservative).
+      - **Two-phase flagging.** Ingestion (`agent-runtime.ts` step 2b) still
+        flags provisionally (order usually unknown on the first message, passes
+        `identifiedOrderId` when a re-reply already has it). Once `get_order`
+        stamps the canonical GID, a reconcile block binds the ticket's hashes to
+        that order and RECOMPUTES the `duplicate_photo_seen_in_ticket_*` flags:
+        same-order hits drop, different-order hits stay. Best-effort — a store
+        failure leaves the ingestion-time flags untouched.
+        - Residual: a brand-new ticket's very first message is flagged before
+          its order is known; the reconcile clears it on the same tick if
+          `get_order` runs. A ticket that never identifies an order keeps the
+          provisional flag (acceptable — it's an operator advisory).
+      - Tests: `image-hash-store.test.ts` (order exclusion, bindOrder,
+        listPhashesForTicket), `image-hash-store-live.integration.test.ts`
+        (order column round-trip + bindOrder), two worker e2e reconcile cases
+        (same-order clears / different-order keeps), and a `damaged_product`
+        notes assertion in `tenant-repository.test.ts`.
+
 - [x] The scenario-resolution agent is THE entry agent, for every tenant
       (2026-07-10). The per-tenant `resolutionAgentEnabled` A/B flag is gone —
       not defaulted to true, **removed**: settings field, `setResolutionAgentEnabled`
