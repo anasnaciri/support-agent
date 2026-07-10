@@ -18,6 +18,11 @@ import { purgeLeakedTenants } from "./packages/db/src/test-teardown-purge.js";
 // connector_connections, …). Pre-existing rows (real dev data like "Anas's
 // Support Team") are in the snapshot and never touched.
 //
+// This is the only caller allowed to purge by keep-list alone (no
+// `onlyTenantIds`). It runs after every test file has finished, so no
+// concurrent test can create a tenant after the snapshot and have it deleted
+// out from under it. Anything that purges *during* the run must scope itself.
+//
 // Limitation: non-tenant-scoped tables (admin_audit_log, pg-boss job tables) are
 // not covered. The current suite doesn't leak into those; revisit if that
 // changes. No-ops without DATABASE_URL (unit-only / no-DB runs).
