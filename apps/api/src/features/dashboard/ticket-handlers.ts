@@ -75,6 +75,10 @@ import {
   parseShippingAddressFields,
   updateTicketShippingAddress,
 } from "./ticket-shipping-address.js";
+import {
+  cancelTicketOrder,
+  parseCancelOrderBody,
+} from "./ticket-cancel-order.js";
 import { describeShopifyError } from "./shopify-error-detail.js";
 import { dashboardRefundNote } from "./refund-note.js";
 import { parseRefundLineItems, parseRefundShipping } from "./refund-input.js";
@@ -1220,6 +1224,135 @@ export const handleDashboardEditShippingAddress = async (
         : outcome.kind === "update_failed"
           ? 502
           : 400; // nothing_to_update
+  return sendJson(res, status, outcome);
+};
+
+// POST /dashboard/tickets/:id/cancel-order — the operator cancels the ticket's
+// order from the Order card. Wires `cancelTicketOrder`'s deps to the live
+// services and records a `ticket.order_cancelled` audit row. Gated on
+// `refunds.issue`: a cancel refunds captured money by default.
+export const handleDashboardCancelOrder = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 400, { error: "missing_user" });
+  const { id } = req.params as { id: string };
+
+  const request = parseCancelOrderBody(parseJsonBody(req));
+  if (!request) return sendJson(res, 400, { kind: "invalid_reason" });
+
+  const tenantId = TenantId(auth.tenantId);
+  const ticketId = TicketId(id);
+  const userId = auth.userId;
+
+  const ticketRow = await runWithDb(layer, (db) =>
+    ticketContextForTenant(db, auth.tenantId, id),
+  );
+  if (!ticketRow) return sendJson(res, 404, { kind: "ticket_not_found" });
+  const context = (ticketRow.context ?? {}) as Record<string, unknown>;
+
+  const outcome = await cancelTicketOrder({
+    request,
+    loadOrder: () =>
+      Effect.runPromise(
+        Effect.provide(
+          resolveOrderForContext(tenantId, context).pipe(
+            Effect.map((order) =>
+              order
+                ? {
+                    orderId: String(order.id),
+                    cancelledAt: order.cancelledAt
+                      ? order.cancelledAt.toISOString()
+                      : null,
+                  }
+                : null,
+            ),
+            // No creds / revoked connector → the order can't be resolved.
+            Effect.catchAll(() => Effect.succeed(null)),
+          ),
+          layer,
+        ),
+      ),
+    cancel: async ({ orderId, request: r }) => {
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const shopify = yield* ShopifyService;
+            return yield* shopify
+              .cancelOrder(tenantId, {
+                orderId: OrderId(orderId),
+                reason: r.reason,
+                refund: r.refund,
+                restock: r.restock,
+                // The operator communicates through the ticket — don't have
+                // Shopify also email a cancellation notice.
+                notifyCustomer: false,
+                staffNote: r.staffNote,
+                // Stable over (ticket, order) so a double-click or a retried
+                // request cannot cancel-and-refund twice.
+                idempotencyKey: `dashboard-cancel:${id}:${orderId}`,
+              })
+              .pipe(Effect.either);
+          }),
+          layer,
+        ),
+      );
+      if (result._tag === "Left") {
+        const detail = describeShopifyError(result.left);
+        req.log.error(
+          {
+            err: result.left,
+            shopifyErrorTag: result.left._tag,
+            tenantId,
+            orderId,
+            ticketId: id,
+          },
+          `dashboard cancel order: Shopify orderCancel failed — ${detail}`,
+        );
+        throw new Error(detail);
+      }
+      return { jobId: result.right.jobId, accepted: result.right.accepted };
+    },
+    recordCancelled: ({ orderId, jobId, request: r }) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const audit = yield* AuditLogService;
+            yield* audit
+              .record({
+                tenantId,
+                ticketId,
+                actor: { type: "user", id: userId },
+                action: "ticket.order_cancelled",
+                details: {
+                  orderId,
+                  ...(jobId ? { jobId } : {}),
+                  refund: r.refund,
+                  restock: r.restock,
+                  reason: r.reason,
+                  ...(r.staffNote ? { staffNote: r.staffNote } : {}),
+                  via: "dashboard",
+                },
+              })
+              .pipe(Effect.catchAll(() => Effect.void));
+          }),
+          layer,
+        ),
+      ),
+  });
+
+  const status =
+    outcome.kind === "cancelled"
+      ? 200
+      : outcome.kind === "order_not_found"
+        ? 404
+        : outcome.kind === "already_cancelled"
+          ? 409
+          : 502; // cancel_failed
   return sendJson(res, status, outcome);
 };
 

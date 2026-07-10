@@ -20,6 +20,7 @@ import {
   handleDashboardEditShippingAddress,
   handleDashboardEscalateSupplier,
   handleDashboardIssueRefund,
+  handleDashboardCancelOrder,
   handleDashboardRefundContext,
   handleDashboardRephrase,
   handleDashboardTicketShopify,
@@ -379,6 +380,14 @@ export const registerDashboardRoutes = (
     "/dashboard/tickets/:id/refund",
     "Issue a refund on a ticket's order (manager)",
     handleDashboardIssueRefund,
+    "refunds.issue",
+  );
+  dashboardPost(
+    "/dashboard/tickets/:id/cancel-order",
+    "Cancel a ticket's order, refunding and restocking it (manager)",
+    handleDashboardCancelOrder,
+    // A cancel refunds captured money by default — same grant as a refund,
+    // not the `orders.edit` store-write grant.
     "refunds.issue",
   );
   dashboardPost(
