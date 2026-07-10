@@ -82,6 +82,49 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `delivery_issue` notes and gain nothing here. Decide whether to backfill
         or surface the new guidance in the scenario editor.
 
+- [x] Store shipping profile — the merchant states the delay threshold
+      (2026-07-10). Closes the "where does the number come from" hole the
+      lateness work left open: agents were told to derive a delivery window from
+      whatever `knowledge.search` ranked highest in the merchant's pasted prose.
+      Retrieval is a poor way to fetch a number a policy branches on.
+      - New `shippingProfile` block on `tenants.settings` (JSONB), edited on the
+        Knowledge base settings page: order processing time, delivery time,
+        shipping cost + free-shipping threshold, customs/duties payer, and
+        `delayedAfterDays` — the day count past which the agent opens a supplier
+        check. Three fields are required; cost and customs are optional.
+      - **All-or-nothing decode.** `decodeShippingProfile` returns `null` unless
+        all three required fields are valid. A half-written block must never hand
+        an agent a window it can act on — `null` sends it back to
+        `knowledge.search`, exactly as before this existed. An unrecognised
+        customs payer degrades to `null` rather than coercing to `customer`,
+        which would have the agent tell a buyer they owe duties the merchant
+        actually absorbs.
+      - Reaches the agent as a trusted `[Store shipping profile: ...]` prompt
+        header from `buildSystemPrompt`, gated on the agent declaring
+        `knowledge.search` (same shape as the knowledge-titles header). NOT
+        through `knowledge.search` itself: that would have coupled the tool to
+        `TenantRepository`, and it would have left the load-bearing number
+        subject to ranking. Optional fields are omitted from the header rather
+        than printed empty — a bare "Shipping cost:" reads to a model as "free".
+      - `scenario-resolution-agent` and `missing-package-agent` now resolve the
+        threshold in a stated order: **(1) the header's number wins if present;
+        (2) else `knowledge.search` for the documented window; (3) else no
+        lateness claim at all.** Still no hardcoded constant anywhere — the
+        number is the merchant's in every branch. The `not.toMatch(/\b(7|14|30)
+        \s*days\b/)` guards stay.
+      - Rewrote one older assertion in `missing-package-agent.test.ts`: it pinned
+        `/knowledge\.search[\s\S]{0,400}before[\s\S]{0,200}B1/`, which encoded the
+        *word order* of the old sentence rather than the rule. It now anchors on
+        `GET THE WINDOW FIRST` and asserts both facts (window precedes the B1/B2
+        branch; `knowledge.search` is the fallback source) so a reordering that
+        preserves the rule doesn't fail it.
+      - Follow-up (not done): the profile is write-only from the UI — there's no
+        "clear" action, though `setShippingProfile(tenantId, null)` supports it.
+      - Follow-up (not done): `deliveryTime` is free text (`"7–12 days"`) and only
+        `delayedAfterDays` is machine-readable. The agent still reads the former
+        as prose. If the stall rule ever needs a real number, parse it there
+        rather than adding another field.
+
 - [x] De-flake `install.test.ts` "fails on tampered state" (2026-07-10). Fired
       ~1 run in 1024 in `ci:local`, unrelated to whatever was being committed.
       - The test built its tampered string as `state.slice(0, -2) + "AA"`. When
