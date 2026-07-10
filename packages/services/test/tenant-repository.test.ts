@@ -506,6 +506,26 @@ describe("delivery_issue built-in scenario", () => {
   });
 });
 
+describe("damaged_product built-in scenario", () => {
+  const dp = defaultResolutionPolicy.scenarios.find(
+    (s) => s.key === "damaged_product",
+  );
+
+  it("asks for photos, verifies them against the product, and flags a mismatch to the merchant", () => {
+    expect(dp).toBeDefined();
+    expect(dp!.supplierMode).toBe("escalate_and_wait");
+    const notes = (dp!.notes ?? "").toLowerCase();
+    // Ask for evidence when none was attached.
+    expect(notes).toContain("photo");
+    expect(notes).toContain("ask");
+    // Compare the photos against the ordered product.
+    expect(notes).toContain("product");
+    // A mismatch is flagged to the merchant, not used to deny the customer.
+    expect(notes).toContain("mismatch");
+    expect(notes).toContain("merchant");
+  });
+});
+
 describe("order_cancellation built-in scenario", () => {
   const cancel = defaultResolutionPolicy.scenarios.find(
     (s) => s.key === "order_cancellation",

@@ -245,7 +245,19 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
-        "Confirm the damage from the customer's description/photos. Prefer a replacement via the supplier; refund if no replacement is possible.",
+        "Damage claims need evidence. If the customer's message has NO photos of the damage, " +
+        "use conversation.ask_customer ONCE to ask for clear photos from a couple of angles plus " +
+        "the outer packaging, then stop — the ticket waits for their reply. " +
+        "If photos ARE attached, look up the order, then call shopify.get_product for the damaged " +
+        "line item and compare the customer's photos against the product's reference images. Record " +
+        "your verdict with ticket.update_context (productMatch: match / mismatch / uncertain). " +
+        "If the photos do NOT match the ordered product (mismatch), or you genuinely can't tell " +
+        "(uncertain), do NOT accuse or deny the customer — flag it for the store owner with " +
+        "merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
+        "is damaged, without committing to a refund amount yet. " +
+        "When the damage is verified (productMatch = match), prefer a replacement via the supplier; " +
+        "refund only if no replacement is possible. Confirm the damage against the store's return/warranty " +
+        "policy with knowledge.search before quoting terms.",
     },
     {
       key: "refund_request",
