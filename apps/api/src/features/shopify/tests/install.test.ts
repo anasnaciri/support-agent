@@ -158,6 +158,30 @@ describe("shopify-install — signState / verifyState", () => {
     expect(verifyState(key, tampered)).toBeNull();
   });
 
+  it("rejects non-canonical spellings of a valid state", () => {
+    // Node's base64 decoder silently drops characters outside the alphabet, so
+    // junk injected into either segment decodes away and the HMAC still checks
+    // out. That makes a single valid state mintable into unlimited distinct raw
+    // strings without the signing key — harmless until something dedups on the
+    // raw string, at which point it is a replay bypass. Reject them at source.
+    const state = signState(key, "tenant-1", "fixed-nonce");
+    const dot = state.lastIndexOf(".");
+    const payload = state.slice(0, dot);
+    const sig = state.slice(dot + 1);
+
+    const variants: ReadonlyArray<readonly [string, string]> = [
+      ["junk in sig", `${payload}.${sig.slice(0, 5)}!${sig.slice(5)}`],
+      ["junk in payload", `${payload.slice(0, 4)}***${payload.slice(4)}.${sig}`],
+      ["padding on sig", `${payload}.${sig}==`],
+      ["newline in sig", `${payload}.${sig.slice(0, 5)}\n${sig.slice(5)}`],
+    ];
+
+    for (const [label, variant] of variants) {
+      expect(variant, label).not.toBe(state);
+      expect(verifyState(key, variant), label).toBeNull();
+    }
+  });
+
   it("two calls with the same tenantId produce different state strings (random nonce)", () => {
     const a = signState(key, "tenant-1");
     const b = signState(key, "tenant-1");
