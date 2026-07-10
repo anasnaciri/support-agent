@@ -19,6 +19,7 @@ export type TicketAction =
   | "setStatus"
   | "resolve"
   | "issueRefund"
+  | "cancelOrder"
   | "escalateSupplier"
   | "reply";
 
@@ -114,6 +115,32 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
       text: "Shopify rejected the refund. No money moved — try again or issue it in Shopify.",
     },
     invalid_amount: { tone: "warning", text: "That refund amount isn't valid." },
+  },
+  cancelOrder: {
+    cancelled: {
+      tone: "success",
+      text: "Order cancelled. Shopify processes the refund and restock in the background, so the order may take a moment to update.",
+    },
+    already_cancelled: {
+      tone: "info",
+      text: "That order is already cancelled — no change.",
+    },
+    order_not_found: {
+      tone: "warning",
+      text: "Couldn't find the order to cancel. Open it in Shopify to cancel it there.",
+    },
+    cancel_failed: {
+      tone: "warning",
+      text: "Shopify rejected the cancellation. Nothing was cancelled and no money moved — an order that has shipped has to be refunded instead.",
+    },
+    invalid_reason: {
+      tone: "warning",
+      text: "That cancellation reason isn't valid.",
+    },
+    ticket_not_found: {
+      tone: "warning",
+      text: "Couldn't find that ticket to cancel on.",
+    },
   },
   escalateSupplier: {
     escalated: {

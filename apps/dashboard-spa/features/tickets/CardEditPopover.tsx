@@ -26,8 +26,14 @@ interface Props {
   readonly title: string;
   readonly description?: string;
   readonly fields: ReadonlyArray<EditFieldConfig>;
-  /** aria-label / tooltip for the pencil trigger. */
+  /** aria-label / tooltip for the trigger. */
   readonly label: string;
+  /**
+   * How the trigger renders: a muted `pencil` beside the field it edits
+   * (default), or a labeled `button` in a card's action row. The button shows
+   * `label` as its text, so keep that short.
+   */
+  readonly trigger?: "pencil" | "button";
   /** Which edge the popover panel aligns to (default: right). */
   readonly align?: "left" | "right";
   /**
@@ -53,6 +59,7 @@ export const CardEditPopover = ({
   description,
   fields,
   label,
+  trigger = "pencil",
   align = "right",
   submitEmpty = false,
 }: Props) => {
@@ -81,16 +88,29 @@ export const CardEditPopover = ({
 
   return (
     <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={label}
-        aria-expanded={open}
-        title={label}
-        className="flex size-6 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <Pencil className="size-3.5" aria-hidden />
-      </button>
+      {trigger === "button" ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          title={title}
+        >
+          {label}
+        </Button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={label}
+          aria-expanded={open}
+          title={label}
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Pencil className="size-3.5" aria-hidden />
+        </button>
+      )}
 
       {open ? (
         <>

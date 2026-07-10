@@ -37,6 +37,11 @@ interface Props {
   readonly ticketId: string;
   /** The order name (e.g. "#1001") for the trigger + title before context loads. */
   readonly orderName: string;
+  /**
+   * Trigger size. The ticket header renders the default; the Order card's
+   * action row renders `sm` to match Cancel / Change address.
+   */
+  readonly size?: "default" | "sm";
 }
 
 const toNum = (s: string): number => {
@@ -53,7 +58,12 @@ const toNum = (s: string): number => {
  * (Shopify refundCreate, restocking returned units). SPA port of the Next
  * dialog: loadContext/issueAction server actions → api + useMutation.
  */
-export function RefundDialog({ workspaceId, ticketId, orderName }: Props) {
+export function RefundDialog({
+  workspaceId,
+  ticketId,
+  orderName,
+  size = "default",
+}: Props) {
   const [open, setOpen] = React.useState(false);
   const [outcome, setOutcome] = React.useState<RefundContextOutcome | null>(
     null,
@@ -75,7 +85,7 @@ export function RefundDialog({ workspaceId, ticketId, orderName }: Props) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" title="Refund this order in Shopify">
+        <Button variant="outline" size={size} title="Refund this order in Shopify">
           Refund
         </Button>
       </AlertDialogTrigger>

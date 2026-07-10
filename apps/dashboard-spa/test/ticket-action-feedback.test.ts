@@ -32,6 +32,27 @@ describe("ticketActionFeedback", () => {
     ).toBe("info");
   });
 
+  it("maps every cancelOrder outcome, and never claims a refund on failure", () => {
+    expect(ticketActionFeedback("cancelOrder", "cancelled").tone).toBe(
+      "success",
+    );
+    expect(ticketActionFeedback("cancelOrder", "already_cancelled").tone).toBe(
+      "info",
+    );
+    expect(ticketActionFeedback("cancelOrder", "order_not_found").tone).toBe(
+      "warning",
+    );
+    expect(ticketActionFeedback("cancelOrder", "invalid_reason").tone).toBe(
+      "warning",
+    );
+
+    // Shopify refused: the money did NOT move, and the copy must say so
+    // rather than leaving the operator thinking the customer was repaid.
+    const failed = ticketActionFeedback("cancelOrder", "cancel_failed");
+    expect(failed.tone).toBe("warning");
+    expect(failed.text).toContain("Nothing was cancelled");
+  });
+
   it("falls back to a generic warning for an unknown/error kind", () => {
     expect(ticketActionFeedback("takeover", "error").tone).toBe("warning");
     expect(ticketActionFeedback("issueRefund", "nonsense")).toEqual({

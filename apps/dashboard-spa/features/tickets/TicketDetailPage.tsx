@@ -51,6 +51,7 @@ import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
+import { orderCancelState } from "@/lib/order-cancel-eligibility";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +70,7 @@ import { ApprovalSignalsStrip } from "./ApprovalSignalsStrip";
 import { BundleApprovalBar } from "./BundleApprovalBar";
 import { IssueRefundCard } from "./IssueRefundCard";
 import { RefundDialog } from "./RefundDialog";
+import { CancelOrderDialog } from "./CancelOrderDialog";
 import { RetrySendButton } from "./RetrySendButton";
 import { ResendApprovalButton } from "./ResendApprovalButton";
 import { CustomerPanel } from "./CustomerPanel";
@@ -635,6 +637,67 @@ export function TicketDetailPage() {
   const refundToIssue = issuableRefund(entries);
   const refundableOrder =
     order && order.financialStatus !== "refunded" ? order : null;
+  // Whether the Order card's Cancel button is live, and why not when it isn't.
+  const cancelState = order
+    ? orderCancelState(order)
+    : { canCancel: false, reason: null };
+  // The Change-address form: prefilled with the order's current address, and
+  // submitted whole (`submitEmpty`) so blanking a field CLEARS it.
+  const shippingAddressFields = [
+    {
+      name: "name",
+      label: "Recipient",
+      placeholder: "Jane Shopper",
+      defaultValue: order?.shippingAddress?.name ?? "",
+      autoComplete: "name",
+    },
+    {
+      name: "address1",
+      label: "Address",
+      placeholder: "123 Main St",
+      defaultValue: order?.shippingAddress?.address1 ?? "",
+      autoComplete: "address-line1",
+    },
+    {
+      name: "address2",
+      label: "Apartment, suite, etc.",
+      placeholder: "Apt 4B",
+      defaultValue: order?.shippingAddress?.address2 ?? "",
+      autoComplete: "address-line2",
+    },
+    {
+      name: "city",
+      label: "City",
+      placeholder: "Brooklyn",
+      defaultValue: order?.shippingAddress?.city ?? "",
+    },
+    {
+      name: "province",
+      label: "State / Province",
+      placeholder: "NY",
+      defaultValue: order?.shippingAddress?.province ?? "",
+    },
+    {
+      name: "zip",
+      label: "ZIP / Postal code",
+      placeholder: "11201",
+      defaultValue: order?.shippingAddress?.zip ?? "",
+      autoComplete: "postal-code",
+    },
+    {
+      name: "country",
+      label: "Country",
+      placeholder: "United States",
+      defaultValue: order?.shippingAddress?.country ?? "",
+    },
+    {
+      name: "phone",
+      label: "Phone",
+      type: "tel",
+      placeholder: "+1 555 123 4567",
+      defaultValue: order?.shippingAddress?.phone ?? "",
+    },
+  ];
   // Lights the composer's border beam and the status chip's shimmer.
   const processing = isTicketProcessing(ticketRow.status);
   const composerMode =
@@ -928,71 +991,36 @@ export function TicketDetailPage() {
             order={order}
             orderHint={orderHint}
             shopDomain={shopDomain}
-            shipToAction={
+            actions={
               order ? (
-                <CardEditPopover
-                  ticketId={id}
-                  onSubmit={submitShippingAddress}
-                  label="Edit shipping address"
-                  title="Edit shipping address"
-                  description="Fix where this order ships. Saves to the order in your store; clear a field to remove it from the address."
-                  submitEmpty
-                  fields={[
-                    {
-                      name: "name",
-                      label: "Recipient",
-                      placeholder: "Jane Shopper",
-                      defaultValue: order.shippingAddress?.name ?? "",
-                      autoComplete: "name",
-                    },
-                    {
-                      name: "address1",
-                      label: "Address",
-                      placeholder: "123 Main St",
-                      defaultValue: order.shippingAddress?.address1 ?? "",
-                      autoComplete: "address-line1",
-                    },
-                    {
-                      name: "address2",
-                      label: "Apartment, suite, etc.",
-                      placeholder: "Apt 4B",
-                      defaultValue: order.shippingAddress?.address2 ?? "",
-                      autoComplete: "address-line2",
-                    },
-                    {
-                      name: "city",
-                      label: "City",
-                      placeholder: "Brooklyn",
-                      defaultValue: order.shippingAddress?.city ?? "",
-                    },
-                    {
-                      name: "province",
-                      label: "State / Province",
-                      placeholder: "NY",
-                      defaultValue: order.shippingAddress?.province ?? "",
-                    },
-                    {
-                      name: "zip",
-                      label: "ZIP / Postal code",
-                      placeholder: "11201",
-                      defaultValue: order.shippingAddress?.zip ?? "",
-                      autoComplete: "postal-code",
-                    },
-                    {
-                      name: "country",
-                      label: "Country",
-                      placeholder: "United States",
-                      defaultValue: order.shippingAddress?.country ?? "",
-                    },
-                    {
-                      name: "phone",
-                      label: "Phone",
-                      type: "tel",
-                      placeholder: "+1 555 123 4567",
-                      defaultValue: order.shippingAddress?.phone ?? "",
-                    },
-                  ]}
-                />
+                <>
+                  {refundableOrder ? (
+                    <RefundDialog
+                      workspaceId={ctx.workspaceId}
+                      ticketId={id}
+                      orderName={refundableOrder.name}
+                      size="sm"
+                    />
+                  ) : null}
+                  <CancelOrderDialog
+                    workspaceId={ctx.workspaceId}
+                    ticketId={id}
+                    orderName={order.name}
+                    canCancel={cancelState.canCancel}
+                    disabledReason={cancelState.reason}
+                  />
+                  <CardEditPopover
+                    ticketId={id}
+                    onSubmit={submitShippingAddress}
+                    label="Change address"
+                    trigger="button"
+                    align="right"
+                    title="Change shipping address"
+                    description="Fix where this order ships. Saves to the order in your store; clear a field to remove it from the address."
+                    submitEmpty
+                    fields={shippingAddressFields}
+                  />
+                </>
               ) : undefined
             }
             headerAction={

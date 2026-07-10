@@ -291,6 +291,26 @@ export interface EditShippingAddressOutcomeView {
   readonly error?: string;
 }
 
+/** Shopify's `OrderCancelReason` values, as the cancel dialog offers them. */
+export type CancelOrderReason =
+  | "customer"
+  | "declined"
+  | "fraud"
+  | "inventory"
+  | "staff"
+  | "other";
+
+export interface CancelOrderOutcomeView {
+  // cancelled | order_not_found | already_cancelled | ticket_not_found |
+  // invalid_reason | cancel_failed | error
+  readonly kind: string;
+  readonly orderId?: string;
+  /** Shopify's async cancellation job GID. */
+  readonly jobId?: string | null;
+  /** Shopify's rejection detail on `cancel_failed` (log-grade, not UI copy). */
+  readonly error?: string;
+}
+
 // One restock/refund line the dashboard refund modal sends to the issue-refund
 // endpoint. Mirrors the api's `RefundLineItemInput` (resolved client-side:
 // restockType + locationId already decided from the order's fulfillment state +
@@ -1128,6 +1148,37 @@ export const api = {
       { method: "POST", body: fields, ctx },
     );
     return (body as EditShippingAddressOutcomeView | null) ?? { kind: "error" };
+  },
+
+  // Cancel the ticket's order (the Cancel button on the Order card). Refunds
+  // and restocks by default; Shopify processes both asynchronously. A real
+  // store write that moves money — gated on `refunds.issue` server-side.
+  cancelOrder: async (
+    ctx: CallCtx,
+    ticketId: string,
+    input: {
+      readonly refund: boolean;
+      readonly restock: boolean;
+      readonly reason: CancelOrderReason;
+      readonly staffNote: string | null;
+    },
+  ): Promise<CancelOrderOutcomeView> => {
+    try {
+      const { body } = await call(
+        `/tickets/${encodeURIComponent(ticketId)}/cancel-order`,
+        { method: "POST", body: input, ctx },
+      );
+      return (body as CancelOrderOutcomeView | null) ?? { kind: "error" };
+    } catch (err) {
+      // A Shopify refusal is a 502 (upstream said no), which `call` turns into
+      // a throw. Recover it as the discriminated outcome so the operator gets
+      // the "nothing was cancelled, no money moved" copy instead of a generic
+      // error — the one outcome where a vague toast is actively dangerous.
+      if (err instanceof ApiError && err.status === 502) {
+        return { kind: "cancel_failed" };
+      }
+      throw err;
+    }
   },
 
   // Refundable line items + pricing for the ticket's order, powering the
