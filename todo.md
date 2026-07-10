@@ -50,16 +50,26 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         slow-fulfilling store it can measure *since order placed* rather than
         *since first scan*. Treat it as approximate.
       - `missing-package-agent` BRANCH B now reads both scalars too (2026-07-10):
-        B1 gains a STALLED trigger (`daysSinceLastScan >= 7` escalates even while
-        the carrier still says `in_transit` — a moving parcel scans, a stalled one
-        does not); B2 gains a LATE-BUT-MOVING path (`transitDays` past the store's
-        documented shipping window, per `knowledge.search`) that replies honestly
-        and spends the ticket's one `merchant.notify` instead of implying the
-        order is on schedule. A null scalar is explicitly *not* evidence of
-        timeliness — it routes to B3.
-      - **The 7-day stall threshold is a guess, not a tuned number.** It is the
-        only hardcoded constant in this work. Revisit once there is real carrier
-        data; slow international lanes may scan less often than weekly.
+        B1 gains a STALLED trigger (escalates even while the carrier still says
+        `in_transit` — a moving parcel scans, a stalled one does not); B2 gains a
+        LATE-BUT-MOVING path that replies honestly and spends the ticket's one
+        `merchant.notify` instead of implying the order is on schedule. A null
+        scalar is explicitly *not* evidence of timeliness — it routes to B3.
+      - **Both thresholds are the merchant's, not ours.** The agent fetches the
+        store's delivery window with `knowledge.search` BEFORE choosing B1 vs B2:
+        `transitDays` past the window is late; `daysSinceLastScan` *reaching* the
+        window means the parcel went silent for as long as the entire promised
+        delivery time, so it is stalled. No hardcoded day count exists in the
+        prompt, and an undocumented window routes to B3 rather than a fallback
+        guess — a test asserts the absence (`not.toContain("7 or more")`).
+        An earlier draft hardcoded 7 days; that was invented, and the merchant's
+        own policy is the only defensible anchor. Don't reintroduce a constant.
+      - Note the two thresholds measure different things against the same number:
+        a delivery window bounds *total transit*, and reusing it as the
+        silence bound for a stall is a deliberate approximation (carriers don't
+        publish scan cadence). It is strictly safer than a guess — a stall can
+        only fire once the parcel is already at the window — but it will miss a
+        parcel that dies early in a long international window.
       - Follow-up (not done): **seeded defaults only reach tenants who never
         saved a resolution policy** — existing tenants keep their old
         `delivery_issue` notes and gain nothing here. Decide whether to backfill
