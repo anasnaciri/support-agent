@@ -64,6 +64,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         guess — a test asserts the absence (`not.toContain("7 or more")`).
         An earlier draft hardcoded 7 days; that was invented, and the merchant's
         own policy is the only defensible anchor. Don't reintroduce a constant.
+      - `scenario-resolution-agent` gets the same rule in its base prompt
+        (2026-07-10), as a `JUDGING LATE OR STUCK` block next to the existing
+        `TRACKING CAUTION`. It stays scenario-agnostic on purpose: the block
+        teaches how to *read* `transitDays` / `daysSinceLastScan` against the
+        store's delivery window, and leaves what to *do* about it to the
+        `[Scenario playbook]` header — so `where_is_order` benefits too, not
+        just `delivery_issue`.
       - Note the two thresholds measure different things against the same number:
         a delivery window bounds *total transit*, and reusing it as the
         silence bound for a stall is a deliberate approximation (carriers don't
