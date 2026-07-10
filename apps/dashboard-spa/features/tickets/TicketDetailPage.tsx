@@ -51,7 +51,6 @@ import { parseLiveTracking } from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
-import { orderCancelState } from "@/lib/order-cancel-eligibility";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -635,12 +634,11 @@ export function TicketDetailPage() {
   const refundRecommendation = extractRefundRecommendation(entries);
   // The agent's issuable refund recommendation (PATH B), if any.
   const refundToIssue = issuableRefund(entries);
-  const refundableOrder =
-    order && order.financialStatus !== "refunded" ? order : null;
-  // Whether the Order card's Cancel button is live, and why not when it isn't.
-  const cancelState = order
-    ? orderCancelState(order)
-    : { canCancel: false, reason: null };
+  // Refund and Cancel are offered for ANY linked order — never hidden or
+  // disabled on a guess about eligibility (a fully-refunded or already-shipped
+  // order still opens its dialog). Shopify is the authority: it refuses what it
+  // must, and the failure toast tells the operator plainly that nothing moved.
+  // The only condition is that an order is actually linked to the ticket.
   // The Change-address form: prefilled with the order's current address, and
   // submitted whole (`submitEmpty`) so blanking a field CLEARS it.
   const shippingAddressFields = [
@@ -816,11 +814,11 @@ export function TicketDetailPage() {
             canBlockSender={canBlockSender}
             statusTargets={ticketRow.manualStatusTargets ?? []}
             refundSlot={
-              refundableOrder ? (
+              order ? (
                 <RefundDialog
                   workspaceId={ctx.workspaceId}
                   ticketId={id}
-                  orderName={refundableOrder.name}
+                  orderName={order.name}
                 />
               ) : null
             }
@@ -994,20 +992,16 @@ export function TicketDetailPage() {
             actions={
               order ? (
                 <>
-                  {refundableOrder ? (
-                    <RefundDialog
-                      workspaceId={ctx.workspaceId}
-                      ticketId={id}
-                      orderName={refundableOrder.name}
-                      size="sm"
-                    />
-                  ) : null}
+                  <RefundDialog
+                    workspaceId={ctx.workspaceId}
+                    ticketId={id}
+                    orderName={order.name}
+                    size="sm"
+                  />
                   <CancelOrderDialog
                     workspaceId={ctx.workspaceId}
                     ticketId={id}
                     orderName={order.name}
-                    canCancel={cancelState.canCancel}
-                    disabledReason={cancelState.reason}
                   />
                   <CardEditPopover
                     ticketId={id}

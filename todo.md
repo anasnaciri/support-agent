@@ -35,10 +35,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         restock toggles (both default ON; only an explicit un-tick withholds
         either, so a malformed flag fails SAFE for the customer), a reason, and
         a staff note.
-      - Client-side eligibility mirrors the store: `orderCancelState` fails
-        CLOSED — only `unfulfilled` / no-status orders offer Cancel; anything
-        shipped or already cancelled renders the button disabled with the reason
-        as its tooltip.
+      - **Refund and Cancel are never gated in the UI** (decided 2026-07-10):
+        both render for ANY linked order — a fully-refunded or already-shipped
+        order still opens its dialog. The short-lived `orderCancelState`
+        eligibility helper was written and then deleted. Rationale: Shopify is
+        the authority on what it will accept; a client-side guess can only be
+        wrong in one of two directions (block a legal write, or promise an
+        illegal one), and every refusal now surfaces as a precise toast
+        (`already_cancelled` 409, `already_refunded` 409, Shopify's own refusal
+        → 502 → `*_failed`). The ONLY remaining condition is that an order is
+        linked to the ticket — there is nothing to act on otherwise. RBAC
+        (`refunds.issue`) is unchanged and still enforced server-side; "not
+        gated" means no eligibility guess, not no authorization.
       - **Refund shows in both places** (header + card) — deliberate, per
         request. `RefundDialog` gained a `size` prop so the card trigger matches
         its `sm` neighbors.
@@ -46,21 +54,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         triggers for one popover on one card is clutter. `CardEditPopover` gained
         `trigger: "pencil" | "button"`; the address field list is now hoisted to
         one `shippingAddressFields` const instead of being duplicated.
-      - **A 502 outcome cannot reach the operator through `call`** — it throws on
-        `status >= 500`, so the mutation's `onError` shows a generic
-        "Something went wrong". `api.cancelOrder` therefore catches `ApiError`
-        502 and recovers it as `{kind:"cancel_failed"}`, which is the one outcome
-        where a vague toast is actively dangerous (the operator must learn that
-        nothing was cancelled and no money moved). Pinned by
-        `test/cancel-order-client.test.ts`, verified red without the catch.
-- [ ] **Same 502 bug, pre-existing, in the refund flow**: `handleDashboardIssueRefund`
-      returns 502 for `refund_failed`, and `api.issueRefund` does NOT catch it —
-      so `ticketActionFeedback("issueRefund", "refund_failed")`'s copy ("Shopify
-      rejected the refund. No money moved…") is currently **unreachable**; the
-      operator sees the generic error toast instead. Found while adding
-      cancel-order; not fixed there to keep the slice honest. Fix by mirroring
-      `api.cancelOrder`'s catch (or by teaching `call` to return a discriminated
-      body for 502 on these write routes).
+- [x] **502 store-write outcomes now reach the operator** (2026-07-10). `call`
+      throws on `status >= 500`, so every 502 the dashboard's store-write routes
+      return — the status meaning "SHOPIFY refused", not "our api faulted" — was
+      landing in the mutation's `onError` as a generic "Something went wrong".
+      That made `ticketActionFeedback`'s `refund_failed` copy ("Shopify rejected
+      the refund. No money moved…") **unreachable**, which is the worst possible
+      place for a vague toast: the operator could not tell whether the money had
+      moved. Fixed with one shared `recover502(kind, run)` helper in
+      `api-client.ts`, applied to `issueRefund` (`refund_failed`) and
+      `cancelOrder` (`cancel_failed`). Only 502 is recovered — a genuine
+      500/503 still throws, because we don't know what the server did and must
+      not narrate an outcome. Pinned by `test/order-write-client.test.ts` (both
+      paths, each verified red first).
 - [x] Empty LLM completions are retryable, not decisions (2026-07-09):
       production ticket `4746d9d6-9931-4645-944a-f1036949d78c` took a
       `supplier.updated` tick, ran three good turns

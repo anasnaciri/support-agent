@@ -20,10 +20,6 @@ interface Props {
   readonly ticketId: string;
   /** The order name (e.g. "#1001"), shown in the trigger's tooltip + title. */
   readonly orderName: string;
-  /** False when the order already shipped or is already cancelled. */
-  readonly canCancel: boolean;
-  /** Why the button is disabled; shown as its tooltip. */
-  readonly disabledReason: string | null;
 }
 
 const REASONS: ReadonlyArray<{
@@ -48,13 +44,16 @@ const REASONS: ReadonlyArray<{
  * flags the same way). This is a REAL store write under the operator's
  * authority (`refunds.issue`), not an agent action, so it never asks the
  * customer's agent for anything; the operator tells the customer themselves.
+ *
+ * The button is ALWAYS offered for a linked order — never disabled on a guess
+ * about eligibility. Shopify is the authority on whether a given order can be
+ * cancelled; when it refuses, the `cancel_failed` toast says so plainly and
+ * confirms no money moved.
  */
 export function CancelOrderDialog({
   workspaceId,
   ticketId,
   orderName,
-  canCancel,
-  disabledReason,
 }: Props) {
   const [open, setOpen] = React.useState(false);
   const [refund, setRefund] = React.useState(true);
@@ -79,19 +78,6 @@ export function CancelOrderDialog({
       if (kind === "cancelled" || kind === "already_cancelled") setOpen(false);
     },
   });
-
-  if (!canCancel) {
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        title={disabledReason ?? "This order can't be cancelled."}
-      >
-        Cancel
-      </Button>
-    );
-  }
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
