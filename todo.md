@@ -195,13 +195,26 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         the **decoded** `nonce` returned by `verifyState`, never the raw state
         string. `dashboard-auth-routes.ts:172` already does this (compares
         `state.nonce` to the cookie) and is the pattern to copy.
-      - Adjacent, **confirmed present, not fixed**: `verifyGoogleInstallState`
-        (`mailbox/google-install.ts:88`) is a second copy of the same shape —
-        decode both segments, HMAC the decoded payload, no canonical check — so
-        it accepts the same junk-injected respellings. Its payload is JSON, so
-        `JSON.parse` rejects junk landing inside the *payload* segment, but the
-        signature segment is wide open. Same one-line fix; left alone to keep
-        this commit to the flake it came from.
+      - `verifyGoogleInstallState` (`mailbox/google-install.ts:88`) had the same
+        gap and is **fixed** the same way (2026-07-10).
+      - **The root cause is the shape, and there are four copies of it.** Every
+        verifier that HMACs the *decoded* payload is malleable; one that HMACs
+        the *encoded* string is not. `verifyOAuthState`
+        (`auth/dashboard-session.ts:209`) MACs `body` before decoding it and is
+        immune by construction — that is the pattern to converge on.
+      - Still vulnerable, **not fixed** (same one-line fix each):
+        - `verifyInstallGrant` (`auth/install-grant.ts:61`) — highest value of
+          the three; install grants are what authorize a Shopify install at
+          all. Junk in either segment is accepted.
+        - `verifyMicrosoftInstallState` (`mailbox/microsoft-install.ts:74`) —
+          the same function as the Google one, line for line.
+        - `verifyTelegramLinkToken` (`telegram/link.ts:56`) — **much narrower**:
+          the `/^[A-Za-z0-9_-]+$/u` charset guard at line 61 blocks injected
+          junk, so only the ~4 trailing-char variants (final char carries 4
+          significant bits + 2 dead ones) decode identically. Low severity.
+      - Follow-up worth taking: these are copy-paste of one function. Extract a
+        single `verifySignedToken` helper that MACs the encoded form, and delete
+        the copies, rather than patching each site a fifth time.
 
 - [x] Order card action row: Refund / Cancel / Change address (2026-07-10). The
       ticket page's Order card gained a footer button row, rendered only once a
