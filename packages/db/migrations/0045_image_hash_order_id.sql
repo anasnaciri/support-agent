@@ -1,0 +1,11 @@
+-- Scope the damaged-product duplicate-photo guard by ORDER, not just by ticket.
+-- A re-used "broken item" photo is only a fraud signal when it turns up on a
+-- DIFFERENT order; the same photo re-sent on a follow-up about the one damaged
+-- order is legitimate. We record the canonical Shopify order GID a photo
+-- belongs to (backfilled once the ticket's order is identified), and the guard
+-- suppresses a near-match hit whose order equals the current ticket's order.
+--
+-- Nullable + no backfill: existing rows keep order_id NULL (order unknown),
+-- which the matcher treats conservatively — an un-bound hash can still hit, so
+-- behaviour for historical rows is unchanged.
+ALTER TABLE "image_hashes" ADD COLUMN "order_id" text;

@@ -137,6 +137,13 @@ export class AgentRuntime extends Context.Tag("AgentRuntime")<
 // Default layer
 // ============================================================
 
+/**
+ * Risk-flag prefix for the damaged-product duplicate-photo guard. One flag per
+ * OTHER ticket a near-identical photo was seen on. Shared by the ingestion-time
+ * detection and the order-scoped reconcile that runs once the order is known.
+ */
+const DUPLICATE_PHOTO_FLAG_PREFIX = "duplicate_photo_seen_in_ticket_";
+
 const AgentRuntimeLayer = Layer.effect(
   AgentRuntime,
   Effect.gen(function* () {
@@ -1190,6 +1197,17 @@ const AgentRuntimeLayer = Layer.effect(
             const dupFlags: string[] = [];
             if (Option.isSome(maybeStore)) {
               const store = maybeStore.value;
+              // The ticket's order, if already identified (a re-reply after the
+              // agent resolved it). Usually null on a first message — the order
+              // is bound later, and the reconcile after `get_order` re-scopes
+              // these flags then.
+              const knownOrderId =
+                typeof working.context["identifiedOrderId"] === "string" &&
+                (working.context["identifiedOrderId"] as string).startsWith(
+                  "gid://shopify/Order/",
+                )
+                  ? (working.context["identifiedOrderId"] as string)
+                  : null;
               const seenTicketIds = new Set<string>();
               for (const att of attachments) {
                 if (
@@ -1209,6 +1227,7 @@ const AgentRuntimeLayer = Layer.effect(
                     tenantId: working.tenantId,
                     ticketId: working.id,
                     phash,
+                    orderId: knownOrderId,
                     maxDistance: 5,
                     sinceDays: 90,
                   })
@@ -1222,7 +1241,9 @@ const AgentRuntimeLayer = Layer.effect(
                 for (const hit of hits) {
                   if (!seenTicketIds.has(hit.ticketId)) {
                     seenTicketIds.add(hit.ticketId);
-                    dupFlags.push(`duplicate_photo_seen_in_ticket_${hit.ticketId}`);
+                    dupFlags.push(
+                      `${DUPLICATE_PHOTO_FLAG_PREFIX}${hit.ticketId}`,
+                    );
                   }
                 }
                 // Record this photo's hash so future uploads can match it.
@@ -1231,6 +1252,7 @@ const AgentRuntimeLayer = Layer.effect(
                     tenantId: working.tenantId,
                     ticketId: working.id,
                     phash,
+                    orderId: knownOrderId,
                   })
                   .pipe(Effect.catchAll(() => Effect.void));
               }
@@ -2374,10 +2396,10 @@ const AgentRuntimeLayer = Layer.effect(
                   existingOrderRef.startsWith("gid://shopify/Order/");
                 if (resolvedOrder) {
                   const patch: Record<string, unknown> = {};
-                  if (!existingIsGid) {
-                    const ref = orderContextRef(resolvedOrder);
-                    if (ref) patch["identifiedOrderId"] = ref;
-                  }
+                  const newOrderRef = !existingIsGid
+                    ? orderContextRef(resolvedOrder)
+                    : null;
+                  if (newOrderRef) patch["identifiedOrderId"] = newOrderRef;
                   // Persist the order's shipping country so a later
                   // tracking.lookup can be checked against it (the
                   // tracking-destination guard in `stampTrackingLookup`). The
@@ -2400,6 +2422,71 @@ const AgentRuntimeLayer = Layer.effect(
                         } as never,
                       })
                       .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                  }
+                  // Order-scoped reconcile of the duplicate-photo guard: now
+                  // that this ticket's order is known, bind it onto the ticket's
+                  // recorded photo hashes and recompute the duplicate flags.
+                  // A photo re-used on the SAME order stops flagging (a
+                  // legitimate follow-up on one damaged order); a photo re-used
+                  // across a DIFFERENT order still flags. Best-effort — a store
+                  // failure leaves the ingestion-time flags untouched.
+                  if (newOrderRef && Option.isSome(maybeImageHashStore)) {
+                    const store = maybeImageHashStore.value;
+                    current = yield* Effect.gen(function* () {
+                      yield* store.bindOrder({
+                        tenantId: current.tenantId,
+                        ticketId: current.id,
+                        orderId: newOrderRef,
+                      });
+                      const phashes = yield* store.listPhashesForTicket({
+                        tenantId: current.tenantId,
+                        ticketId: current.id,
+                      });
+                      if (phashes.length === 0) return current;
+                      const otherTicketIds = new Set<string>();
+                      for (const ph of phashes) {
+                        const hits = yield* store.findSimilar({
+                          tenantId: current.tenantId,
+                          ticketId: current.id,
+                          phash: ph,
+                          orderId: newOrderRef,
+                          maxDistance: 5,
+                          sinceDays: 90,
+                        });
+                        for (const hit of hits)
+                          otherTicketIds.add(hit.ticketId as string);
+                      }
+                      const existing = Array.isArray(
+                        current.context["riskFlags"],
+                      )
+                        ? (current.context["riskFlags"] as unknown[]).filter(
+                            (f): f is string => typeof f === "string",
+                          )
+                        : [];
+                      const kept = existing.filter(
+                        (f) => !f.startsWith(DUPLICATE_PHOTO_FLAG_PREFIX),
+                      );
+                      const merged = Array.from(
+                        new Set([
+                          ...kept,
+                          ...[...otherTicketIds].map(
+                            (id) => `${DUPLICATE_PHOTO_FLAG_PREFIX}${id}`,
+                          ),
+                        ]),
+                      );
+                      const unchanged =
+                        merged.length === existing.length &&
+                        merged.every((f) => existing.includes(f));
+                      if (unchanged) return current;
+                      return yield* tickets
+                        .update(current.id, {
+                          context: {
+                            ...current.context,
+                            riskFlags: merged,
+                          } as never,
+                        })
+                        .pipe(Effect.catchAll(() => Effect.succeed(current)));
+                    }).pipe(Effect.catchAll(() => Effect.succeed(current)));
                   }
                 }
                 // The tool may have mutated the ticket (e.g. transitioned status).

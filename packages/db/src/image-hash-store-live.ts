@@ -1,12 +1,14 @@
 import { Effect, FiberRef, Layer } from "effect";
-import { and, eq, gte, ne } from "drizzle-orm";
+import { and, eq, gte, isNull, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   ImageHashStore,
   ImageHashStoreDbError,
   matchSimilar,
+  type BindOrderInput,
   type FindSimilarInput,
   type ImageHashStoreError,
+  type ListPhashesInput,
   type RecordImageHashInput,
   type SimilarImageHit,
 } from "@support-agent/services";
@@ -47,6 +49,7 @@ export const ImageHashStoreLive = Layer.effect(
             tenantId: input.tenantId,
             ticketId: input.ticketId,
             phash: input.phash,
+            orderId: input.orderId ?? null,
           }),
         );
       });
@@ -83,12 +86,58 @@ export const ImageHashStoreLive = Layer.effect(
             tenantId: makeTenantId(r.tenantId),
             ticketId: makeTicketId(r.ticketId),
             phash: r.phash,
+            orderId: r.orderId ?? null,
             createdAt: r.createdAt,
           })),
           input,
         );
       });
 
-    return ImageHashStore.of({ record, findSimilar });
+    const bindOrder = (
+      input: BindOrderInput,
+    ): Effect.Effect<void, ImageHashStoreError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        yield* wrap(
+          "bindOrder",
+          db
+            .update(imageHashes)
+            .set({ orderId: input.orderId })
+            .where(
+              and(
+                eq(imageHashes.tenantId, input.tenantId),
+                eq(imageHashes.ticketId, input.ticketId),
+                isNull(imageHashes.orderId),
+              ),
+            ),
+        );
+      });
+
+    const listPhashesForTicket = (
+      input: ListPhashesInput,
+    ): Effect.Effect<ReadonlyArray<bigint>, ImageHashStoreError> =>
+      Effect.gen(function* () {
+        const db = yield* useDb(defaultDb);
+        const rows = yield* wrap(
+          "listPhashesForTicket",
+          db
+            .select({ phash: imageHashes.phash })
+            .from(imageHashes)
+            .where(
+              and(
+                eq(imageHashes.tenantId, input.tenantId),
+                eq(imageHashes.ticketId, input.ticketId),
+              ),
+            ),
+        );
+        return rows.map((r) => r.phash);
+      });
+
+    return ImageHashStore.of({
+      record,
+      findSimilar,
+      bindOrder,
+      listPhashesForTicket,
+    });
   }),
 );

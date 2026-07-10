@@ -3498,6 +3498,141 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
   });
 
   // ----------------------------------------------------------------
+  // Order-scoped duplicate-photo reconcile: a photo re-used on the SAME
+  // order is NOT fraud (a legitimate follow-up on one damaged order). The
+  // ingestion guard flags it provisionally (the order isn't known yet), then
+  // once `get_order` identifies the order the runtime re-scopes the flag —
+  // clearing it when the prior hit belongs to the same order, keeping it when
+  // it belongs to a different one.
+  // ----------------------------------------------------------------
+  const runOrderScopedReconcile = async (priorOrderGid: string) => {
+    const orderId = OrderId("gid://shopify/Order/RECON1");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#3001",
+      confirmationNumber: null,
+      email: "buyer@example.com",
+      customerId: CustomerId("gid://shopify/Customer/999"),
+      fulfillmentStatus: "delivered",
+      financialStatus: "paid",
+      totalPrice: { amount: "40.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [
+        {
+          id: "li-1",
+          title: "Ceramic Mug",
+          quantity: 1,
+          sku: "MUG-01",
+          variantTitle: null,
+          productId: null,
+          imageUrl: null,
+        },
+      ],
+      fulfillments: [],
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-05-02T00:00:00.000Z"),
+    };
+
+    const script: ReadonlyArray<LLMDecision> = [
+      { type: "tool_call", callId: "g0", tool: "shopify.get_order", input: { orderId } },
+      { type: "final_message", text: "looked up the order" },
+    ];
+
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, refundReviewAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      tenantRepoDefault,
+      ImageHashStoreTest,
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(Layer.provide(Layer.merge(env, TicketAttachmentStoreTest()))),
+      env,
+    );
+
+    const priorTicketId = TicketId("88888888-8888-4888-8888-888888888888");
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          // A near-identical hash recorded on ANOTHER ticket, bound to a given order.
+          const store = yield* ImageHashStore;
+          yield* store.record({
+            tenantId: TenantId("tenant-recon"),
+            ticketId: priorTicketId,
+            phash: 1n,
+            orderId: priorOrderGid,
+          });
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId("tenant-recon"),
+            channel: "email",
+            currentAgentId: refundReviewAgent.id,
+            subject: "Damaged mug",
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-recon" as never,
+              messageId: "msg-recon",
+              from: { name: null, email: "buyer@example.com" },
+              to: [],
+              subject: "Re: Damaged mug",
+              bodyText: `My order ${orderId} arrived broken, photo attached.`,
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [
+                {
+                  filename: "broken.jpg",
+                  contentType: "image/jpeg",
+                  storageKey: "gmail/tenant-recon/msg-recon/att1.jpg",
+                  sizeBytes: 5000,
+                  phash: "3", // distance 1 from the pre-seeded hash "1"
+                },
+              ],
+            },
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+  };
+
+  it("clears the duplicate-photo flag once get_order proves it is the SAME order", async () => {
+    const fetched = await runOrderScopedReconcile("gid://shopify/Order/RECON1");
+    const riskFlags =
+      ((fetched?.context as Record<string, unknown>)?.["riskFlags"] as
+        | string[]
+        | undefined) ?? [];
+    expect(
+      riskFlags.filter((f) => f.startsWith("duplicate_photo_seen_in_ticket_")),
+    ).toEqual([]);
+  });
+
+  it("keeps the duplicate-photo flag when get_order proves it is a DIFFERENT order", async () => {
+    const fetched = await runOrderScopedReconcile("gid://shopify/Order/OTHER");
+    const riskFlags =
+      ((fetched?.context as Record<string, unknown>)?.["riskFlags"] as
+        | string[]
+        | undefined) ?? [];
+    expect(
+      riskFlags.filter((f) => f.startsWith("duplicate_photo_seen_in_ticket_")),
+    ).toEqual(["duplicate_photo_seen_in_ticket_88888888-8888-4888-8888-888888888888"]);
+  });
+
+  // ----------------------------------------------------------------
   // Triage → refund-review-agent → conversation.reply (gated "ask").
   //
   // First specialist that exercises the full ask-then-pause-then-approve

@@ -820,6 +820,12 @@ export const imageHashes = pgTable(
       .notNull()
       .references(() => tickets.id, { onDelete: "cascade" }),
     phash: bigint("phash", { mode: "bigint" }).notNull(),
+    // Canonical Shopify order GID this photo belongs to, when known. NULL at
+    // ingestion (the order is resolved later by get_order) and backfilled once
+    // the ticket's order is identified. Scopes the duplicate-photo guard: a
+    // re-used photo is only a fraud signal across DIFFERENT orders, never a
+    // follow-up on the same damaged order.
+    orderId: text("order_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
