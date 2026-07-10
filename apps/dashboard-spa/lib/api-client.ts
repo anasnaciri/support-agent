@@ -174,6 +174,31 @@ const call = async (
   return res;
 };
 
+/**
+ * Recover a 502 as a discriminated outcome.
+ *
+ * The store-write endpoints (refund, cancel) answer 502 when SHOPIFY refused
+ * the write — an upstream "no", not a fault in our api. But `call` throws on
+ * any status >= 500, so those outcomes would reach the mutation's `onError`
+ * and surface as "Something went wrong. Please try again." For a money write
+ * that is actively dangerous: the operator must learn that nothing happened
+ * and no money moved, not be left wondering whether it half-succeeded.
+ *
+ * Only 502 is recovered. A genuine 500/503 still throws — we don't know what
+ * the server did, so we must not narrate an outcome.
+ */
+const recover502 = async <T extends { readonly kind: string }>(
+  kind: T["kind"],
+  run: () => Promise<T>,
+): Promise<T> => {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 502) return { kind } as T;
+    throw err;
+  }
+};
+
 const okBody = async (path: string, ctx: CallCtx): Promise<unknown> => {
   const { status, body } = await call(path, { ctx });
   if (status !== 200) {
@@ -1089,21 +1114,27 @@ export const api = {
         readonly currencyCode: string;
       } | null;
     } = {},
-  ): Promise<IssueRefundOutcomeView> => {
-    const { body } = await call(`/tickets/${encodeURIComponent(ticketId)}/refund`, {
-      method: "POST",
-      body: {
-        amount,
-        ...(opts.reason ? { reason: opts.reason } : {}),
-        ...(opts.lineItems && opts.lineItems.length > 0
-          ? { lineItems: opts.lineItems }
-          : {}),
-        ...(opts.shipping ? { shipping: opts.shipping } : {}),
-      },
-      ctx,
-    });
-    return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
-  },
+  ): Promise<IssueRefundOutcomeView> =>
+    // A Shopify refusal (502) becomes `refund_failed`, so the operator is told
+    // no money moved rather than shown a generic error.
+    recover502("refund_failed", async () => {
+      const { body } = await call(
+        `/tickets/${encodeURIComponent(ticketId)}/refund`,
+        {
+          method: "POST",
+          body: {
+            amount,
+            ...(opts.reason ? { reason: opts.reason } : {}),
+            ...(opts.lineItems && opts.lineItems.length > 0
+              ? { lineItems: opts.lineItems }
+              : {}),
+            ...(opts.shipping ? { shipping: opts.shipping } : {}),
+          },
+          ctx,
+        },
+      );
+      return (body as IssueRefundOutcomeView | null) ?? { kind: "error" };
+    }),
 
   // Hand-correct the customer / order the agent couldn't identify (the pencil on
   // the Customer / Order panels). Only non-empty fields are sent; an order ref is
@@ -1162,24 +1193,16 @@ export const api = {
       readonly reason: CancelOrderReason;
       readonly staffNote: string | null;
     },
-  ): Promise<CancelOrderOutcomeView> => {
-    try {
+  ): Promise<CancelOrderOutcomeView> =>
+    // A Shopify refusal (502) becomes `cancel_failed`, so the operator is told
+    // nothing was cancelled rather than shown a generic error.
+    recover502("cancel_failed", async () => {
       const { body } = await call(
         `/tickets/${encodeURIComponent(ticketId)}/cancel-order`,
         { method: "POST", body: input, ctx },
       );
       return (body as CancelOrderOutcomeView | null) ?? { kind: "error" };
-    } catch (err) {
-      // A Shopify refusal is a 502 (upstream said no), which `call` turns into
-      // a throw. Recover it as the discriminated outcome so the operator gets
-      // the "nothing was cancelled, no money moved" copy instead of a generic
-      // error — the one outcome where a vague toast is actively dangerous.
-      if (err instanceof ApiError && err.status === 502) {
-        return { kind: "cancel_failed" };
-      }
-      throw err;
-    }
-  },
+    }),
 
   // Refundable line items + pricing for the ticket's order, powering the
   // Shopify-style refund modal. Read-only (gated on `refunds.issue` like the
