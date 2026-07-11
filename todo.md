@@ -32,6 +32,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       instruction naming the document and telling the agent to call
       `knowledge.search` with that title, without inlining the document body.
 
+- [x] **Scenario note `@` menu distinguishes docs from facts** (2026-07-11).
+      Verified with
+      `pnpm test -- apps/dashboard-spa/test/playbook-notes-field.test.ts`,
+      `pnpm build`, and
+      `pnpm --filter @support-agent/dashboard-spa build`. The dropdown now
+      keeps the original compact one-line option style while adding a small
+      leading `FileText` icon for knowledge docs and `Database` icon for
+      structured Facts. Keyboard navigation now scrolls the highlighted option
+      into view inside the dropdown.
+
 - [x] **Scenarios page quick Facts sidebar** (2026-07-11). Verified with
       `pnpm test -- apps/dashboard-spa/test/scenarios-facts-sidebar.test.ts`,
       `pnpm --filter @support-agent/dashboard-spa build`, `pnpm build`, and a

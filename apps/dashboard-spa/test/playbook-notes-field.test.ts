@@ -32,6 +32,13 @@ const { MOCK_CATALOG } = vi.hoisted(() => ({
       label: "Refund processing time",
       value: "5–7 business days",
     },
+    {
+      id: "docs.123e4567-e89b-12d3-a456-426614174000",
+      namespace: "docs",
+      field: "123e4567-e89b-12d3-a456-426614174000",
+      label: "Knowledge doc",
+      value: "International shipping policy",
+    },
   ],
 }));
 
@@ -247,6 +254,7 @@ describe("serializeNotes", () => {
 // asserts on the position — `clampCaretMenuLeft` covers that, and only a real
 // browser can confirm the pixels.
 Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+HTMLElement.prototype.scrollIntoView ??= () => undefined;
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -327,6 +335,37 @@ const openOptions = () =>
   );
 
 describe("the @-menu's keyboard navigation", () => {
+  it("marks fact and doc options with distinct source kinds", async () => {
+    const editor = await mountField("Use @");
+    caretToEnd(editor);
+
+    await press(editor, "keyup", "@");
+
+    const kinds = [
+      ...container!.querySelectorAll<HTMLButtonElement>(
+        "[data-reference-kind]",
+      ),
+    ].map((button) => button.dataset.referenceKind);
+    expect(kinds).toEqual(["fact", "fact", "doc"]);
+  });
+
+  it("scrolls the highlighted option into view when arrow keys move it", async () => {
+    const editor = await mountField("Use @");
+    caretToEnd(editor);
+
+    await press(editor, "keyup", "@");
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+
+    try {
+      await press(editor, "keydown", "ArrowDown");
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
   it("keeps the arrowed-to option selected — keyup must not snap back to the first", async () => {
     const editor = await mountField("Refund after @ret");
     caretToEnd(editor);

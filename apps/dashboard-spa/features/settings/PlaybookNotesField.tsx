@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Database, FileText } from "lucide-react";
 
 import type { FactReferenceEntryView } from "@support-agent/dashboard-contracts";
 
@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils";
 
 type Ctx = { readonly workspaceId: string };
 type Catalog = ReadonlyMap<string, FactReferenceEntryView>;
+
+export const referenceSourceKind = (
+  entry: FactReferenceEntryView,
+): "fact" | "doc" => (entry.namespace === "docs" ? "doc" : "fact");
 
 // An in-progress `@token` immediately before the caret. Anchored to start-of-
 // text or whitespace so it never fires inside an email address (`user@…`).
@@ -194,6 +198,7 @@ export function PlaybookNotesField({
   const [highlight, setHighlight] = useState(0);
   const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLUListElement | null>(null);
   // Chips can only be rendered once the catalog (labels + this store's values)
   // has arrived. Until then the editor shows the raw note, and it is re-rendered
   // exactly once — never under a caret the merchant is already using.
@@ -241,6 +246,14 @@ export function PlaybookNotesField({
       )
       .slice(0, 8);
   }, [menuOpen, query, catalog]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const highlighted = menuRef.current?.querySelector<HTMLElement>(
+      '[data-highlighted="true"]',
+    );
+    highlighted?.scrollIntoView({ block: "nearest" });
+  }, [highlight, matches.length, menuOpen]);
 
   /** The caret's text node + offset, when the caret is inside this editor. */
   const caretInText = (): { node: Text; offset: number } | null => {
@@ -409,33 +422,50 @@ export function PlaybookNotesField({
 
         {menuOpen && matches.length > 0 ? (
           <ul
+            ref={menuRef}
             role="listbox"
             // Opens at the caret, not under the whole field.
             style={{ left: menuPos.left, top: menuPos.top, width: MENU_WIDTH }}
             className="absolute z-20 max-h-64 overflow-auto rounded-md border border-input bg-popover p-1 shadow-md"
           >
-            {matches.map((entry, i) => (
-              <li key={entry.id} role="option" aria-selected={i === highlight}>
-                <button
-                  type="button"
-                  // mousedown (not click) so it fires before the editor blurs.
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    insert(entry);
-                  }}
-                  onMouseEnter={() => setHighlight(i)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm",
-                    i === highlight && "bg-accent text-accent-foreground",
-                  )}
+            {matches.map((entry, i) => {
+              const kind = referenceSourceKind(entry);
+              const Icon = kind === "doc" ? FileText : Database;
+              return (
+                <li
+                  key={entry.id}
+                  role="option"
+                  aria-selected={i === highlight}
                 >
-                  <span>{entry.label}</span>
-                  <span className="truncate font-mono text-xs text-muted-foreground">
-                    {entry.value ?? "not set"}
-                  </span>
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    data-reference-kind={kind}
+                    data-highlighted={i === highlight ? "true" : undefined}
+                    // mousedown (not click) so it fires before the editor blurs.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      insert(entry);
+                    }}
+                    onMouseEnter={() => setHighlight(i)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm",
+                      i === highlight && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <Icon
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-hidden
+                      />
+                      <span className="truncate">{entry.label}</span>
+                    </span>
+                    <span className="truncate font-mono text-xs text-muted-foreground">
+                      {entry.value ?? "not set"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </div>
