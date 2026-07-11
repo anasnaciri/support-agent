@@ -484,6 +484,35 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(await zero.json()).toEqual({ error: "invalid_return_window" });
   });
 
+  it("GET /dashboard/fact-references returns the @-menu catalog", async () => {
+    if (!raw) return;
+    const res = await get("/dashboard/fact-references");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly entries: ReadonlyArray<{ readonly id: string }>;
+    };
+    const ids = new Set(body.entries.map((e) => e.id));
+    expect(ids.has("returns.return_window")).toBe(true);
+    expect(ids.has("shipping.delivery_time")).toBe(true);
+    expect(ids.has("refunds.approval_threshold")).toBe(true);
+  });
+
+  it("POST /dashboard/fact-references/resolve resolves against the tenant's facts", async () => {
+    if (!raw) return;
+    await post("/dashboard/returns-facts", { returnWindowDays: 45 });
+    const res = await post("/dashboard/fact-references/resolve", {
+      text: "Accept within @returns.return_window of delivery.",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly resolved: string;
+      readonly dangling: ReadonlyArray<string>;
+    };
+    expect(body.resolved).toContain("45 days");
+    expect(body.resolved).not.toContain("@returns.return_window");
+    expect(body.dangling).toEqual([]);
+  });
+
   it("POST /dashboard/shipping-profile 400s on a missing or nonsense delay threshold", async () => {
     if (!raw) return;
     const bad = await post("/dashboard/shipping-profile", {

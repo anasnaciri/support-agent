@@ -7,6 +7,8 @@ import {
   defaultBlockedSenders,
   decodeShippingProfile,
   decodeReturnsFacts,
+  FACT_REFERENCE_CATALOG,
+  resolveFactReferences,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -898,6 +900,57 @@ export const handleDashboardReturnsFactsSet = async (
     ),
   );
   return sendJson(res, 200, { ok: true, returnsFacts: parsed.facts });
+};
+
+// ---- Fact references (scenario-notes @-menu + live preview) ----
+
+// GET /dashboard/fact-references — the code-defined catalog that drives the `@`
+// menu in the scenario-notes editor. Static (no tenant read); the merchant's
+// values are resolved separately by the POST below. Single-source with the
+// runtime: both are generated from FACT_REFERENCE_CATALOG.
+export const handleDashboardFactReferences = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const entries = FACT_REFERENCE_CATALOG.map((e) => ({
+    id: e.id,
+    namespace: e.namespace,
+    field: e.field,
+    label: e.label,
+  }));
+  return sendJson(res, 200, { entries });
+};
+
+// POST /dashboard/fact-references/resolve — resolve `@`-references in a note
+// against THIS tenant's Facts, so the editor preview shows exactly the
+// agent-visible text (including the fallback state) and flags dangling refs.
+// Uses the same resolver the runtime does, so the preview can't drift from what
+// the agent actually sees.
+export const handleDashboardFactReferencesResolve = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const body = parseJsonBody(req);
+  const text = typeof body["text"] === "string" ? body["text"] : "";
+  const settings = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        return yield* repo.getSettings(TenantId(auth.tenantId));
+      }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+      layer,
+    ),
+  );
+  const { resolved, dangling } = resolveFactReferences(text, settings);
+  return sendJson(res, 200, { resolved, dangling });
 };
 
 // ---- Blocked senders ----

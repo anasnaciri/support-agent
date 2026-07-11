@@ -46,6 +46,8 @@ import {
   handleDashboardBlockedSendersAdd,
   handleDashboardShippingProfileSet,
   handleDashboardReturnsFactsSet,
+  handleDashboardFactReferences,
+  handleDashboardFactReferencesResolve,
   handleDashboardBlockedSendersRemove,
   handleDashboardAgentSystemPromptClear,
   handleDashboardAgentSystemPromptSet,
@@ -551,6 +553,18 @@ export const registerDashboardRoutes = (
     "Save the store's returns facts",
     handleDashboardReturnsFactsSet,
     "knowledge.manage",
+  );
+  dashboardGet(
+    "/dashboard/fact-references",
+    "The @-reference catalog for the scenario-notes editor",
+    handleDashboardFactReferences,
+    "settings.agents",
+  );
+  dashboardPost(
+    "/dashboard/fact-references/resolve",
+    "Resolve @-references in a note against the tenant's facts",
+    handleDashboardFactReferencesResolve,
+    "settings.agents",
   );
   dashboardPost(
     "/dashboard/blocked-senders/add",

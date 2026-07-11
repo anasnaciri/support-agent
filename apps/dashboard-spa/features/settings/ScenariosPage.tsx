@@ -29,6 +29,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
+import { PlaybookNotesField } from "./PlaybookNotesField";
 
 /**
  * Per-scenario remedy-action control is HIDDEN for now (2026-06-28): tools and
@@ -59,10 +60,12 @@ function ScenarioCard({
   formKey,
   scenario,
   onRemove,
+  ctx,
 }: {
   readonly formKey: string;
   readonly scenario: ResolutionScenarioView | null;
   readonly onRemove?: () => void;
+  readonly ctx: { readonly workspaceId: string };
 }) {
   const custom = onRemove != null;
   const [active, setActive] = useState(scenario ? scenario.enabled : true);
@@ -249,15 +252,15 @@ function ScenarioCard({
 
         <Separator />
 
-        {/* Free-text playbook. */}
+        {/* Free-text playbook, with @-references to store facts. */}
         <div className="space-y-1.5">
           <Label htmlFor={fieldName(formKey, "notes")}>Playbook notes</Label>
-          <Textarea
+          <PlaybookNotesField
             id={fieldName(formKey, "notes")}
             name={fieldName(formKey, "notes")}
-            rows={3}
             defaultValue={scenario?.notes ?? ""}
             placeholder="How should the agent handle this? e.g. check tracking first, then offer a refund if it's genuinely lost."
+            ctx={ctx}
           />
         </div>
       </CardContent>
@@ -335,7 +338,7 @@ function ResolutionPolicyForm({
       <input type="hidden" name={SCENARIO_KEYS_FIELD} value={manifest} />
 
       {builtins.map((s) => (
-        <ScenarioCard key={s.key} formKey={s.key} scenario={s} />
+        <ScenarioCard key={s.key} formKey={s.key} scenario={s} ctx={ctx} />
       ))}
 
       {customs.map((c) => (
@@ -344,6 +347,7 @@ function ResolutionPolicyForm({
           formKey={c.formKey}
           scenario={c.initial}
           onRemove={() => removeCustom(c.formKey)}
+          ctx={ctx}
         />
       ))}
 

@@ -971,6 +971,32 @@ export interface ResolutionPolicyView {
   readonly scenarios: ReadonlyArray<ResolutionScenarioView>;
 }
 
+/**
+ * One `@`-referenceable store Fact, as surfaced to the scenario-notes `@` menu.
+ * Mirror of the services `FactReference` (the menu is generated from the same
+ * single-source catalog). `field` is null for a whole-block `@namespace` ref.
+ */
+export interface FactReferenceEntryView {
+  readonly id: string;
+  readonly namespace: string;
+  readonly field: string | null;
+  readonly label: string;
+}
+
+export interface FactReferencesResponse {
+  readonly entries: ReadonlyArray<FactReferenceEntryView>;
+}
+
+/**
+ * The result of resolving `@`-references in a note against the tenant's Facts —
+ * the exact agent-visible text plus the ids that did not resolve (unset field or
+ * typo in a known namespace), for the non-blocking dangling-ref warning.
+ */
+export interface ResolvedReferencesView {
+  readonly resolved: string;
+  readonly dangling: ReadonlyArray<string>;
+}
+
 // ============================================================
 // Connector scope coverage (shared rule)
 // ============================================================
