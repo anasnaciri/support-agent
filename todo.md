@@ -960,15 +960,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `junkSubscriptionExpiresAt`. Harmless: the reverted code reads
         metadata as loose JSONB behind `typeof` guards and simply ignores
         unknown keys. Not worth a migration to strip.
-- [ ] **Prod cleanup — orphan Graph junk subscriptions** (from the spam
-      revert above). The Outlook webhook is folder-agnostic, so any junk
-      subscription created before the revert KEEPS delivering junk
-      notifications that the reverted code will still ingest. The reverted
-      renewal cron no longer knows the junk slot, so it will not renew them
-      and they lapse on their own within `GRAPH_SUBSCRIPTION_TTL_MS`
-      (4000 min ≈ 2.8 days). To stop Outlook spam ingestion sooner, DELETE
-      each `junkSubscriptionId` via the Graph API. Moot if no Outlook
-      connector was ever connected in prod — check before doing the work.
+- [x] **Prod cleanup — orphan Graph junk subscriptions: NOT NEEDED**
+      (confirmed 2026-07-11). No tenant had ever connected an Outlook
+      account, so the revert left no junk subscriptions live and the code
+      revert alone fully stopped spam ingestion. Kept as the reference if
+      Outlook is ever connected and this gets reverted again:
+      - The trap: the Outlook webhook is folder-agnostic (it fetches by
+        message id and never checks which folder fired). So a junk
+        subscription created *before* a revert keeps delivering
+        notifications that the reverted code still ingests — reverting the
+        code does NOT stop Outlook spam on its own.
+      - Self-healing: the reverted renewal cron no longer knows the junk
+        slot, so nothing renews those subscriptions and they lapse within
+        `GRAPH_SUBSCRIPTION_TTL_MS` (4000 min ≈ 2.8 days).
+      - To stop it immediately: read each `junkSubscriptionId` from
+        `connector_connections.metadata` and
+        `DELETE https://graph.microsoft.com/v1.0/subscriptions/{id}`.
+      - Gmail and IMAP need no such cleanup: Gmail's reverted history filter
+        drops SPAM even while an old INBOX+SPAM watch lease is still live,
+        and the IMAP junk poll leg stops the moment the code ships.
 - [x] Fly Gmail OAuth redirect repaired (2026-07-07): the live Fly app still
       had `GOOGLE_OAUTH_CALLBACK_URL` set to the old Railway callback
       (`https://api-production-7770.up.railway.app/google/auth/callback`),
