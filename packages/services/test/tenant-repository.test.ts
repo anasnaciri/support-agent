@@ -14,6 +14,7 @@ import {
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
+  FACT_REFERENCE_CATALOG,
   type BlockedSenders,
   type LegalAcceptance,
   type RefundPolicy,
@@ -523,6 +524,83 @@ describe("damaged_product built-in scenario", () => {
     // A mismatch is flagged to the merchant, not used to deny the customer.
     expect(notes).toContain("mismatch");
     expect(notes).toContain("merchant");
+  });
+});
+
+describe("wrong_item built-in scenario", () => {
+  const wi = defaultResolutionPolicy.scenarios.find(
+    (s) => s.key === "wrong_item",
+  );
+
+  it("ships as a supplier-escalating built-in with a gated refund", () => {
+    expect(wi).toBeDefined();
+    expect(wi!.builtin).toBe(true);
+    expect(wi!.enabled).toBe(true);
+    expect(wi!.supplierMode).toBe("escalate_and_wait");
+    expect(wi!.enabledActions).toEqual([
+      { tool: "refund.create", permission: "ask" },
+    ]);
+  });
+
+  it("asks for a photo, verifies it, prefers a reship, and flags uncertainty", () => {
+    const notes = (wi!.notes ?? "").toLowerCase();
+    expect(notes).toContain("photo");
+    expect(notes).toContain("product");
+    expect(notes).toContain("supplier");
+    expect(notes).toContain("merchant");
+    expect(notes).toContain("reassur");
+    // Refund is the fallback, not the first move.
+    expect(notes).toContain("refund only");
+  });
+
+  it("survives the write-path normalizer as a forced built-in", () => {
+    const p = decodeResolutionPolicyUpdate({ scenarios: [] });
+    const out = p.scenarios.find((s) => s.key === "wrong_item");
+    expect(out).toBeDefined();
+    expect(out!.builtin).toBe(true);
+  });
+});
+
+describe("built-in scenario notes reference store facts", () => {
+  const byKey = (k: string) =>
+    defaultResolutionPolicy.scenarios.find((s) => s.key === k)!;
+
+  it("delivery_issue references the lost-package threshold and reads it from the carrier", () => {
+    const notes = byKey("delivery_issue").notes ?? "";
+    expect(notes).toContain("@shipping.lost_after");
+    // The elapsed number comes from 17track's transitDays, never a hand count.
+    expect(notes).toContain("transitDays");
+    expect(notes.toLowerCase()).toContain("do not count the days yourself");
+  });
+
+  it("refund_request references the return window and refund processing time", () => {
+    const notes = byKey("refund_request").notes ?? "";
+    expect(notes).toContain("@returns.return_window");
+    expect(notes).toContain("@returns.refund_processing_time");
+  });
+
+  it("wrong_item quotes the refund processing time via a fact reference", () => {
+    expect(byKey("wrong_item").notes ?? "").toContain(
+      "@returns.refund_processing_time",
+    );
+  });
+
+  it("order_cancellation references the return window on the already-shipped branch", () => {
+    expect(byKey("order_cancellation").notes ?? "").toContain(
+      "@returns.return_window",
+    );
+  });
+
+  it("every fact reference in a built-in note is a real catalog id", () => {
+    // Guard against a typo'd @-ref shipping in a default note: it would show as
+    // a dangling fallback to every unconfigured tenant.
+    const ids = new Set(FACT_REFERENCE_CATALOG.map((e) => e.id));
+    const tokenRe = /@([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)/g;
+    for (const s of defaultResolutionPolicy.scenarios) {
+      for (const m of (s.notes ?? "").matchAll(tokenRe)) {
+        expect(ids.has(m[1]!)).toBe(true);
+      }
+    }
   });
 });
 

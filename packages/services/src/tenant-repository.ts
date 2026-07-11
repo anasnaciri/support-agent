@@ -234,8 +234,12 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "none, or either number is null, you cannot confirm lateness — say so rather than " +
         "asserting the order is on schedule. On a real delivery problem, escalate to the supplier " +
         "to reship AND always send the customer a short reassuring reply in the same run — we are " +
-        "looking into it and will follow up — without promising a specific outcome yet. If " +
-        "genuinely lost and there is no supplier, offer a refund.",
+        "looking into it and will follow up — without promising a specific outcome yet. " +
+        "Once the carrier's transitDays reaches @shipping.lost_after with the parcel still " +
+        "undelivered, treat it as genuinely lost: stop waiting and make the customer whole — a " +
+        "reshipment via the supplier, or a refund if no replacement is possible. Compare the " +
+        "carrier's transitDays against that threshold; do not count the days yourself. If there " +
+        "is no supplier, offer a refund.",
     },
     {
       key: "damaged_product",
@@ -261,6 +265,30 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "policy with knowledge.search before quoting terms.",
     },
     {
+      key: "wrong_item",
+      label: "Wrong item received",
+      recognition:
+        "The customer received a different product than they ordered — the wrong size, colour, or variant, or an entirely different item.",
+      builtin: true,
+      enabled: true,
+      enabledActions: [{ tool: "refund.create", permission: "ask" }],
+      supplierMode: "escalate_and_wait",
+      notes:
+        "Like a damage claim, the fix depends on seeing what arrived. If the message has NO photo of " +
+        "the item received, use conversation.ask_customer ONCE for a clear photo of what they got " +
+        "(and the packing slip if handy), then stop. If a photo IS present, look up the order and call " +
+        "shopify.get_product for the ordered line item to compare what was sent against what was " +
+        "ordered; record your verdict with ticket.update_context (productMatch: match / mismatch / " +
+        "uncertain — here a mismatch SUPPORTS the customer, it means the photo really shows a different " +
+        "product). If you genuinely can't tell (uncertain), do NOT accuse or deny — flag it for the " +
+        "store owner with merchant.notify and draft a softer reply asking them to confirm the order and " +
+        "what they received. When it is clearly the wrong item this is OUR error: we cover return " +
+        "shipping, and the fix is to send the correct product — escalate to the supplier to ship the " +
+        "right item and reassure the customer we are correcting it. Refund only if the correct item " +
+        "can't be sent, and then tell the customer the refund takes @returns.refund_processing_time to " +
+        "appear. Check terms against the store's policy with knowledge.search before quoting them.",
+    },
+    {
       key: "refund_request",
       label: "Refund request",
       recognition:
@@ -273,7 +301,12 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       ],
       supplierMode: "none",
       notes:
-        "Check the order and the refund policy. Prefer a replacement or store credit before a full refund when appropriate.",
+        "Check the order and confirm the request against the store's return policy: returns are " +
+        "accepted within @returns.return_window of delivery, so if it is past that window explain " +
+        "politely rather than refunding by default. When a refund is due, tell the customer it " +
+        "takes @returns.refund_processing_time to appear. Prefer a replacement or store credit " +
+        "before a full refund when appropriate, and use knowledge.search for anything the facts " +
+        "above don't cover (return address, non-returnable items, exchanges).",
     },
     {
       key: "order_cancellation",
@@ -290,8 +323,8 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "order.cancel to cancel and refund it, and tell the customer the cancellation and refund " +
         "are being processed. If it has ALREADY shipped (fulfilled / in transit / delivered), do " +
         "NOT cancel — tell the customer it has already shipped and can no longer be cancelled, and " +
-        "that if they would like a refund they can return the order to us after it arrives and we " +
-        "will refund it per our return policy.",
+        "that if they would like a refund they can return the order to us within @returns.return_window " +
+        "of delivery and we will refund it per our return policy.",
     },
     {
       key: "shipping_address_update",
