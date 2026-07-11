@@ -19,6 +19,7 @@ import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AccountSettingsPage } from "@/features/settings/AccountSettingsPage";
 import { IntegrationsPage } from "@/features/settings/IntegrationsPage";
 import { IntegrationDetailPage } from "@/features/settings/IntegrationDetailPage";
+import { FactsPage } from "@/features/settings/FactsPage";
 import { KnowledgePage } from "@/features/settings/KnowledgePage";
 import { KnowledgeDocPage } from "@/features/settings/KnowledgeDocPage";
 import { LlmPage } from "@/features/settings/LlmPage";
@@ -88,6 +89,7 @@ const settingsIntegrationDetailRoute = authedChild(
   IntegrationDetailPage,
 );
 const settingsKnowledgeRoute = authedChild("/settings/knowledge", KnowledgePage);
+const settingsFactsRoute = authedChild("/settings/facts", FactsPage);
 const settingsKnowledgeDocRoute = authedChild(
   "/settings/knowledge/$docId",
   KnowledgeDocPage,
@@ -168,6 +170,7 @@ const routeTree = rootRoute.addChildren([
     settingsIntegrationDetailRoute,
     settingsKnowledgeRoute,
     settingsKnowledgeDocRoute,
+    settingsFactsRoute,
     settingsLlmRoute,
     settingsRefundPolicyRoute,
     settingsDiscountPolicyRoute,

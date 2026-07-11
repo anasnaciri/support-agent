@@ -14,6 +14,12 @@ export interface SettingsNavItem {
    * The api enforces independently; this only hides links the member can't use.
    */
   readonly requires?: RbacPermissionId;
+  /**
+   * Sub-items rendered indented beneath this one. An item with children is a
+   * section label rather than a link — the children carry the destinations, and
+   * `activeSettingsHref` always resolves to a child, never the parent.
+   */
+  readonly children?: ReadonlyArray<SettingsNavItem>;
 }
 
 export interface SettingsNavGroup {
@@ -70,10 +76,29 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
         requires: "settings.refund_policy",
       },
       {
+        // A section, not a link: the documents and the structured store facts
+        // are two different jobs (paste prose vs. state a number the agent acts
+        // on), so each gets its own page.
         href: "/settings/knowledge",
         label: "Knowledge base",
-        match: prefix("/settings/knowledge"),
+        match: (pathname) =>
+          prefix("/settings/knowledge")(pathname) ||
+          prefix("/settings/facts")(pathname),
         requires: "knowledge.view",
+        children: [
+          {
+            href: "/settings/knowledge",
+            label: "Docs",
+            match: prefix("/settings/knowledge"),
+            requires: "knowledge.view",
+          },
+          {
+            href: "/settings/facts",
+            label: "Facts",
+            match: prefix("/settings/facts"),
+            requires: "knowledge.view",
+          },
+        ],
       },
       {
         href: "/settings/blocked-senders",
@@ -139,11 +164,17 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
   },
 ];
 
-/** The href of the nav item that should be highlighted, or null. */
+/**
+ * The href of the nav item that should be highlighted, or null. A child always
+ * wins over its parent — the parent is only a label.
+ */
 export const activeSettingsHref = (pathname: string): string | null => {
   for (const group of SETTINGS_NAV_GROUPS) {
     for (const item of group.items) {
-      if (item.match(pathname)) return item.href;
+      for (const child of item.children ?? []) {
+        if (child.match(pathname)) return child.href;
+      }
+      if (!item.children && item.match(pathname)) return item.href;
     }
   }
   return null;
@@ -152,21 +183,30 @@ export const activeSettingsHref = (pathname: string): string | null => {
 /**
  * Filter the settings nav to the items a member may see, dropping any group
  * left empty. An item with no `requires` is always shown; otherwise the
- * member's effective permission set must include it. (The api enforces the
- * real boundary — this only hides links.)
+ * member's effective permission set must include it. A parent survives only if
+ * it keeps at least one visible child. (The api enforces the real boundary —
+ * this only hides links.)
  */
 export const visibleSettingsGroups = (
   permissions: ReadonlySet<RbacPermissionId>,
   groups: ReadonlyArray<SettingsNavGroup> = SETTINGS_NAV_GROUPS,
-): ReadonlyArray<SettingsNavGroup> =>
-  groups
+): ReadonlyArray<SettingsNavGroup> => {
+  const allowed = (item: SettingsNavItem) =>
+    !item.requires || permissions.has(item.requires);
+  return groups
     .map((group) => ({
       ...group,
-      items: group.items.filter(
-        (item) => !item.requires || permissions.has(item.requires),
-      ),
+      items: group.items
+        .filter(allowed)
+        .map((item) =>
+          item.children
+            ? { ...item, children: item.children.filter(allowed) }
+            : item,
+        )
+        .filter((item) => !item.children || item.children.length > 0),
     }))
     .filter((group) => group.items.length > 0);
+};
 
 /**
  * True when the member holds at least one PERMISSION-GATED settings item — the

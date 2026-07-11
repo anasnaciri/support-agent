@@ -41,6 +41,18 @@ const ICONS: Record<string, LucideIcon> = {
   "/settings/account": Trash2,
 };
 
+// Shared by the top-level links and the indented sub-items, so an active
+// sub-item reads exactly like an active link one level up.
+const rowClass = (active: boolean) =>
+  cn(
+    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+    // Active = an elevated neutral surface (depth via shadow, not a colored
+    // indicator), matching the tickets sidebar.
+    active
+      ? "bg-card font-medium text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10"
+      : "text-foreground/80 hover:bg-accent hover:text-foreground",
+  );
+
 export function SettingsNav({
   permissions,
 }: {
@@ -66,20 +78,42 @@ export function SettingsNav({
           ) : null}
           {group.items.map((item) => {
             const Icon = ICONS[item.href] ?? LayoutGrid;
+
+            // An item with children is a section label — the children are the
+            // links, so the parent itself is not clickable.
+            if (item.children) {
+              return (
+                <div key={item.href}>
+                  <div className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground">
+                    <Icon className="size-4 shrink-0" aria-hidden />
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                  <div className="ml-[1.625rem] space-y-0.5 border-l border-border pl-2">
+                    {item.children.map((child) => {
+                      const active = child.match(pathname);
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          aria-current={active ? "page" : undefined}
+                          className={rowClass(active)}
+                        >
+                          <span className="truncate">{child.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
             const active = item.match(pathname);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  // Active = an elevated neutral surface (depth via shadow, not a
-                  // colored indicator), matching the tickets sidebar.
-                  active
-                    ? "bg-card font-medium text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] ring-1 ring-black/5 dark:ring-white/10"
-                    : "text-foreground/80 hover:bg-accent hover:text-foreground",
-                )}
+                className={rowClass(active)}
               >
                 <Icon className="size-4 shrink-0" aria-hidden />
                 <span className="truncate">{item.label}</span>
