@@ -23,7 +23,7 @@ const Output = Schema.Struct({
 export const knowledgeSearch = defineTool({
   name: "knowledge.search",
   description:
-    "Search the store's knowledge base — the merchant's own policy and reference documents (shipping policy, returns/refund policy, FAQs, …). Pass the customer's question or a few keywords as `query`; returns the most relevant documents with their text. Call this BEFORE answering a policy question or recommending a refund, and ground your reply in what it returns rather than assuming a generic policy. Returns an empty list when the store has no documents.",
+    "Search the store's knowledge base: the merchant's own policy and reference documents (shipping policy, returns/refund policy, FAQs, …). Pass the customer's question or a few keywords as `query`; returns the most relevant documents with their text. Call this BEFORE answering a policy question or recommending a refund, and ground your reply in what it returns rather than assuming a generic policy. Returns an empty list when the store has no documents.",
   inputSchema: Input,
   outputSchema: Output,
   // Read-only and always allowed: it only reads the merchant's own documents.

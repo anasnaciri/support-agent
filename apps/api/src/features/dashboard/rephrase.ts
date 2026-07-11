@@ -19,10 +19,11 @@ export const REPHRASE_SYSTEM =
   "You are helping a customer-support agent polish a reply before it is sent " +
   "to a customer. Rewrite the agent's draft so it reads clearly, warmly, and " +
   "professionally. Preserve the meaning and every fact, name, number, order " +
-  "reference, and commitment exactly — never invent details or change what is " +
+  "reference, and commitment exactly. Never invent details or change what is " +
   "promised. Keep it roughly the same length. Do not add a greeting or sign-off " +
   "that isn't already there, and never answer as if you were the customer. " +
-  "Return ONLY the rewritten reply text — no preamble, labels, or quotes.";
+  "Never use em dashes; use commas, colons, or separate sentences instead. " +
+  "Return ONLY the rewritten reply text, with no preamble, labels, or quotes.";
 
 export const buildRephraseMessages = (
   text: string,

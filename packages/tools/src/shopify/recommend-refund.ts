@@ -193,7 +193,7 @@ export const computeRefundRecommendation = (input: {
     return {
       recommendation: "investigate",
       amount: null,
-      reasoning: "Could not parse the order total — manual review needed.",
+      reasoning: "Could not parse the order total: manual review needed.",
       riskFlags,
     };
   }
@@ -201,7 +201,7 @@ export const computeRefundRecommendation = (input: {
     return {
       recommendation: "investigate",
       amount: order.totalPrice,
-      reasoning: `Order currency (${parsedAmount.currencyCode}) differs from policy currency (${policy.currencyCode}) — manual review for cross-currency refund.`,
+      reasoning: `Order currency (${parsedAmount.currencyCode}) differs from policy currency (${policy.currencyCode}): manual review for cross-currency refund.`,
       riskFlags,
     };
   }
@@ -229,7 +229,7 @@ export const computeRefundRecommendation = (input: {
     return {
       recommendation: "full_refund",
       amount: order.totalPrice,
-      reasoning: "Within auto-approve zone — full refund recommended.",
+      reasoning: "Within auto-approve zone: full refund recommended.",
       riskFlags,
     };
   }
@@ -239,7 +239,7 @@ export const computeRefundRecommendation = (input: {
     recommendation: "full_refund",
     amount: order.totalPrice,
     reasoning:
-      "Mid-zone amount — recommend full refund with operator review.",
+      "Mid-zone amount: recommend full refund with operator review.",
     riskFlags,
   };
 };
@@ -251,7 +251,7 @@ export const computeRefundRecommendation = (input: {
 export const shopifyRefundRecommend = defineTool({
   name: "refund.recommend",
   description:
-    "Recommend a refund decision for an existing Shopify order, without issuing anything. Returns a structured `{ recommendation, amount, reasoning, riskFlags }` payload: 'full_refund' / 'partial_refund' / 'deny' / 'investigate'. The agent calls this BEFORE drafting a customer reply on PATH B (when refund.create is blocked by the threshold) so the operator approving the draft sees the structured assessment alongside the prose. Read-only — `defaultPermission: allow`, no side effects, no `requiredConnectorScopes` (uses the same scopes shopify.get_order + shopify.get_customer already need).",
+    "Recommend a refund decision for an existing Shopify order, without issuing anything. Returns a structured `{ recommendation, amount, reasoning, riskFlags }` payload: 'full_refund' / 'partial_refund' / 'deny' / 'investigate'. The agent calls this BEFORE drafting a customer reply on PATH B (when refund.create is blocked by the threshold) so the operator approving the draft sees the structured assessment alongside the prose. Read-only, `defaultPermission: allow`, no side effects, no `requiredConnectorScopes` (uses the same scopes shopify.get_order + shopify.get_customer already need).",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

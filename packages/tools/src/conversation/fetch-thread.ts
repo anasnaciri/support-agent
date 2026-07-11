@@ -44,7 +44,7 @@ const Output = Schema.Struct({
 export const conversationFetchThread = defineTool({
   name: "conversation.fetch_thread",
   description:
-    "Fetch the full message history of a customer conversation thread, ordered oldest → newest. Use this when you need surrounding context before drafting a reply (the original customer message, your prior replies, the customer's follow-ups). Works against whatever connector (Gmail, Outlook, helpdesk, …) is configured for this tenant — you do not need to know which.",
+    "Fetch the full message history of a customer conversation thread, ordered oldest → newest. Use this when you need surrounding context before drafting a reply (the original customer message, your prior replies, the customer's follow-ups). Works against whatever connector (Gmail, Outlook, helpdesk, …) is configured for this tenant, you do not need to know which.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

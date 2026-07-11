@@ -15,6 +15,7 @@ import {
   applyTriageScenarioRouting,
   buildScenarioPlaybookHeader,
   buildSystemPrompt,
+  WRITING_STYLE,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -183,11 +184,11 @@ describe("inboundReplyCandidateIds", () => {
 });
 
 // Every system prompt is prefixed with the untrusted-content preamble
-// (prompt-injection mitigation). The header-composition tests below pin the
-// rest of the prompt by asserting equality against the bare body wrapped with
-// this prefix.
+// (prompt-injection mitigation) and suffixed with the shared writing-style
+// rules. The header-composition tests below pin the rest of the prompt by
+// asserting equality against the bare body wrapped with both.
 const withPreamble = (body: string): string =>
-  `${UNTRUSTED_PREAMBLE}\n\n${body}`;
+  `${UNTRUSTED_PREAMBLE}\n\n${body}\n\n${WRITING_STYLE}`;
 
 // Pure-helper tests for the runtime's system-prompt composition. Full
 // end-to-end behavior lives in `apps/worker/test/agent-runtime.e2e.test.ts`;
@@ -335,7 +336,7 @@ describe("buildSystemPrompt", () => {
     ]);
     expect(got).toContain("Base prompt for testing.");
     expect(got).toContain(
-      '[Store knowledge base — call knowledge.search to read: "Shipping policy", "Returns policy"]',
+      '[Store knowledge base. Call knowledge.search to read: "Shipping policy", "Returns policy"]',
     );
   });
 
@@ -510,7 +511,7 @@ describe("buildSystemPrompt", () => {
       "[Supplier escalation sheet: spreadsheetId=s1, range=Escalations!A:F]",
     );
     expect(got).toContain(
-      '[Store knowledge base — call knowledge.search to read: "Shipping policy"]',
+      '[Store knowledge base. Call knowledge.search to read: "Shipping policy"]',
     );
   });
 

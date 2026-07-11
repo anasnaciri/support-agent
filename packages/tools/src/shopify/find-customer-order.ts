@@ -23,7 +23,7 @@ const LOOKUP_LIMIT = 10;
 export const shopifyFindCustomerOrder = defineTool({
   name: "shopify.find_customer_order",
   description:
-    "Look up the writer's orders. When the ticket has already resolved the customer (matched by their email, phone, or name), this lists THAT customer's orders — so it finds them even if an order was placed under a different email. Otherwise it falls back to the email you pass (the `from=` value in the `[Thread context: ...]` header). Use this ONLY when the ticket has no identified order id and the customer did not give an order number. Returns `status`: `single` when there is exactly one order (then `order` holds it — treat it as the order they're asking about; do NOT ask them for an order number), `none` when no orders match, or `multiple` when there is more than one (then ask which order). A returned order is already known to belong to the resolved customer.",
+    "Look up the writer's orders. When the ticket has already resolved the customer (matched by their email, phone, or name), this lists THAT customer's orders, so it finds them even if an order was placed under a different email. Otherwise it falls back to the email you pass (the `from=` value in the `[Thread context: ...]` header). Use this ONLY when the ticket has no identified order id and the customer did not give an order number. Returns `status`: `single` when there is exactly one order (then `order` holds it, treat it as the order they're asking about; do NOT ask them for an order number), `none` when no orders match, or `multiple` when there is more than one (then ask which order). A returned order is already known to belong to the resolved customer.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

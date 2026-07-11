@@ -23,7 +23,7 @@ const Output = Schema.Struct({
 export const shopifyListPickupLocations = defineTool({
   name: "shopify.list_pickup_locations",
   description:
-    "List the store's customer pickup points — only locations where local pickup is enabled, with their address and any merchant pickup instructions. Use this to answer 'can I pick up my order?' or 'do you have a store I can visit?'. An empty list means the store offers no customer pickup. These are pickup points ONLY: they say nothing about where orders ship from, and the store's warehouses or fulfillment locations are never included or revealed.",
+    "List the store's customer pickup points: only locations where local pickup is enabled, with their address and any merchant pickup instructions. Use this to answer 'can I pick up my order?' or 'do you have a store I can visit?'. An empty list means the store offers no customer pickup. These are pickup points ONLY: they say nothing about where orders ship from, and the store's warehouses or fulfillment locations are never included or revealed.",
   inputSchema: Input,
   outputSchema: Output,
   // Read-only, always allowed, internal plumbing (no tenantControl /

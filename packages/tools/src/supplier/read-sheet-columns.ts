@@ -20,7 +20,7 @@ const Output = Schema.Struct({
 export const supplierReadSheetColumns = defineTool({
   name: "supplier.read_sheet_columns",
   description:
-    "Read the header row (column names) of a shared Google Sheets spreadsheet so a later `supplier.add_sheet_row` can be aligned to the sheet's own schema instead of a fixed column order. The tenant must have connected Google Sheets first; failures surface as `SheetsAuthMissing` until they do. `range` is an A1 reference with sheet name (e.g. `Escalations!A:F`) — only the sheet name is used; the header is always the first row. Returns `columns`: the header cells left-to-right as strings (blank cells are `\"\"`, an empty array means no header row exists yet). Read-only: defaultPermission is `allow`.",
+    "Read the header row (column names) of a shared Google Sheets spreadsheet so a later `supplier.add_sheet_row` can be aligned to the sheet's own schema instead of a fixed column order. The tenant must have connected Google Sheets first; failures surface as `SheetsAuthMissing` until they do. `range` is an A1 reference with sheet name (e.g. `Escalations!A:F`), only the sheet name is used; the header is always the first row. Returns `columns`: the header cells left-to-right as strings (blank cells are `\"\"`, an empty array means no header row exists yet). Read-only: defaultPermission is `allow`.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",

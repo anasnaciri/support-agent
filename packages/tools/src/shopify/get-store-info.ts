@@ -26,7 +26,7 @@ const SHIPS_WORLDWIDE_THRESHOLD = 100;
 export const shopifyGetStoreInfo = defineTool({
   name: "shopify.get_store_info",
   description:
-    "Read the store's public facts: store name, public website (`domain`), customer-facing contact email (null when the store hasn't set one), default currency, and where the store ships TO — either `shipsWorldwide: true` or the explicit `shipsToCountries` ISO country-code list. Use this to answer 'do you ship to X?', 'where do you ship?', 'how do I contact you?', or 'what's your website?'. It says nothing about shipping costs, delivery times (answer those from the knowledge base), or where orders ship FROM (never reveal that).",
+    "Read the store's public facts: store name, public website (`domain`), customer-facing contact email (null when the store hasn't set one), default currency, and where the store ships TO, either `shipsWorldwide: true` or the explicit `shipsToCountries` ISO country-code list. Use this to answer 'do you ship to X?', 'where do you ship?', 'how do I contact you?', or 'what's your website?'. It says nothing about shipping costs, delivery times (answer those from the knowledge base), or where orders ship FROM (never reveal that).",
   inputSchema: Input,
   outputSchema: Output,
   // Read-only public store facts, always allowed. Internal plumbing like
