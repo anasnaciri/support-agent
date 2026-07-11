@@ -17,6 +17,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Scenarios page quick Facts sidebar** (2026-07-11). Verified with
+      `pnpm test -- apps/dashboard-spa/test/scenarios-facts-sidebar.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`, `pnpm build`, and a
+      local Vite route smoke check (`GET /settings/scenarios` returned 200).
+      `/settings/scenarios` now has a right-side Store facts sidebar collapsed
+      by default, with the open/closed state persisted in localStorage. When
+      expanded, it shows catalog-driven Shipping/Returns fact cards and compact
+      save forms for members with `knowledge.manage`; members without that
+      permission see the current facts read-only.
+
 - [x] **Scenario agent can suggest partial refunds** (2026-07-11). Verified
       with `pnpm test -- packages/tools/test/shopify.test.ts`,
       `pnpm test -- packages/providers/test/shopify-service-live.test.ts`,
