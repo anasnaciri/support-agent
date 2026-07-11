@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
 import type {
   CustomsDutiesPayerView,
@@ -29,8 +30,6 @@ type Ctx = { readonly workspaceId: string };
 const row = "grid gap-4 sm:grid-cols-2 sm:items-start";
 const field = "grid gap-2";
 const hint = "text-xs text-muted-foreground";
-const selectClass =
-  "h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50";
 
 // Saving a fact changes what every `@`-reference chip in the scenario notes
 // renders, so the catalog (which carries the tenant's current values) has to be
@@ -193,19 +192,18 @@ function ShippingProfileForm({
           <Label htmlFor="customsDuties">
             Customs / import duties — who pays?
           </Label>
-          <select
+          <NativeSelect
             id="customsDuties"
             disabled={pending}
             value={customsDuties}
             onChange={(e) => setCustomsDuties(e.currentTarget.value)}
-            className={selectClass}
             aria-describedby="customs-hint"
           >
             <option value="">Not specified</option>
             <option value="customer">The customer pays</option>
             <option value="merchant">We pay</option>
             <option value="not_applicable">Doesn&apos;t apply</option>
-          </select>
+          </NativeSelect>
           <p id="customs-hint" className={hint}>
             Optional.
           </p>
@@ -360,19 +358,18 @@ function ReturnsFactsForm({
           <Label htmlFor="returnShippingPayer">
             Return shipping — who pays?
           </Label>
-          <select
+          <NativeSelect
             id="returnShippingPayer"
             disabled={pending}
             value={returnShippingPayer}
             onChange={(e) => setReturnShippingPayer(e.currentTarget.value)}
-            className={selectClass}
             aria-describedby="return-shipping-hint"
           >
             <option value="">Not specified</option>
             <option value="customer">The customer pays</option>
             <option value="merchant">We pay (free returns)</option>
             <option value="depends">It depends</option>
-          </select>
+          </NativeSelect>
           <p id="return-shipping-hint" className={hint}>
             Optional.
           </p>
@@ -382,19 +379,18 @@ function ReturnsFactsForm({
       <div className={row}>
         <div className={field}>
           <Label htmlFor="refundMethod">How are refunds issued?</Label>
-          <select
+          <NativeSelect
             id="refundMethod"
             disabled={pending}
             value={refundMethod}
             onChange={(e) => setRefundMethod(e.currentTarget.value)}
-            className={selectClass}
             aria-describedby="refund-method-hint"
           >
             <option value="">Not specified</option>
             <option value="original">To the original payment method</option>
             <option value="store_credit">As store credit</option>
             <option value="customer_choice">The customer chooses</option>
-          </select>
+          </NativeSelect>
           <p id="refund-method-hint" className={hint}>
             Optional.
           </p>
