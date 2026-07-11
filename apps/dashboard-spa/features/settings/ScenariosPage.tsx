@@ -971,7 +971,7 @@ export function ScenarioCard({
                   name={fieldName(formKey, `action:${action.tool}:permission`)}
                   defaultValue={permission}
                   disabled={!enabled}
-                  aria-label={`${action.label} — approval`}
+                  aria-label={`${action.label} approval`}
                   className="w-44"
                 >
                   {PERMISSION_OPTIONS.map((o) => (
@@ -1168,7 +1168,7 @@ export function ScenariosPage() {
           A single agent handles every incoming ticket end-to-end, steered by
           the scenarios below. It reads the customer&apos;s message, picks the
           scenario that fits, gathers what it needs, takes the actions
-          you&apos;ve allowed, and drafts the reply — pausing for your approval
+          you&apos;ve allowed, and drafts the reply, pausing for your approval
           on anything you marked <em>Ask me first</em>. A message that matches no
           scenario is handed to you rather than guessed at.
         </p>
@@ -1182,7 +1182,7 @@ export function ScenariosPage() {
               For each situation, choose what the agent may do and whether it
               acts automatically or asks you first. The built-in scenarios cover
               the common tickets; add your own for anything specific to your
-              store — describe when it applies and the agent will route matching
+              store. Describe when it applies and the agent will route matching
               messages to it.
             </p>
           </div>

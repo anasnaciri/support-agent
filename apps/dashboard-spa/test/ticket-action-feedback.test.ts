@@ -89,7 +89,7 @@ describe("bundleDecisionFeedback", () => {
       /Approved 3 actions/,
     );
     expect(bundleDecisionFeedback("approve", "decided", 1).text).toMatch(
-      /Approved 1 action —/,
+      /Approved 1 action\./,
     );
     expect(bundleDecisionFeedback("reject", "decided", 2).text).toMatch(
       /Rejected the remaining/,

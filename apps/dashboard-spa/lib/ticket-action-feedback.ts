@@ -31,7 +31,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     already_terminal: {
       tone: "info",
-      text: "This ticket was already in a terminal state — no change.",
+      text: "This ticket was already in a terminal state. No change.",
     },
   },
   resume: {
@@ -41,13 +41,13 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     not_in_takeover: {
       tone: "info",
-      text: "This ticket wasn't under human takeover — no change.",
+      text: "This ticket wasn't under human takeover. No change.",
     },
   },
   retry: {
     retried: {
       tone: "success",
-      text: "Handed back to the agent — it's retrying now. New activity will appear in the timeline shortly.",
+      text: "Handed back to the agent. It's retrying now. New activity will appear in the timeline shortly.",
     },
     resumed_no_tick: {
       tone: "warning",
@@ -55,7 +55,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     not_in_takeover: {
       tone: "info",
-      text: "This ticket wasn't under human takeover — no change.",
+      text: "This ticket wasn't under human takeover. No change.",
     },
   },
   retrySend: {
@@ -65,7 +65,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     no_failed_delivery: {
       tone: "info",
-      text: "There's no failed reply to re-send on this ticket — no change.",
+      text: "There's no failed reply to re-send on this ticket. No change.",
     },
   },
   setStatus: {
@@ -75,7 +75,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     unchanged: {
       tone: "info",
-      text: "That's already the ticket's status — no change.",
+      text: "That's already the ticket's status. No change.",
     },
     invalid_status: {
       tone: "warning",
@@ -100,7 +100,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     already_refunded: {
       tone: "info",
-      text: "That order is already fully refunded — nothing more to issue.",
+      text: "That order is already fully refunded. Nothing more to issue.",
     },
     order_not_found: {
       tone: "warning",
@@ -108,11 +108,11 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     currency_mismatch: {
       tone: "warning",
-      text: "The refund currency doesn't match the order's — issue this refund in Shopify instead.",
+      text: "The refund currency doesn't match the order's. Issue this refund in Shopify instead.",
     },
     refund_failed: {
       tone: "warning",
-      text: "Shopify rejected the refund. No money moved — try again or issue it in Shopify.",
+      text: "Shopify rejected the refund. No money moved. Try again or issue it in Shopify.",
     },
     invalid_amount: { tone: "warning", text: "That refund amount isn't valid." },
   },
@@ -123,7 +123,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     already_cancelled: {
       tone: "info",
-      text: "That order is already cancelled — no change.",
+      text: "That order is already cancelled. No change.",
     },
     order_not_found: {
       tone: "warning",
@@ -131,7 +131,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     cancel_failed: {
       tone: "warning",
-      text: "Shopify rejected the cancellation. Nothing was cancelled and no money moved — an order that has shipped has to be refunded instead.",
+      text: "Shopify rejected the cancellation. Nothing was cancelled and no money moved. An order that has shipped has to be refunded instead.",
     },
     invalid_reason: {
       tone: "warning",
@@ -153,7 +153,7 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
     },
     already_escalated: {
       tone: "info",
-      text: "This ticket is already with your supplier — no change.",
+      text: "This ticket is already with your supplier. No change.",
     },
     transition_not_allowed: {
       tone: "warning",
@@ -167,11 +167,11 @@ const FEEDBACK: Record<TicketAction, Record<string, ActionFeedback>> = {
   resendApproval: {
     resent: {
       tone: "success",
-      text: "The approved reply was sent to the customer. The ticket stays with you — resolve it when you're done.",
+      text: "The approved reply was sent to the customer. The ticket stays with you; resolve it when you're done.",
     },
     nothing_to_resend: {
       tone: "info",
-      text: "There's no approved reply waiting to be sent on this ticket — no change.",
+      text: "There's no approved reply waiting to be sent on this ticket. No change.",
     },
     not_in_takeover: {
       tone: "info",
@@ -228,8 +228,8 @@ export const bundleDecisionFeedback = (
           tone: "success",
           text:
             n > 0
-              ? `Approved ${n} action${n === 1 ? "" : "s"} — they'll run in order.`
-              : "Approved — the queued actions will run in order.",
+              ? `Approved ${n} action${n === 1 ? "" : "s"}. They'll run in order.`
+              : "Approved. The queued actions will run in order.",
         }
       : {
           tone: "success",
@@ -239,7 +239,7 @@ export const bundleDecisionFeedback = (
   if (kind === "no_pending") {
     return {
       tone: "info",
-      text: "No queued actions were left to decide — no change.",
+      text: "No queued actions were left to decide. No change.",
     };
   }
   return GENERIC_ERROR;
@@ -264,7 +264,7 @@ export const approvalDecisionFeedback = (
   if (kind === "already_decided") {
     return {
       tone: "info",
-      text: "This approval had already been decided — no change.",
+      text: "This approval had already been decided. No change.",
     };
   }
   if (kind === "approval_not_found") {

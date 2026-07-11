@@ -17,6 +17,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Dashboard scenario and notification copy avoids em dashes**
+      (2026-07-11). Verified with
+      `pnpm test -- apps/dashboard-spa/test/user-facing-copy.test.ts apps/dashboard-spa/test/ticket-action-feedback.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`, and `pnpm build`.
+      Scenario page explanatory copy, the notification settings/linking copy,
+      and ticket action notification/toast feedback now avoid em dashes. Added a
+      dashboard SPA regression test that strips comments and checks the relevant
+      user-facing copy files.
+
 - [x] **Knowledge docs can be referenced with `@` in scenario notes**
       (2026-07-11). Verified with
       `pnpm test -- packages/services/test/fact-references.test.ts`,

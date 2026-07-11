@@ -23,7 +23,7 @@ import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 
 const ERROR_MESSAGES = {
   not_configured:
-    "Telegram notifications aren't enabled on this deployment — ask your operator to configure the platform bot.",
+    "Telegram notifications aren't enabled on this deployment. Ask your operator to configure the platform bot.",
   legal_acceptance_required:
     "Please accept the current terms under Settings → Legal before connecting a notification channel.",
   link_failed: "Couldn't generate a link right now. Please try again.",
@@ -110,7 +110,7 @@ export function NotificationsPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Get a Telegram message the moment your agent needs you — a reply
+          Get a Telegram message the moment your agent needs you: a reply
           waiting for approval, a ticket it couldn&apos;t finish, a broken
           connection, or your AI credits running low.
         </p>
@@ -151,7 +151,7 @@ export function NotificationsPage() {
             <>
               <p className="text-sm text-muted-foreground">
                 Open the link below and press <strong>Start</strong> in
-                Telegram. The link expires after 15 minutes — then come back
+                Telegram. The link expires after 15 minutes. Then come back
                 and refresh this page.
               </p>
               <div className="flex flex-wrap items-center gap-3">
@@ -175,7 +175,7 @@ export function NotificationsPage() {
             <>
               <p className="text-sm text-muted-foreground">
                 Connect your personal or team Telegram chat. You&apos;ll get a
-                short-lived link that opens our bot — press{" "}
+                short-lived link that opens our bot. Press{" "}
                 <strong>Start</strong> there and you&apos;re done.
               </p>
               <Button
