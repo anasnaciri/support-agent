@@ -17,6 +17,33 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Scenarios page warns before leaving with unsaved changes** (2026-07-11).
+      Verified with `pnpm test -- apps/dashboard-spa/test/unsaved-changes.test.ts`,
+      the full `apps/dashboard-spa` suite, `pnpm --filter
+      @support-agent/dashboard-spa build`, `pnpm build`, and a stubbed-API
+      Playwright run at 1400px and 390px: a clean page navigates freely; one
+      keystroke in a playbook note blocks in-app navigation (sidebar link and
+      mobile drawer alike) with a "Leave without saving?" dialog; Stay keeps the
+      edit; Leave discards and navigates. The scenarios form is uncontrolled, so
+      dirtiness is a `resolutionPolicySnapshot` of the DOM compared against the
+      snapshot taken at load / last save (an edit the save would normalize away,
+      or an edit undone by hand, leaves the page clean). Each Facts sidebar card
+      reports its own flag; the page ORs them and `useBlocker`'s
+      `enableBeforeUnload` covers reload/close-tab.
+
+- [x] **Dialogs animate as a centre fade + scale, not a top-left diagonal**
+      (2026-07-11). Verified with
+      `pnpm test -- apps/dashboard-spa/test/dialog-motion.test.ts`, `pnpm build`,
+      and computed-style reads in a real browser (enter: `enter` 200ms ease-out,
+      no X/Y drift, scale .95; exit: `exit` 150ms ease-in, scale .95). The
+      shadcn template's `slide-in-from-left-1/2` + `slide-in-from-top-[48%]` pair
+      re-applies the centring translate from inside the keyframe — a Tailwind v3
+      idiom. Under v4 the centring lives on the `translate` property, so the pair
+      only dragged every dialog in diagonally from the top-left. Motion now lives
+      in `components/ui/dialog-motion.ts` (shared by any future modal surface):
+      centre fade + scale both ways, and below `sm` the dialog rises 1.5rem from
+      the bottom on entry and drops back down on exit.
+
 - [x] **Dashboard scenario and notification copy avoids em dashes**
       (2026-07-11). Verified with
       `pnpm test -- apps/dashboard-spa/test/user-facing-copy.test.ts apps/dashboard-spa/test/ticket-action-feedback.test.ts`,

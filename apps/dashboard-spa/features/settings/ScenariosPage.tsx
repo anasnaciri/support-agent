@@ -1,4 +1,11 @@
-import { useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -39,7 +46,15 @@ import {
   SCENARIO_KEYS_FIELD,
   fieldName,
   parseResolutionForm,
+  resolutionPolicySnapshot,
 } from "@/lib/parse-resolution";
+import {
+  formValuesDirty,
+  hasUnsavedChanges,
+  setDirtyFlag,
+  type DirtyFlags,
+} from "@/lib/unsaved-changes";
+import { UnsavedChangesPrompt } from "@/components/unsaved-changes-prompt";
 import { Button } from "@/components/ui/button";
 import { GlassSwitch } from "@/components/ui/glass-switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -278,6 +293,21 @@ export const sidebarFactGroups = (
 
 type DashboardCtx = { readonly workspaceId: string };
 
+/** How a form on this page tells the page it has (or no longer has) edits to save. */
+type ReportDirty = (id: string, dirty: boolean) => void;
+
+/** Report `dirty` under `id` while mounted; report clean on the way out. */
+const useReportDirty = (
+  report: ReportDirty,
+  id: string,
+  dirty: boolean,
+): void => {
+  useEffect(() => {
+    report(id, dirty);
+  }, [report, id, dirty]);
+  useEffect(() => () => report(id, false), [report, id]);
+};
+
 const compactField = "grid gap-1.5";
 const compactHint = "text-xs text-muted-foreground";
 
@@ -343,16 +373,21 @@ function ShippingFactsSidebarCard({
   factValues,
   canManageFacts,
   canViewFacts,
+  reportDirty,
 }: {
   readonly ctx: DashboardCtx;
   readonly facts: ShippingFactsView | null;
   readonly factValues: ReadonlyArray<SidebarFact>;
   readonly canManageFacts: boolean;
   readonly canViewFacts: boolean;
+  readonly reportDirty: ReportDirty;
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState(() => shippingFactsSidebarFormFrom(facts));
+  const [saved, setSaved] = useState(form);
   const [error, setError] = useState<string | null>(null);
+
+  useReportDirty(reportDirty, "facts:shipping", formValuesDirty(saved, form));
 
   const save = useMutation({
     mutationFn: (input: ShippingFactsSidebarInput) =>
@@ -363,6 +398,7 @@ function ShippingFactsSidebarCard({
         return;
       }
       setError(null);
+      setSaved(form);
       toast.success("Shipping facts saved.");
       invalidateSidebarFacts(qc, ctx.workspaceId);
     },
@@ -522,16 +558,21 @@ function ReturnsFactsSidebarCard({
   factValues,
   canManageFacts,
   canViewFacts,
+  reportDirty,
 }: {
   readonly ctx: DashboardCtx;
   readonly facts: ReturnsFactsView | null;
   readonly factValues: ReadonlyArray<SidebarFact>;
   readonly canManageFacts: boolean;
   readonly canViewFacts: boolean;
+  readonly reportDirty: ReportDirty;
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState(() => returnsFactsSidebarFormFrom(facts));
+  const [saved, setSaved] = useState(form);
   const [error, setError] = useState<string | null>(null);
+
+  useReportDirty(reportDirty, "facts:returns", formValuesDirty(saved, form));
 
   const save = useMutation({
     mutationFn: (input: ReturnsFactsSidebarInput) =>
@@ -542,6 +583,7 @@ function ReturnsFactsSidebarCard({
         return;
       }
       setError(null);
+      setSaved(form);
       toast.success("Returns facts saved.");
       invalidateSidebarFacts(qc, ctx.workspaceId);
     },
@@ -670,10 +712,12 @@ function ScenarioFactsSidebar({
   ctx,
   canManageFacts,
   canViewFacts,
+  reportDirty,
 }: {
   readonly ctx: DashboardCtx;
   readonly canManageFacts: boolean;
   readonly canViewFacts: boolean;
+  readonly reportDirty: ReportDirty;
 }) {
   const [expanded, setExpanded] = useState(readScenariosFactsSidebarExpanded);
 
@@ -772,6 +816,7 @@ function ScenarioFactsSidebar({
                     factValues={shippingGroup.facts}
                     canManageFacts={canManageFacts}
                     canViewFacts={canViewFacts}
+                    reportDirty={reportDirty}
                   />
                 ) : null}
                 {returnsGroup ? (
@@ -782,6 +827,7 @@ function ScenarioFactsSidebar({
                     factValues={returnsGroup.facts}
                     canManageFacts={canManageFacts}
                     canViewFacts={canViewFacts}
+                    reportDirty={reportDirty}
                   />
                 ) : null}
               </>
@@ -1045,8 +1091,10 @@ export function ScenarioCard({
  */
 function ResolutionPolicyForm({
   scenarios,
+  reportDirty,
 }: {
   readonly scenarios: ReadonlyArray<ResolutionScenarioView>;
+  readonly reportDirty: ReportDirty;
 }) {
   const ctx = useWorkspaceCtx();
   const qc = useQueryClient();
@@ -1058,10 +1106,42 @@ function ResolutionPolicyForm({
   );
   const [nextId, setNextId] = useState(0);
 
+  // The cards are uncontrolled (defaultValue + FormData on submit), so what the
+  // form would save lives in the DOM, not in state: dirtiness is the DOM
+  // snapshot compared against the one taken at load / at the last save.
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const savedSnapshot = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [revision, setRevision] = useState(0);
+
+  const snapshot = useCallback((): string | null => {
+    const form = formRef.current;
+    if (!form) return null;
+    const fd = new FormData(form);
+    return resolutionPolicySnapshot((name) => {
+      const value = fd.get(name);
+      return typeof value === "string" ? value : null;
+    });
+  }, []);
+
+  // Snapshot in an effect rather than in the edit handler: the playbook editor
+  // writes its note into a hidden input on render, so reading the DOM while the
+  // event is still in flight would be one keystroke behind.
+  useEffect(() => {
+    const current = snapshot();
+    if (current == null) return;
+    savedSnapshot.current ??= current;
+    setDirty(current !== savedSnapshot.current);
+  }, [revision, customs, snapshot]);
+
+  useReportDirty(reportDirty, "scenarios", dirty);
+
   const saveM = useMutation({
     mutationFn: (next: ReadonlyArray<ResolutionScenarioView>) =>
       api.setResolutionPolicy(ctx, next),
     onSuccess: () => {
+      savedSnapshot.current = snapshot();
+      setDirty(false);
       toast.success("Scenarios saved.");
       void qc.invalidateQueries({
         queryKey: qk.resolutionPolicy(ctx.workspaceId),
@@ -1101,8 +1181,16 @@ function ResolutionPolicyForm({
     saveM.mutate(parseResolutionForm(get));
   };
 
+  const bumpRevision = () => setRevision((r) => r + 1);
+
   return (
-    <form onSubmit={onSubmit} className="space-y-5">
+    <form
+      ref={formRef}
+      onSubmit={onSubmit}
+      onInput={bumpRevision}
+      onChange={bumpRevision}
+      className="space-y-5"
+    >
       <input type="hidden" name={SCENARIO_KEYS_FIELD} value={manifest} />
 
       {builtins.map((s) => (
@@ -1146,6 +1234,14 @@ export function ScenariosPage() {
   const canManageFacts = permissions.has("knowledge.manage");
   const canViewFacts = canManageFacts || permissions.has("knowledge.view");
 
+  // The scenarios form and each facts card save separately; any one of them
+  // holding unsaved edits should stop the merchant walking away from the page.
+  const [dirtyFlags, setDirtyFlags] = useState<DirtyFlags>({});
+  const reportDirty = useCallback<ReportDirty>(
+    (id, dirty) => setDirtyFlags((flags) => setDirtyFlag(flags, id, dirty)),
+    [],
+  );
+
   const { data: policy, isLoading } = useQuery({
     queryKey: qk.resolutionPolicy(ctx.workspaceId),
     queryFn: () => api.resolutionPolicy(ctx),
@@ -1160,6 +1256,11 @@ export function ScenariosPage() {
 
   return (
     <div className="space-y-6">
+      <UnsavedChangesPrompt
+        dirty={hasUnsavedChanges(dirtyFlags)}
+        description="Your scenario changes haven't been saved yet. Leave this page and you'll lose them."
+      />
+
       <SettingsBreadcrumb current="Scenarios" />
 
       <div>
@@ -1187,13 +1288,17 @@ export function ScenariosPage() {
             </p>
           </div>
 
-          <ResolutionPolicyForm scenarios={policy.scenarios} />
+          <ResolutionPolicyForm
+            scenarios={policy.scenarios}
+            reportDirty={reportDirty}
+          />
         </div>
 
         <ScenarioFactsSidebar
           ctx={ctx}
           canManageFacts={canManageFacts}
           canViewFacts={canViewFacts}
+          reportDirty={reportDirty}
         />
       </div>
     </div>

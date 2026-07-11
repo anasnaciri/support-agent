@@ -108,3 +108,15 @@ export const parseResolutionForm = (
     };
   });
 };
+
+/**
+ * A comparable string for what the form would save right now. Comparing it to
+ * the snapshot taken at load (or at the last save) is what tells the page it
+ * has unsaved changes. It runs through the parser on purpose: an edit that the
+ * save would normalize away — padding a note with spaces — is not a change the
+ * merchant needs warning about, and undoing an edit by hand makes the page
+ * clean again.
+ */
+export const resolutionPolicySnapshot = (
+  get: (name: string) => string | null,
+): string => JSON.stringify(parseResolutionForm(get));
