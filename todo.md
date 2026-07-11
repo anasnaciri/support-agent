@@ -42,6 +42,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       structured Facts. Keyboard navigation now scrolls the highlighted option
       into view inside the dropdown.
 
+- [x] **Scenario note `@` menu scrolls one row at a time** (2026-07-11).
+      Verified with
+      `pnpm test -- apps/dashboard-spa/test/playbook-notes-field.test.ts`,
+      `pnpm --filter @support-agent/dashboard-spa build`, and `pnpm build`.
+      Keyboard navigation now scrolls the menu element itself with smooth
+      behavior, advances by one option height as the highlighted row crosses the
+      visible bottom edge, and no longer delegates to `scrollIntoView`, avoiding
+      page jumps while keeping the focused option anchored at the dropdown's
+      bottom during downward navigation.
+
 - [x] **Scenario doc refs stay visible when many facts match** (2026-07-11).
       Verified with
       `pnpm test -- apps/dashboard-spa/test/playbook-notes-field.test.ts`.

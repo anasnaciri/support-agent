@@ -357,20 +357,56 @@ describe("the @-menu's keyboard navigation", () => {
     expect(kinds).toContain("doc");
   });
 
-  it("scrolls the highlighted option into view when arrow keys move it", async () => {
+  it("smoothly scrolls one option at a time inside the menu", async () => {
     const editor = await mountField("Use @");
     caretToEnd(editor);
 
     await press(editor, "keyup", "@");
-    const scroll = vi
+    const menu = container!.querySelector<HTMLElement>('[role="listbox"]')!;
+    const rows = [
+      ...container!.querySelectorAll<HTMLElement>('[role="option"]'),
+    ];
+    const rowHeight = 32;
+    Object.defineProperty(menu, "clientHeight", {
+      configurable: true,
+      value: rowHeight * 3,
+    });
+    rows.forEach((row, index) => {
+      Object.defineProperty(row, "offsetTop", {
+        configurable: true,
+        value: index * rowHeight,
+      });
+      Object.defineProperty(row, "offsetHeight", {
+        configurable: true,
+        value: rowHeight,
+      });
+    });
+
+    const scrollTo = vi.fn((options?: ScrollToOptions) => {
+      menu.scrollTop = Number(options?.top ?? 0);
+    });
+    Object.defineProperty(menu, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+    const pageJump = vi
       .spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => undefined);
 
     try {
       await press(editor, "keydown", "ArrowDown");
-      expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+      await press(editor, "keydown", "ArrowDown");
+      await press(editor, "keydown", "ArrowDown");
+
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: rowHeight,
+        behavior: "smooth",
+      });
+      expect(menu.scrollTop).toBe(rowHeight);
+      expect(pageJump).not.toHaveBeenCalled();
     } finally {
-      scroll.mockRestore();
+      pageJump.mockRestore();
     }
   });
 

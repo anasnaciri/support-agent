@@ -48,6 +48,29 @@ export const clampCaretMenuLeft = (
   boxWidth: number,
 ): number => Math.max(0, Math.min(caretLeft, boxWidth - menuWidth));
 
+export const scrollReferenceMenuToHighlight = (
+  menu: HTMLElement,
+  highlighted: HTMLElement,
+) => {
+  const row = highlighted.closest<HTMLElement>('[role="option"]') ?? highlighted;
+  const rowTop = row.offsetTop;
+  const rowBottom = rowTop + row.offsetHeight;
+  const visibleTop = menu.scrollTop;
+  const visibleBottom = visibleTop + menu.clientHeight;
+
+  if (rowBottom > visibleBottom) {
+    menu.scrollTo({
+      top: rowBottom - menu.clientHeight,
+      behavior: "smooth",
+    });
+    return;
+  }
+
+  if (rowTop < visibleTop) {
+    menu.scrollTo({ top: rowTop, behavior: "smooth" });
+  }
+};
+
 // ---- the note ↔ DOM mapping ----
 //
 // The note is STORED as `@id` tokens and only ever rendered as chips, so editing
@@ -248,10 +271,12 @@ export function PlaybookNotesField({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const highlighted = menuRef.current?.querySelector<HTMLElement>(
+    const menu = menuRef.current;
+    const highlighted = menu?.querySelector<HTMLElement>(
       '[data-highlighted="true"]',
     );
-    highlighted?.scrollIntoView({ block: "nearest" });
+    if (!menu || !highlighted) return;
+    scrollReferenceMenuToHighlight(menu, highlighted);
   }, [highlight, matches.length, menuOpen]);
 
   /** The caret's text node + offset, when the caret is inside this editor. */
