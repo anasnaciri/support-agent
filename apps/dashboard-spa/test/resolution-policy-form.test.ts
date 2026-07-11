@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toolDisplayName } from "@support-agent/agent-core";
 
 import {
   NEW_SCENARIO_PREFIX,
@@ -6,6 +7,10 @@ import {
   fieldName,
   parseResolutionForm,
 } from "../lib/parse-resolution";
+import {
+  REMEDY_ACTIONS,
+  deniedActionsFor,
+} from "../lib/resolution-action-labels";
 
 const getter =
   (m: Map<string, string>) =>
@@ -21,6 +26,44 @@ const formWith = (formKeys: ReadonlyArray<string>, fields: [string, string][]) =
       ...fields,
     ]),
   );
+
+describe("REMEDY_ACTIONS", () => {
+  it("names each action exactly as the rest of the app does", () => {
+    // The checkbox, the playbook chip, and the ticket timeline must all call an
+    // action the same thing — TOOL_DISPLAY_NAMES is that one name.
+    for (const action of REMEDY_ACTIONS) {
+      expect(action.label).toBe(toolDisplayName(action.tool));
+    }
+  });
+});
+
+describe("deniedActionsFor", () => {
+  it("denies every remedy action the scenario didn't enable", () => {
+    const denied = deniedActionsFor(new Set(["refund.create"]), "none");
+    expect(denied.has("refund.create")).toBe(false);
+    expect(denied.has("discount.create")).toBe(true);
+    expect(denied.has("order.cancel")).toBe(true);
+  });
+
+  it("denies the supplier escalation only when no supplier is involved", () => {
+    expect(deniedActionsFor(new Set(), "none").has("supplier.escalate")).toBe(
+      true,
+    );
+    expect(
+      deniedActionsFor(new Set(), "escalate_and_wait").has("supplier.escalate"),
+    ).toBe(false);
+    expect(
+      deniedActionsFor(new Set(), "notify_and_proceed").has("supplier.escalate"),
+    ).toBe(false);
+  });
+
+  it("never denies a baseline action — those are always on", () => {
+    const denied = deniedActionsFor(new Set(), "none");
+    expect(denied.has("knowledge.search")).toBe(false);
+    expect(denied.has("conversation.ask_customer")).toBe(false);
+    expect(denied.has("shopify.get_order")).toBe(false);
+  });
+});
 
 describe("parseResolutionForm", () => {
   it("parses a built-in card: editable fields from the form, key/label/recognition passed through", () => {

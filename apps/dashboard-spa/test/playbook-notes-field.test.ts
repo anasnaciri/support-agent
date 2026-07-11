@@ -11,6 +11,7 @@ import {
   clampCaretMenuLeft,
   matchTokenAtCaret,
   PlaybookNotesField,
+  referencedActionIds,
   serializeNotes,
 } from "../features/settings/PlaybookNotesField";
 
@@ -337,6 +338,30 @@ describe("serializeNotes", () => {
   });
 });
 
+describe("referencedActionIds", () => {
+  it("lists the actions a playbook tells the agent to take", () => {
+    expect(
+      referencedActionIds(
+        "Ask with /conversation.ask_customer, then queue /refund.create.",
+      ),
+    ).toEqual(["conversation.ask_customer", "refund.create"]);
+  });
+
+  it("ignores fact refs, url paths, and dates", () => {
+    expect(
+      referencedActionIds(
+        "Within @returns.return_window — see https://shop.example/refund.create, we reply 24/7.",
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports each action once, however often the note names it", () => {
+    expect(
+      referencedActionIds("/refund.create now, or /refund.create later."),
+    ).toEqual(["refund.create"]);
+  });
+});
+
 // ---- the live menu ----
 //
 // The mapping above is pure, but the menu's keyboard behaviour is not, and it is
@@ -360,7 +385,10 @@ afterEach(() => {
 });
 
 /** Mount the field with a note already typed, and hand back its editor. */
-const mountField = async (defaultValue: string): Promise<HTMLElement> => {
+const mountField = async (
+  defaultValue: string,
+  deniedActions?: ReadonlySet<string>,
+): Promise<HTMLElement> => {
   (
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -381,6 +409,7 @@ const mountField = async (defaultValue: string): Promise<HTMLElement> => {
           id: "notes",
           defaultValue,
           ctx: { workspaceId: "w1" },
+          ...(deniedActions ? { deniedActions } : {}),
         }),
       ),
     );
@@ -426,6 +455,41 @@ const openOptions = () =>
   [...container!.querySelectorAll('[role="option"]')].map((li) =>
     li.getAttribute("aria-selected"),
   );
+
+describe("the turned-off-action warning", () => {
+  it("warns when the playbook tells the agent to take an action the scenario denies", async () => {
+    // The soft layer contradicting the hard gate: the note says to refund, the
+    // scenario's switches say it may not. The runtime silently removes the tool,
+    // so the merchant has to be told here — named the way they named it.
+    await mountField(
+      "When it is genuinely lost, queue /refund.create.",
+      new Set(["refund.create"]),
+    );
+    const warning = [...container!.querySelectorAll("p")]
+      .map((p) => p.textContent ?? "")
+      .find((t) => t.toLowerCase().includes("turned off"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("Issue a refund");
+    // Named the merchant's way — never the tool id.
+    expect(warning).not.toContain("refund.create");
+  });
+
+  it("says nothing when every referenced action is enabled", async () => {
+    await mountField(
+      "When it is genuinely lost, queue /refund.create.",
+      new Set(["discount.create"]),
+    );
+    expect(container!.textContent ?? "").not.toContain("turned off");
+  });
+
+  it("says nothing about a baseline action, which is always on", async () => {
+    await mountField(
+      "Ask with /conversation.ask_customer first.",
+      new Set(["refund.create", "discount.create"]),
+    );
+    expect(container!.textContent ?? "").not.toContain("turned off");
+  });
+});
 
 describe("the @-menu's keyboard navigation", () => {
   it("marks fact and doc options with distinct source kinds", async () => {

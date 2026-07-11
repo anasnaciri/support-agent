@@ -32,6 +32,7 @@ import {
   PERMISSION_OPTIONS,
   REMEDY_ACTIONS,
   SUPPLIER_MODE_OPTIONS,
+  deniedActionsFor,
 } from "@/lib/resolution-action-labels";
 import {
   NEW_SCENARIO_PREFIX,
@@ -50,16 +51,6 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
 import { PlaybookNotesField } from "./PlaybookNotesField";
-
-/**
- * Per-scenario remedy-action control is HIDDEN for now (2026-06-28): tools and
- * permissions are configured once on the agent (Settings → Agents), not per
- * scenario. The editor UI below is kept behind this flag — flip to `true` to
- * resurface fine-grained per-scenario tool control. While hidden, each card
- * round-trips its stored `enabledActions` through hidden inputs so saving the
- * policy never wipes them. See todo "RESURFACE LATER".
- */
-const SHOW_PER_SCENARIO_ACTIONS = false;
 
 export const SCENARIOS_FACTS_SIDEBAR_STORAGE_KEY =
   "settings:scenarios:facts-sidebar";
@@ -827,7 +818,7 @@ interface CustomCard {
  * and whether each needs approval, supplier handling, the Active toggle, and
  * free-text notes — are identical for both.
  */
-function ScenarioCard({
+export function ScenarioCard({
   formKey,
   scenario,
   onRemove,
@@ -844,6 +835,23 @@ function ScenarioCard({
     (scenario?.enabledActions ?? []).map((a) => [a.tool, a.permission]),
   );
   const defaultSupplierMode = scenario?.supplierMode ?? "none";
+
+  // The form is uncontrolled (it submits via FormData), but the playbook warning
+  // has to react to these two the moment they change: a note that names an action
+  // the switches just turned off is a playbook the agent will refuse to follow.
+  const [enabledTools, setEnabledTools] = useState<ReadonlySet<string>>(
+    () => new Set(byTool.keys()),
+  );
+  const [supplierMode, setSupplierMode] = useState(defaultSupplierMode);
+  const deniedActions = deniedActionsFor(enabledTools, supplierMode);
+
+  const toggleTool = (tool: string, on: boolean) =>
+    setEnabledTools((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(tool);
+      else next.delete(tool);
+      return next;
+    });
 
   return (
     <Card className={active ? "transition-opacity" : "opacity-55 transition-opacity"}>
@@ -925,77 +933,63 @@ function ScenarioCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Per-scenario remedy actions. HIDDEN 2026-06-28 (tools configured once
-            on the agent now); the editor is kept behind SHOW_PER_SCENARIO_ACTIONS
-            and the stored enabledActions are round-tripped via hidden inputs so a
-            save never wipes them. */}
-        {SHOW_PER_SCENARIO_ACTIONS ? (
-          <>
-            <fieldset className="space-y-3">
-              <legend className="text-sm font-medium">
-                Actions the agent can take
-              </legend>
-              {REMEDY_ACTIONS.map((action) => {
-                const enabled = byTool.has(action.tool);
-                const permission = byTool.get(action.tool) ?? "ask";
-                return (
-                  <div
-                    key={action.tool}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-2"
-                  >
-                    <label className="flex flex-1 items-start gap-2">
-                      <input
-                        type="checkbox"
-                        name={fieldName(formKey, `action:${action.tool}:enabled`)}
-                        defaultChecked={enabled}
-                        className="mt-0.5 size-4 rounded border-input accent-primary"
-                      />
-                      <span className="text-sm">
-                        <span className="font-medium">{action.label}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {action.help}
-                        </span>
-                      </span>
-                    </label>
-                    <NativeSelect
-                      name={fieldName(formKey, `action:${action.tool}:permission`)}
-                      defaultValue={permission}
-                      aria-label={`${action.label} — approval`}
-                      className="w-44"
-                    >
-                      {PERMISSION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </div>
-                );
-              })}
-              <p className="text-xs text-muted-foreground">
-                Reading the order, searching your knowledge base, and replying to
-                the customer are always on.
-              </p>
-            </fieldset>
+        {/* Which remedies the agent may reach for in THIS scenario, and whether
+            each runs on its own. This is the hard gate: the runtime removes a
+            disabled action from the model's tool list entirely. */}
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium">
+            Actions the agent can take
+          </legend>
+          {REMEDY_ACTIONS.map((action) => {
+            const enabled = enabledTools.has(action.tool);
+            const permission = byTool.get(action.tool) ?? "ask";
+            return (
+              <div
+                key={action.tool}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2"
+              >
+                <label className="flex flex-1 items-start gap-2">
+                  <input
+                    type="checkbox"
+                    name={fieldName(formKey, `action:${action.tool}:enabled`)}
+                    checked={enabled}
+                    onChange={(e) =>
+                      toggleTool(action.tool, e.currentTarget.checked)
+                    }
+                    className="mt-0.5 size-4 rounded border-input accent-primary"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">{action.label}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {action.help}
+                    </span>
+                  </span>
+                </label>
+                {/* The approval choice only means something for an action the
+                    agent is allowed to take at all. */}
+                <NativeSelect
+                  name={fieldName(formKey, `action:${action.tool}:permission`)}
+                  defaultValue={permission}
+                  disabled={!enabled}
+                  aria-label={`${action.label} — approval`}
+                  className="w-44"
+                >
+                  {PERMISSION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+            );
+          })}
+          <p className="text-xs text-muted-foreground">
+            Reading the order, searching your knowledge base, asking the customer
+            a question, and replying are always on.
+          </p>
+        </fieldset>
 
-            <Separator />
-          </>
-        ) : (
-          Array.from(byTool.entries()).flatMap(([tool, perm]) => [
-            <input
-              key={`${tool}:enabled`}
-              type="hidden"
-              name={fieldName(formKey, `action:${tool}:enabled`)}
-              value="on"
-            />,
-            <input
-              key={`${tool}:permission`}
-              type="hidden"
-              name={fieldName(formKey, `action:${tool}:permission`)}
-              value={perm}
-            />,
-          ])
-        )}
+        <Separator />
 
         {/* Supplier handling. */}
         <fieldset className="space-y-2">
@@ -1008,7 +1002,8 @@ function ScenarioCard({
                 type="radio"
                 name={fieldName(formKey, "supplierMode")}
                 value={o.value}
-                defaultChecked={defaultSupplierMode === o.value}
+                checked={supplierMode === o.value}
+                onChange={() => setSupplierMode(o.value)}
                 className="mt-0.5 size-4 border-input accent-primary"
               />
               <span className="text-sm">
@@ -1033,6 +1028,7 @@ function ScenarioCard({
             defaultValue={scenario?.notes ?? ""}
             placeholder="How should the agent handle this? e.g. check tracking first, then offer a refund if it's genuinely lost."
             ctx={ctx}
+            deniedActions={deniedActions}
           />
         </div>
       </CardContent>

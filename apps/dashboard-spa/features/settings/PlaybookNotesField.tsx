@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Database, FileText, Zap } from "lucide-react";
 
+import { toolDisplayName } from "@support-agent/agent-core";
 import type { FactReferenceEntryView } from "@support-agent/dashboard-contracts";
 
 import { api } from "@/lib/api-client";
@@ -188,6 +189,24 @@ export const buildNotesFragment = (
   return frag;
 };
 
+/**
+ * The actions a note tells the agent to take, in order, without repeats. Pure +
+ * exported: this is what the turned-off-action warning is computed from, and it
+ * must agree with `buildNotesFragment` on what counts as an action ref (a `/` at
+ * a word boundary — never a url path or a date).
+ */
+export const referencedActionIds = (text: string): ReadonlyArray<string> => {
+  const ids = new Set<string>();
+  for (const line of text.split("\n")) {
+    for (const m of line.matchAll(TOKEN)) {
+      if (m[1] !== "/" || !m[3]) continue;
+      if (!opensAction(line, m.index)) continue;
+      ids.add(`${m[2]}.${m[3]}`.toLowerCase());
+    }
+  }
+  return [...ids];
+};
+
 const isBlock = (el: Element) =>
   el.tagName === "DIV" || el.tagName === "P" || el.tagName === "LI";
 
@@ -269,12 +288,19 @@ export function PlaybookNotesField({
   defaultValue,
   placeholder,
   ctx,
+  deniedActions,
 }: {
   readonly name: string;
   readonly id: string;
   readonly defaultValue: string;
   readonly placeholder?: string;
   readonly ctx: Ctx;
+  /**
+   * Actions this scenario's switches forbid (see `deniedActionsFor`). A note that
+   * references one is telling the agent to do something the runtime will refuse —
+   * the merchant is warned, live, as they toggle the switches above.
+   */
+  readonly deniedActions?: ReadonlySet<string>;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -451,6 +477,16 @@ export function PlaybookNotesField({
     syncMenu();
   };
 
+  // The turned-off-action warning. Local and instant (no round-trip): both halves
+  // — the note and the scenario's switches — are already on this screen, and the
+  // merchant needs to see the contradiction the moment they create it.
+  const blockedActions = useMemo(() => {
+    if (!deniedActions || deniedActions.size === 0) return [];
+    return referencedActionIds(value)
+      .filter((id) => deniedActions.has(id))
+      .map((id) => catalog.get(id)?.label ?? toolDisplayName(id));
+  }, [value, deniedActions, catalog]);
+
   // The dangling-ref warning: resolved server-side by the same resolver the
   // runtime uses, so it also catches a mistyped id a chip never claimed.
   const [dangling, setDangling] = useState<ReadonlyArray<string>>([]);
@@ -572,6 +608,21 @@ export function PlaybookNotesField({
         knowledge doc, or <span className="font-mono">/</span> to reference an
         action.
       </p>
+
+      {blockedActions.length > 0 ? (
+        <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-500">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>
+            <span className="font-medium">{blockedActions.join(", ")}</span>{" "}
+            {blockedActions.length > 1 ? "are" : "is"} turned off for this
+            scenario, but the playbook still asks for{" "}
+            {blockedActions.length > 1 ? "them" : "it"} — your agent won&apos;t
+            do {blockedActions.length > 1 ? "them" : "it"}. Turn{" "}
+            {blockedActions.length > 1 ? "them" : "it"} on above, or take{" "}
+            {blockedActions.length > 1 ? "them" : "it"} out of the playbook.
+          </span>
+        </p>
+      ) : null}
 
       {dangling.length > 0 ? (
         <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-500">

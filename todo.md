@@ -1417,6 +1417,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       refund-review, and scenario-resolution flows exist.
 - [x] Resolution Policy stores per-scenario playbooks in tenant settings, with
       built-ins and merchant-authored custom scenarios.
+- [x] Merchants configure the resolution policy PER SCENARIO again (2026-07-11):
+      the action checklist + approval choice is un-hidden on every scenario card
+      (`SHOW_PER_SCENARIO_ACTIONS` deleted; it was hidden 2026-06-28 when tools
+      moved to the agent). This is the hard gate — `applyScenarioEnvelope` strips
+      a disabled action from the model's tool list — so the checkbox now sits on
+      the same card as the playbook that names it, and the approval dropdown is
+      disabled for an action the agent may not take at all.
+- [x] The playbook warns, live, when its prose contradicts those switches: a note
+      that `/`-references an action the scenario denies (a remedy that isn't
+      ticked, or `supplier.escalate` with supplier handling set to none) shows an
+      amber line naming it the merchant's way. Purely client-side —
+      `deniedActionsFor` mirrors the runtime envelope, and both halves are on the
+      one screen. Baseline actions never warn.
 - [x] Playbook notes reference AGENT ACTIONS with a `/` sigil, the way they
       already reference Facts and docs with `@` (2026-07-11). A note stores
       `/refund.create`; the editor chips it as "Issue a refund" (label from
@@ -1948,14 +1961,6 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Policy, Agents, Models, And Cost
 
-- [ ] Warn when a playbook note `/`-references an action the scenario's
-      `enabledActions` does not grant: `applyScenarioEnvelope` strips that tool
-      from the schema and denies it, so the note is telling the model to do
-      something the hard gate blocks — today that mismatch is silent. Now cheap
-      to detect (the refs are structured, and `enabledActions` is in the same
-      form state), but deferred while the per-scenario action editor is hidden
-      behind `SHOW_PER_SCENARIO_ACTIONS` — a merchant can't yet create the
-      mismatch. Wire it up if that editor comes back.
 - [ ] New built-in scenarios don't reach tenants with a STORED resolution
       policy until their next scenarios-page save (`decodeResolutionPolicy`
       read path returns stored scenarios verbatim; only the write-path
