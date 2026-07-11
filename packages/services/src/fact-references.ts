@@ -42,7 +42,17 @@ export interface FactReference {
    * Fact is unset. Distinct from the bracketed header-line render.
    */
   readonly render: (settings: TenantSettings | null) => string | null;
-  /** Neutral phrase substituted when {@link render} returns null. */
+  /**
+   * Neutral phrase substituted when {@link render} returns null.
+   *
+   * Must fit the SAME sentence frame as {@link render} — same grammatical shape
+   * — so one frame reads correctly whether or not the Fact is set. A noun-phrase
+   * render takes a noun-phrase fallback ("30 days" / "our standard return
+   * window"); a clause render takes a clause ("the customer pays return
+   * shipping" / "who pays return shipping depends on our returns policy").
+   * Mixing the shapes yields broken prose for exactly the tenants who configured
+   * nothing — the ones the fallback exists for.
+   */
   readonly fallback: string;
 }
 
@@ -125,7 +135,8 @@ const FIELD_CATALOG: ReadonlyArray<FactReference> = [
         ? RETURN_SHIPPING_FRAGMENT[f.returnShippingPayer]
         : null;
     },
-    fallback: "our return shipping policy",
+    // Clause, to match the clause-shaped fragments above.
+    fallback: "who pays return shipping depends on our returns policy",
   },
   {
     id: "returns.refund_method",
@@ -136,7 +147,9 @@ const FIELD_CATALOG: ReadonlyArray<FactReference> = [
       const f = r(x);
       return f?.refundMethod ? REFUND_METHOD_FRAGMENT[f.refundMethod] : null;
     },
-    fallback: "our usual refund method",
+    // Prepositional phrase, to match "to the original payment method" — the
+    // frame is "the refund is issued @returns.refund_method".
+    fallback: "using our usual refund method",
   },
   {
     id: "returns.refund_processing_time",

@@ -15,6 +15,7 @@ import {
   defaultDiscountPolicy,
   defaultResolutionPolicy,
   FACT_REFERENCE_CATALOG,
+  resolveFactReferences,
   type BlockedSenders,
   type LegalAcceptance,
   type RefundPolicy,
@@ -565,17 +566,33 @@ describe("built-in scenario notes reference store facts", () => {
   const byKey = (k: string) =>
     defaultResolutionPolicy.scenarios.find((s) => s.key === k)!;
 
-  it("delivery_issue references the lost-package threshold and reads it from the carrier", () => {
+  it("where_is_order quotes the store's own processing + delivery times", () => {
+    // The most common ticket there is: "when will it arrive?". The two numbers
+    // that answer it are stated Facts, so the note points at them rather than
+    // sending the agent hunting through prose.
+    const notes = byKey("where_is_order").notes ?? "";
+    expect(notes).toContain("@shipping.processing_time");
+    expect(notes).toContain("@shipping.delivery_time");
+  });
+
+  it("delivery_issue judges lateness by the stated delayed-after threshold", () => {
     const notes = byKey("delivery_issue").notes ?? "";
+    expect(notes).toContain("@shipping.delayed_after");
     expect(notes).toContain("@shipping.lost_after");
     // The elapsed number comes from 17track's transitDays, never a hand count.
     expect(notes).toContain("transitDays");
     expect(notes.toLowerCase()).toContain("do not count the days yourself");
+    // The safety property the Facts must not erode: with no stated window the
+    // agent may not assert the order is on schedule.
+    expect(notes.toLowerCase()).toContain("cannot confirm lateness");
   });
 
-  it("refund_request references the return window and refund processing time", () => {
+  it("refund_request references the window, the payer, the method, and the timing", () => {
+    // Everything a customer asking for their money back needs told to them.
     const notes = byKey("refund_request").notes ?? "";
     expect(notes).toContain("@returns.return_window");
+    expect(notes).toContain("@returns.return_shipping");
+    expect(notes).toContain("@returns.refund_method");
     expect(notes).toContain("@returns.refund_processing_time");
   });
 
@@ -585,10 +602,35 @@ describe("built-in scenario notes reference store facts", () => {
     );
   });
 
-  it("order_cancellation references the return window on the already-shipped branch", () => {
-    expect(byKey("order_cancellation").notes ?? "").toContain(
-      "@returns.return_window",
+  it("damaged_product quotes the refund processing time when it refunds", () => {
+    expect(byKey("damaged_product").notes ?? "").toContain(
+      "@returns.refund_processing_time",
     );
+  });
+
+  it("order_cancellation references the return window and the refund timing", () => {
+    const notes = byKey("order_cancellation").notes ?? "";
+    expect(notes).toContain("@returns.return_window");
+    expect(notes).toContain("@returns.refund_processing_time");
+  });
+
+  it("shipping_address_update references the processing time it races against", () => {
+    // The address is editable only until the order leaves the warehouse, and
+    // the processing time is exactly how long that is.
+    expect(byKey("shipping_address_update").notes ?? "").toContain(
+      "@shipping.processing_time",
+    );
+  });
+
+  it("general_inquiry answers the common shipping + returns questions from Facts", () => {
+    // A general question is most often "how long does shipping take" / "what's
+    // your return policy". Field refs, NOT the `@shipping` / `@returns`
+    // whole-block summaries: those join their fragments unlabeled ("1–2 business
+    // days; 7–12 days; …"), so the model can't tell which number is which.
+    const notes = byKey("general_inquiry").notes ?? "";
+    expect(notes).toContain("@shipping.processing_time");
+    expect(notes).toContain("@shipping.delivery_time");
+    expect(notes).toContain("@returns.return_window");
   });
 
   it("every fact reference in a built-in note is a real catalog id", () => {
@@ -600,6 +642,57 @@ describe("built-in scenario notes reference store facts", () => {
       for (const m of (s.notes ?? "").matchAll(tokenRe)) {
         expect(ids.has(m[1]!)).toBe(true);
       }
+    }
+  });
+
+  it("resolves every built-in note to real values once both Facts blocks are filled", () => {
+    // The end state the defaults are written for: a merchant who filled both
+    // forms gets prose carrying THEIR numbers, with nothing dangling and no raw
+    // token left behind for the model to read as literal text.
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 365,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      shippingFacts: {
+        processingTime: "1–2 business days",
+        deliveryTime: "7–12 days",
+        shippingCost: "Free over $50",
+        customsDuties: "customer",
+        delayedAfterDays: 14,
+        lostPackageInvestigationDays: 30,
+      },
+      returnsFacts: {
+        returnWindowDays: 30,
+        returnShippingPayer: "customer",
+        refundMethod: "original",
+        refundProcessingTime: "5–7 business days",
+      },
+    });
+
+    for (const s of defaultResolutionPolicy.scenarios) {
+      const { resolved, dangling } = resolveFactReferences(
+        s.notes ?? "",
+        settings,
+      );
+      expect(dangling, `${s.key} has dangling refs`).toEqual([]);
+      expect(resolved, `${s.key} left a raw token`).not.toMatch(
+        /@(shipping|returns|refunds)\b/,
+      );
+    }
+  });
+
+  it("degrades every built-in note to a neutral phrase when no Facts are set", () => {
+    // The unconfigured tenant — the default state on day 1. Each ref falls back
+    // to a neutral phrase, so the playbook still reads as English and never
+    // shows the merchant's customer a raw `@shipping.delivery_time`.
+    for (const s of defaultResolutionPolicy.scenarios) {
+      const { resolved } = resolveFactReferences(s.notes ?? "", null);
+      expect(resolved, `${s.key} left a raw token`).not.toMatch(
+        /@(shipping|returns|refunds)\b/,
+      );
     }
   });
 });
