@@ -41,6 +41,9 @@ export class TelegramConfig extends Context.Tag("TelegramConfig")<
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
+const withoutEmDashes = (text: string): string =>
+  text.replace(/\s*—\s*/gu, " - ");
+
 const safeBody = async (res: Response): Promise<unknown> => {
   const text = await res.text().catch(() => "");
   try {
@@ -70,7 +73,10 @@ export const telegramSendMessage = (input: {
           headers: { "Content-Type": "application/json" },
           // Plain text on purpose: no `parse_mode`, so customer-derived
           // content in the body can never be interpreted as markup.
-          body: JSON.stringify({ chat_id: input.chatId, text: input.text }),
+          body: JSON.stringify({
+            chat_id: input.chatId,
+            text: withoutEmDashes(input.text),
+          }),
         }),
       catch: (cause) => ({ cause }),
     });

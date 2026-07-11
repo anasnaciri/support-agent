@@ -36,6 +36,23 @@ export class ResendConfig extends Context.Tag("ResendConfig")<
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
+const withoutEmDashes = (text: string): string =>
+  text.replace(/\s*—\s*/gu, " - ");
+
+const normalizeRenderedCopy = (rendered: {
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+}): {
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+} => ({
+  subject: withoutEmDashes(rendered.subject),
+  text: withoutEmDashes(rendered.text),
+  html: withoutEmDashes(rendered.html),
+});
+
 interface ResendErrorBody {
   readonly message?: string;
   readonly name?: string;
@@ -109,7 +126,7 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
   const lines = [
     `Your ${input.tenantName} account on the support platform has been deleted.`,
     ``,
-    `All associated data — tickets, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.`,
+    `All associated data, including tickets, conversations, approvals, audit history, connected integrations, and your team's access, has been permanently removed. This cannot be undone.`,
     ``,
     `If you did not request this, contact support immediately.`,
   ];
@@ -121,7 +138,7 @@ const renderAccountDeletedEmail = (input: SendAccountDeletedInput): {
       .replace(/>/gu, "&gt;");
   const html = `<!doctype html><html><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;color:#111">
   <p>Your <strong>${escape(input.tenantName)}</strong> account on the support platform has been deleted.</p>
-  <p>All associated data — tickets, conversations, approvals, audit history, connected integrations, and your team's access — has been permanently removed. This cannot be undone.</p>
+  <p>All associated data, including tickets, conversations, approvals, audit history, connected integrations, and your team's access, has been permanently removed. This cannot be undone.</p>
   <p style="color:#666;font-size:12px;margin-top:24px">If you did not request this, contact support immediately.</p>
 </body></html>`;
   return { subject, text, html };
@@ -188,6 +205,7 @@ export const PlatformMailServiceLive = Layer.effect(
       idempotencyKey?: string,
     ): Effect.Effect<void, PlatformMailSendFailed> =>
       Effect.gen(function* () {
+        const cleanRendered = normalizeRenderedCopy(rendered);
         const res = yield* Effect.tryPromise({
           try: () =>
             fetchImpl(RESEND_ENDPOINT, {
@@ -202,9 +220,9 @@ export const PlatformMailServiceLive = Layer.effect(
               body: JSON.stringify({
                 from: config.fromAddress,
                 to: [recipient],
-                subject: rendered.subject,
-                text: rendered.text,
-                html: rendered.html,
+                subject: cleanRendered.subject,
+                text: cleanRendered.text,
+                html: cleanRendered.html,
               }),
             }),
           catch: (cause) =>
@@ -338,6 +356,7 @@ export const PlatformMailServiceLive = Layer.effect(
 
           // 2. Render + POST to Resend.
           const { subject, text, html } = renderApprovalEmail(input);
+          const cleanRendered = normalizeRenderedCopy({ subject, text, html });
           const res = yield* Effect.tryPromise({
             try: () =>
               fetchImpl(RESEND_ENDPOINT, {
@@ -349,9 +368,9 @@ export const PlatformMailServiceLive = Layer.effect(
                 body: JSON.stringify({
                   from: config.fromAddress,
                   to: [recipient],
-                  subject,
-                  text,
-                  html,
+                  subject: cleanRendered.subject,
+                  text: cleanRendered.text,
+                  html: cleanRendered.html,
                 }),
               }),
             catch: (cause) =>

@@ -45,7 +45,7 @@ const sendInput = {
   approvalId,
   draftSubject: "Refund for #1001",
   draftPreview:
-    "Hi Jane — thanks for reaching out about order #1001. We can process a refund on receipt.",
+    "Hi Jane, thanks for reaching out about order #1001. We can process a refund on receipt.",
   toolName: "conversation.reply",
   approveUrl: "https://api.example.com/approvals/x/approve?token=A",
   rejectUrl: "https://api.example.com/approvals/x/reject?token=R",

@@ -134,13 +134,13 @@ const HUMAN_TAKEOVER_REASON_COPY: Readonly<Record<string, string>> = {
   approval_denied_by_policy:
     "Your policy settings blocked the approved action from running.",
   approved_tool_failed:
-    "The action you approved failed while executing — nothing further was sent.",
+    "The action you approved failed while executing. Nothing further was sent.",
   "approval rejected":
     "You rejected the agent's draft, so the ticket is now with you.",
   llm_credential_missing:
-    "Your AI provider key is missing — reconnect it under Settings so the agent can work.",
+    "Your AI provider key is missing. Reconnect it under Settings so the agent can work.",
   llm_credential_revoked:
-    "Your AI provider key was revoked — reconnect it under Settings so the agent can work.",
+    "Your AI provider key was revoked. Reconnect it under Settings so the agent can work.",
   workflow_retries_exhausted:
     "Processing kept failing and was stopped after several retries.",
 };
@@ -189,7 +189,7 @@ export const llmCreditsLowNotification = (
   body: [
     `Your ${input.provider} balance is down to $${input.remainingUsd.toFixed(2)} (alert threshold $${input.thresholdUsd}).`,
     ``,
-    `The agent stops handling customer tickets once credits run out — top up your ${input.provider} account to keep it running.`,
+    `The agent stops handling customer tickets once credits run out. Top up your ${input.provider} account to keep it running.`,
   ].join("\n"),
 });
 
@@ -295,6 +295,9 @@ export const MerchantNotificationServiceTest = (
  */
 const ACTION_PREVIEW_MAX = 80;
 
+const withoutEmDashes = (text: string): string =>
+  text.replace(/\s*—\s*/gu, " - ");
+
 const summaryMoney = (input: Record<string, unknown>): string | null => {
   const m = input["amount"];
   if (!m || typeof m !== "object") return null;
@@ -325,12 +328,12 @@ export const summarizeApprovalAction = (
         body.length > ACTION_PREVIEW_MAX
           ? `${body.slice(0, ACTION_PREVIEW_MAX)}…`
           : body;
-      return `${base} — "${preview}"`;
+      return `${base}: "${withoutEmDashes(preview)}"`;
     }
     case "refund.create":
     case "order.cancel": {
       const money = summaryMoney(input);
-      return money ? `${base} — ${money}` : base;
+      return money ? `${base}: ${money}` : base;
     }
     case "order.update_shipping_address": {
       // Show WHERE the parcel would be redirected — street + city/province is
@@ -339,19 +342,19 @@ export const summarizeApprovalAction = (
       const parts = ["address1", "city", "province"]
         .map((k) => (typeof input[k] === "string" ? (input[k] as string) : null))
         .filter((v): v is string => v !== null && v.length > 0);
-      return parts.length > 0 ? `${base} — ${parts.join(", ")}` : base;
+      return parts.length > 0 ? `${base}: ${parts.join(", ")}` : base;
     }
     case "discount.create": {
       const value = typeof input["value"] === "string" ? input["value"] : null;
       if (value && input["valueType"] === "percentage") {
-        return `${base} — ${value}%`;
+        return `${base}: ${value}%`;
       }
       if (value && input["valueType"] === "fixed_amount") {
         const currency =
           typeof input["currencyCode"] === "string"
             ? input["currencyCode"]
             : null;
-        return `${base} — ${value}${currency ? ` ${currency}` : ""}`;
+        return `${base}: ${value}${currency ? ` ${currency}` : ""}`;
       }
       return base;
     }

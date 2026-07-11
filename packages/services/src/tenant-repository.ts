@@ -221,12 +221,12 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       notes:
         "Look up the order, check tracking if available, and tell the customer the status. " +
         "Give them a real expectation rather than 'soon': this store ships orders in " +
-        "@shipping.processing_time and delivery then takes @shipping.delivery_time — quote those " +
+        "@shipping.processing_time and delivery then takes @shipping.delivery_time. Quote those " +
         "when the order has not shipped yet or the carrier has no events for it. If the store has " +
         "not stated those windows, call /knowledge.search for the shipping policy rather than " +
         "repeating a vague phrase back to the customer. If the carrier's transitDays has already " +
         "passed @shipping.delayed_after, this is no longer a status question: do NOT reassure the " +
-        "customer the order is on schedule — treat it as a delivery problem and follow that " +
+        "customer the order is on schedule. Treat it as a delivery problem and follow that " +
         "playbook instead.",
     },
     {
@@ -239,21 +239,21 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       supplierMode: "escalate_and_wait",
       notes:
         "Verify the carrier status first with /tracking.lookup. There is no fixed number of days " +
-        "that counts as too long — this store treats a shipment as delayed once it has been in " +
+        "that counts as too long. This store treats a shipment as delayed once it has been in " +
         "transit for @shipping.delayed_after. transitDays past that is LATE. daysSinceLastScan " +
         "reaching it means the parcel has gone silent for as long as the store's whole delivery " +
-        "window — it is STALLED, a real delivery problem even while the status still reads in " +
+        "window. It is STALLED, a real delivery problem even while the status still reads in " +
         "transit. Treat an exception status as a real delivery problem too. Compare the carrier's " +
         "transitDays against the threshold; do not count the days yourself. Never judge lateness " +
         "from the customer's wording, and never invent a window: if the store has not stated a " +
         "threshold, call /knowledge.search for the shipping policy's delivery window, and if that " +
-        "documents none either — or either carrier number is null — you cannot confirm lateness, " +
+        "documents none either, or either carrier number is null, you cannot confirm lateness, " +
         "so say so rather than asserting the order is on schedule. On a real delivery problem, " +
         "escalate to the supplier to reship AND always send the customer a short reassuring reply " +
-        "in the same run — we are looking into it and will follow up — without promising a " +
+        'in the same run: "We are looking into it and will follow up," without promising a ' +
         "specific outcome yet. " +
         "Once the carrier's transitDays reaches @shipping.lost_after with the parcel still " +
-        "undelivered, treat it as genuinely lost: stop waiting and make the customer whole — a " +
+        "undelivered, treat it as genuinely lost: stop waiting and make the customer whole with a " +
         "reshipment via the supplier, or a refund if no replacement is possible. If there is no " +
         "supplier, offer a refund, and tell the customer it takes @returns.refund_processing_time " +
         "to appear.",
@@ -269,7 +269,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       notes:
         "Damage claims need evidence. If the customer's message has NO photos of the damage, " +
         "use /conversation.ask_customer ONCE to ask for clear photos from a couple of angles plus " +
-        "the outer packaging, then stop — the ticket waits for their reply. " +
+        "the outer packaging, then stop. The ticket waits for their reply. " +
         "If photos ARE attached, look up the order, then call /shopify.get_product for the damaged " +
         "line item and compare the customer's photos against the product's reference images. Record " +
         "your verdict with /ticket.update_context (productMatch: match / mismatch / uncertain). " +
@@ -285,7 +285,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "or unitPrice is ambiguous. Then tell the customer the refund takes " +
         "@returns.refund_processing_time to appear. A damaged item is our fault, not the " +
         "customer's: never make them pay to send it back, whatever the store's general " +
-        "return-shipping rule says, and do not hold them to @returns.return_window — that window " +
+        "return-shipping rule says, and do not hold them to @returns.return_window. That window " +
         "is for change-of-mind returns, not for goods that arrived broken. Use /knowledge.search " +
         "for anything the facts above don't cover (warranty terms, what to do with the damaged " +
         "item).",
@@ -294,7 +294,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       key: "wrong_item",
       label: "Wrong item received",
       recognition:
-        "The customer received a different product than they ordered — the wrong size, colour, or variant, or an entirely different item.",
+        "The customer received a different product than they ordered: the wrong size, colour, or variant, or an entirely different item.",
       builtin: true,
       enabled: true,
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
@@ -305,11 +305,11 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "(and the packing slip if handy), then stop. If a photo IS present, look up the order and call " +
         "/shopify.get_product for the ordered line item to compare what was sent against what was " +
         "ordered; record your verdict with /ticket.update_context (productMatch: match / mismatch / " +
-        "uncertain — here a mismatch SUPPORTS the customer, it means the photo really shows a different " +
-        "product). If you genuinely can't tell (uncertain), do NOT accuse or deny — flag it for the " +
+        "uncertain. Here a mismatch SUPPORTS the customer; it means the photo really shows a different " +
+        "product). If you genuinely can't tell (uncertain), do NOT accuse or deny. Flag it for the " +
         "store owner with /merchant.notify and draft a softer reply asking them to confirm the order and " +
         "what they received. When it is clearly the wrong item this is OUR error: we cover return " +
-        "shipping, and the fix is to send the correct product — escalate to the supplier to ship the " +
+        "shipping, and the fix is to send the correct product. Escalate to the supplier to ship the " +
         "right item and reassure the customer we are correcting it. Refund only if the correct item " +
         "can't be sent. On a multi-item order, refund only the wrong line item: use that lineItems " +
         "entry's unitPrice amount (times the affected quantity when more than one unit is clearly " +
@@ -334,7 +334,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "Check the order and confirm the request against the store's return policy: returns are " +
         "accepted within @returns.return_window of delivery, so if it is past that window explain " +
         "politely rather than refunding by default. When the item has to come back, be straight " +
-        "about who pays — @returns.return_shipping. When a refund is due, tell the customer it is " +
+        "about who pays: @returns.return_shipping. When a refund is due, tell the customer it is " +
         "issued @returns.refund_method and takes @returns.refund_processing_time to appear; quote " +
         "those rather than guessing, and never promise a payout route this store does not use. " +
         "Prefer a replacement or store credit before a full refund when appropriate. If the order " +
@@ -358,11 +358,11 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       notes:
         "Look up the order and check the store's cancellation policy with /knowledge.search. " +
         "An order is only cancellable while it is still in the warehouse, which is roughly " +
-        "@shipping.processing_time from when it was placed — so act on this quickly. " +
+        "@shipping.processing_time from when it was placed, so act on this quickly. " +
         "If it has NOT shipped yet (fulfillment unfulfilled and not already cancelled), propose " +
         "/order.cancel to cancel and refund it, and tell the customer the cancellation is done and " +
         "the refund takes @returns.refund_processing_time to appear. If it has ALREADY shipped " +
-        "(fulfilled / in transit / delivered), do NOT cancel — tell the customer it has already " +
+        "(fulfilled / in transit / delivered), do NOT cancel. Tell the customer it has already " +
         "shipped and can no longer be cancelled, and that if they would like a refund they can " +
         "return the order to us within @returns.return_window of delivery and we will refund it " +
         "per our return policy.",
@@ -380,14 +380,14 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       supplierMode: "escalate_and_wait",
       notes:
         "Look up the order first. The address is only editable until the order leaves the " +
-        "warehouse, which is about @shipping.processing_time from when it was placed — so treat " +
+        "warehouse, which is about @shipping.processing_time from when it was placed, so treat " +
         "this as urgent and do not sit on it. If it has NOT shipped yet (no fulfillments and not " +
         "cancelled): when the customer already gave the complete new address, update it with " +
         "/order.update_shipping_address and confirm the change; when they did not, ask them for the " +
         "full new address (street, city, state/province, postal code, country) with " +
-        "/conversation.ask_customer and update it once they reply — never guess or fill in missing " +
+        "/conversation.ask_customer and update it once they reply. Never guess or fill in missing " +
         "parts yourself. If the order HAS already shipped, the address on the order can no longer " +
-        "redirect the parcel — do not edit it; escalate to the supplier with the customer's new " +
+        "redirect the parcel. Do not edit it; escalate to the supplier with the customer's new " +
         "address and wait for their answer before promising the customer anything.",
     },
     {

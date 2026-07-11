@@ -89,7 +89,7 @@ describe("MerchantNotificationService test layer", () => {
     const accountAlert: MerchantNotification = {
       kind: "llm_credits_low",
       title: "OpenRouter credits running low",
-      body: "Remaining balance is $3.20 — top up to keep the agent running.",
+      body: "Remaining balance is $3.20. Top up to keep the agent running.",
     };
     const result = await Effect.runPromise(
       Effect.provide(
