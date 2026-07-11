@@ -17,6 +17,267 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Store Facts + `@`-references in scenario notes** (designed 2026-07-10,
+      BUILT 2026-07-11 across slices 1–4, each committed with full `ci:local`
+      green). One deliberate scope cut: the legacy `missing-package-agent` prompt
+      was NOT rewritten to reference `@shipping.lost_after` — it is off the live
+      path (nothing auto-routes to it; the resolution agent's `delivery_issue`
+      scenario is the live path and DOES carry the ref) and its logic is
+      escalate-never-refund (`Never call refund.create`), so the make-whole
+      threshold doesn't map onto it. Optional follow-up if that specialist is
+      ever resurfaced. Lets a merchant state structured operational facts once and
+      reference them by name inside a scenario playbook, so the load-bearing
+      number lives in exactly one place and the scenario prose stays in sync with
+      it by construction. Generalizes the `shippingProfile` header pattern.
+      - **Vocabulary — Facts vs Policy (deliberate, load-bearing).** "Policy" is
+        already taken in this codebase for the ENFORCEMENT structures
+        (`refundPolicy`, `discountPolicy`, `resolutionPolicy`, `ScenarioPolicy`,
+        `RefundPolicyMode`) — the walls `PermissionService`/the runtime enforce.
+        **Facts** are the merchant's stated operational *grounding* facts the
+        agent may quote (return window, who pays return shipping, refund method,
+        processing times, delay/investigation thresholds). Keeping the two nouns
+        distinct is the whole point — it draws the line the design depends on. Do
+        NOT name any new block `*Policy`.
+      - **Three homes — a fact field belongs to exactly one, and mixing them is
+        the drift bug this design prevents:**
+        1. **Enforcement policy (already exists — never re-store as a Fact).**
+           Refund approval threshold = `refundPolicy.askAboveMinorUnits` /
+           `denyAboveMinorUnits` (`/settings/refund-policy`). "Can cancel before
+           ship? Y/N" = `order_cancellation` scenario `enabled` + `order.cancel`
+           permission. "Address change on unshipped: agent directly / through
+           you" = `shipping_address_update` → `order.update_shipping_address`
+           permission `allow` vs `ask`. "Address change once shipped: check
+           carrier/supplier first" = that scenario's `supplierMode:
+           escalate_and_wait` + notes. These are walls; a contradicting sentence
+           can only make the model promise something the wall blocks. The Facts
+           forms DEEP-LINK to these pages, they do not copy the value.
+        2. **Facts blocks (new — structured, decoded, header-injected, like
+           `shippingProfile`).** The numbers/enums a scenario branches on:
+           return window (days), return-shipping payer, refund method, refund
+           processing time to quote, lost-package investigation days, and
+           (optionally) damaged/wrong-item default resolution. Decoded
+           all-or-nothing on required fields (a half-written block ⇒ `null` ⇒
+           the pre-existing `knowledge.search` fallback), each optional field
+           degrading individually — same discipline as `decodeShippingProfile`.
+        3. **Free-text knowledge doc (already exists — paste/URL).** Pure prose:
+           return condition, return address, non-returnable-items list, exchange
+           details, partial-refund nuance.
+      - **New Facts blocks + fields.**
+        - `returnsFacts` (new `tenants.settings` block): `returnWindowDays`
+          (required, the only all-or-nothing field), `returnShippingPayer`
+          (`customer|merchant|depends`), `refundMethod`
+          (`original|store_credit|customer_choice`), `refundProcessingTime`
+          (string the agent quotes). Optional fields omit from the header when
+          unset (a bare "Refund method:" reads as a default — same rule as the
+          shipping header).
+        - `shippingProfile` gains `lostPackageInvestigationDays` next to
+          `delayedAfterDays`. Two DIFFERENT numbers on one timeline:
+          `delayedAfterDays` = when `delivery_issue` opens a supplier check;
+          `lostPackageInvestigationDays` = when we stop waiting and make the
+          customer whole (refund/reship). This is the direct answer to "how long
+          do you investigate a lost package… they should both be in sync": one
+          number, one home, referenced by the `delivery_issue` /
+          `missing-package-agent` notes — never hardcoded, never in prose only.
+        - Open sub-decision: whether to rename the shipped `shippingProfile`
+          symbols to `shippingFacts` for vocabulary consistency. The persisted
+          JSONB key is `shippingProfile`; renaming it needs a back-compat read or
+          a settings migration. Recommendation: keep the JSONB key, optionally
+          rename code symbols later — the token namespace (`@shipping.*`) is
+          independent of the storage key either way. Don't block this feature on
+          the rename.
+      - **`@`-reference system (the merchant-facing mechanism).**
+        - **Catalog is code-defined + single-source** (same spirit as
+          `TOOL_DISPLAY_NAMES`). Each referenceable field carries: an id
+          `{namespace}.{field}` (`@returns.return_window`, `@shipping.delivery_time`);
+          a dropdown label; an *inline-render* fn `TenantSettings → string | null`
+          (enum → sentence, like `CUSTOMS_DUTIES_SENTENCE`; distinct from the
+          header-line render); and a per-field neutral **fallback phrase** for
+          the null case. The `@` menu is generated from this catalog.
+        - **Grammar:** resolve `@ns` (whole-block summary) and `@ns.field` ONLY
+          when the id is in the catalog; leave every other `@…` (email addresses,
+          unknown ids) verbatim. An unknown id is treated as dangling.
+        - **Dangling ref is UNIDIRECTIONAL — one condition only.** A scenario
+          references a field; the field references nothing back, so the profile
+          can never be the dangling party. The single condition is "a scenario
+          ref resolves to `null`", reached two ways (author the ref before
+          filling the field, or clear the field after authoring the ref) — same
+          state, same rule. Consequence: **all validation/warning lives on the
+          scenario side.** The Facts editor needs to know nothing about who
+          references it. Resolution: substitute the field's fallback phrase AND
+          flag the scenario as carrying a dangling ref for a non-blocking
+          Scenarios-page warning. Do NOT hard-couple the two editors' validation.
+        - **Store the token, resolve on every render — never store resolved
+          text** (else editing a fact wouldn't update old notes, defeating the
+          point). This ENDS the `ScenarioPolicy.notes` "injected verbatim"
+          contract: `buildSystemPrompt` now runs the notes through
+          `resolveFactReferences(notes, tenantSettings)`. Behavior-changing →
+          own tests. The dashboard note preview resolves too, so the merchant
+          sees exactly the agent-visible text including the fallback state.
+        - **Headers coexist with refs.** The header injection
+          (`buildShippingProfileHeader` + a new returns-facts header) stays the
+          scenario-AGNOSTIC baseline (`where_is_order` and the base-prompt blocks
+          benefit with no note authoring). `@`-refs are for precise inlining at
+          the decision point inside one playbook. Accept minor header/inline
+          duplication for now; suppressing the header for a fully-inlined block
+          is a later optimization.
+        - **Enforcement values are read-only, auto-synced refs — not editable
+          through a note.** Include `@refunds.approval_threshold` sourced from
+          `refundPolicy` (auto-stays-in-sync with the wall, framed "this is what
+          your settings currently say"). Leave scenario permission toggles OUT of
+          the catalog for v1 — describing an allow/ask wall in prose invites the
+          merchant to think the note controls it.
+      - **Frontend scope.** v1: `@` in the notes textarea opens a catalog-driven
+        menu that inserts the plain token text at the cursor (no rich chips,
+        works in the existing `<textarea>`), plus a resolved-preview panel below
+        that shows the expansion and highlights dangling refs. Later: token chips
+        / inline dangling underline via a mention editor.
+      - **Coverage gaps (new scenarios).** `wrong_item` is a genuine gap (only
+        `damaged_product` exists) — add it as a built-in. Confirm "marked
+        delivered but never arrived" is intended to ride `delivery_issue` /
+        `missing-package-agent` (likely fine). "Change items before it ships" has
+        no tool — omit from v1.
+      - **Build order (TDD, own slices):** (1) plumbing —
+        `returnsFacts` type+decode+repo get/set+contract+API+KnowledgePage form,
+        add `lostPackageInvestigationDays` to shipping facts, returns-facts
+        header injection; (2) `factReferenceCatalog` + `resolveFactReferences`
+        (pure, unit-tested null/dangling contract) wired into `buildSystemPrompt`;
+        (3) frontend `@` menu + resolved preview + Scenarios-page dangling
+        warning; (4) `wrong_item` scenario + rewrite `delivery_issue` /
+        `missing-package` / returns notes to reference the new facts.
+      - **Slice 1 LANDED (2026-07-11).** All six sub-slices committed with full
+        `ci:local` green each time:
+        - `returns-facts.ts`: `ReturnsFacts` + `decodeReturnsFacts`
+          (`returnWindowDays` all-or-nothing; `returnShippingPayer`
+          `customer|merchant|depends`, `refundMethod`
+          `original|store_credit|customer_choice`, `refundProcessingTime`
+          degrade individually). Mirrors `decodeShippingProfile`.
+        - `shippingProfile` gained `lostPackageInvestigationDays` (optional,
+          degrades individually — an existing profile without it still decodes).
+          Threaded through decode / `parseShippingProfileInput` / contract /
+          api-client / Knowledge base form.
+        - Repo: `TenantSettings.returnsFacts` + `setReturnsFacts` (Tag + Test +
+          Live JSONB `||` merge + `getSettings` decode).
+        - API: `ReturnsFactsView` contract, `parseReturnsFactsInput`,
+          `POST /dashboard/returns-facts` (gated `knowledge.manage`), settings
+          read-back, `api.setReturnsFacts`.
+        - Header injection: `buildReturnsFactsHeader` into `buildSystemPrompt`
+          under the same `knowledge.search` gating as the shipping header;
+          `lostPackageInvestigationDays` surfaced in the shipping header
+          (make-the-customer-whole threshold, judged from the carrier's
+          tracking days — the elapsed number comes from 17track's `transitDays`,
+          never a client-side day calc; per user instruction).
+        - Knowledge base "Returns & refunds" form card.
+      - **Slice 2 LANDED (2026-07-11).** `packages/services/src/fact-references.ts`:
+        code-defined single-source `FACT_REFERENCE_CATALOG` (id, label,
+        inline-render fragment, neutral fallback per field) covering
+        `returns.*` (window / return_shipping / refund_method /
+        refund_processing_time), `shipping.*` (processing_time / delivery_time /
+        shipping_cost / customs / delayed_after / lost_after), the read-only
+        `refunds.approval_threshold` (rendered from `refundPolicy`, currency via
+        `Intl.NumberFormat`), and `@returns` / `@shipping` whole-block
+        summaries. `resolveFactReferences(text, settings)` → `{ resolved,
+        dangling }`: resolves catalog ids only; leaves emails verbatim; a
+        known-namespace typo is left verbatim BUT flagged dangling; an unset
+        field falls back to its neutral phrase AND is flagged dangling. Wired
+        into `buildSystemPrompt` over the whole composed body (injection-safe —
+        no customer text flows through the system prompt) — this ENDS the
+        `ScenarioPolicy.notes` injected-verbatim contract. Unit-tested +
+        buildSystemPrompt behavior tests. Exposed via the services barrel for
+        the dashboard preview (slice 3).
+      - **Slice 3 LANDED (2026-07-11).** Exposed the catalog + resolver to the
+        pure-api-client SPA via two endpoints (NOT a contract mirror — keeps
+        single-source): `GET /dashboard/fact-references` (the `{id, namespace,
+        field, label}` catalog for the menu) and
+        `POST /dashboard/fact-references/resolve` (`{text}` → `{resolved,
+        dangling}` against the caller's tenant settings), both gated
+        `settings.agents`, plus `FactReferenceEntryView` / `ResolvedReferencesView`
+        contracts and api-client methods. New `PlaybookNotesField` component
+        (controlled textarea, still form-`name`d so FormData submit is unchanged)
+        replaces the plain notes textarea in `ScenarioCard`: typing `@` opens a
+        catalog-driven menu (keyboard + mouse; anchored so it never fires inside
+        an email), inserts the plain `@id` token at the cursor, and a debounced
+        live preview shows the agent-visible resolved text with dangling refs
+        flagged (amber). Trigger detection is the pure `matchTokenAtCaret`
+        helper (unit-tested); endpoints covered by a settings integration
+        round-trip. The per-card preview's dangling flag IS the Scenarios-page
+        dangling warning (v1); a page-level banner summarizing all cards is a
+        possible later enhancement. (The menu originally opened under the whole
+        field, far from the caret; it is caret-anchored as of slice 5 below.)
+      - **Slice 4 REMAINS:**
+        - **Slice 4 (content):** add the `wrong_item` built-in scenario
+          (genuine gap — only `damaged_product` exists), and rewrite the
+          `delivery_issue` / `missing-package` / returns-related notes to
+          reference the new Facts (`@shipping.lost_after` compared to 17track's
+          `transitDays` — NOT a client-side day calc; `@returns.return_window`,
+          etc.). Merchant-editable built-in rule applies (customized notes
+          preserved; everyone else picks up the new default).
+      - **Slice 5 LANDED (2026-07-11) — Facts get their own page, and a
+        reference renders as a chip.**
+        - **Settings nav: Knowledge base is now a SECTION with two children,
+          Docs (`/settings/knowledge`) and Facts (`/settings/facts`).** They are
+          different jobs — prose the agent *searches* vs. numbers it *acts on* —
+          and burying the structured forms under a page called "documents" hid
+          them. `SettingsNavItem` gained `children`; a parent with children is a
+          label, NOT a link (`activeSettingsHref` always resolves to a child),
+          and it disappears entirely when a member can see none of its children.
+          The two fact forms moved off `KnowledgePage` to a new `FactsPage`;
+          Docs links across to Facts in its intro.
+        - **Form layout:** fields sit in two-column rows that TOP-align
+          (`sm:items-start`) instead of stretching, so a field carrying a hint no
+          longer pads out the height of the field beside it, and the two shipping
+          thresholds (delayed-after / lost-after) now pair up in one row instead
+          of stacking as two lonely `max-w-sm` inputs. Every field carries a hint
+          (an "Optional." where there's nothing to say) so the rows stay even.
+        - **`GET /dashboard/fact-references` now carries each entry's `value`** —
+          the tenant's current value for that fact, rendered by the SAME catalog
+          `render` fn the runtime uses — so a chip can read `Return window:
+          30 days` without a second round trip and cannot drift from the prompt.
+          `null` = the fact isn't set (what the chip and the warning flag). The
+          endpoint is no longer static; it reads tenant settings.
+        - **`PlaybookNotesField` is now a contenteditable chip editor**, not a
+          textarea. `@returns.return_window` renders inline as an atomic
+          `Return window: 30 days` chip (`contenteditable=false`, so backspace
+          removes the whole reference). Two pure inverse functions own the
+          mapping and their round-trip is unit-tested (jsdom): `buildNotesFragment`
+          (stored token text → chips) and `serializeNotes` (live editor → token
+          text, absorbing the `<div>`-per-line + bogus-`<br>` markup a browser
+          produces on Enter, and normalizing `&nbsp;`). **What is stored is still
+          the `@id` token** — resolve on render, never resolve-and-store — so
+          editing a fact still updates every note referencing it. The
+          contenteditable is not a form control, so a hidden input carries the
+          value to the unchanged FormData submit.
+        - **The resolved-text preview panel is GONE** (the chips ARE the preview
+          now); the amber **dangling-ref warning stays**, still resolved
+          server-side by the runtime's own resolver so it also catches a mistyped
+          id that never became a chip. Saving a fact invalidates
+          `qk.factReferences`, so chips repaint with the new value.
+        - Caret geometry got simpler: a contenteditable exposes a real caret rect
+          (`Range.getBoundingClientRect`), so the textarea mirror-div measurement
+          is gone. `clampCaretMenuLeft` survives unchanged.
+        - Added `jsdom` as a root devDependency — the SPA had no DOM test
+          environment, and the editor's DOM↔text mapping is the part that must
+          not regress. The test file opts in with `// @vitest-environment jsdom`;
+          the rest of the suite still runs in node.
+        - **Menu keyboard fix (2026-07-11).** Arrowing down re-selected the first
+          option: `onKeyUp` re-ran `syncMenu` for EVERY key, and `syncMenu` resets
+          the highlight (a new token means a new match list). The arrow had
+          already been handled on keydown and the caret never moved, so the sync
+          had nothing to learn and only undid the arrow. Same root cause made
+          Escape a no-op — the keyup reopened the menu it had just closed. An open
+          menu now marks the keydown it consumed (`menuHandledKeyRef`) and the
+          matching keyup skips the sync. Keys the menu does NOT consume still sync
+          (they move the caret, which is exactly what a sync is for).
+        - **The menu's keyboard behaviour is now covered** by two tests that mount
+          the real component (React `act` + `createRoot` — no testing-library in
+          this repo) and drive it with key events. Two jsdom limits are worked
+          around IN THE TEST, and neither touches what is asserted: jsdom does no
+          layout (`Range.getBoundingClientRect` is stubbed) and cannot focus a
+          contenteditable, so React's commit collapses the selection — the caret
+          is re-parked before each key, which is the state a browser is already in.
+        - **STILL not verified in a real browser** (no Playwright in this repo):
+          inserting a chip mid-sentence and pasting are unexercised. Worth a
+          click-through on `/settings/scenarios` before trusting it.
+
 - [x] Damaged-product handling on the scenario-resolution agent + order-scoped
       duplicate-photo guard (2026-07-10). The damaged-product specialist was
       orphaned by the resolution-agent cutover; its photo logic now lives where
