@@ -890,6 +890,13 @@ export interface ShippingProfileView {
   readonly shippingCost: string | null;
   readonly customsDuties: CustomsDutiesPayerView | null;
   readonly delayedAfterDays: number;
+  /**
+   * Whole days in transit past which the store stops waiting on a missing
+   * package and makes the customer whole (refund / reship) — a later point on
+   * the same timeline than `delayedAfterDays`. `null` when the merchant hasn't
+   * stated one.
+   */
+  readonly lostPackageInvestigationDays: number | null;
 }
 
 export interface TenantSettingsView {

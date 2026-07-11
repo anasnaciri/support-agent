@@ -34,6 +34,15 @@ export interface ShippingProfile {
    * never a value we infer.
    */
   readonly delayedAfterDays: number;
+  /**
+   * Whole days in transit past which the store STOPS waiting on a missing
+   * package and makes the customer whole (refund / reship), as opposed to
+   * `delayedAfterDays` which only opens a supplier check. A second, later point
+   * on the same timeline. Optional — `null` when the merchant hasn't said, so
+   * the `delivery_issue` / `missing-package-agent` notes fall back to
+   * `knowledge.search` for it rather than to a made-up number.
+   */
+  readonly lostPackageInvestigationDays: number | null;
 }
 
 /** Absent until the merchant fills the form. */
@@ -57,6 +66,16 @@ const text = (raw: unknown): string | null => {
   const v = raw.trim();
   return v === "" ? null : v.slice(0, SHIPPING_PROFILE_TEXT_MAX);
 };
+
+/**
+ * A sane whole day-count, clamped to the cap — or null when absent / not a
+ * positive integer. For the OPTIONAL day thresholds that degrade individually
+ * (a bad value drops to null rather than nulling the whole block).
+ */
+const optionalDays = (raw: unknown): number | null =>
+  typeof raw === "number" && Number.isInteger(raw) && raw >= 1
+    ? Math.min(raw, SHIPPING_PROFILE_MAX_DELAY_DAYS)
+    : null;
 
 /**
  * Decode the `shippingProfile` block of `tenants.settings`.
@@ -92,5 +111,6 @@ export const decodeShippingProfile = (
         ? (customs as CustomsDutiesPayer)
         : null,
     delayedAfterDays: Math.min(days, SHIPPING_PROFILE_MAX_DELAY_DAYS),
+    lostPackageInvestigationDays: optionalDays(r["lostPackageInvestigationDays"]),
   };
 };

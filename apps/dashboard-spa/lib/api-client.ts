@@ -817,6 +817,7 @@ export const api = {
       readonly shippingCost: string | null;
       readonly customsDuties: CustomsDutiesPayerView | null;
       readonly delayedAfterDays: number;
+      readonly lostPackageInvestigationDays: number | null;
     },
   ): Promise<CallResult> =>
     call("/shipping-profile", { method: "POST", body: input, ctx }),

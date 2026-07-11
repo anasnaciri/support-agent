@@ -778,12 +778,24 @@ export const parseShippingProfileInput = (
     return { ok: false, error: "invalid_delay_days" };
   }
 
+  // Optional second threshold — accept a number or a numeric string like the
+  // required one, but never reject the save over it: a bad value degrades to
+  // null inside `decodeShippingProfile`.
+  const rawLost = body["lostPackageInvestigationDays"];
+  const lostDays =
+    typeof rawLost === "number"
+      ? rawLost
+      : typeof rawLost === "string" && rawLost.trim() !== ""
+        ? Number(rawLost)
+        : rawLost;
+
   const profile = decodeShippingProfile({
     processingTime,
     deliveryTime,
     shippingCost: body["shippingCost"],
     customsDuties: body["customsDuties"],
     delayedAfterDays: days,
+    lostPackageInvestigationDays: lostDays,
   });
   // Unreachable given the guards above; a null here would mean the decoder and
   // this validator disagree, which must not silently persist a broken profile.

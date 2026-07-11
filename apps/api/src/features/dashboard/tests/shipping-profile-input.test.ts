@@ -21,6 +21,7 @@ describe("parseShippingProfileInput", () => {
         shippingCost: "Free over $50",
         customsDuties: "customer",
         delayedAfterDays: 14,
+        lostPackageInvestigationDays: null,
       },
     });
   });
@@ -39,7 +40,32 @@ describe("parseShippingProfileInput", () => {
         shippingCost: null,
         customsDuties: null,
         delayedAfterDays: 9,
+        lostPackageInvestigationDays: null,
       },
+    });
+  });
+
+  it("accepts the optional lost-package investigation threshold", () => {
+    // Merchant's second timeline point: when to stop waiting and make the
+    // customer whole. Optional and coerces a numeric string like the required
+    // threshold does; a bad value degrades to null rather than failing the save.
+    expect(
+      parseShippingProfileInput(body({ lostPackageInvestigationDays: 30 })),
+    ).toEqual({
+      ok: true,
+      profile: expect.objectContaining({ lostPackageInvestigationDays: 30 }),
+    });
+    expect(
+      parseShippingProfileInput(body({ lostPackageInvestigationDays: "45" })),
+    ).toEqual({
+      ok: true,
+      profile: expect.objectContaining({ lostPackageInvestigationDays: 45 }),
+    });
+    expect(
+      parseShippingProfileInput(body({ lostPackageInvestigationDays: "soon" })),
+    ).toEqual({
+      ok: true,
+      profile: expect.objectContaining({ lostPackageInvestigationDays: null }),
     });
   });
 

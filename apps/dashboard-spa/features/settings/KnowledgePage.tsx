@@ -235,6 +235,12 @@ function ShippingProfileForm({
   const [delayedAfterDays, setDelayedAfterDays] = useState(
     profile ? String(profile.delayedAfterDays) : "",
   );
+  const [lostPackageInvestigationDays, setLostPackageInvestigationDays] =
+    useState(
+      profile?.lostPackageInvestigationDays != null
+        ? String(profile.lostPackageInvestigationDays)
+        : "",
+    );
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -244,6 +250,7 @@ function ShippingProfileForm({
       readonly shippingCost: string | null;
       readonly customsDuties: CustomsDutiesPayerView | null;
       readonly delayedAfterDays: number;
+      readonly lostPackageInvestigationDays: number | null;
     }) => api.setShippingProfile(ctx, input),
     onSuccess: (res) => {
       if (res.status !== 200) {
@@ -272,6 +279,19 @@ function ShippingProfileForm({
       setError("Enter a whole number of days, 1 or more.");
       return;
     }
+    // Optional second threshold: blank clears it; a filled value must be sane.
+    let lostDays: number | null = null;
+    const lostRaw = lostPackageInvestigationDays.trim();
+    if (lostRaw !== "") {
+      const parsed = Number(lostRaw);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        setError(
+          "Enter a whole number of days, 1 or more, for when to make the customer whole (or leave it blank).",
+        );
+        return;
+      }
+      lostDays = parsed;
+    }
     setError(null);
     save.mutate({
       processingTime: processingTime.trim(),
@@ -279,6 +299,7 @@ function ShippingProfileForm({
       shippingCost: shippingCost.trim() || null,
       customsDuties: (customsDuties || null) as CustomsDutiesPayerView | null,
       delayedAfterDays: days,
+      lostPackageInvestigationDays: lostDays,
     });
   };
 
@@ -369,6 +390,30 @@ function ShippingProfileForm({
         <p id="delay-hint" className="text-xs text-muted-foreground">
           Your agents open a supplier check past this point instead of telling
           the customer the order is on schedule.
+        </p>
+      </div>
+
+      <div className="grid gap-2 sm:max-w-sm">
+        <Label htmlFor="lostPackageInvestigationDays">
+          After how many days in transit should a package be treated as lost?
+        </Label>
+        <Input
+          id="lostPackageInvestigationDays"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          placeholder="30"
+          disabled={pending}
+          aria-describedby="lost-hint"
+          value={lostPackageInvestigationDays}
+          onChange={(e) =>
+            setLostPackageInvestigationDays(e.currentTarget.value)
+          }
+        />
+        <p id="lost-hint" className="text-xs text-muted-foreground">
+          Past this point your agents stop waiting and make the customer whole —
+          a refund or reshipment — instead of only checking with the supplier.
+          Optional; leave blank if you handle this case by case.
         </p>
       </div>
 

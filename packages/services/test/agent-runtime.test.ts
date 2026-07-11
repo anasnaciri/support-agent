@@ -222,6 +222,7 @@ const fullProfile: ShippingProfile = {
   shippingCost: "Free over $50, otherwise $4.95",
   customsDuties: "customer",
   delayedAfterDays: 14,
+  lostPackageInvestigationDays: null,
 };
 
 describe("buildSystemPrompt", () => {

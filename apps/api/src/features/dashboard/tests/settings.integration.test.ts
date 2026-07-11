@@ -419,6 +419,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       shippingCost: "Free over $50",
       customsDuties: "customer",
       delayedAfterDays: 14,
+      lostPackageInvestigationDays: 30,
     });
     expect(saved.status).toBe(200);
 
@@ -436,6 +437,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
       shippingCost: "Free over $50",
       customsDuties: "customer",
       delayedAfterDays: 14,
+      lostPackageInvestigationDays: 30,
     });
     // The shallow merge must not have clobbered a sibling settings block.
     expect(body.refundPolicy).toBeTruthy();

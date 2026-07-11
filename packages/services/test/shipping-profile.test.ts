@@ -12,6 +12,7 @@ const full: ShippingProfile = {
   shippingCost: "Free over $50, otherwise $4.95",
   customsDuties: "customer",
   delayedAfterDays: 14,
+  lostPackageInvestigationDays: 30,
 };
 
 describe("decodeShippingProfile", () => {
@@ -51,6 +52,7 @@ describe("decodeShippingProfile", () => {
       shippingCost: null,
       customsDuties: null,
       delayedAfterDays: 10,
+      lostPackageInvestigationDays: null,
     });
   });
 
@@ -100,6 +102,27 @@ describe("decodeShippingProfile", () => {
     expect(
       decodeShippingProfile({ ...full, delayedAfterDays: 100_000 })
         ?.delayedAfterDays,
+    ).toBe(SHIPPING_PROFILE_MAX_DELAY_DAYS);
+  });
+
+  it("keeps lostPackageInvestigationDays optional and degrades a bad value to null", () => {
+    // A separate number on the same timeline: when we stop waiting and make the
+    // customer whole. New field, so an existing profile without it still
+    // decodes — it degrades individually rather than nulling the whole block.
+    const { lostPackageInvestigationDays: _omit, ...without } = full;
+    expect(decodeShippingProfile(without)?.lostPackageInvestigationDays).toBeNull();
+    for (const bad of [0, -3, 1.5, Number.NaN, Infinity, "30"]) {
+      expect(
+        decodeShippingProfile({ ...full, lostPackageInvestigationDays: bad })
+          ?.lostPackageInvestigationDays,
+      ).toBeNull();
+    }
+  });
+
+  it("clamps an absurd lost-package investigation threshold to the cap", () => {
+    expect(
+      decodeShippingProfile({ ...full, lostPackageInvestigationDays: 100_000 })
+        ?.lostPackageInvestigationDays,
     ).toBe(SHIPPING_PROFILE_MAX_DELAY_DAYS);
   });
 });
