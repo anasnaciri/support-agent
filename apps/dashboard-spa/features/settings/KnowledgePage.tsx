@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BookOpen, FileText, Link2, Pencil, Truck } from "lucide-react";
+import { BookOpen, FileText, Link2, Pencil, RotateCcw, Truck } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
@@ -21,6 +21,9 @@ import { ConfirmButton } from "@/features/tickets/ConfirmButton";
 import type {
   CustomsDutiesPayerView,
   KnowledgeDocumentSummaryView,
+  RefundMethodView,
+  ReturnShippingPayerView,
+  ReturnsFactsView,
   ShippingProfileView,
 } from "@support-agent/dashboard-contracts";
 
@@ -430,6 +433,154 @@ function ShippingProfileForm({
   );
 }
 
+// The store's structured returns facts. Like the shipping profile, the return
+// window is a number the agent branches on (in-policy vs not) rather than prose
+// it reads, and the payer / method / processing-time are values it quotes to the
+// customer — so they travel to the agent directly instead of through search.
+function ReturnsFactsForm({
+  facts,
+  ctx,
+}: {
+  readonly facts: ReturnsFactsView | null;
+  readonly ctx: Ctx;
+}) {
+  const qc = useQueryClient();
+  const [returnWindowDays, setReturnWindowDays] = useState(
+    facts ? String(facts.returnWindowDays) : "",
+  );
+  const [returnShippingPayer, setReturnShippingPayer] = useState<string>(
+    facts?.returnShippingPayer ?? "",
+  );
+  const [refundMethod, setRefundMethod] = useState<string>(
+    facts?.refundMethod ?? "",
+  );
+  const [refundProcessingTime, setRefundProcessingTime] = useState(
+    facts?.refundProcessingTime ?? "",
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: (input: {
+      readonly returnWindowDays: number;
+      readonly returnShippingPayer: ReturnShippingPayerView | null;
+      readonly refundMethod: RefundMethodView | null;
+      readonly refundProcessingTime: string | null;
+    }) => api.setReturnsFacts(ctx, input),
+    onSuccess: (res) => {
+      if (res.status !== 200) {
+        setError("Something went wrong. Please check the fields and try again.");
+        return;
+      }
+      setError(null);
+      toast.success("Returns details saved.");
+      void qc.invalidateQueries({ queryKey: qk.settings(ctx.workspaceId) });
+    },
+    onError: () => toast.warning("Something went wrong. Please try again."),
+  });
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const days = Number(returnWindowDays.trim());
+    if (!Number.isInteger(days) || days < 1) {
+      setError("Enter a whole number of days, 1 or more, for your return window.");
+      return;
+    }
+    setError(null);
+    save.mutate({
+      returnWindowDays: days,
+      returnShippingPayer:
+        (returnShippingPayer || null) as ReturnShippingPayerView | null,
+      refundMethod: (refundMethod || null) as RefundMethodView | null,
+      refundProcessingTime: refundProcessingTime.trim() || null,
+    });
+  };
+
+  const pending = save.isPending;
+  const selectClass =
+    "h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50";
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid gap-2 sm:max-w-sm">
+        <Label htmlFor="returnWindowDays">
+          How many days after delivery can a customer return an item?
+        </Label>
+        <Input
+          id="returnWindowDays"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          placeholder="30"
+          required
+          disabled={pending}
+          value={returnWindowDays}
+          onChange={(e) => setReturnWindowDays(e.currentTarget.value)}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="returnShippingPayer">
+            Return shipping — who pays?
+          </Label>
+          <select
+            id="returnShippingPayer"
+            disabled={pending}
+            value={returnShippingPayer}
+            onChange={(e) => setReturnShippingPayer(e.currentTarget.value)}
+            className={selectClass}
+          >
+            <option value="">Not specified</option>
+            <option value="customer">The customer pays</option>
+            <option value="merchant">We pay (free returns)</option>
+            <option value="depends">It depends</option>
+          </select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="refundMethod">How are refunds issued?</Label>
+          <select
+            id="refundMethod"
+            disabled={pending}
+            value={refundMethod}
+            onChange={(e) => setRefundMethod(e.currentTarget.value)}
+            className={selectClass}
+          >
+            <option value="">Not specified</option>
+            <option value="original">To the original payment method</option>
+            <option value="store_credit">As store credit</option>
+            <option value="customer_choice">The customer chooses</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:max-w-sm">
+        <Label htmlFor="refundProcessingTime">Refund processing time</Label>
+        <Input
+          id="refundProcessingTime"
+          placeholder="5–7 business days after we receive the item"
+          disabled={pending}
+          aria-describedby="refund-time-hint"
+          value={refundProcessingTime}
+          onChange={(e) => setRefundProcessingTime(e.currentTarget.value)}
+        />
+        <p id="refund-time-hint" className="text-xs text-muted-foreground">
+          What your agents tell a customer to expect once a refund is started.
+        </p>
+      </div>
+
+      {error ? (
+        <Alert variant="warning">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Button type="submit" disabled={pending}>
+        {pending ? "Saving…" : "Save returns details"}
+      </Button>
+    </form>
+  );
+}
+
 export function KnowledgePage() {
   const allowed = useRequirePermission("knowledge.view");
   const ctx = useWorkspaceCtx();
@@ -486,6 +637,33 @@ export function KnowledgePage() {
               // their stored values instead of keeping their initial "".
               key={settingsQuery.data?.shippingProfile ? "loaded" : "empty"}
               profile={settingsQuery.data?.shippingProfile ?? null}
+              ctx={ctx}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <RotateCcw className="size-4" aria-hidden />
+            Returns &amp; refunds
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
+          <p className="text-sm text-muted-foreground">
+            Your agents quote these when a customer wants to return an item or
+            asks for a refund, and use the return window to tell an in-policy
+            return from a late one — instead of guessing from your documents.
+          </p>
+          {settingsQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <ReturnsFactsForm
+              // Remount when the saved facts arrive so the inputs pick up their
+              // stored values instead of keeping their initial "".
+              key={settingsQuery.data?.returnsFacts ? "loaded" : "empty"}
+              facts={settingsQuery.data?.returnsFacts ?? null}
               ctx={ctx}
             />
           )}
