@@ -29,7 +29,10 @@ import type {
   ReturnShippingPayer,
   ReturnsFacts,
 } from "./returns-facts.js";
-import { resolveFactReferences } from "./fact-references.js";
+import {
+  resolveFactReferences,
+  type KnowledgeDocReference,
+} from "./fact-references.js";
 import type {
   ResolutionPolicy,
   ScenarioPolicy,
@@ -111,7 +114,7 @@ export const eventToTicketLookup = (event: DomainEvent): TicketLookup | null => 
  * The `[Store knowledge base — ...]` header (listing the tenant's document
  * titles) is added under the same shape when the agent declares
  * `knowledge.search` AND the tenant has at least one knowledge document
- * (`knowledgeTitles`, loaded once per tick).
+ * (`knowledgeDocs`, loaded once per tick).
  *
  * Missing-package-agent's BRANCH A is the first user of this header — its
  * prompt checks for the bracketed line and conditionally calls
@@ -273,7 +276,7 @@ export const buildReturnsFactsHeader = (facts: ReturnsFacts): string => {
 export const buildSystemPrompt = (
   agent: Pick<AgentConfig, "tools" | "promptTemplate">,
   tenantSettings: TenantSettings | null,
-  knowledgeTitles: ReadonlyArray<string> = [],
+  knowledgeDocs: ReadonlyArray<string | KnowledgeDocReference> = [],
   specialists: ReadonlyArray<HandoffSpecialist> = [],
 ): string => {
   const headers: string[] = [];
@@ -295,8 +298,10 @@ export const buildSystemPrompt = (
   const usesKnowledgeTool = agent.tools.some(
     (t) => (t as string) === "knowledge.search",
   );
-  if (usesKnowledgeTool && knowledgeTitles.length > 0) {
-    const titles = knowledgeTitles.map((t) => `"${t}"`).join(", ");
+  if (usesKnowledgeTool && knowledgeDocs.length > 0) {
+    const titles = knowledgeDocs
+      .map((d) => `"${typeof d === "string" ? d : d.title}"`)
+      .join(", ");
     headers.push(
       `[Store knowledge base — call knowledge.search to read: ${titles}]`,
     );
@@ -348,7 +353,13 @@ export const buildSystemPrompt = (
   // entirely merchant/runtime-authored (no customer text flows through here),
   // and only catalog ids resolve, so this is injection-safe. A dangling ref
   // falls back to a neutral phrase; the merchant sees the warning in the editor.
-  const body = resolveFactReferences(composed, tenantSettings).resolved;
+  const body = resolveFactReferences(
+    composed,
+    tenantSettings,
+    knowledgeDocs.filter(
+      (d): d is KnowledgeDocReference => typeof d !== "string",
+    ),
+  ).resolved;
   // Prefix the untrusted-content preamble so the model knows that fenced
   // customer text and every tool result are data, not instructions
   // (prompt-injection mitigation). buildInitialMessages / tool-result

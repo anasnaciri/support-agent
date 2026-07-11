@@ -2,7 +2,10 @@
  * `@`-reference catalog + resolver — the merchant-facing mechanism that lets a
  * scenario note reference a store Fact by name (`@returns.return_window`,
  * `@shipping.delivery_time`) so the load-bearing value lives in exactly ONE
- * home and the prose stays in sync with it by construction.
+ * home and the prose stays in sync with it by construction. Tenant knowledge
+ * docs also flow through this resolver as `@docs.<document-id>` refs, but they
+ * are never inlined: they expand to an instruction to call `knowledge.search`
+ * for the named document.
  *
  * The catalog is code-defined and single-source (same spirit as
  * `TOOL_DISPLAY_NAMES`): each referenceable field carries an id, a dropdown
@@ -55,6 +58,23 @@ export interface FactReference {
    */
   readonly fallback: string;
 }
+
+export interface KnowledgeDocReference {
+  readonly id: string;
+  readonly title: string;
+}
+
+export const KNOWLEDGE_DOC_REFERENCE_NAMESPACE = "docs";
+
+export const knowledgeDocReferenceId = (doc: KnowledgeDocReference): string =>
+  `${KNOWLEDGE_DOC_REFERENCE_NAMESPACE}.${doc.id}`;
+
+const quoted = (value: string): string => JSON.stringify(value);
+
+export const renderKnowledgeDocReference = (
+  doc: KnowledgeDocReference,
+): string =>
+  `the knowledge-base document titled ${quoted(doc.title)} (call knowledge.search with query ${quoted(doc.title)} before using it)`;
 
 // ---- inline fragments (distinct from the header-line sentences) ----
 
@@ -280,10 +300,12 @@ export const FACT_NAMESPACES: ReadonlySet<string> = new Set(
   FACT_REFERENCE_CATALOG.map((e) => e.namespace),
 );
 
-// `@ns` or `@ns.field`, lowercase ids. The optional field group is only taken
-// when a `.` is immediately followed by a word — so `@returns.` (trailing punct)
-// still resolves the bare `@returns` summary.
-const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z][a-z0-9_]*))?/gi;
+// `@ns` or `@ns.field`. Fact fields are lowercase identifiers; doc refs use
+// `@docs.<uuid>`, so the field side also accepts digits and hyphens. The
+// optional field group is only taken when a `.` is immediately followed by a
+// token char — so `@returns.` (trailing punct) still resolves the bare
+// `@returns` summary.
+const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
 
 export interface ResolvedReferences {
   readonly resolved: string;
@@ -300,11 +322,17 @@ export interface ResolvedReferences {
 export const resolveFactReferences = (
   text: string,
   settings: TenantSettings | null,
+  knowledgeDocs: ReadonlyArray<KnowledgeDocReference> = [],
 ): ResolvedReferences => {
   const dangling: string[] = [];
+  const docByRef = new Map(
+    knowledgeDocs.map((doc) => [knowledgeDocReferenceId(doc).toLowerCase(), doc]),
+  );
   const resolved = text.replace(TOKEN, (match, ns: string, field?: string) => {
     const namespace = ns.toLowerCase();
     const id = field ? `${namespace}.${field.toLowerCase()}` : namespace;
+    const doc = docByRef.get(id);
+    if (doc) return renderKnowledgeDocReference(doc);
     const entry = factReferenceById.get(id);
     if (entry) {
       const rendered = entry.render(settings);
@@ -316,7 +344,12 @@ export const resolveFactReferences = (
     // field) — flag it dangling but leave the raw token so the merchant can see
     // and fix it. An unknown namespace is an email / unrelated mention — leave
     // it verbatim and never flag it.
-    if (FACT_NAMESPACES.has(namespace)) dangling.push(id);
+    if (
+      FACT_NAMESPACES.has(namespace) ||
+      namespace === KNOWLEDGE_DOC_REFERENCE_NAMESPACE
+    ) {
+      dangling.push(id);
+    }
     return match;
   });
   return { resolved, dangling };

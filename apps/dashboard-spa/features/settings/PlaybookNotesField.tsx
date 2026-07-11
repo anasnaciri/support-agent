@@ -13,7 +13,7 @@ type Catalog = ReadonlyMap<string, FactReferenceEntryView>;
 
 // An in-progress `@token` immediately before the caret. Anchored to start-of-
 // text or whitespace so it never fires inside an email address (`user@…`).
-const TOKEN_AT_CARET = /(?:^|\s)@([a-z0-9_.]*)$/i;
+const TOKEN_AT_CARET = /(?:^|\s)@([a-z0-9_.-]*)$/i;
 
 /**
  * The in-progress `@`-token immediately before the caret, or null when there
@@ -52,9 +52,10 @@ export const clampCaretMenuLeft = (
 // live editor → token text). They are inverses, and their round-trip is tested.
 
 // Mirrors the resolver's grammar in packages/services/src/fact-references.ts:
-// `@ns` or `@ns.field`. Anything else — an email, an unknown id — is left as
-// plain text and never becomes a chip.
-const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z][a-z0-9_]*))?/gi;
+// `@ns` or `@ns.field`. Fact fields are lowercase identifiers; doc refs use
+// `@docs.<uuid>`, so the field side also accepts digits and hyphens. Anything
+// else — an email, an unknown id — is left as plain text and never becomes a chip.
+const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
 
 /** What a chip reads as: the fact's friendly name and this store's value. */
 export const chipText = (entry: FactReferenceEntryView): string =>
@@ -163,16 +164,16 @@ const EDITOR_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1";
 
 /**
- * The scenario "Playbook notes" editor. The merchant writes prose; a reference
- * to a store Fact is rendered inline as a `Return window: 30 days` chip, so the
- * note reads as the agent will read it without the merchant having to hold the
- * `@returns.return_window` spelling in their head.
+ * The scenario "Playbook notes" editor. The merchant writes prose; references
+ * to store Facts and knowledge docs render inline as chips, so the note reads
+ * close to the agent-visible instruction without the merchant having to hold
+ * token spellings like `@returns.return_window` in their head.
  *
  * What is stored is still the plain `@id` token (see `serializeNotes`) — resolve
- * on render, never resolve-and-store, so editing a fact updates every note that
- * references it. Chips, the `@` menu, and the dangling warning are all driven by
- * the same server catalog + resolver the agent runtime uses, so what the
- * merchant sees can't drift from the agent's prompt.
+ * on render, never resolve-and-store, so editing a source updates every note
+ * that references it. Chips, the `@` menu, and the dangling warning are all
+ * driven by the same server catalog + resolver the agent runtime uses, so what
+ * the merchant sees can't drift from the agent's prompt.
  */
 export function PlaybookNotesField({
   name,
@@ -234,7 +235,9 @@ export function PlaybookNotesField({
     return [...catalog.values()]
       .filter(
         (e) =>
-          e.id.toLowerCase().includes(q) || e.label.toLowerCase().includes(q),
+          e.id.toLowerCase().includes(q) ||
+          e.label.toLowerCase().includes(q) ||
+          (e.value?.toLowerCase().includes(q) ?? false),
       )
       .slice(0, 8);
   }, [menuOpen, query, catalog]);
@@ -441,8 +444,8 @@ export function PlaybookNotesField({
       <input type="hidden" name={name} value={value} />
 
       <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-        Type <span className="font-mono">@</span> to insert a store fact (return
-        window, delivery time, …). It stays in sync when you update the fact.
+        Type <span className="font-mono">@</span> to insert a store fact or
+        knowledge doc. It stays in sync when you update the source.
       </p>
 
       {dangling.length > 0 ? (

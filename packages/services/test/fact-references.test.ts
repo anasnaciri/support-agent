@@ -125,6 +125,24 @@ describe("resolveFactReferences", () => {
     expect(dangling).toEqual([]);
   });
 
+  it("turns a knowledge-doc reference into a knowledge.search instruction without inlining the doc", () => {
+    const { resolved, dangling } = resolveFactReferences(
+      "For international orders, follow @docs.123e4567-e89b-12d3-a456-426614174000.",
+      withReturns,
+      [
+        {
+          id: "123e4567-e89b-12d3-a456-426614174000",
+          title: "International shipping policy",
+        },
+      ],
+    );
+    expect(resolved).toContain("knowledge.search");
+    expect(resolved).toContain("International shipping policy");
+    expect(resolved).not.toContain("@docs.");
+    expect(resolved).not.toContain("International shipments usually arrive");
+    expect(dangling).toEqual([]);
+  });
+
   it("is a no-op on text with no references", () => {
     const text = "Just plain guidance with no tokens.";
     expect(resolveFactReferences(text, withReturns)).toEqual({

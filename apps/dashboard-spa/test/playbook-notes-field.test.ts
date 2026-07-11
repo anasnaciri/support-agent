@@ -60,6 +60,11 @@ const CATALOG: ReadonlyArray<FactReferenceEntryView> = [
     "5–7 business days",
   ),
   entry("shipping.delivery_time", "Delivery time", null),
+  entry(
+    "docs.123e4567-e89b-12d3-a456-426614174000",
+    "Knowledge doc",
+    "International shipping policy",
+  ),
 ];
 
 const byId = new Map(CATALOG.map((e) => [e.id, e]));
@@ -106,6 +111,14 @@ describe("matchTokenAtCaret", () => {
 
   it("closes once the token is terminated by a space", () => {
     expect(matchTokenAtCaret("@returns.return_window ", 23)).toBeNull();
+  });
+
+  it("keeps hyphenated doc ids in the in-progress token", () => {
+    const value = "See @docs.123e4567-e89b";
+    expect(matchTokenAtCaret(value, value.length)).toEqual({
+      query: "docs.123e4567-e89b",
+      tokenStart: 4,
+    });
   });
 
   it("only considers text up to the caret, not after it", () => {
@@ -167,6 +180,19 @@ describe("buildNotesFragment", () => {
     expect(chips(editor)).toHaveLength(0);
     expect(editor.textContent).toBe(
       "Mail help@store.com or check @shipping.nonsense.",
+    );
+  });
+
+  it("renders a knowledge doc reference as a chip carrying the document id", () => {
+    const editor = render(
+      "Follow @docs.123e4567-e89b-12d3-a456-426614174000 for international orders.",
+    );
+    const [chip] = chips(editor);
+    expect(chip?.getAttribute("data-fact-ref")).toBe(
+      "docs.123e4567-e89b-12d3-a456-426614174000",
+    );
+    expect(chip?.textContent).toBe(
+      "Knowledge doc: International shipping policy",
     );
   });
 });

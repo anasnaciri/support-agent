@@ -596,7 +596,7 @@ export const api = {
   resolutionPolicy: (ctx: CallCtx): Promise<ResolutionPolicyView> =>
     okBody("/resolution-policy", ctx) as Promise<ResolutionPolicyView>,
 
-  // The @-reference catalog that drives the scenario-notes menu (static).
+  // The @-reference catalog that drives the scenario-notes menu.
   factReferences: async (
     ctx: CallCtx,
   ): Promise<ReadonlyArray<FactReferenceEntryView>> =>
@@ -604,8 +604,8 @@ export const api = {
       (await okBody("/fact-references", ctx)) as FactReferencesResponse
     ).entries,
 
-  // Resolve @-references in a note against this tenant's facts, for the live
-  // preview + dangling-ref warning. Mirrors the resolver the runtime uses.
+  // Resolve @-references in a note against this tenant's facts and knowledge
+  // docs, for the live warning. Mirrors the resolver the runtime uses.
   resolveFactReferences: async (
     ctx: CallCtx,
     text: string,

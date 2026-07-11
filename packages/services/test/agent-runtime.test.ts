@@ -317,6 +317,21 @@ describe("buildSystemPrompt", () => {
     );
   });
 
+  it("resolves @docs references in the system prompt into knowledge.search instructions", () => {
+    const docId = "123e4567-e89b-12d3-a456-426614174000";
+    const agent = baseAgent({
+      tools: ["knowledge.search", "conversation.reply"],
+      promptTemplate: `Base prompt. Follow @docs.${docId} for international orders.`,
+    });
+    const got = buildSystemPrompt(agent, null, [
+      { id: docId, title: "International shipping policy" },
+    ]);
+    expect(got).toContain("knowledge.search");
+    expect(got).toContain("International shipping policy");
+    expect(got).not.toContain(`@docs.${docId}`);
+    expect(got).not.toContain("International shipments usually arrive");
+  });
+
   it("omits the shipping-facts header when the agent doesn't use knowledge.search", () => {
     const agent = baseAgent({ tools: ["conversation.reply"] });
     expect(buildSystemPrompt(agent, makeSettings(null, fullProfile))).toBe(

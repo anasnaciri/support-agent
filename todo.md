@@ -17,6 +17,21 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Knowledge docs can be referenced with `@` in scenario notes**
+      (2026-07-11). Verified with
+      `pnpm test -- packages/services/test/fact-references.test.ts`,
+      `pnpm test -- packages/services/test/agent-runtime.test.ts -t "buildSystemPrompt"`,
+      `pnpm test -- apps/dashboard-spa/test/playbook-notes-field.test.ts`,
+      `pnpm vitest run apps/api/src/features/dashboard/tests/settings.integration.test.ts -t "fact-references"`
+      (DB-gated, skipped locally because `DATABASE_URL` was unset),
+      `pnpm build`, and
+      `pnpm --filter @support-agent/dashboard-spa build`. The existing
+      scenario-note `@` menu now includes tenant knowledge docs as stable
+      `@docs.<document-id>` references alongside Facts. Stored notes still keep
+      the raw token; at prompt-build time the token resolves to a short
+      instruction naming the document and telling the agent to call
+      `knowledge.search` with that title, without inlining the document body.
+
 - [x] **Scenarios page quick Facts sidebar** (2026-07-11). Verified with
       `pnpm test -- apps/dashboard-spa/test/scenarios-facts-sidebar.test.ts`,
       `pnpm --filter @support-agent/dashboard-spa build`, `pnpm build`, and a

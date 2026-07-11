@@ -497,6 +497,36 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(ids.has("refunds.approval_threshold")).toBe(true);
   });
 
+  it("GET /dashboard/fact-references includes knowledge docs as @-references", async () => {
+    if (!raw) return;
+    const created = await post("/dashboard/knowledge", {
+      title: "International shipping policy",
+      sourceType: "text",
+      content: "International shipments usually arrive in 10-15 days.",
+    });
+    expect(created.status).toBe(200);
+    const { id } = (await created.json()) as { readonly id: string };
+
+    const res = await get("/dashboard/fact-references");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly entries: ReadonlyArray<{
+        readonly id: string;
+        readonly namespace: string;
+        readonly field: string | null;
+        readonly label: string;
+        readonly value: string | null;
+      }>;
+    };
+    expect(body.entries).toContainEqual({
+      id: `docs.${id}`,
+      namespace: "docs",
+      field: id,
+      label: "Knowledge doc",
+      value: "International shipping policy",
+    });
+  });
+
   it("GET /dashboard/fact-references carries each fact's current value", async () => {
     if (!raw) return;
     // The editor renders a reference as a `label: value` chip, so the catalog

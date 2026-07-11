@@ -972,9 +972,10 @@ export interface ResolutionPolicyView {
 }
 
 /**
- * One `@`-referenceable store Fact, as surfaced to the scenario-notes `@` menu.
- * Mirror of the services `FactReference` (the menu is generated from the same
- * single-source catalog). `field` is null for a whole-block `@namespace` ref.
+ * One `@`-referenceable source, as surfaced to the scenario-notes `@` menu.
+ * Facts mirror the services `FactReference` catalog; knowledge docs are dynamic
+ * `docs.<document-id>` entries. `field` is null for a whole-block `@namespace`
+ * ref, and the document id for knowledge-doc refs.
  */
 export interface FactReferenceEntryView {
   readonly id: string;
@@ -982,10 +983,10 @@ export interface FactReferenceEntryView {
   readonly field: string | null;
   readonly label: string;
   /**
-   * This tenant's current value for the fact, as the agent would read it
-   * mid-sentence — the notes editor renders a reference as a `label: value`
-   * chip. Null when the backing fact isn't set, which is what the chip and the
-   * dangling-ref warning flag.
+   * This tenant's current value for the source, as the chip should display it:
+   * a fact's mid-sentence value, or a knowledge doc's current title. Null when
+   * the backing fact isn't set, which is what the chip and the dangling-ref
+   * warning flag.
    */
   readonly value: string | null;
 }
@@ -995,9 +996,10 @@ export interface FactReferencesResponse {
 }
 
 /**
- * The result of resolving `@`-references in a note against the tenant's Facts —
- * the exact agent-visible text plus the ids that did not resolve (unset field or
- * typo in a known namespace), for the non-blocking dangling-ref warning.
+ * The result of resolving `@`-references in a note against the tenant's facts
+ * and knowledge docs — the exact agent-visible text plus the ids that did not
+ * resolve (unset field, missing doc, or typo in a known namespace), for the
+ * non-blocking dangling-ref warning.
  */
 export interface ResolvedReferencesView {
   readonly resolved: string;

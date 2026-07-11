@@ -8,6 +8,8 @@ import {
   decodeShippingFacts,
   decodeReturnsFacts,
   FACT_REFERENCE_CATALOG,
+  KnowledgeBaseService,
+  knowledgeDocReferenceId,
   resolveFactReferences,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -902,14 +904,14 @@ export const handleDashboardReturnsFactsSet = async (
   return sendJson(res, 200, { ok: true, returnsFacts: parsed.facts });
 };
 
-// ---- Fact references (scenario-notes @-menu + live preview) ----
+// ---- Playbook @ references (scenario-notes menu + live preview) ----
 
-// GET /dashboard/fact-references — the code-defined catalog that drives the `@`
-// menu in the scenario-notes editor, each entry carrying THIS tenant's current
-// value so the editor can render a reference as a `label: value` chip (a null
-// value is a fact the merchant hasn't filled in yet). Single-source with the
-// runtime: the ids, labels and value fragments all come from
-// FACT_REFERENCE_CATALOG, so a chip can't drift from the agent's prompt.
+// GET /dashboard/fact-references — the catalog that drives the `@` menu in the
+// scenario-notes editor: code-defined store facts plus this tenant's knowledge
+// docs. Each entry carries THIS tenant's current value so the editor can render
+// a reference as a `label: value` chip (a null value is a fact the merchant
+// hasn't filled in yet). Fact ids, labels and value fragments come from
+// FACT_REFERENCE_CATALOG; docs use stable `docs.<document-id>` refs.
 export const handleDashboardFactReferences = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -918,12 +920,23 @@ export const handleDashboardFactReferences = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const settings = await Effect.runPromise(
+  const { settings, docs } = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
-        return yield* repo.getSettings(TenantId(auth.tenantId));
-      }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+        const kb = yield* KnowledgeBaseService;
+        const settings = yield* repo
+          .getSettings(TenantId(auth.tenantId))
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const docs = yield* kb
+          .list(TenantId(auth.tenantId))
+          .pipe(Effect.catchAll(() => Effect.succeed([])));
+        return { settings, docs };
+      }).pipe(
+        Effect.catchAll(() =>
+          Effect.succeed({ settings: null, docs: [] as const }),
+        ),
+      ),
       layer,
     ),
   );
@@ -933,15 +946,23 @@ export const handleDashboardFactReferences = async (
     field: e.field,
     label: e.label,
     value: e.render(settings),
-  }));
+  })).concat(
+    docs.map((doc) => ({
+      id: knowledgeDocReferenceId(doc),
+      namespace: "docs",
+      field: doc.id,
+      label: "Knowledge doc",
+      value: doc.title,
+    })),
+  );
   return sendJson(res, 200, { entries });
 };
 
 // POST /dashboard/fact-references/resolve — resolve `@`-references in a note
-// against THIS tenant's Facts, so the editor preview shows exactly the
-// agent-visible text (including the fallback state) and flags dangling refs.
-// Uses the same resolver the runtime does, so the preview can't drift from what
-// the agent actually sees.
+// against THIS tenant's facts and knowledge docs, so the editor warning mirrors
+// the agent-visible text (including the fallback state) and flags dangling refs.
+// Uses the same resolver the runtime does, so the dashboard can't drift from
+// what the agent actually sees.
 export const handleDashboardFactReferencesResolve = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -952,16 +973,27 @@ export const handleDashboardFactReferencesResolve = async (
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
   const body = parseJsonBody(req);
   const text = typeof body["text"] === "string" ? body["text"] : "";
-  const settings = await Effect.runPromise(
+  const { settings, docs } = await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
-        return yield* repo.getSettings(TenantId(auth.tenantId));
-      }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+        const kb = yield* KnowledgeBaseService;
+        const settings = yield* repo
+          .getSettings(TenantId(auth.tenantId))
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        const docs = yield* kb
+          .list(TenantId(auth.tenantId))
+          .pipe(Effect.catchAll(() => Effect.succeed([])));
+        return { settings, docs };
+      }).pipe(
+        Effect.catchAll(() =>
+          Effect.succeed({ settings: null, docs: [] as const }),
+        ),
+      ),
       layer,
     ),
   );
-  const { resolved, dangling } = resolveFactReferences(text, settings);
+  const { resolved, dangling } = resolveFactReferences(text, settings, docs);
   return sendJson(res, 200, { resolved, dangling });
 };
 

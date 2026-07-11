@@ -1430,19 +1430,19 @@ const AgentRuntimeLayer = Layer.effect(
             (yield* tenantRepo
               .getSettings(working.tenantId)
               .pipe(Effect.catchAll(() => Effect.succeed(null))));
-          // Knowledge-base document titles for the system-prompt header. Loaded
-          // once per tick (titles only — the `knowledge.search` tool pulls the
-          // bodies on demand). Absent service (test layers) → no titles; DB
-          // failures fall back to an empty list so the runtime keeps going with
-          // the bare prompt.
-          const knowledgeTitles: ReadonlyArray<string> = Option.isSome(
+          // Knowledge-base document summaries for the system-prompt header and
+          // `@docs.<id>` references. Loaded once per tick (titles only — the
+          // `knowledge.search` tool pulls the bodies on demand). Absent service
+          // (test layers) → no docs; DB failures fall back to an empty list so
+          // the runtime keeps going with the bare prompt.
+          const knowledgeDocs = Option.isSome(
             maybeKnowledge,
           )
             ? yield* maybeKnowledge.value
-                .listTitles(working.tenantId)
+                .list(working.tenantId)
                 .pipe(
                   Effect.catchAll(() =>
-                    Effect.succeed([] as ReadonlyArray<string>),
+                    Effect.succeed([] as ReadonlyArray<never>),
                   ),
                 )
             : [];
@@ -2544,7 +2544,7 @@ const AgentRuntimeLayer = Layer.effect(
                 system: buildSystemPrompt(
                   agent,
                   tenantSettings,
-                  knowledgeTitles,
+                  knowledgeDocs,
                   specialistsCallableFrom(allSpecialists, agent.id as string),
                 ),
                 messages,
