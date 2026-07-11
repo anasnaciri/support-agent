@@ -382,6 +382,30 @@ describe("buildSystemPrompt", () => {
     expect(withoutLost).not.toMatch(/lost/i);
   });
 
+  it("resolves @-references in the prompt body against the tenant's facts", () => {
+    // The scenario playbook bakes its notes into promptTemplate before
+    // buildSystemPrompt runs, so resolving the composed body catches the notes.
+    const agent = baseAgent({
+      tools: ["conversation.reply"],
+      promptTemplate:
+        "Accept the return if it is within @returns.return_window of delivery.",
+    });
+    const got = buildSystemPrompt(agent, makeSettings(null, null, fullReturns));
+    expect(got).toContain("30 days");
+    expect(got).not.toContain("@returns.return_window");
+  });
+
+  it("falls a dangling @-reference back to its neutral phrase", () => {
+    const agent = baseAgent({
+      tools: ["conversation.reply"],
+      promptTemplate: "Accept within @returns.return_window of delivery.",
+    });
+    // returnsFacts unset → the ref resolves to the fallback, never the raw token.
+    const got = buildSystemPrompt(agent, makeSettings(null, null, null));
+    expect(got).not.toContain("@returns.return_window");
+    expect(got).toContain("our standard return window");
+  });
+
   // ---- Returns facts header ----
 
   it("appends the returns-facts header only when the agent uses knowledge.search and one is configured", () => {

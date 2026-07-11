@@ -29,6 +29,7 @@ import type {
   ReturnShippingPayer,
   ReturnsFacts,
 } from "./returns-facts.js";
+import { resolveFactReferences } from "./fact-references.js";
 import type {
   ResolutionPolicy,
   ScenarioPolicy,
@@ -336,10 +337,18 @@ export const buildSystemPrompt = (
     );
   }
 
-  const body =
+  const composed =
     headers.length === 0
       ? agent.promptTemplate
       : `${agent.promptTemplate}\n\n${headers.join("\n\n")}`;
+  // Resolve `@`-references (`@returns.return_window`, …) against the tenant's
+  // Facts. Scenario notes bake into promptTemplate before this runs, so
+  // resolving the whole composed body catches them — this is what ends the
+  // `ScenarioPolicy.notes` "injected verbatim" contract. The system prompt is
+  // entirely merchant/runtime-authored (no customer text flows through here),
+  // and only catalog ids resolve, so this is injection-safe. A dangling ref
+  // falls back to a neutral phrase; the merchant sees the warning in the editor.
+  const body = resolveFactReferences(composed, tenantSettings).resolved;
   // Prefix the untrusted-content preamble so the model knows that fenced
   // customer text and every tool result are data, not instructions
   // (prompt-injection mitigation). buildInitialMessages / tool-result
