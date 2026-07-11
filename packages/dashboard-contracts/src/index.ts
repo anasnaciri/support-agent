@@ -899,6 +899,24 @@ export interface ShippingProfileView {
   readonly lostPackageInvestigationDays: number | null;
 }
 
+/** Who pays return shipping — mirror of the services `ReturnShippingPayer`. */
+export type ReturnShippingPayerView = "customer" | "merchant" | "depends";
+
+/** How a refund is issued — mirror of the services `RefundMethod`. */
+export type RefundMethodView = "original" | "store_credit" | "customer_choice";
+
+/**
+ * The store's structured returns/refund facts. `null` until the merchant
+ * configures one. Only `returnWindowDays` is required; the rest are `null`
+ * until stated.
+ */
+export interface ReturnsFactsView {
+  readonly returnWindowDays: number;
+  readonly returnShippingPayer: ReturnShippingPayerView | null;
+  readonly refundMethod: RefundMethodView | null;
+  readonly refundProcessingTime: string | null;
+}
+
 export interface TenantSettingsView {
   readonly notificationEmail: string | null;
   readonly refundPolicy: RefundPolicyView;
@@ -913,6 +931,8 @@ export interface TenantSettingsView {
   readonly cancellationRestock: boolean;
   /** The store's shipping profile; `null` until the merchant configures one. */
   readonly shippingProfile: ShippingProfileView | null;
+  /** The store's returns facts; `null` until the merchant configures one. */
+  readonly returnsFacts: ReturnsFactsView | null;
 }
 
 // ============================================================

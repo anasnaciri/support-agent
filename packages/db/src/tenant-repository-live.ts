@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import {
   decodeBlockedSenders,
   decodeShippingProfile,
+  decodeReturnsFacts,
   decodeResolutionPolicy,
   defaultRefundPolicy,
   defaultDiscountPolicy,
@@ -13,6 +14,7 @@ import {
   TenantSettings,
   type BlockedSenders,
   type ShippingProfile,
+  type ReturnsFacts,
   type DiscountPolicy,
   type DiscountPolicyMode,
   type LegalAcceptance,
@@ -222,6 +224,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly resolutionPolicy?: unknown;
                 readonly blockedSenders?: unknown;
                 readonly shippingProfile?: unknown;
+                readonly returnsFacts?: unknown;
               }
             | null;
           const notificationEmail =
@@ -266,6 +269,9 @@ export const TenantRepositoryLive = Layer.effect(
           const shippingProfile = decodeShippingProfile(
             settings?.shippingProfile,
           );
+          // Null for an unconfigured or half-written block — agents then fall
+          // back to knowledge.search for the return policy.
+          const returnsFacts = decodeReturnsFacts(settings?.returnsFacts);
           return new TenantSettings({
             notificationEmail,
             refundPolicy,
@@ -278,6 +284,7 @@ export const TenantRepositoryLive = Layer.effect(
             resolutionPolicy,
             blockedSenders,
             shippingProfile,
+            returnsFacts,
           });
         }),
 
@@ -514,6 +521,33 @@ export const TenantRepositoryLive = Layer.effect(
             catch: (cause) =>
               new TenantRepositoryDbError({
                 operation: "setShippingProfile",
+                cause,
+              }),
+          });
+          if (result.length === 0) {
+            return yield* Effect.fail(new TenantNotFound({ tenantId }));
+          }
+        }),
+
+      setReturnsFacts: (tenantId, facts: ReturnsFacts | null) =>
+        Effect.gen(function* () {
+          const db = yield* pickDb;
+          // Same shallow `||` JSONB merge as setShippingProfile. A `null` block
+          // writes JSON null, which `decodeReturnsFacts` reads back as
+          // "unconfigured" — the clear action.
+          const json = JSON.stringify({ returnsFacts: facts });
+          const result = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .update(tenants)
+                .set({
+                  settings: sql`${tenants.settings} || ${json}::jsonb`,
+                })
+                .where(eq(tenants.id, tenantId))
+                .returning({ id: tenants.id }),
+            catch: (cause) =>
+              new TenantRepositoryDbError({
+                operation: "setReturnsFacts",
                 cause,
               }),
           });

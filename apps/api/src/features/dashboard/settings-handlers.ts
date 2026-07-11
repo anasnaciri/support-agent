@@ -6,6 +6,7 @@ import {
   decodeResolutionPolicyUpdate,
   defaultBlockedSenders,
   decodeShippingProfile,
+  decodeReturnsFacts,
   defaultRefundPolicy,
   defaultDiscountPolicy,
   defaultResolutionPolicy,
@@ -16,6 +17,7 @@ import {
   type BlockedSenderEntry,
   type BlockedSenders,
   type ShippingProfile,
+  type ReturnsFacts,
   type LegalAcceptance,
   type ScenarioPolicy,
 } from "@support-agent/services";
@@ -376,6 +378,7 @@ export const handleDashboardSettings = async (
             legalAcceptance: null,
             cancellationRestock: true,
             shippingProfile: null,
+            returnsFacts: null,
           } as const),
         ),
       ),
@@ -393,6 +396,8 @@ export const handleDashboardSettings = async (
     cancellationRestock: settings.cancellationRestock !== false,
     // Null until the merchant fills the Knowledge base page's shipping form.
     shippingProfile: settings.shippingProfile ?? null,
+    // Null until the merchant fills the Knowledge base page's returns form.
+    returnsFacts: settings.returnsFacts ?? null,
   });
 };
 
@@ -826,6 +831,73 @@ export const handleDashboardShippingProfileSet = async (
     ),
   );
   return sendJson(res, 200, { ok: true, shippingProfile: parsed.profile });
+};
+
+// ---- Returns facts ----
+
+export type ReturnsFactsInput =
+  | { readonly ok: true; readonly facts: ReturnsFacts }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * Validate the returns-facts form body. Only `returnWindowDays` is required —
+ * it gets its own error code so the form can point at it; the payer, method,
+ * and processing time degrade to `null` rather than rejecting the save.
+ * Normalization is delegated to `decodeReturnsFacts`, the same decoder the agent
+ * runtime reads through, so what we persist is exactly what an agent later sees.
+ *
+ * Pure + exported for its own unit test.
+ */
+export const parseReturnsFactsInput = (
+  body: Record<string, unknown>,
+): ReturnsFactsInput => {
+  // A number input round-trips as text through some clients, so accept both.
+  const rawDays = body["returnWindowDays"];
+  const days =
+    typeof rawDays === "number"
+      ? rawDays
+      : typeof rawDays === "string" && rawDays.trim() !== ""
+        ? Number(rawDays)
+        : Number.NaN;
+  if (!Number.isInteger(days) || days < 1) {
+    return { ok: false, error: "invalid_return_window" };
+  }
+
+  const facts = decodeReturnsFacts({
+    returnWindowDays: days,
+    returnShippingPayer: body["returnShippingPayer"],
+    refundMethod: body["refundMethod"],
+    refundProcessingTime: body["refundProcessingTime"],
+  });
+  // Unreachable given the guard above; a null here would mean the decoder and
+  // this validator disagree, which must not silently persist a broken block.
+  if (!facts) return { ok: false, error: "invalid_returns_facts" };
+  return { ok: true, facts };
+};
+
+// POST /dashboard/returns-facts — replace the store's returns facts. Its own
+// permission-gated endpoint; the block is READ back through /dashboard/settings
+// alongside the other store policies.
+export const handleDashboardReturnsFactsSet = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateDashboard(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const parsed = parseReturnsFactsInput(parseJsonBody(req));
+  if (!parsed.ok) return sendJson(res, 400, { error: parsed.error });
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        yield* repo.setReturnsFacts(TenantId(auth.tenantId), parsed.facts);
+      }),
+      layer,
+    ),
+  );
+  return sendJson(res, 200, { ok: true, returnsFacts: parsed.facts });
 };
 
 // ---- Blocked senders ----

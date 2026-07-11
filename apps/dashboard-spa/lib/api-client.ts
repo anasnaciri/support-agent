@@ -9,6 +9,8 @@ import type {
   ApprovalsFilter,
   RefundPolicyMode,
   CustomsDutiesPayerView,
+  ReturnShippingPayerView,
+  RefundMethodView,
   DiscountPolicyMode,
   ApprovalsListResult,
   AuditEntry,
@@ -821,6 +823,17 @@ export const api = {
     },
   ): Promise<CallResult> =>
     call("/shipping-profile", { method: "POST", body: input, ctx }),
+
+  setReturnsFacts: (
+    ctx: CallCtx,
+    input: {
+      readonly returnWindowDays: number;
+      readonly returnShippingPayer: ReturnShippingPayerView | null;
+      readonly refundMethod: RefundMethodView | null;
+      readonly refundProcessingTime: string | null;
+    },
+  ): Promise<CallResult> =>
+    call("/returns-facts", { method: "POST", body: input, ctx }),
 
   setDiscountPolicy: (
     ctx: CallCtx,

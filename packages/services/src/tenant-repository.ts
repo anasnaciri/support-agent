@@ -3,6 +3,7 @@ import type { TenantId } from "@support-agent/agent-core";
 
 import type { BlockedSenders } from "./blocked-senders.js";
 import type { ShippingProfile } from "./shipping-profile.js";
+import type { ReturnsFacts } from "./returns-facts.js";
 
 // ============================================================
 // TenantRepository
@@ -677,6 +678,17 @@ export class TenantSettings extends Data.Class<{
    * this existed.
    */
   readonly shippingProfile?: ShippingProfile | null;
+  /**
+   * The store's structured returns/refund facts — return window, who pays
+   * return shipping, refund method, and the processing time to quote. Edited on
+   * the dashboard Knowledge base page. Optional on the class (existing
+   * construction sites don't ripple); the Live `getSettings` always populates it
+   * via `decodeReturnsFacts`, which yields `null` for an unconfigured or
+   * half-written block (only `returnWindowDays` is all-or-nothing). `null` means
+   * the agents fall back to searching the merchant's knowledge documents for the
+   * return policy, as they did before this existed.
+   */
+  readonly returnsFacts?: ReturnsFacts | null;
 }> {}
 
 export class TenantNotFound extends Data.TaggedError("TenantNotFound")<{
@@ -780,6 +792,16 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     readonly setShippingProfile: (
       tenantId: TenantId,
       profile: ShippingProfile | null,
+    ) => Effect.Effect<void, TenantRepositoryError>;
+
+    /**
+     * Replace the tenant's returns facts. `null` clears it, sending agents back
+     * to `knowledge.search` for the return policy. Same shallow JSONB merge as
+     * `setRefundPolicy` — unrelated settings are preserved.
+     */
+    readonly setReturnsFacts: (
+      tenantId: TenantId,
+      facts: ReturnsFacts | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
   }
 >() {}
@@ -903,6 +925,17 @@ export const TenantRepositoryTest = (
         store.set(
           tenantId,
           new TenantSettings({ ...prev, shippingProfile: profile }),
+        );
+        return Effect.void;
+      },
+      setReturnsFacts: (tenantId, facts) => {
+        const prev = store.get(tenantId);
+        if (!prev) {
+          return Effect.fail(new TenantNotFound({ tenantId }));
+        }
+        store.set(
+          tenantId,
+          new TenantSettings({ ...prev, returnsFacts: facts }),
         );
         return Effect.void;
       },

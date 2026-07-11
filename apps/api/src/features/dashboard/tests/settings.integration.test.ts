@@ -443,6 +443,47 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.refundPolicy).toBeTruthy();
   });
 
+  it("POST /dashboard/returns-facts round-trips through settings", async () => {
+    if (!raw) return;
+    const saved = await post("/dashboard/returns-facts", {
+      returnWindowDays: 30,
+      returnShippingPayer: "customer",
+      refundMethod: "original",
+      refundProcessingTime: "  5–7 business days  ",
+    });
+    expect(saved.status).toBe(200);
+
+    // Read back through the same endpoint the agent runtime's settings load
+    // uses, so this pins the JSONB `||` merge AND decodeReturnsFacts.
+    const res = await get("/dashboard/settings");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly returnsFacts: Record<string, unknown> | null;
+      readonly shippingProfile: unknown;
+    };
+    expect(body.returnsFacts).toEqual({
+      returnWindowDays: 30,
+      returnShippingPayer: "customer",
+      refundMethod: "original",
+      refundProcessingTime: "5–7 business days",
+    });
+  });
+
+  it("POST /dashboard/returns-facts 400s on a missing or nonsense return window", async () => {
+    if (!raw) return;
+    const bad = await post("/dashboard/returns-facts", {
+      returnShippingPayer: "customer",
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "invalid_return_window" });
+
+    const zero = await post("/dashboard/returns-facts", {
+      returnWindowDays: 0,
+    });
+    expect(zero.status).toBe(400);
+    expect(await zero.json()).toEqual({ error: "invalid_return_window" });
+  });
+
   it("POST /dashboard/shipping-profile 400s on a missing or nonsense delay threshold", async () => {
     if (!raw) return;
     const bad = await post("/dashboard/shipping-profile", {

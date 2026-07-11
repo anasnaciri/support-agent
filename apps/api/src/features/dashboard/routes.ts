@@ -45,6 +45,7 @@ import {
   handleDashboardBlockedSenders,
   handleDashboardBlockedSendersAdd,
   handleDashboardShippingProfileSet,
+  handleDashboardReturnsFactsSet,
   handleDashboardBlockedSendersRemove,
   handleDashboardAgentSystemPromptClear,
   handleDashboardAgentSystemPromptSet,
@@ -543,6 +544,12 @@ export const registerDashboardRoutes = (
     "/dashboard/shipping-profile",
     "Save the store's shipping profile",
     handleDashboardShippingProfileSet,
+    "knowledge.manage",
+  );
+  dashboardPost(
+    "/dashboard/returns-facts",
+    "Save the store's returns facts",
+    handleDashboardReturnsFactsSet,
     "knowledge.manage",
   );
   dashboardPost(
