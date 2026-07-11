@@ -122,6 +122,9 @@ const ORDER_PAYLOAD = {
             quantity: 2,
             sku: "MUG-01",
             variantTitle: null,
+            discountedUnitPriceSet: {
+              shopMoney: { amount: "14.99", currencyCode: "USD" },
+            },
             product: { id: "gid://shopify/Product/555" },
             image: { url: "https://cdn.shopify.com/s/files/mug.jpg" },
           },
@@ -223,6 +226,10 @@ describe("ShopifyServiceLive — getOrder", () => {
     expect(order.totalPrice).toEqual({ amount: "29.99", currencyCode: "USD" });
     expect(order.lineItems).toHaveLength(1);
     expect(order.lineItems[0]!.title).toBe("Mug");
+    expect(order.lineItems[0]!.unitPrice).toEqual({
+      amount: "14.99",
+      currencyCode: "USD",
+    });
     expect(order.lineItems[0]!.productId).toBe("gid://shopify/Product/555");
     expect(order.lineItems[0]!.imageUrl).toBe(
       "https://cdn.shopify.com/s/files/mug.jpg",
@@ -241,6 +248,7 @@ describe("ShopifyServiceLive — getOrder", () => {
       variables: Record<string, unknown>;
     };
     expect(body.query).toContain("query GetOrder");
+    expect(body.query).toContain("discountedUnitPriceSet");
     // Line-item images must be requested as CDN-resized thumbnails, not
     // full-size originals — the dashboard renders them at 36px.
     expect(body.query).toContain(

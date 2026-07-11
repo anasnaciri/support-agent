@@ -272,7 +272,11 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
         "is damaged, without committing to a refund amount yet. " +
         "When the damage is verified (productMatch = match), prefer a replacement via the supplier; " +
-        "refund only if no replacement is possible, and then tell the customer the refund takes " +
+        "refund only if no replacement is possible. On a multi-item order, refund only the damaged " +
+        "line item: use that lineItems entry's unitPrice amount (times the affected quantity when " +
+        "more than one unit is clearly damaged) as the partial refund amount for refund.create; " +
+        "do not infer a line amount from the order total, and ask/flag a human if the damaged item " +
+        "or unitPrice is ambiguous. Then tell the customer the refund takes " +
         "@returns.refund_processing_time to appear. A damaged item is our fault, not the " +
         "customer's: never make them pay to send it back, whatever the store's general " +
         "return-shipping rule says, and do not hold them to @returns.return_window — that window " +
@@ -301,8 +305,12 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "what they received. When it is clearly the wrong item this is OUR error: we cover return " +
         "shipping, and the fix is to send the correct product — escalate to the supplier to ship the " +
         "right item and reassure the customer we are correcting it. Refund only if the correct item " +
-        "can't be sent, and then tell the customer the refund takes @returns.refund_processing_time to " +
-        "appear. Check terms against the store's policy with knowledge.search before quoting them.",
+        "can't be sent. On a multi-item order, refund only the wrong line item: use that lineItems " +
+        "entry's unitPrice amount (times the affected quantity when more than one unit is clearly " +
+        "wrong) as the partial refund amount for refund.create; do not infer a line amount from the " +
+        "order total, and ask/flag a human if the affected item or unitPrice is ambiguous. Then tell " +
+        "the customer the refund takes @returns.refund_processing_time to appear. Check terms " +
+        "against the store's policy with knowledge.search before quoting them.",
     },
     {
       key: "refund_request",
@@ -323,9 +331,14 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "about who pays — @returns.return_shipping. When a refund is due, tell the customer it is " +
         "issued @returns.refund_method and takes @returns.refund_processing_time to appear; quote " +
         "those rather than guessing, and never promise a payout route this store does not use. " +
-        "Prefer a replacement or store credit before a full refund when appropriate, and use " +
-        "knowledge.search for anything the facts above don't cover (return address, " +
-        "non-returnable items, exchanges).",
+        "Prefer a replacement or store credit before a full refund when appropriate. If the order " +
+        "has multiple lineItems and the customer's complaint clearly names or matches one line item, " +
+        "you may offer a partial refund for that one line item using that line's unitPrice amount " +
+        "(times the affected quantity when they clearly identify more than one unit). When you queue " +
+        "the refund with refund.create, use that exact partial amount. Do not infer a line-item " +
+        "amount from the order total, and do not offer a one line item partial refund when the " +
+        "affected item or unitPrice is ambiguous. Use knowledge.search for anything the facts above " +
+        "don't cover (return address, non-returnable items, exchanges).",
     },
     {
       key: "order_cancellation",

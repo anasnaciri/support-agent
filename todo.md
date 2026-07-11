@@ -17,6 +17,22 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Scenario agent can suggest partial refunds** (2026-07-11). Verified
+      with `pnpm test -- packages/tools/test/shopify.test.ts`,
+      `pnpm test -- packages/providers/test/shopify-service-live.test.ts`,
+      `pnpm test -- packages/services/test/tenant-repository.test.ts`, and
+      `pnpm build`. `refund.recommend` now emits `partial_refund` with a
+      policy-capped amount when a full-order refund exceeds the tenant hard cap
+      instead of only returning `investigate`. `shopify.get_order` now exposes
+      each line item's `unitPrice` from Shopify `discountedUnitPriceSet`, so the
+      default scenario-resolution agent can offer a one-line-item partial refund
+      on multi-item orders without inferring from the order total. Built-in
+      `refund_request`, `damaged_product`, and `wrong_item` notes now tell the
+      scenario agent to use the affected line's `unitPrice` (times clearly
+      affected quantity) as the `refund.create` partial amount, and to ask/flag
+      a human when the affected item or price is ambiguous. Also pinned the
+      literal "Where is my order?" label/recognition mapping to `where_is_order`.
+
 - [x] **Store Facts + `@`-references in scenario notes** (designed 2026-07-10,
       BUILT 2026-07-11 across slices 1–4, each committed with full `ci:local`
       green). One deliberate scope cut: the legacy `missing-package-agent` prompt
@@ -1879,7 +1895,9 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       policy re-save (or the merge-on-read above) to reach existing tenants —
       for live tenants, edit /settings/resolution-policy directly. (The
       `where_is_order` supplierMode flip from `39ab74e` was superseded by the
-      general re-classification rule `d8b1ddc` and reverted.)
+      general re-classification rule `d8b1ddc` and reverted.) The 2026-07-11
+      partial-refund note updates for `refund_request`, `damaged_product`, and
+      `wrong_item` have the same stored-policy caveat.
 - [ ] If `supplier.escalate` is ever set to `auto`, the tool description
       ("must NOT send a customer reply" after escalated:true) suppresses the
       reassuring holding reply — reword the description before flipping any

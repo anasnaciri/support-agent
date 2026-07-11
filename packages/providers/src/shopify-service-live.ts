@@ -357,6 +357,7 @@ type GqlOrder = {
       readonly quantity: number;
       readonly sku: string | null;
       readonly variantTitle: string | null;
+      readonly discountedUnitPriceSet: { readonly shopMoney: GqlMoney } | null;
       readonly product: { readonly id: string } | null;
       readonly image: { readonly url: string } | null;
     }>;
@@ -384,6 +385,9 @@ const mapOrder = (o: GqlOrder): ShopifyOrder => ({
       quantity: n.quantity,
       sku: n.sku,
       variantTitle: n.variantTitle,
+      unitPrice: n.discountedUnitPriceSet
+        ? mapMoney(n.discountedUnitPriceSet.shopMoney)
+        : null,
       productId: n.product ? n.product.id : null,
       imageUrl: n.image?.url ?? null,
     }),
@@ -552,7 +556,7 @@ const ORDER_FIELDS = `
     name address1 address2 city province country zip phone
   }
   lineItems(first: 50) {
-    nodes { id title quantity sku variantTitle product { id } image { url(transform: { maxWidth: 96, maxHeight: 96 }) } }
+    nodes { id title quantity sku variantTitle discountedUnitPriceSet { shopMoney { amount currencyCode } } product { id } image { url(transform: { maxWidth: 96, maxHeight: 96 }) } }
   }
   fulfillments(first: 20) {
     id

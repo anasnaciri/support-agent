@@ -32,6 +32,12 @@ export type ShopifyLineItem = {
   readonly sku: string | null;
   readonly variantTitle: string | null;
   /**
+   * Per-unit line price after line discounts, in the order currency. Optional
+   * for older tests/provider fixtures; projected to the agent as `null` when
+   * unavailable so it never has to infer item price from the order total.
+   */
+  readonly unitPrice?: ShopifyMoney | null;
+  /**
    * GID of the product this line item was sold from
    * (`gid://shopify/Product/...`), or null for custom/deleted items.
    * Surfaced so an agent can pull the product's reference images via

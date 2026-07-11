@@ -525,6 +525,8 @@ describe("damaged_product built-in scenario", () => {
     // A mismatch is flagged to the merchant, not used to deny the customer.
     expect(notes).toContain("mismatch");
     expect(notes).toContain("merchant");
+    expect(notes).toContain("unitprice");
+    expect(notes).toContain("partial refund");
   });
 });
 
@@ -552,6 +554,8 @@ describe("wrong_item built-in scenario", () => {
     expect(notes).toContain("reassur");
     // Refund is the fallback, not the first move.
     expect(notes).toContain("refund only");
+    expect(notes).toContain("unitprice");
+    expect(notes).toContain("partial refund");
   });
 
   it("survives the write-path normalizer as a forced built-in", () => {
@@ -575,6 +579,14 @@ describe("built-in scenario notes reference store facts", () => {
     expect(notes).toContain("@shipping.delivery_time");
   });
 
+  it("keeps the literal where-is-my-order wording mapped to the where_is_order scenario", () => {
+    const scenario = byKey("where_is_order");
+    expect(scenario.label).toBe("Where is my order?");
+    expect(scenario.recognition?.toLowerCase()).toContain(
+      "where their order is",
+    );
+  });
+
   it("delivery_issue judges lateness by the stated delayed-after threshold", () => {
     const notes = byKey("delivery_issue").notes ?? "";
     expect(notes).toContain("@shipping.delayed_after");
@@ -594,6 +606,15 @@ describe("built-in scenario notes reference store facts", () => {
     expect(notes).toContain("@returns.return_shipping");
     expect(notes).toContain("@returns.refund_method");
     expect(notes).toContain("@returns.refund_processing_time");
+  });
+
+  it("refund_request can offer one line item's amount on multi-item orders", () => {
+    const notes = byKey("refund_request").notes ?? "";
+    expect(notes).toContain("lineItems");
+    expect(notes).toContain("unitPrice");
+    expect(notes.toLowerCase()).toContain("one line item");
+    expect(notes.toLowerCase()).toContain("partial refund");
+    expect(notes).toContain("refund.create");
   });
 
   it("wrong_item quotes the refund processing time via a fact reference", () => {

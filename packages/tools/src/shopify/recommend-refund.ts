@@ -71,6 +71,14 @@ const FREQUENT_REFUNDER_RATIO = 0.3;
 // without an FX rate).
 const HIGH_LTV_THRESHOLD_MINOR = 50_000;
 
+const moneyFromMinorUnits = (
+  minorUnits: number,
+  currencyCode: string,
+): ShopifyMoney => ({
+  amount: (minorUnits / 100).toFixed(2),
+  currencyCode,
+});
+
 export const computeRiskFlags = (
   history: CustomerRefundHistory,
   now: Date,
@@ -198,6 +206,18 @@ export const computeRefundRecommendation = (input: {
     };
   }
   if (parsedAmount.amountMinorUnits > policy.denyAboveMinorUnits) {
+    if (policy.denyAboveMinorUnits > 0) {
+      const partialAmount = moneyFromMinorUnits(
+        policy.denyAboveMinorUnits,
+        policy.currencyCode,
+      );
+      return {
+        recommendation: "partial_refund",
+        amount: partialAmount,
+        reasoning: `Full order total exceeds tenant's hard cap (${policy.denyAboveMinorUnits / 100} ${policy.currencyCode}); recommend a policy-capped partial refund instead.`,
+        riskFlags,
+      };
+    }
     return {
       recommendation: "investigate",
       amount: order.totalPrice,

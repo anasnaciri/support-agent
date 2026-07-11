@@ -86,6 +86,7 @@ const buildOrder = (id: string): ShopifyOrder => ({
       variantTitle: null,
       productId: "gid://shopify/Product/555",
       imageUrl: null,
+      unitPrice: { amount: "14.99", currencyCode: "USD" },
     },
   ],
   fulfillments: [
@@ -131,6 +132,7 @@ describe("shopify.get_order tool", () => {
       title: "Mug",
       quantity: 2,
       sku: "MUG-01",
+      unitPrice: { amount: "14.99", currencyCode: "USD" },
     });
     const fulfillments = result["fulfillments"] as ReadonlyArray<
       Record<string, unknown>
@@ -1175,7 +1177,7 @@ describe("refund.recommend — pure logic", () => {
     expect(d.riskFlags).toEqual([]);
   });
 
-  it("investigate when amount exceeds the hard cap (denyAbove)", () => {
+  it("recommends a policy-capped partial refund when the full amount exceeds the hard cap", () => {
     const d = computeRefundRecommendation({
       order: mkOrder({
         financialStatus: "paid",
@@ -1186,8 +1188,9 @@ describe("refund.recommend — pure logic", () => {
       history: emptyHistory,
       now,
     });
-    expect(d.recommendation).toBe("investigate");
-    expect(d.amount).toEqual({ amount: "999.99", currencyCode: "USD" });
+    expect(d.recommendation).toBe("partial_refund");
+    expect(d.amount).toEqual({ amount: "500.00", currencyCode: "USD" });
+    expect(d.reasoning).toContain("partial refund");
     expect(d.reasoning).toContain("hard cap");
   });
 

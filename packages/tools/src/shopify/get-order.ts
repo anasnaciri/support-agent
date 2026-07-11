@@ -71,6 +71,7 @@ export const ShopifyOrderOutput = Schema.Struct({
       title: Schema.String,
       quantity: Schema.Number,
       sku: Schema.NullOr(Schema.String),
+      unitPrice: Schema.NullOr(Money),
       productId: Schema.NullOr(Schema.String),
     }),
   ),
@@ -111,6 +112,7 @@ export const projectShopifyOrder = (
     title: li.title,
     quantity: li.quantity,
     sku: li.sku,
+    unitPrice: li.unitPrice ?? null,
     productId: li.productId,
   })),
   fulfillments: order.fulfillments.map((f) => ({
@@ -131,7 +133,7 @@ export const projectShopifyOrder = (
 export const shopifyGetOrder = defineTool({
   name: "shopify.get_order",
   description:
-    "Look up a Shopify order. Accepts the merchant-facing order name (`#1001`, with or without the leading `#`), the customer-facing confirmation number (a random alphanumeric code like `XPAV284CT` printed on the order confirmation email), the numeric Shopify internal id, or a `gid://shopify/Order/...` GID. Pass whatever identifier the customer gave verbatim — the tool tries the order name first and falls back to a confirmation-number lookup automatically. Returns the order (including its `confirmationNumber`) with line items, fulfillment status, financial status, and tracking info. Use this to answer 'where is my order?' questions — customers typically reference orders by name (`#1001`) or by the confirmation number from their email.",
+    "Look up a Shopify order. Accepts the merchant-facing order name (`#1001`, with or without the leading `#`), the customer-facing confirmation number (a random alphanumeric code like `XPAV284CT` printed on the order confirmation email), the numeric Shopify internal id, or a `gid://shopify/Order/...` GID. Pass whatever identifier the customer gave verbatim — the tool tries the order name first and falls back to a confirmation-number lookup automatically. Returns the order (including its `confirmationNumber`) with line items, each line item's `unitPrice` when available, fulfillment status, financial status, and tracking info. Use this to answer order questions and to price one-line-item partial refund offers without inferring from the order total.",
   inputSchema: Input,
   outputSchema: Output,
   risk: "read",
