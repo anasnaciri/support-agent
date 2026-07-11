@@ -2,7 +2,7 @@ import { Effect, FiberRef, Layer } from "effect";
 import { eq, sql } from "drizzle-orm";
 import {
   decodeBlockedSenders,
-  decodeShippingProfile,
+  decodeShippingFacts,
   decodeReturnsFacts,
   decodeResolutionPolicy,
   defaultRefundPolicy,
@@ -13,7 +13,7 @@ import {
   TenantRepositoryDbError,
   TenantSettings,
   type BlockedSenders,
-  type ShippingProfile,
+  type ShippingFacts,
   type ReturnsFacts,
   type DiscountPolicy,
   type DiscountPolicyMode,
@@ -223,7 +223,7 @@ export const TenantRepositoryLive = Layer.effect(
                 readonly cancellationRestock?: unknown;
                 readonly resolutionPolicy?: unknown;
                 readonly blockedSenders?: unknown;
-                readonly shippingProfile?: unknown;
+                readonly shippingFacts?: unknown;
                 readonly returnsFacts?: unknown;
               }
             | null;
@@ -266,9 +266,7 @@ export const TenantRepositoryLive = Layer.effect(
           );
           // Null for an unconfigured or half-written block — agents then fall
           // back to knowledge.search for the delivery window.
-          const shippingProfile = decodeShippingProfile(
-            settings?.shippingProfile,
-          );
+          const shippingFacts = decodeShippingFacts(settings?.shippingFacts);
           // Null for an unconfigured or half-written block — agents then fall
           // back to knowledge.search for the return policy.
           const returnsFacts = decodeReturnsFacts(settings?.returnsFacts);
@@ -283,7 +281,7 @@ export const TenantRepositoryLive = Layer.effect(
             cancellationRestock,
             resolutionPolicy,
             blockedSenders,
-            shippingProfile,
+            shippingFacts,
             returnsFacts,
           });
         }),
@@ -502,13 +500,13 @@ export const TenantRepositoryLive = Layer.effect(
           }
         }),
 
-      setShippingProfile: (tenantId, profile: ShippingProfile | null) =>
+      setShippingFacts: (tenantId, facts: ShippingFacts | null) =>
         Effect.gen(function* () {
           const db = yield* pickDb;
-          // Same shallow `||` JSONB merge as setRefundPolicy. A `null` profile
-          // writes JSON null into the block, which `decodeShippingProfile`
-          // reads back as "unconfigured" — that's the clear action.
-          const json = JSON.stringify({ shippingProfile: profile });
+          // Same shallow `||` JSONB merge as setRefundPolicy. A `null` block
+          // writes JSON null, which `decodeShippingFacts` reads back as
+          // "unconfigured" — that's the clear action.
+          const json = JSON.stringify({ shippingFacts: facts });
           const result = yield* Effect.tryPromise({
             try: () =>
               db
@@ -520,7 +518,7 @@ export const TenantRepositoryLive = Layer.effect(
                 .returning({ id: tenants.id }),
             catch: (cause) =>
               new TenantRepositoryDbError({
-                operation: "setShippingProfile",
+                operation: "setShippingFacts",
                 cause,
               }),
           });
@@ -532,7 +530,7 @@ export const TenantRepositoryLive = Layer.effect(
       setReturnsFacts: (tenantId, facts: ReturnsFacts | null) =>
         Effect.gen(function* () {
           const db = yield* pickDb;
-          // Same shallow `||` JSONB merge as setShippingProfile. A `null` block
+          // Same shallow `||` JSONB merge as setShippingFacts. A `null` block
           // writes JSON null, which `decodeReturnsFacts` reads back as
           // "unconfigured" — the clear action.
           const json = JSON.stringify({ returnsFacts: facts });

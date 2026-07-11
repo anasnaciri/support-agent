@@ -411,9 +411,9 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(after.length).toBe(0);
   });
 
-  it("POST /dashboard/shipping-profile round-trips through settings", async () => {
+  it("POST /dashboard/shipping-facts round-trips through settings", async () => {
     if (!raw) return;
-    const saved = await post("/dashboard/shipping-profile", {
+    const saved = await post("/dashboard/shipping-facts", {
       processingTime: "  1–2 business days  ",
       deliveryTime: "7–12 days",
       shippingCost: "Free over $50",
@@ -424,14 +424,14 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(saved.status).toBe(200);
 
     // Read back through the same endpoint the agent runtime's settings load
-    // uses, so this pins the JSONB `||` merge AND decodeShippingProfile.
+    // uses, so this pins the JSONB `||` merge AND decodeShippingFacts.
     const res = await get("/dashboard/settings");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      readonly shippingProfile: Record<string, unknown> | null;
+      readonly shippingFacts: Record<string, unknown> | null;
       readonly refundPolicy: unknown;
     };
-    expect(body.shippingProfile).toEqual({
+    expect(body.shippingFacts).toEqual({
       processingTime: "1–2 business days",
       deliveryTime: "7–12 days",
       shippingCost: "Free over $50",
@@ -459,7 +459,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       readonly returnsFacts: Record<string, unknown> | null;
-      readonly shippingProfile: unknown;
+      readonly shippingFacts: unknown;
     };
     expect(body.returnsFacts).toEqual({
       returnWindowDays: 30,
@@ -533,9 +533,9 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(body.dangling).toEqual([]);
   });
 
-  it("POST /dashboard/shipping-profile 400s on a missing or nonsense delay threshold", async () => {
+  it("POST /dashboard/shipping-facts 400s on a missing or nonsense delay threshold", async () => {
     if (!raw) return;
-    const bad = await post("/dashboard/shipping-profile", {
+    const bad = await post("/dashboard/shipping-facts", {
       processingTime: "1 day",
       deliveryTime: "5 days",
       delayedAfterDays: 0,
@@ -543,7 +543,7 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: "invalid_delay_days" });
 
-    const blank = await post("/dashboard/shipping-profile", {
+    const blank = await post("/dashboard/shipping-facts", {
       processingTime: "   ",
       deliveryTime: "5 days",
       delayedAfterDays: 7,

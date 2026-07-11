@@ -27,7 +27,7 @@
 
 import type { TenantSettings } from "./tenant-repository.js";
 import type { ReturnShippingPayer, RefundMethod } from "./returns-facts.js";
-import type { CustomsDutiesPayer } from "./shipping-profile.js";
+import type { CustomsDutiesPayer } from "./shipping-facts.js";
 
 /** One referenceable store Fact. `field: null` is the whole-block summary. */
 export interface FactReference {
@@ -95,7 +95,7 @@ const refundThresholdFragment = (settings: TenantSettings | null): string => {
 // ---- catalog ----
 
 const r = (settings: TenantSettings | null) => settings?.returnsFacts ?? null;
-const s = (settings: TenantSettings | null) => settings?.shippingProfile ?? null;
+const s = (settings: TenantSettings | null) => settings?.shippingFacts ?? null;
 
 /**
  * Field-level entries. Whole-block `@namespace` summaries are derived from these

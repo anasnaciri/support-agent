@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  SHIPPING_PROFILE_MAX_DELAY_DAYS,
-  SHIPPING_PROFILE_TEXT_MAX,
-  decodeShippingProfile,
-  type ShippingProfile,
-} from "../src/shipping-profile.js";
+  SHIPPING_FACTS_MAX_DELAY_DAYS,
+  SHIPPING_FACTS_TEXT_MAX,
+  decodeShippingFacts,
+  type ShippingFacts,
+} from "../src/shipping-facts.js";
 
-const full: ShippingProfile = {
+const full: ShippingFacts = {
   processingTime: "1–2 business days",
   deliveryTime: "7–12 days",
   shippingCost: "Free over $50, otherwise $4.95",
@@ -15,33 +15,33 @@ const full: ShippingProfile = {
   lostPackageInvestigationDays: 30,
 };
 
-describe("decodeShippingProfile", () => {
+describe("decodeShippingFacts", () => {
   it("round-trips a fully populated profile", () => {
-    expect(decodeShippingProfile({ ...full })).toEqual(full);
+    expect(decodeShippingFacts({ ...full })).toEqual(full);
   });
 
   it("treats an unconfigured profile as null", () => {
-    // A tenant that never opened the form has no `shippingProfile` key at all.
-    expect(decodeShippingProfile(undefined)).toBeNull();
-    expect(decodeShippingProfile(null)).toBeNull();
-    expect(decodeShippingProfile("not an object")).toBeNull();
-    expect(decodeShippingProfile([])).toBeNull();
+    // A tenant that never opened the form has no `shippingFacts` key at all.
+    expect(decodeShippingFacts(undefined)).toBeNull();
+    expect(decodeShippingFacts(null)).toBeNull();
+    expect(decodeShippingFacts("not an object")).toBeNull();
+    expect(decodeShippingFacts([])).toBeNull();
   });
 
   it("requires the three starred fields — a partial block decodes to null", () => {
     // Defaults-on-read must never invent a delivery window or a delay
     // threshold: a half-written block is no profile at all, which sends the
     // agent back to knowledge.search rather than to a made-up number.
-    expect(decodeShippingProfile({ ...full, processingTime: "" })).toBeNull();
-    expect(decodeShippingProfile({ ...full, deliveryTime: "   " })).toBeNull();
-    expect(decodeShippingProfile({ ...full, delayedAfterDays: null })).toBeNull();
+    expect(decodeShippingFacts({ ...full, processingTime: "" })).toBeNull();
+    expect(decodeShippingFacts({ ...full, deliveryTime: "   " })).toBeNull();
+    expect(decodeShippingFacts({ ...full, delayedAfterDays: null })).toBeNull();
     const { deliveryTime: _omit, ...missing } = full;
-    expect(decodeShippingProfile(missing)).toBeNull();
+    expect(decodeShippingFacts(missing)).toBeNull();
   });
 
   it("keeps the optional fields optional", () => {
     expect(
-      decodeShippingProfile({
+      decodeShippingFacts({
         processingTime: "1 day",
         deliveryTime: "5 days",
         delayedAfterDays: 10,
@@ -57,7 +57,7 @@ describe("decodeShippingProfile", () => {
   });
 
   it("trims text and drops a blank optional to null", () => {
-    const decoded = decodeShippingProfile({
+    const decoded = decodeShippingFacts({
       ...full,
       processingTime: "  1–2 business days  ",
       shippingCost: "   ",
@@ -67,17 +67,17 @@ describe("decodeShippingProfile", () => {
   });
 
   it("caps text fields rather than rejecting them", () => {
-    const decoded = decodeShippingProfile({
+    const decoded = decodeShippingFacts({
       ...full,
-      processingTime: "x".repeat(SHIPPING_PROFILE_TEXT_MAX + 50),
+      processingTime: "x".repeat(SHIPPING_FACTS_TEXT_MAX + 50),
     });
-    expect(decoded?.processingTime).toHaveLength(SHIPPING_PROFILE_TEXT_MAX);
+    expect(decoded?.processingTime).toHaveLength(SHIPPING_FACTS_TEXT_MAX);
   });
 
   it("rejects an unknown customs payer instead of guessing one", () => {
     // Guessing "customer" here would have the agent tell a buyer they owe
     // duties the merchant actually absorbs.
-    expect(decodeShippingProfile({ ...full, customsDuties: "someone" })).toEqual({
+    expect(decodeShippingFacts({ ...full, customsDuties: "someone" })).toEqual({
       ...full,
       customsDuties: null,
     });
@@ -85,7 +85,7 @@ describe("decodeShippingProfile", () => {
 
   it("accepts each customs payer", () => {
     for (const payer of ["customer", "merchant", "not_applicable"] as const) {
-      expect(decodeShippingProfile({ ...full, customsDuties: payer })).toEqual({
+      expect(decodeShippingFacts({ ...full, customsDuties: payer })).toEqual({
         ...full,
         customsDuties: payer,
       });
@@ -94,15 +94,15 @@ describe("decodeShippingProfile", () => {
 
   it("rejects a delay threshold that isn't a sane whole number of days", () => {
     for (const bad of [0, -3, 1.5, Number.NaN, Infinity, "14", null]) {
-      expect(decodeShippingProfile({ ...full, delayedAfterDays: bad })).toBeNull();
+      expect(decodeShippingFacts({ ...full, delayedAfterDays: bad })).toBeNull();
     }
   });
 
   it("clamps an absurd delay threshold to the cap", () => {
     expect(
-      decodeShippingProfile({ ...full, delayedAfterDays: 100_000 })
+      decodeShippingFacts({ ...full, delayedAfterDays: 100_000 })
         ?.delayedAfterDays,
-    ).toBe(SHIPPING_PROFILE_MAX_DELAY_DAYS);
+    ).toBe(SHIPPING_FACTS_MAX_DELAY_DAYS);
   });
 
   it("keeps lostPackageInvestigationDays optional and degrades a bad value to null", () => {
@@ -110,10 +110,10 @@ describe("decodeShippingProfile", () => {
     // customer whole. New field, so an existing profile without it still
     // decodes — it degrades individually rather than nulling the whole block.
     const { lostPackageInvestigationDays: _omit, ...without } = full;
-    expect(decodeShippingProfile(without)?.lostPackageInvestigationDays).toBeNull();
+    expect(decodeShippingFacts(without)?.lostPackageInvestigationDays).toBeNull();
     for (const bad of [0, -3, 1.5, Number.NaN, Infinity, "30"]) {
       expect(
-        decodeShippingProfile({ ...full, lostPackageInvestigationDays: bad })
+        decodeShippingFacts({ ...full, lostPackageInvestigationDays: bad })
           ?.lostPackageInvestigationDays,
       ).toBeNull();
     }
@@ -121,8 +121,8 @@ describe("decodeShippingProfile", () => {
 
   it("clamps an absurd lost-package investigation threshold to the cap", () => {
     expect(
-      decodeShippingProfile({ ...full, lostPackageInvestigationDays: 100_000 })
+      decodeShippingFacts({ ...full, lostPackageInvestigationDays: 100_000 })
         ?.lostPackageInvestigationDays,
-    ).toBe(SHIPPING_PROFILE_MAX_DELAY_DAYS);
+    ).toBe(SHIPPING_FACTS_MAX_DELAY_DAYS);
   });
 });

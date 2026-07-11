@@ -6,7 +6,7 @@ export * from "./ticket-repository.js";
 export * from "./ticket-lifecycle-writer.js";
 export * from "./tenant-repository.js";
 export * from "./blocked-senders.js";
-export * from "./shipping-profile.js";
+export * from "./shipping-facts.js";
 export * from "./returns-facts.js";
 export * from "./fact-references.js";
 export * from "./permission-service-live.js";

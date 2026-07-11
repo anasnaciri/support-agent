@@ -839,7 +839,7 @@ export const api = {
   ): Promise<CallResult> =>
     call("/cancellation-restock", { method: "POST", body: { restock }, ctx }),
 
-  setShippingProfile: (
+  setShippingFacts: (
     ctx: CallCtx,
     input: {
       readonly processingTime: string;
@@ -850,7 +850,7 @@ export const api = {
       readonly lostPackageInvestigationDays: number | null;
     },
   ): Promise<CallResult> =>
-    call("/shipping-profile", { method: "POST", body: input, ctx }),
+    call("/shipping-facts", { method: "POST", body: input, ctx }),
 
   setReturnsFacts: (
     ctx: CallCtx,

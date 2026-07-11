@@ -31,7 +31,7 @@ import {
   type AgentOverride,
   type ResolutionPolicy,
   type ScenarioPolicy,
-  type ShippingProfile,
+  type ShippingFacts,
   type ReturnsFacts,
   type SupplierEscalationSheet,
 } from "../src/index.js";
@@ -206,7 +206,7 @@ const baseAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
 
 const makeSettings = (
   sheet: SupplierEscalationSheet | null,
-  shippingProfile: ShippingProfile | null = null,
+  shippingFacts: ShippingFacts | null = null,
   returnsFacts: ReturnsFacts | null = null,
 ): TenantSettings =>
   new TenantSettings({
@@ -216,11 +216,11 @@ const makeSettings = (
     retentionDays: DEFAULT_RETENTION_DAYS,
     supplierEscalationSheet: sheet,
     legalAcceptance: null,
-    shippingProfile,
+    shippingFacts,
     returnsFacts,
   });
 
-const fullProfile: ShippingProfile = {
+const fullProfile: ShippingFacts = {
   processingTime: "1–2 business days",
   deliveryTime: "7–12 days",
   shippingCost: "Free over $50, otherwise $4.95",
@@ -317,24 +317,24 @@ describe("buildSystemPrompt", () => {
     );
   });
 
-  it("omits the shipping-profile header when the agent doesn't use knowledge.search", () => {
+  it("omits the shipping-facts header when the agent doesn't use knowledge.search", () => {
     const agent = baseAgent({ tools: ["conversation.reply"] });
     expect(buildSystemPrompt(agent, makeSettings(null, fullProfile))).toBe(
       withPreamble("Base prompt for testing."),
     );
   });
 
-  it("omits the shipping-profile header when the tenant hasn't configured one", () => {
+  it("omits the shipping-facts header when the tenant hasn't configured one", () => {
     const agent = baseAgent({ tools: ["knowledge.search"] });
     expect(buildSystemPrompt(agent, makeSettings(null, null))).toBe(
       withPreamble("Base prompt for testing."),
     );
   });
 
-  it("appends the shipping-profile header, carrying the merchant's delay threshold", () => {
+  it("appends the shipping-facts header, carrying the merchant's delay threshold", () => {
     const agent = baseAgent({ tools: ["knowledge.search", "tracking.lookup"] });
     const got = buildSystemPrompt(agent, makeSettings(null, fullProfile));
-    expect(got).toContain("[Store shipping profile");
+    expect(got).toContain("[Store shipping facts");
     expect(got).toContain("1–2 business days");
     expect(got).toContain("7–12 days");
     expect(got).toContain("Free over $50, otherwise $4.95");
@@ -345,7 +345,7 @@ describe("buildSystemPrompt", () => {
 
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {
     const agent = baseAgent({ tools: ["knowledge.search"] });
-    const render = (customsDuties: ShippingProfile["customsDuties"]) =>
+    const render = (customsDuties: ShippingFacts["customsDuties"]) =>
       buildSystemPrompt(agent, makeSettings(null, { ...fullProfile, customsDuties }));
 
     expect(render("customer")).toMatch(/customs[\s\S]{0,80}customer/i);
@@ -360,7 +360,7 @@ describe("buildSystemPrompt", () => {
       agent,
       makeSettings(null, { ...fullProfile, shippingCost: null }),
     );
-    expect(got).toContain("[Store shipping profile");
+    expect(got).toContain("[Store shipping facts");
     expect(got.toLowerCase()).not.toContain("shipping cost");
   });
 

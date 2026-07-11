@@ -44,7 +44,7 @@ import {
   handleDashboardAgentModelSet,
   handleDashboardBlockedSenders,
   handleDashboardBlockedSendersAdd,
-  handleDashboardShippingProfileSet,
+  handleDashboardShippingFactsSet,
   handleDashboardReturnsFactsSet,
   handleDashboardFactReferences,
   handleDashboardFactReferencesResolve,
@@ -543,9 +543,18 @@ export const registerDashboardRoutes = (
     "settings.refund_policy",
   );
   dashboardPost(
+    "/dashboard/shipping-facts",
+    "Save the store's shipping facts",
+    handleDashboardShippingFactsSet,
+    "knowledge.manage",
+  );
+  // Pre-rename path (2026-07-11), kept so a dashboard build cached from before
+  // the rename can still save. The SPA and the API deploy separately, so the
+  // new path alone would break saves for the length of that window.
+  dashboardPost(
     "/dashboard/shipping-profile",
-    "Save the store's shipping profile",
-    handleDashboardShippingProfileSet,
+    "Save the store's shipping facts (legacy path)",
+    handleDashboardShippingFactsSet,
     "knowledge.manage",
   );
   dashboardPost(

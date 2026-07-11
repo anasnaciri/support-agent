@@ -21,7 +21,7 @@ const settings = (
     retentionDays: DEFAULT_RETENTION_DAYS,
     supplierEscalationSheet: null,
     legalAcceptance: null,
-    shippingProfile: null,
+    shippingFacts: null,
     returnsFacts: null,
     ...over,
   });

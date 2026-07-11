@@ -97,13 +97,13 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toMatch(/destinationcountry[\s\S]{0,400}(differ|does not match|mismatch|different)/);
   });
 
-  it("prefers the store shipping profile's stated delay threshold over searching for a window", () => {
+  it("prefers the store shipping facts's stated delay threshold over searching for a window", () => {
     const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
-    // The runtime injects `[Store shipping profile: ...]` when the merchant has
+    // The runtime injects `[Store shipping facts: ...]` when the merchant has
     // configured one. It carries an exact day count, so the agent must not go
     // hunting through knowledge.search for a window that contradicts it.
-    expect(p).toContain("store shipping profile");
-    expect(p).toMatch(/shipping profile[\s\S]{0,400}knowledge\.search/);
+    expect(p).toContain("store shipping facts");
+    expect(p).toMatch(/shipping facts[\s\S]{0,400}knowledge\.search/);
     // Still no invented constant — the number comes from the merchant either
     // way, via the header when set or the policy documents when not.
     expect(p).not.toMatch(/\b(7|14|30)\s*(\+|or more)?\s*days\b/);

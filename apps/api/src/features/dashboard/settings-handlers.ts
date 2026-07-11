@@ -5,7 +5,7 @@ import {
   CustomAgentService,
   decodeResolutionPolicyUpdate,
   defaultBlockedSenders,
-  decodeShippingProfile,
+  decodeShippingFacts,
   decodeReturnsFacts,
   FACT_REFERENCE_CATALOG,
   resolveFactReferences,
@@ -18,7 +18,7 @@ import {
   TenantRepository,
   type BlockedSenderEntry,
   type BlockedSenders,
-  type ShippingProfile,
+  type ShippingFacts,
   type ReturnsFacts,
   type LegalAcceptance,
   type ScenarioPolicy,
@@ -379,7 +379,7 @@ export const handleDashboardSettings = async (
             supplierEscalationSheet: null,
             legalAcceptance: null,
             cancellationRestock: true,
-            shippingProfile: null,
+            shippingFacts: null,
             returnsFacts: null,
           } as const),
         ),
@@ -397,7 +397,7 @@ export const handleDashboardSettings = async (
     // cancellations" checkbox. Defaults-on-read in getSettings ⇒ true.
     cancellationRestock: settings.cancellationRestock !== false,
     // Null until the merchant fills the Knowledge base page's shipping form.
-    shippingProfile: settings.shippingProfile ?? null,
+    shippingFacts: settings.shippingFacts ?? null,
     // Null until the merchant fills the Knowledge base page's returns form.
     returnsFacts: settings.returnsFacts ?? null,
   });
@@ -744,26 +744,26 @@ export const handleDashboardAgentToolPermissionClear = async (
   return sendJson(res, 200, { ok: true });
 };
 
-// ---- Shipping profile ----
+// ---- Shipping facts ----
 
-export type ShippingProfileInput =
-  | { readonly ok: true; readonly profile: ShippingProfile }
+export type ShippingFactsInput =
+  | { readonly ok: true; readonly facts: ShippingFacts }
   | { readonly ok: false; readonly error: string };
 
 /**
- * Validate the shipping-profile form body. The three starred fields are
+ * Validate the shipping-facts form body. The three starred fields are
  * required and each gets its own error code so the form can point at the field
  * that failed; the optional ones degrade to `null` rather than rejecting the
  * save (a stale customs enum from an old tab shouldn't cost the merchant their
  * typing). Normalization — trim, cap, clamp — is delegated to
- * `decodeShippingProfile`, the same decoder the agent runtime reads through, so
+ * `decodeShippingFacts`, the same decoder the agent runtime reads through, so
  * what we persist is exactly what an agent will later see.
  *
  * Pure + exported for its own unit test.
  */
-export const parseShippingProfileInput = (
+export const parseShippingFactsInput = (
   body: Record<string, unknown>,
-): ShippingProfileInput => {
+): ShippingFactsInput => {
   const processingTime = body["processingTime"];
   if (typeof processingTime !== "string" || processingTime.trim() === "") {
     return { ok: false, error: "invalid_processing_time" };
@@ -787,7 +787,7 @@ export const parseShippingProfileInput = (
 
   // Optional second threshold — accept a number or a numeric string like the
   // required one, but never reject the save over it: a bad value degrades to
-  // null inside `decodeShippingProfile`.
+  // null inside `decodeShippingFacts`.
   const rawLost = body["lostPackageInvestigationDays"];
   const lostDays =
     typeof rawLost === "number"
@@ -796,7 +796,7 @@ export const parseShippingProfileInput = (
         ? Number(rawLost)
         : rawLost;
 
-  const profile = decodeShippingProfile({
+  const facts = decodeShippingFacts({
     processingTime,
     deliveryTime,
     shippingCost: body["shippingCost"],
@@ -805,15 +805,15 @@ export const parseShippingProfileInput = (
     lostPackageInvestigationDays: lostDays,
   });
   // Unreachable given the guards above; a null here would mean the decoder and
-  // this validator disagree, which must not silently persist a broken profile.
-  if (!profile) return { ok: false, error: "invalid_profile" };
-  return { ok: true, profile };
+  // this validator disagree, which must not silently persist a broken block.
+  if (!facts) return { ok: false, error: "invalid_shipping_facts" };
+  return { ok: true, facts };
 };
 
-// POST /dashboard/shipping-profile — replace the store's shipping profile.
-// Its own permission-gated endpoint; the profile is READ back through
+// POST /dashboard/shipping-facts — replace the store's shipping facts.
+// Its own permission-gated endpoint; the block is READ back through
 // /dashboard/settings alongside the other store policies.
-export const handleDashboardShippingProfileSet = async (
+export const handleDashboardShippingFactsSet = async (
   cfg: ApiConfig,
   layer: ApiLayer,
   req: FastifyRequest,
@@ -821,18 +821,18 @@ export const handleDashboardShippingProfileSet = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
-  const parsed = parseShippingProfileInput(parseJsonBody(req));
+  const parsed = parseShippingFactsInput(parseJsonBody(req));
   if (!parsed.ok) return sendJson(res, 400, { error: parsed.error });
   await Effect.runPromise(
     Effect.provide(
       Effect.gen(function* () {
         const repo = yield* TenantRepository;
-        yield* repo.setShippingProfile(TenantId(auth.tenantId), parsed.profile);
+        yield* repo.setShippingFacts(TenantId(auth.tenantId), parsed.facts);
       }),
       layer,
     ),
   );
-  return sendJson(res, 200, { ok: true, shippingProfile: parsed.profile });
+  return sendJson(res, 200, { ok: true, shippingFacts: parsed.facts });
 };
 
 // ---- Returns facts ----

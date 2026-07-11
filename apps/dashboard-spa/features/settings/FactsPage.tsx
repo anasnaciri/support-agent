@@ -19,7 +19,7 @@ import type {
   RefundMethodView,
   ReturnShippingPayerView,
   ReturnsFactsView,
-  ShippingProfileView,
+  ShippingFactsView,
 } from "@support-agent/dashboard-contracts";
 
 type Ctx = { readonly workspaceId: string };
@@ -47,11 +47,11 @@ const invalidateFacts = (
 // against, and the delay threshold is the exact point past which the agent opens
 // a supplier check, so both travel to the agent directly rather than through
 // search.
-function ShippingProfileForm({
+function ShippingFactsForm({
   profile,
   ctx,
 }: {
-  readonly profile: ShippingProfileView | null;
+  readonly profile: ShippingFactsView | null;
   readonly ctx: Ctx;
 }) {
   const qc = useQueryClient();
@@ -82,7 +82,7 @@ function ShippingProfileForm({
       readonly customsDuties: CustomsDutiesPayerView | null;
       readonly delayedAfterDays: number;
       readonly lostPackageInvestigationDays: number | null;
-    }) => api.setShippingProfile(ctx, input),
+    }) => api.setShippingFacts(ctx, input),
     onSuccess: (res) => {
       if (res.status !== 200) {
         setError("Something went wrong. Please check the fields and try again.");
@@ -268,7 +268,7 @@ function ShippingProfileForm({
   );
 }
 
-// The store's structured returns facts. Like the shipping profile, the return
+// The store's structured returns facts. Like the shipping facts, the return
 // window is a number the agent branches on (in-policy vs not) rather than prose
 // it reads, and the payer / method / processing-time are values it quotes to the
 // customer — so they travel to the agent directly instead of through search.
@@ -473,11 +473,11 @@ export function FactsPage() {
           {settingsQuery.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <ShippingProfileForm
+            <ShippingFactsForm
               // Remount when the saved profile arrives so the inputs pick up
               // their stored values instead of keeping their initial "".
-              key={settingsQuery.data?.shippingProfile ? "loaded" : "empty"}
-              profile={settingsQuery.data?.shippingProfile ?? null}
+              key={settingsQuery.data?.shippingFacts ? "loaded" : "empty"}
+              profile={settingsQuery.data?.shippingFacts ?? null}
               ctx={ctx}
             />
           )}

@@ -4,7 +4,7 @@
  *
  * Stored as a `returnsFacts` sub-object of `tenants.settings` (JSONB) and edited
  * on the dashboard's Knowledge base page, alongside the free-text knowledge
- * documents and the `shippingProfile` block. It sits here rather than inside the
+ * documents and the `shippingFacts` block. It sits here rather than inside the
  * pasted prose because these are the numbers/enums a returns scenario *branches*
  * on: `returnWindowDays` is the window an agent judges an in-policy return
  * against, and the payer / method / processing-time are the values it quotes
@@ -18,7 +18,7 @@
  * `knowledge.search` over the merchant's documents, which is where the guidance
  * lived before this existed. Every OTHER field degrades to `null` individually
  * and is simply omitted from the header when unset — same discipline as
- * `decodeShippingProfile`.
+ * `decodeShippingFacts`.
  */
 
 /** Who pays to ship a return back to the store. */

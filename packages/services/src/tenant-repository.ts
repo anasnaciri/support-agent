@@ -2,7 +2,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { TenantId } from "@support-agent/agent-core";
 
 import type { BlockedSenders } from "./blocked-senders.js";
-import type { ShippingProfile } from "./shipping-profile.js";
+import type { ShippingFacts } from "./shipping-facts.js";
 import type { ReturnsFacts } from "./returns-facts.js";
 
 // ============================================================
@@ -705,12 +705,12 @@ export class TenantSettings extends Data.Class<{
    * customs, and the day count past which a shipment counts as delayed. Edited
    * on the dashboard Knowledge base page. Optional on the class (existing
    * construction sites don't ripple); the Live `getSettings` always populates it
-   * via `decodeShippingProfile`, which yields `null` for an unconfigured or
+   * via `decodeShippingFacts`, which yields `null` for an unconfigured or
    * half-written block. `null` means the agents fall back to searching the
    * merchant's knowledge documents for a delivery window, as they did before
    * this existed.
    */
-  readonly shippingProfile?: ShippingProfile | null;
+  readonly shippingFacts?: ShippingFacts | null;
   /**
    * The store's structured returns/refund facts — return window, who pays
    * return shipping, refund method, and the processing time to quote. Edited on
@@ -818,13 +818,13 @@ export class TenantRepository extends Context.Tag("TenantRepository")<
     ) => Effect.Effect<void, TenantRepositoryError>;
 
     /**
-     * Replace the tenant's shipping profile. `null` clears it, sending agents
+     * Replace the tenant's shipping facts. `null` clears it, sending agents
      * back to `knowledge.search` for the delivery window. Same shallow JSONB
      * merge as `setRefundPolicy` — unrelated settings are preserved.
      */
-    readonly setShippingProfile: (
+    readonly setShippingFacts: (
       tenantId: TenantId,
-      profile: ShippingProfile | null,
+      profile: ShippingFacts | null,
     ) => Effect.Effect<void, TenantRepositoryError>;
 
     /**
@@ -950,14 +950,14 @@ export const TenantRepositoryTest = (
         );
         return Effect.void;
       },
-      setShippingProfile: (tenantId, profile) => {
+      setShippingFacts: (tenantId, profile) => {
         const prev = store.get(tenantId);
         if (!prev) {
           return Effect.fail(new TenantNotFound({ tenantId }));
         }
         store.set(
           tenantId,
-          new TenantSettings({ ...prev, shippingProfile: profile }),
+          new TenantSettings({ ...prev, shippingFacts: profile }),
         );
         return Effect.void;
       },

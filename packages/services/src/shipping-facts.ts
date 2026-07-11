@@ -1,25 +1,33 @@
 /**
- * Per-tenant shipping profile — the store's own shipping facts, structured.
+ * Per-tenant shipping facts — the store's own shipping grounding facts,
+ * structured. Sibling of `returnsFacts`; "Facts" (what the agent may quote) is
+ * deliberately not "Policy" (the walls the runtime enforces).
  *
- * Stored as a `shippingProfile` sub-object of `tenants.settings` (JSONB) and
+ * Stored as a `shippingFacts` sub-object of `tenants.settings` (JSONB) and
  * edited on the dashboard's Knowledge base page. It sits alongside the free-text
  * knowledge documents rather than inside them because two of its fields are
  * *decisions*, not prose: `deliveryTime` is the window an agent judges lateness
  * against, and `delayedAfterDays` is the exact point past which a shipment gets
  * a supplier check. Retrieval over pasted prose is a poor way to fetch a number
- * a policy depends on, so these travel to the agent as a trusted prompt header.
+ * a policy depends on, so these travel to the agent as a trusted prompt header
+ * (and as `@shipping.*` references inside scenario notes).
  *
- * The profile is all-or-nothing: `decodeShippingProfile` returns `null` unless
- * the three required fields are present and valid. A half-written block must not
+ * The block is all-or-nothing: `decodeShippingFacts` returns `null` unless the
+ * three required fields are present and valid. A half-written block must not
  * hand the agent a delivery window it can act on — the fallback is
  * `knowledge.search` over the merchant's documents, which is where the guidance
  * lived before this existed.
+ *
+ * Shipped as `shippingProfile` and renamed to `shippingFacts` on 2026-07-11 for
+ * vocabulary consistency. Migration `0046_shipping_facts_rename` moves the
+ * persisted key, so there is exactly one name for the block and no read-time
+ * fallback.
  */
 
 /** Who settles customs / import duties on an international order. */
 export type CustomsDutiesPayer = "customer" | "merchant" | "not_applicable";
 
-export interface ShippingProfile {
+export interface ShippingFacts {
   /** How long before an order leaves the warehouse, e.g. "1–2 business days". */
   readonly processingTime: string;
   /** Typical ship→deliver window, e.g. "7–12 days". The lateness yardstick. */
@@ -46,13 +54,13 @@ export interface ShippingProfile {
 }
 
 /** Absent until the merchant fills the form. */
-export const defaultShippingProfile: ShippingProfile | null = null;
+export const defaultShippingFacts: ShippingFacts | null = null;
 
 /** Per-field cap for the free-text fields, enforced by truncation on read. */
-export const SHIPPING_PROFILE_TEXT_MAX = 200;
+export const SHIPPING_FACTS_TEXT_MAX = 200;
 
 /** Upper bound on the delay threshold — a year of transit is already absurd. */
-export const SHIPPING_PROFILE_MAX_DELAY_DAYS = 365;
+export const SHIPPING_FACTS_MAX_DELAY_DAYS = 365;
 
 const CUSTOMS_PAYERS: ReadonlySet<string> = new Set([
   "customer",
@@ -64,7 +72,7 @@ const CUSTOMS_PAYERS: ReadonlySet<string> = new Set([
 const text = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
   const v = raw.trim();
-  return v === "" ? null : v.slice(0, SHIPPING_PROFILE_TEXT_MAX);
+  return v === "" ? null : v.slice(0, SHIPPING_FACTS_TEXT_MAX);
 };
 
 /**
@@ -74,21 +82,21 @@ const text = (raw: unknown): string | null => {
  */
 const optionalDays = (raw: unknown): number | null =>
   typeof raw === "number" && Number.isInteger(raw) && raw >= 1
-    ? Math.min(raw, SHIPPING_PROFILE_MAX_DELAY_DAYS)
+    ? Math.min(raw, SHIPPING_FACTS_MAX_DELAY_DAYS)
     : null;
 
 /**
- * Decode the `shippingProfile` block of `tenants.settings`.
+ * Decode the `shippingFacts` block of `tenants.settings`.
  *
- * Returns `null` for anything short of a usable profile: not an object, or any
- * of `processingTime` / `deliveryTime` / `delayedAfterDays` missing or invalid.
+ * Returns `null` for anything short of a usable block: not an object, or any of
+ * `processingTime` / `deliveryTime` / `delayedAfterDays` missing or invalid.
  * Optional fields degrade to `null` individually — an unrecognised customs payer
  * is dropped rather than coerced, since guessing `customer` would have the agent
  * tell a buyer they owe duties the merchant actually absorbs.
  */
-export const decodeShippingProfile = (
+export const decodeShippingFacts = (
   raw: unknown,
-): ShippingProfile | null => {
+): ShippingFacts | null => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
 
@@ -110,7 +118,7 @@ export const decodeShippingProfile = (
       typeof customs === "string" && CUSTOMS_PAYERS.has(customs)
         ? (customs as CustomsDutiesPayer)
         : null,
-    delayedAfterDays: Math.min(days, SHIPPING_PROFILE_MAX_DELAY_DAYS),
+    delayedAfterDays: Math.min(days, SHIPPING_FACTS_MAX_DELAY_DAYS),
     lostPackageInvestigationDays: optionalDays(r["lostPackageInvestigationDays"]),
   };
 };

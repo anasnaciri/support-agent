@@ -884,7 +884,7 @@ export type CustomsDutiesPayerView = "customer" | "merchant" | "not_applicable";
  * former is the window lateness is measured against, the latter the exact point
  * past which a shipment earns a supplier check.
  */
-export interface ShippingProfileView {
+export interface ShippingFactsView {
   readonly processingTime: string;
   readonly deliveryTime: string;
   readonly shippingCost: string | null;
@@ -929,8 +929,8 @@ export interface TenantSettingsView {
    * Defaults-on-read to true.
    */
   readonly cancellationRestock: boolean;
-  /** The store's shipping profile; `null` until the merchant configures one. */
-  readonly shippingProfile: ShippingProfileView | null;
+  /** The store's shipping facts; `null` until the merchant configures one. */
+  readonly shippingFacts: ShippingFactsView | null;
   /** The store's returns facts; `null` until the merchant configures one. */
   readonly returnsFacts: ReturnsFactsView | null;
 }

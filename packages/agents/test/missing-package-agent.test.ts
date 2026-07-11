@@ -104,13 +104,13 @@ describe("missing-package-agent config", () => {
     expect(p).toMatch(/destinationCountry[\s\S]{0,400}(differ|does not match|mismatch|different)/i);
   });
 
-  it("takes the delay threshold from the store shipping profile header when present", () => {
+  it("takes the delay threshold from the store shipping facts header when present", () => {
     const p = missingPackageAgent.promptTemplate;
-    // The runtime injects `[Store shipping profile: ...]` for agents holding
+    // The runtime injects `[Store shipping facts: ...]` for agents holding
     // knowledge.search — this one does. Its stated day count is exact and must
     // beat a window inferred from prose.
-    expect(p).toContain("[Store shipping profile");
-    expect(p).toMatch(/Store shipping profile[\s\S]{0,500}knowledge\.search/);
+    expect(p).toContain("[Store shipping facts");
+    expect(p).toMatch(/Store shipping facts[\s\S]{0,500}knowledge\.search/);
     expect(p).not.toContain("7 or more");
   });
 
