@@ -14,10 +14,7 @@
 export interface StartGmailWatchOptions {
   readonly accessToken: string;
   readonly topicName: string;
-  /**
-   * Defaults to INBOX + SPAM: customer mail is ingested even when Gmail
-   * spam-filters it, while outbound sends (SENT) still don't notify us.
-   */
+  /** Defaults to INBOX-only so we don't get notified on outbound sends. */
   readonly labelIds?: ReadonlyArray<string>;
   readonly fetchImpl?: typeof fetch;
 }
@@ -49,7 +46,7 @@ export const startGmailWatch = async (
       },
       body: JSON.stringify({
         topicName: opts.topicName,
-        labelIds: [...(opts.labelIds ?? ["INBOX", "SPAM"])],
+        labelIds: [...(opts.labelIds ?? ["INBOX"])],
         labelFilterBehavior: "INCLUDE",
       }),
     },

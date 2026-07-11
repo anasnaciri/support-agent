@@ -107,22 +107,6 @@ export interface ImapSmtpOps {
   readonly latestUid: () => Promise<number>;
   /** Mark INBOX messages as read after the workflow has accepted them. */
   readonly markRead: (uids: ReadonlyArray<number>) => Promise<void>;
-  /**
-   * Junk-folder variants — spam is ingested, not filtered. The folder is
-   * resolved via the RFC 6154 \Junk special-use attribute, falling back to
-   * common names (Junk, Spam, Junk E-mail, …). `null` means the mailbox has
-   * no junk folder; the poll skips it.
-   */
-  readonly listJunkSince: (
-    sinceUid: number,
-  ) => Promise<{
-    readonly messages: ReadonlyArray<RawImapMessage>;
-    readonly latestUid: number;
-  } | null>;
-  /** Highest junk-folder UID, or `null` when the mailbox has no junk folder. */
-  readonly latestJunkUid: () => Promise<number | null>;
-  /** Mark junk-folder messages as read after the workflow has accepted them. */
-  readonly markJunkRead: (uids: ReadonlyArray<number>) => Promise<void>;
   /** Send a message; returns the assigned Message-ID (brackets stripped). */
   readonly send: (input: ImapSendInput) => Promise<{ readonly messageId: string }>;
   /** Throws if IMAP or SMTP login fails — used by the connect endpoint. */
@@ -560,32 +544,6 @@ const resolveSentMailbox = async (
   return sent?.path ?? sent?.name ?? DEFAULT_SENT_MAILBOX;
 };
 
-// Junk-folder names seen across common providers, matched case-insensitively
-// when no \Junk special-use attribute is advertised.
-const JUNK_MAILBOX_NAMES = new Set([
-  "junk",
-  "spam",
-  "junk e-mail",
-  "junk email",
-  "bulk mail",
-]);
-
-const resolveJunkMailbox = async (
-  client: ImapClientLike,
-): Promise<string | null> => {
-  const boxes = client.list ? await client.list() : [];
-  const junk =
-    boxes.find(
-      (b) => b.specialUse === "\\Junk" || b.flags?.includes("\\Junk"),
-    ) ??
-    boxes.find((b) => {
-      const name = (b.path ?? b.name ?? "").toLowerCase();
-      const leaf = name.split(/[/.]/).pop() ?? name;
-      return JUNK_MAILBOX_NAMES.has(name) || JUNK_MAILBOX_NAMES.has(leaf);
-    });
-  return junk?.path ?? junk?.name ?? null;
-};
-
 const sentContainsMessage = async (
   client: ImapClientLike,
   mailbox: string,
@@ -705,121 +663,58 @@ export const makeImapSmtpOps = (
     }
   };
 
-  const listSinceIn = async (
-    client: ImapClientLike,
-    mailboxPath: string,
-    sinceUid: number,
-  ): Promise<{ messages: ReadonlyArray<RawImapMessage>; latestUid: number }> => {
-    const lock = await client.getMailboxLock(mailboxPath);
-    try {
-      const out: Array<RawImapMessage> = [];
-      let latest = sinceUid;
-      // `n:*` always yields the highest message even if none are newer, so
-      // we filter on uid > sinceUid below.
-      for await (const msg of client.fetch(
-        { uid: `${sinceUid + 1}:*` },
-        { uid: true, source: true },
-        { uid: true },
-      )) {
-        if (msg.uid <= sinceUid) continue;
-        if (msg.source) out.push(await parseRawImapMessage(msg.uid, msg.source));
-        if (msg.uid > latest) latest = msg.uid;
-      }
-      return { messages: out, latestUid: latest };
-    } finally {
-      lock.release();
-    }
-  };
-
   const listSince = async (
     sinceUid: number,
   ): Promise<{ messages: ReadonlyArray<RawImapMessage>; latestUid: number }> => {
     const client = await connectImap();
     try {
-      return await listSinceIn(client, "INBOX", sinceUid);
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        const out: Array<RawImapMessage> = [];
+        let latest = sinceUid;
+        // `n:*` always yields the highest message even if none are newer, so
+        // we filter on uid > sinceUid below.
+        for await (const msg of client.fetch(
+          { uid: `${sinceUid + 1}:*` },
+          { uid: true, source: true },
+          { uid: true },
+        )) {
+          if (msg.uid <= sinceUid) continue;
+          if (msg.source) out.push(await parseRawImapMessage(msg.uid, msg.source));
+          if (msg.uid > latest) latest = msg.uid;
+        }
+        return { messages: out, latestUid: latest };
+      } finally {
+        lock.release();
+      }
     } finally {
       await client.logout();
     }
-  };
-
-  const latestUidIn = async (
-    client: ImapClientLike,
-    mailboxPath: string,
-  ): Promise<number> => {
-    const mb = await client.mailboxOpen(mailboxPath);
-    // `uidNext` is the UID the next message will get, so the highest current
-    // UID is one less (0 when the mailbox is empty / uidNext is 1).
-    return Math.max(0, Number(mb.uidNext) - 1);
   };
 
   const latestUid = async (): Promise<number> => {
     const client = await connectImap();
     try {
-      return await latestUidIn(client, "INBOX");
+      const mb = await client.mailboxOpen("INBOX");
+      // `uidNext` is the UID the next message will get, so the highest current
+      // UID is one less (0 when the mailbox is empty / uidNext is 1).
+      return Math.max(0, Number(mb.uidNext) - 1);
     } finally {
       await client.logout();
-    }
-  };
-
-  const markReadIn = async (
-    client: ImapClientLike,
-    mailboxPath: string,
-    uids: ReadonlyArray<number>,
-  ): Promise<void> => {
-    const unique = [...new Set(uids)].filter((uid) => Number.isInteger(uid) && uid > 0);
-    if (unique.length === 0) return;
-    const lock = await client.getMailboxLock(mailboxPath);
-    try {
-      await client.messageFlagsAdd?.(unique, ["\\Seen"], { uid: true });
-    } finally {
-      lock.release();
     }
   };
 
   const markRead = async (uids: ReadonlyArray<number>): Promise<void> => {
-    if (uids.length === 0) return;
+    const unique = [...new Set(uids)].filter((uid) => Number.isInteger(uid) && uid > 0);
+    if (unique.length === 0) return;
     const client = await connectImap();
     try {
-      await markReadIn(client, "INBOX", uids);
-    } finally {
-      await client.logout();
-    }
-  };
-
-  const listJunkSince = async (
-    sinceUid: number,
-  ): Promise<{
-    messages: ReadonlyArray<RawImapMessage>;
-    latestUid: number;
-  } | null> => {
-    const client = await connectImap();
-    try {
-      const junk = await resolveJunkMailbox(client);
-      if (!junk) return null;
-      return await listSinceIn(client, junk, sinceUid);
-    } finally {
-      await client.logout();
-    }
-  };
-
-  const latestJunkUid = async (): Promise<number | null> => {
-    const client = await connectImap();
-    try {
-      const junk = await resolveJunkMailbox(client);
-      if (!junk) return null;
-      return await latestUidIn(client, junk);
-    } finally {
-      await client.logout();
-    }
-  };
-
-  const markJunkRead = async (uids: ReadonlyArray<number>): Promise<void> => {
-    if (uids.length === 0) return;
-    const client = await connectImap();
-    try {
-      const junk = await resolveJunkMailbox(client);
-      if (!junk) return;
-      await markReadIn(client, junk, uids);
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        await client.messageFlagsAdd?.(unique, ["\\Seen"], { uid: true });
+      } finally {
+        lock.release();
+      }
     } finally {
       await client.logout();
     }
@@ -876,15 +771,5 @@ export const makeImapSmtpOps = (
     }
   };
 
-  return {
-    fetchThread,
-    listSince,
-    latestUid,
-    markRead,
-    listJunkSince,
-    latestJunkUid,
-    markJunkRead,
-    send,
-    verify,
-  };
+  return { fetchThread, listSince, latestUid, markRead, send, verify };
 };

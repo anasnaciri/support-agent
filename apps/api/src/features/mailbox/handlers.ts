@@ -7,8 +7,6 @@ import {
 import { TenantId } from "@support-agent/agent-core";
 import {
   startGmailWatch,
-  GRAPH_INBOX_RESOURCE,
-  GRAPH_JUNK_RESOURCE,
   graphCreateSubscription,
   GRAPH_SUBSCRIPTION_TTL_MS,
 } from "@support-agent/providers";
@@ -377,9 +375,6 @@ export const handleGoogleCallback = async (
             metadata: {
               historyId: watch.historyId,
               watchExpiresAt: watch.expiresAt.toISOString(),
-              // Mirrors startGmailWatch's default label set. The renewal
-              // cron re-registers any watch whose marker lacks SPAM.
-              watchLabelIds: ["INBOX", "SPAM"],
             },
           });
         }),
@@ -626,47 +621,16 @@ export const handleMicrosoftCallback = async (
   // client-state secret; Graph validates the URL during creation.
   let subscription: { id: string; expirationDateTime: string } | null = null;
   if (cfg.microsoft.notificationUrl && cfg.microsoft.webhookClientState) {
-    const notificationUrl = `${cfg.microsoft.notificationUrl.replace(/\/+$/, "")}/${encodeURIComponent(tenantId)}`;
-    const expirationDateTime = new Date(
-      Date.now() + GRAPH_SUBSCRIPTION_TTL_MS,
-    ).toISOString();
-    const metadata: Record<string, unknown> = {};
     try {
+      const notificationUrl = `${cfg.microsoft.notificationUrl.replace(/\/+$/, "")}/${encodeURIComponent(tenantId)}`;
       subscription = await graphCreateSubscription({
         token: token.accessToken,
         notificationUrl,
         clientState: cfg.microsoft.webhookClientState,
-        expirationDateTime,
-        resource: GRAPH_INBOX_RESOURCE,
+        expirationDateTime: new Date(
+          Date.now() + GRAPH_SUBSCRIPTION_TTL_MS,
+        ).toISOString(),
       });
-      metadata["subscriptionId"] = subscription.id;
-      metadata["subscriptionExpiresAt"] = subscription.expirationDateTime;
-    } catch (cause) {
-      req.log.error(
-        { err: cause },
-        "[microsoft callback] subscription registration failed",
-      );
-    }
-    // Junk Email folder subscription — spam is ingested, not filtered. Its
-    // own try/catch so a junk-folder failure never costs the inbox one; the
-    // renewal cron recreates whichever is missing.
-    try {
-      const junk = await graphCreateSubscription({
-        token: token.accessToken,
-        notificationUrl,
-        clientState: cfg.microsoft.webhookClientState,
-        expirationDateTime,
-        resource: GRAPH_JUNK_RESOURCE,
-      });
-      metadata["junkSubscriptionId"] = junk.id;
-      metadata["junkSubscriptionExpiresAt"] = junk.expirationDateTime;
-    } catch (cause) {
-      req.log.error(
-        { err: cause },
-        "[microsoft callback] junk subscription registration failed",
-      );
-    }
-    if (Object.keys(metadata).length > 0) {
       const patchExit = await Effect.runPromiseExit(
         Effect.provide(
           Effect.gen(function* () {
@@ -675,7 +639,10 @@ export const handleMicrosoftCallback = async (
               tenantId: TenantId(tenantId),
               provider: "outlook",
               shopDomain: email,
-              metadata,
+              metadata: {
+                subscriptionId: subscription!.id,
+                subscriptionExpiresAt: subscription!.expirationDateTime,
+              },
             });
           }),
           layer,
@@ -687,6 +654,11 @@ export const handleMicrosoftCallback = async (
           "[microsoft callback] subscription metadata patch failed",
         );
       }
+    } catch (cause) {
+      req.log.error(
+        { err: cause },
+        "[microsoft callback] subscription registration failed",
+      );
     }
   }
 

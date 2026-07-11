@@ -154,11 +154,6 @@ const PROVIDER = "gmail" as const;
 // retention window, not by this policy.)
 const BACKFILL_LOOKBACK_QUERY = "newer_than:30d" as const;
 
-// Spam is ingested, not filtered: every list-based recovery path scopes to
-// both folders. (`gmailListInboxMessageIds` sets `includeSpamTrash=true`,
-// without which Gmail drops `in:spam` matches from list results.)
-const INBOX_AND_SPAM_QUERY = "(in:inbox OR in:spam)" as const;
-
 export type GmailConnectorLayer = Layer.Layer<
   ConnectorCredentialStore | BlobStorage,
   never,
@@ -361,7 +356,7 @@ export const backfillUnreadGmailInbox = async (opts: {
   );
   const messageIds = await gmailListInboxMessageIds({
     token: conn.accessToken,
-    query: `${INBOX_AND_SPAM_QUERY} is:unread ${BACKFILL_LOOKBACK_QUERY}`,
+    query: `in:inbox is:unread ${BACKFILL_LOOKBACK_QUERY}`,
     maxResults: opts.maxMessages ?? 50,
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
@@ -509,7 +504,7 @@ export const handleGmailPushNotification = async (
       try {
         const reseedIds = await gmailListInboxMessageIds({
           token: conn.accessToken,
-          query: `${INBOX_AND_SPAM_QUERY} newer_than:7d`,
+          query: "in:inbox newer_than:7d",
           maxResults: 50,
           ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
         });

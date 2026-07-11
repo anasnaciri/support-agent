@@ -942,40 +942,33 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       - Residual gap (pre-existing, unchanged): the top-up only folds in page
         1, so a changed ticket sitting beyond page 1 of a deep-scrolled list
         keeps a stale badge until it sorts into page 1 by `updated_at`.
-- [x] Ingest spam/junk mail across ALL mailbox connectors (decided + landed
-      2026-07-07): spam-filtered customer mail was invisible to the agent
-      forever — even Gmail "Not spam" rescue was dropped because
-      `gmailListHistory` requests `historyTypes=messageAdded` only and
-      un-spamming is a `labelAdded` event. Decision: do NOT listen for
-      labelAdded; stop filtering spam at ingestion for every provider.
-      - Gmail: watch defaults to `labelIds` INBOX+SPAM (`gmail-watch.ts`);
-        history filter accepts SPAM alongside INBOX (still drops
-        SENT/DRAFT/TRASH); backfill + reseed queries `(in:inbox OR in:spam)`;
-        `gmailListInboxMessageIds` now sends `includeSpamTrash=true` (Gmail
-        drops `in:spam` matches from `messages.list` without it). Existing
-        INBOX-only watches re-register on the NEXT 6h renewal-cron fire, not
-        at lease end: `watchLabelIds` metadata marker — missing marker =
-        pre-spam watch = due now (`apps/worker/src/gmail-watch-renewal.ts`).
-      - Outlook/Graph: second change-notification subscription on
-        `mailfolders('junkemail')` (`GRAPH_JUNK_RESOURCE`), keys
-        `junkSubscriptionId`/`junkSubscriptionExpiresAt`; created at install
-        AND by the renewal cron for existing connectors (slot-based
-        `renewOne`). Webhook untouched — it is folder-agnostic (fetches by
-        message id).
-      - IMAP: junk-folder poll leg with its own `lastJunkUid` cursor (UIDs
-        are per-mailbox); folder resolved via \Junk special-use then common
-        names (Junk/Spam/Junk E-mail/Junk Email/Bulk Mail); no junk folder →
-        `null`, leg skipped; junk-leg errors warn but never fail the inbox
-        poll; existing connectors seed `lastJunkUid` at current top (no old
-        spam replayed).
-      - Unchanged: blocked-senders gate pre-LLM; processed_messages / thread
-        dedup keeps re-publishes idempotent.
-      - Untested gap (pre-existing): microsoft-install callback subscription
-        registration has no test harness; junk-slot behavior is covered at
-        the renewal-cron level instead.
-      - NOT retroactive: mail already sitting in spam before deploy is only
-        picked up if still `is:unread newer_than:30d` on a Gmail re-install
-        backfill, or on a Gmail 7d-reseed; otherwise resend the message.
+- [x] ~~Ingest spam/junk mail across ALL mailbox connectors~~ — **REVERTED
+      2026-07-11.** Landed 2026-07-07 (a149007), reverted in full: mailbox
+      connectors are INBOX-only again. Spam-filtered customer mail is once
+      more invisible to the agent; that is the accepted trade.
+      - Reverted surface: Gmail watch back to `labelIds: ["INBOX"]` and the
+        `gmailListHistory` filter back to INBOX-only (so a lingering
+        INBOX+SPAM watch lease still can't ingest spam — the filter drops
+        it); `includeSpamTrash` and the `(in:inbox OR in:spam)` backfill /
+        reseed queries removed; Graph junk subscription + slot-based
+        `renewOne` removed (back to a single inbox subscription); IMAP junk
+        poll leg + `lastJunkUid` cursor removed.
+      - Clean revert: no migrations or schema were ever involved, and the
+        later cursor fix (2e6a9ef, `gmail-webhook.ts`) is untouched.
+      - Stale metadata left behind in `connector_connections.metadata` —
+        `watchLabelIds`, `lastJunkUid`, `junkSubscriptionId`,
+        `junkSubscriptionExpiresAt`. Harmless: the reverted code reads
+        metadata as loose JSONB behind `typeof` guards and simply ignores
+        unknown keys. Not worth a migration to strip.
+- [ ] **Prod cleanup — orphan Graph junk subscriptions** (from the spam
+      revert above). The Outlook webhook is folder-agnostic, so any junk
+      subscription created before the revert KEEPS delivering junk
+      notifications that the reverted code will still ingest. The reverted
+      renewal cron no longer knows the junk slot, so it will not renew them
+      and they lapse on their own within `GRAPH_SUBSCRIPTION_TTL_MS`
+      (4000 min ≈ 2.8 days). To stop Outlook spam ingestion sooner, DELETE
+      each `junkSubscriptionId` via the Graph API. Moot if no Outlook
+      connector was ever connected in prod — check before doing the work.
 - [x] Fly Gmail OAuth redirect repaired (2026-07-07): the live Fly app still
       had `GOOGLE_OAUTH_CALLBACK_URL` set to the old Railway callback
       (`https://api-production-7770.up.railway.app/google/auth/callback`),

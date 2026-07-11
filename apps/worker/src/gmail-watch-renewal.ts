@@ -65,19 +65,6 @@ const watchExpiresAtFromMetadata = (
   return Number.isFinite(t) ? new Date(t) : null;
 };
 
-// The label set `startGmailWatch` registers by default. Persisted alongside
-// the lease so we can tell watches that predate SPAM ingestion (no marker)
-// apart from current ones — those are re-registered immediately instead of
-// staying INBOX-only until their ~7-day lease runs down.
-const CURRENT_WATCH_LABEL_IDS = ["INBOX", "SPAM"] as const;
-
-const watchCoversSpam = (
-  metadata: Readonly<Record<string, unknown>>,
-): boolean => {
-  const raw = metadata["watchLabelIds"];
-  return Array.isArray(raw) && raw.includes("SPAM");
-};
-
 /**
  * Narrow surface of `ConnectorCredentialStore` that `renewOne` needs.
  * Letting the unit test pass a hand-rolled object instead of standing up
@@ -103,15 +90,12 @@ export const renewOne = async (
   now: Date,
 ): Promise<RenewalResult> => {
   const watchExpiresAt = watchExpiresAtFromMetadata(conn.metadata);
-  // Skip rows where the lease is still comfortably alive AND the watch
-  // already covers SPAM. `null` expiry means we never registered a watch
-  // (or it predates metadata persisting expiry); a missing/INBOX-only
-  // label marker means the watch predates spam ingestion. Both are
-  // treated as due-for-renewal.
+  // Skip rows where the lease is still comfortably alive. `null` means
+  // we never registered a watch (or it was registered before metadata
+  // started persisting expiry); we treat that as due-for-renewal.
   if (
     watchExpiresAt !== null &&
-    watchExpiresAt.getTime() - now.getTime() > RENEWAL_WINDOW_MS &&
-    watchCoversSpam(conn.metadata)
+    watchExpiresAt.getTime() - now.getTime() > RENEWAL_WINDOW_MS
   ) {
     return {
       tenantId: conn.tenantId,
@@ -170,7 +154,6 @@ export const renewOne = async (
       metadata: {
         historyId: watch.historyId,
         watchExpiresAt: watch.expiresAt.toISOString(),
-        watchLabelIds: [...CURRENT_WATCH_LABEL_IDS],
       },
     });
     return {

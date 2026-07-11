@@ -107,7 +107,7 @@ describe("renewOne — Gmail watch renewal", () => {
       .toMatchObject({ historyId: "999" });
   });
 
-  it("skips a connector whose lease is comfortably alive (>24h) and already covers SPAM", async () => {
+  it("skips a connector whose lease is comfortably alive (>24h)", async () => {
     const fetchImpl = vi.fn();
     const store = recordingStore();
     const conn = baseConn({
@@ -115,7 +115,6 @@ describe("renewOne — Gmail watch renewal", () => {
         watchExpiresAt: new Date(
           NOW.getTime() + 3 * 24 * 60 * 60_000,
         ).toISOString(),
-        watchLabelIds: ["INBOX", "SPAM"],
       },
     });
 
@@ -129,37 +128,6 @@ describe("renewOne — Gmail watch renewal", () => {
     expect(result.outcome).toBe("skipped_not_due");
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(store.metas).toHaveLength(0);
-  });
-
-  it("re-registers a healthy lease whose watch predates SPAM coverage", async () => {
-    const fetchImpl = vi.fn(async () =>
-      okJson({
-        historyId: "2000",
-        expiration: String(NOW.getTime() + 7 * 24 * 60 * 60_000),
-      }),
-    );
-    const store = recordingStore();
-    // Lease comfortably alive, but no watchLabelIds marker — the watch was
-    // registered before spam ingestion existed, so it is INBOX-only.
-    const conn = baseConn({
-      metadata: {
-        watchExpiresAt: new Date(
-          NOW.getTime() + 3 * 24 * 60 * 60_000,
-        ).toISOString(),
-      },
-    });
-
-    const result = await renewOne(
-      conn,
-      baseDeps(fetchImpl as unknown as typeof fetch),
-      store.ops,
-      NOW,
-    );
-
-    expect(result.outcome).toBe("renewed");
-    expect(store.metas).toHaveLength(1);
-    expect((store.metas[0] as { metadata: Record<string, unknown> }).metadata)
-      .toMatchObject({ watchLabelIds: ["INBOX", "SPAM"] });
   });
 
   it("treats a missing watchExpiresAt as due-for-renewal", async () => {

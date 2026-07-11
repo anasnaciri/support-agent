@@ -11,7 +11,7 @@ const okJson = (body: unknown): Response =>
   }) as unknown as Response;
 
 describe("startGmailWatch", () => {
-  it("watches INBOX and SPAM by default so spam-foldered mail is ingested too", async () => {
+  it("watches INBOX only, so spam-foldered mail is not ingested", async () => {
     const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         topicName: string;
@@ -19,7 +19,7 @@ describe("startGmailWatch", () => {
         labelFilterBehavior: string;
       };
       expect(body.topicName).toBe("projects/p/topics/t");
-      expect(body.labelIds).toEqual(["INBOX", "SPAM"]);
+      expect(body.labelIds).toEqual(["INBOX"]);
       expect(body.labelFilterBehavior).toBe("INCLUDE");
       return okJson({ historyId: "100", expiration: "1780000000000" });
     });
@@ -35,13 +35,13 @@ describe("startGmailWatch", () => {
   it("honours an explicit labelIds override", async () => {
     const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { labelIds: string[] };
-      expect(body.labelIds).toEqual(["INBOX"]);
+      expect(body.labelIds).toEqual(["INBOX", "SPAM"]);
       return okJson({ historyId: "101", expiration: "1780000000000" });
     });
     await startGmailWatch({
       accessToken: "tok",
       topicName: "projects/p/topics/t",
-      labelIds: ["INBOX"],
+      labelIds: ["INBOX", "SPAM"],
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(fetchImpl).toHaveBeenCalledOnce();

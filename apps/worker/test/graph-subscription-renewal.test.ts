@@ -67,8 +67,7 @@ const recordingStore = () => {
 };
 
 describe("graph-subscription-renewal renewOne", () => {
-  it("creates inbox AND junk subscriptions when the connector has none", async () => {
-    const resources: Array<unknown> = [];
+  it("creates a subscription when the connector has none", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toBe("https://graph.microsoft.com/v1.0/subscriptions");
       expect(init?.method).toBe("POST");
@@ -76,77 +75,34 @@ describe("graph-subscription-renewal renewOne", () => {
       expect(body["notificationUrl"]).toBe(
         `https://api.example.com/webhooks/conversations/outlook/${tenantId}`,
       );
-      resources.push(body["resource"]);
-      const id = resources.length === 1 ? "sub-inbox" : "sub-junk";
-      return okJson({ id, expirationDateTime: "2026-06-03T00:00:00Z" });
+      return okJson({ id: "sub-new", expirationDateTime: "2026-06-03T00:00:00Z" });
     }) as unknown as typeof fetch;
     const { ops, calls } = recordingStore();
     const res = await renewOne(conn({}), deps(fetchImpl), ops, NOW);
     expect(res.outcome).toBe("created");
-    expect(resources).toEqual([
-      "/me/mailfolders('inbox')/messages",
-      "/me/mailfolders('junkemail')/messages",
-    ]);
-    const merged = Object.assign(
-      {},
-      ...calls.patchMetadata.map((c) => c.metadata),
-    ) as Record<string, unknown>;
-    expect(merged["subscriptionId"]).toBe("sub-inbox");
-    expect(merged["junkSubscriptionId"]).toBe("sub-junk");
+    expect(calls.patchMetadata[0]!.metadata["subscriptionId"]).toBe("sub-new");
   });
 
-  it("renews existing inbox + junk subscriptions that are within the window", async () => {
-    const patched: Array<string> = [];
+  it("renews an existing subscription that is within the window", async () => {
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       expect(init?.method).toBe("PATCH");
-      patched.push(url);
-      return okJson({ expirationDateTime: "2026-06-03T00:00:00Z" });
+      expect(url).toBe("https://graph.microsoft.com/v1.0/subscriptions/sub-1");
+      return okJson({ id: "sub-1", expirationDateTime: "2026-06-03T00:00:00Z" });
     }) as unknown as typeof fetch;
     const { ops } = recordingStore();
     const res = await renewOne(
       conn({
         subscriptionId: "sub-1",
         subscriptionExpiresAt: "2026-06-01T06:00:00Z",
-        junkSubscriptionId: "sub-junk-1",
-        junkSubscriptionExpiresAt: "2026-06-01T06:00:00Z",
       }),
       deps(fetchImpl),
       ops,
       NOW,
     );
     expect(res.outcome).toBe("renewed");
-    expect(patched).toEqual([
-      "https://graph.microsoft.com/v1.0/subscriptions/sub-1",
-      "https://graph.microsoft.com/v1.0/subscriptions/sub-junk-1",
-    ]);
   });
 
-  it("creates only the junk subscription for a connector whose inbox lease is healthy", async () => {
-    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toBe("https://graph.microsoft.com/v1.0/subscriptions");
-      expect(init?.method).toBe("POST");
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      expect(body["resource"]).toBe("/me/mailfolders('junkemail')/messages");
-      return okJson({ id: "sub-junk-new", expirationDateTime: "2026-06-03T00:00:00Z" });
-    }) as unknown as typeof fetch;
-    const { ops, calls } = recordingStore();
-    const res = await renewOne(
-      conn({
-        subscriptionId: "sub-1",
-        subscriptionExpiresAt: "2026-06-10T00:00:00Z",
-      }),
-      deps(fetchImpl),
-      ops,
-      NOW,
-    );
-    expect(res.outcome).toBe("created");
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(calls.patchMetadata[0]!.metadata["junkSubscriptionId"]).toBe(
-      "sub-junk-new",
-    );
-  });
-
-  it("skips when inbox and junk subscriptions are both comfortably in lease", async () => {
+  it("skips a subscription that is comfortably in lease", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("should not call Graph for a not-due subscription");
     }) as unknown as typeof fetch;
@@ -155,8 +111,6 @@ describe("graph-subscription-renewal renewOne", () => {
       conn({
         subscriptionId: "sub-1",
         subscriptionExpiresAt: "2026-06-10T00:00:00Z",
-        junkSubscriptionId: "sub-junk-1",
-        junkSubscriptionExpiresAt: "2026-06-10T00:00:00Z",
       }),
       deps(fetchImpl),
       ops,
