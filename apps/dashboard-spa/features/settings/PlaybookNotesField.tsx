@@ -198,6 +198,11 @@ export function PlaybookNotesField({
   // exactly once — never under a caret the merchant is already using.
   const chippedRef = useRef(false);
   const dirtyRef = useRef(false);
+  // Set when an open menu handles a keydown itself (arrows, Enter, Escape). The
+  // matching keyup must then NOT re-sync the menu: the caret never moved, so a
+  // sync has nothing to learn and would only undo what the key just did — reset
+  // the arrowed-to highlight, or reopen the menu Escape just closed.
+  const menuHandledKeyRef = useRef(false);
 
   const catalogQuery = useQuery({
     queryKey: qk.factReferences(ctx.workspaceId),
@@ -327,7 +332,18 @@ export function PlaybookNotesField({
     } else if (e.key === "Escape") {
       e.preventDefault();
       setMenuOpen(false);
+    } else {
+      return;
     }
+    menuHandledKeyRef.current = true;
+  };
+
+  const onKeyUp = () => {
+    if (menuHandledKeyRef.current) {
+      menuHandledKeyRef.current = false;
+      return;
+    }
+    syncMenu();
   };
 
   // The dangling-ref warning: resolved server-side by the same resolver the
@@ -368,7 +384,7 @@ export function PlaybookNotesField({
             commit();
             syncMenu();
           }}
-          onKeyUp={syncMenu}
+          onKeyUp={onKeyUp}
           onMouseUp={syncMenu}
           onKeyDown={onKeyDown}
           // Chips are ours to render — never let a paste bring its own markup in.

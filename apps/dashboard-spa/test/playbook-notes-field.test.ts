@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { FactReferenceEntryView } from "@support-agent/dashboard-contracts";
 
 import {
@@ -7,8 +10,38 @@ import {
   chipText,
   clampCaretMenuLeft,
   matchTokenAtCaret,
+  PlaybookNotesField,
   serializeNotes,
 } from "../features/settings/PlaybookNotesField";
+
+// The field is a pure api client; the menu only needs the catalog. Hoisted
+// because the factory runs before this module's own consts are initialized.
+const { MOCK_CATALOG } = vi.hoisted(() => ({
+  MOCK_CATALOG: [
+    {
+      id: "returns.return_window",
+      namespace: "returns",
+      field: "return_window",
+      label: "Return window",
+      value: "30 days",
+    },
+    {
+      id: "returns.refund_processing_time",
+      namespace: "returns",
+      field: "refund_processing_time",
+      label: "Refund processing time",
+      value: "5–7 business days",
+    },
+  ],
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  api: {
+    factReferences: () => Promise.resolve(MOCK_CATALOG),
+    resolveFactReferences: () =>
+      Promise.resolve({ resolved: "", dangling: [] }),
+  },
+}));
 
 const entry = (
   id: string,
@@ -175,5 +208,126 @@ describe("serializeNotes", () => {
     const editor = document.createElement("div");
     editor.innerHTML = "two&nbsp;words";
     expect(serializeNotes(editor)).toBe("two words");
+  });
+});
+
+// ---- the live menu ----
+//
+// The mapping above is pure, but the menu's keyboard behaviour is not, and it is
+// where the bugs live. These mount the real component and drive it with events.
+
+// jsdom does no layout, so a Range has no geometry at all. The menu asks one
+// where the caret is; give it an answer so the component can run. Nothing here
+// asserts on the position — `clampCaretMenuLeft` covers that, and only a real
+// browser can confirm the pixels.
+Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+
+afterEach(() => {
+  act(() => root?.unmount());
+  container?.remove();
+  root = null;
+  container = null;
+});
+
+/** Mount the field with a note already typed, and hand back its editor. */
+const mountField = async (defaultValue: string): Promise<HTMLElement> => {
+  (
+    globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  await act(async () => {
+    root!.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(PlaybookNotesField, {
+          name: "notes",
+          id: "notes",
+          defaultValue,
+          ctx: { workspaceId: "w1" },
+        }),
+      ),
+    );
+  });
+
+  const editor = container.querySelector<HTMLElement>("[contenteditable]");
+  if (!editor) throw new Error("the field rendered no editor");
+  return editor;
+};
+
+/**
+ * Park the caret at the end of the editor's text — where a merchant who just
+ * typed the token would leave it.
+ *
+ * Re-applied before every key because jsdom cannot focus a contenteditable, so
+ * React's commit collapses the selection to the editor element on each
+ * re-render. A browser keeps the caret in the text node; this restores the state
+ * a browser would already be in, and never touches what the tests assert on.
+ */
+const caretToEnd = (editor: HTMLElement) => {
+  const text = editor.firstChild as Text;
+  const range = document.createRange();
+  range.setStart(text, text.data.length);
+  range.collapse(true);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
+const press = async (
+  editor: HTMLElement,
+  type: "keydown" | "keyup",
+  key: string,
+) => {
+  caretToEnd(editor);
+  await act(async () => {
+    editor.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true }));
+  });
+};
+
+/** aria-selected per open option, in order. */
+const openOptions = () =>
+  [...container!.querySelectorAll('[role="option"]')].map((li) =>
+    li.getAttribute("aria-selected"),
+  );
+
+describe("the @-menu's keyboard navigation", () => {
+  it("keeps the arrowed-to option selected — keyup must not snap back to the first", async () => {
+    const editor = await mountField("Refund after @ret");
+    caretToEnd(editor);
+
+    // The in-progress token opens the menu on its first option.
+    await press(editor, "keyup", "t");
+    expect(openOptions()).toEqual(["true", "false"]);
+
+    // Arrow down to the second...
+    await press(editor, "keydown", "ArrowDown");
+    expect(openOptions()).toEqual(["false", "true"]);
+
+    // ...and RELEASING the arrow must not re-sync the menu and re-select the
+    // first: the caret never moved, so there is nothing to re-sync.
+    await press(editor, "keyup", "ArrowDown");
+    expect(openOptions()).toEqual(["false", "true"]);
+  });
+
+  it("stays closed after Escape — keyup must not reopen it", async () => {
+    const editor = await mountField("Refund after @ret");
+    caretToEnd(editor);
+
+    await press(editor, "keyup", "t");
+    expect(openOptions()).toHaveLength(2);
+
+    await press(editor, "keydown", "Escape");
+    await press(editor, "keyup", "Escape");
+    expect(openOptions()).toHaveLength(0);
   });
 });
