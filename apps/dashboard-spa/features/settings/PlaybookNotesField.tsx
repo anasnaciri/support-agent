@@ -243,8 +243,7 @@ export function PlaybookNotesField({
           e.id.toLowerCase().includes(q) ||
           e.label.toLowerCase().includes(q) ||
           (e.value?.toLowerCase().includes(q) ?? false),
-      )
-      .slice(0, 8);
+      );
   }, [menuOpen, query, catalog]);
 
   useEffect(() => {

@@ -42,6 +42,16 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       structured Facts. Keyboard navigation now scrolls the highlighted option
       into view inside the dropdown.
 
+- [x] **Scenario doc refs stay visible when many facts match** (2026-07-11).
+      Verified with
+      `pnpm test -- apps/dashboard-spa/test/playbook-notes-field.test.ts`.
+      The `@` dropdown no longer caps matches at 8 before rendering; it relies
+      on the existing scroll container, so knowledge docs appended after the
+      structured Facts catalog still appear in real workspaces such as Elva Labs.
+      The DB-gated API check
+      `pnpm vitest run apps/api/src/features/dashboard/tests/settings.integration.test.ts -t "fact-references"`
+      was attempted and skipped locally because `DATABASE_URL` was unset.
+
 - [x] **Scenarios page quick Facts sidebar** (2026-07-11). Verified with
       `pnpm test -- apps/dashboard-spa/test/scenarios-facts-sidebar.test.ts`,
       `pnpm --filter @support-agent/dashboard-spa build`, `pnpm build`, and a
