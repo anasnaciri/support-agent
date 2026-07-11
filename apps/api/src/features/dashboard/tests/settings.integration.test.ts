@@ -497,6 +497,26 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(ids.has("refunds.approval_threshold")).toBe(true);
   });
 
+  it("GET /dashboard/fact-references carries each fact's current value", async () => {
+    if (!raw) return;
+    // The editor renders a reference as a `label: value` chip, so the catalog
+    // has to carry the tenant's resolved value alongside the label. An unset
+    // fact is null — that's what the chip flags as not yet configured.
+    await post("/dashboard/returns-facts", { returnWindowDays: 45 });
+    const res = await get("/dashboard/fact-references");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly entries: ReadonlyArray<{
+        readonly id: string;
+        readonly value: string | null;
+      }>;
+    };
+    const byId = new Map(body.entries.map((e) => [e.id, e.value]));
+    expect(byId.get("returns.return_window")).toBe("45 days");
+    // Saving only the window leaves the optional fields unset → no value.
+    expect(byId.get("returns.refund_processing_time")).toBeNull();
+  });
+
   it("POST /dashboard/fact-references/resolve resolves against the tenant's facts", async () => {
     if (!raw) return;
     await post("/dashboard/returns-facts", { returnWindowDays: 45 });

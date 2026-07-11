@@ -905,9 +905,11 @@ export const handleDashboardReturnsFactsSet = async (
 // ---- Fact references (scenario-notes @-menu + live preview) ----
 
 // GET /dashboard/fact-references — the code-defined catalog that drives the `@`
-// menu in the scenario-notes editor. Static (no tenant read); the merchant's
-// values are resolved separately by the POST below. Single-source with the
-// runtime: both are generated from FACT_REFERENCE_CATALOG.
+// menu in the scenario-notes editor, each entry carrying THIS tenant's current
+// value so the editor can render a reference as a `label: value` chip (a null
+// value is a fact the merchant hasn't filled in yet). Single-source with the
+// runtime: the ids, labels and value fragments all come from
+// FACT_REFERENCE_CATALOG, so a chip can't drift from the agent's prompt.
 export const handleDashboardFactReferences = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -916,11 +918,21 @@ export const handleDashboardFactReferences = async (
 ): Promise<FastifyReply> => {
   const auth = await authenticateDashboard(cfg, layer, req);
   if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  const settings = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const repo = yield* TenantRepository;
+        return yield* repo.getSettings(TenantId(auth.tenantId));
+      }).pipe(Effect.catchAll(() => Effect.succeed(null))),
+      layer,
+    ),
+  );
   const entries = FACT_REFERENCE_CATALOG.map((e) => ({
     id: e.id,
     namespace: e.namespace,
     field: e.field,
     label: e.label,
+    value: e.render(settings),
   }));
   return sendJson(res, 200, { entries });
 };

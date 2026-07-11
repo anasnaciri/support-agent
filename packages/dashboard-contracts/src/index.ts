@@ -981,6 +981,13 @@ export interface FactReferenceEntryView {
   readonly namespace: string;
   readonly field: string | null;
   readonly label: string;
+  /**
+   * This tenant's current value for the fact, as the agent would read it
+   * mid-sentence — the notes editor renders a reference as a `label: value`
+   * chip. Null when the backing fact isn't set, which is what the chip and the
+   * dangling-ref warning flag.
+   */
+  readonly value: string | null;
 }
 
 export interface FactReferencesResponse {
