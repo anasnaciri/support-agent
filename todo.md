@@ -28,7 +28,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       ever resurfaced. Lets a merchant state structured operational facts once and
       reference them by name inside a scenario playbook, so the load-bearing
       number lives in exactly one place and the scenario prose stays in sync with
-      it by construction. Generalizes the `shippingProfile` header pattern.
+      it by construction. Generalizes the `shippingFacts` header pattern.
       - **Vocabulary — Facts vs Policy (deliberate, load-bearing).** "Policy" is
         already taken in this codebase for the ENFORCEMENT structures
         (`refundPolicy`, `discountPolicy`, `resolutionPolicy`, `ScenarioPolicy`,
@@ -52,13 +52,13 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
            can only make the model promise something the wall blocks. The Facts
            forms DEEP-LINK to these pages, they do not copy the value.
         2. **Facts blocks (new — structured, decoded, header-injected, like
-           `shippingProfile`).** The numbers/enums a scenario branches on:
+           `shippingFacts`).** The numbers/enums a scenario branches on:
            return window (days), return-shipping payer, refund method, refund
            processing time to quote, lost-package investigation days, and
            (optionally) damaged/wrong-item default resolution. Decoded
            all-or-nothing on required fields (a half-written block ⇒ `null` ⇒
            the pre-existing `knowledge.search` fallback), each optional field
-           degrading individually — same discipline as `decodeShippingProfile`.
+           degrading individually — same discipline as `decodeShippingFacts`.
         3. **Free-text knowledge doc (already exists — paste/URL).** Pure prose:
            return condition, return address, non-returnable-items list, exchange
            details, partial-refund nuance.
@@ -70,7 +70,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           (string the agent quotes). Optional fields omit from the header when
           unset (a bare "Refund method:" reads as a default — same rule as the
           shipping header).
-        - `shippingProfile` gains `lostPackageInvestigationDays` next to
+        - `shippingFacts` gains `lostPackageInvestigationDays` next to
           `delayedAfterDays`. Two DIFFERENT numbers on one timeline:
           `delayedAfterDays` = when `delivery_issue` opens a supplier check;
           `lostPackageInvestigationDays` = when we stop waiting and make the
@@ -78,13 +78,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           do you investigate a lost package… they should both be in sync": one
           number, one home, referenced by the `delivery_issue` /
           `missing-package-agent` notes — never hardcoded, never in prose only.
-        - Open sub-decision: whether to rename the shipped `shippingProfile`
-          symbols to `shippingFacts` for vocabulary consistency. The persisted
-          JSONB key is `shippingProfile`; renaming it needs a back-compat read or
-          a settings migration. Recommendation: keep the JSONB key, optionally
-          rename code symbols later — the token namespace (`@shipping.*`) is
-          independent of the storage key either way. Don't block this feature on
-          the rename.
+        - ~~Open sub-decision: rename `shippingProfile` → `shippingFacts`?~~
+          **DONE (2026-07-11), and it went all the way down.** Symbols, module
+          (`shipping-facts.ts`), the `[Store shipping facts …]` prompt header (and
+          the two agent prompts that name it), the dashboard contract, and the
+          POST route. The user rejected the read-time fallback the earlier
+          recommendation assumed — **migration `0046_shipping_facts_rename` moves
+          the persisted JSONB key**, so there is exactly one name for the block
+          and no `?? settings.shippingProfile` anywhere. The migration is
+          value-preserving (moves the block verbatim, drops a stale duplicate if
+          both keys are somehow present) and is pinned by
+          `packages/db/test/shipping-facts-rename.integration.test.ts`, which runs
+          the migration's own SQL against a seeded pre-rename row — the test DB is
+          already migrated, so a seeded legacy row would otherwise never be
+          touched. **Deploy order: run 0046 before shipping the new code — the
+          renamed reader does not look at the old key.** The pre-rename POST path
+          (`/dashboard/shipping-profile`) stays registered as an alias, since the
+          SPA and API deploy separately and a cached dashboard build would
+          otherwise fail to save; drop it once a dashboard build carrying the new
+          path has shipped.
       - **`@`-reference system (the merchant-facing mechanism).**
         - **Catalog is code-defined + single-source** (same spirit as
           `TOOL_DISPLAY_NAMES`). Each referenceable field carries: an id
@@ -114,7 +126,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           own tests. The dashboard note preview resolves too, so the merchant
           sees exactly the agent-visible text including the fallback state.
         - **Headers coexist with refs.** The header injection
-          (`buildShippingProfileHeader` + a new returns-facts header) stays the
+          (`buildShippingFactsHeader` + a new returns-facts header) stays the
           scenario-AGNOSTIC baseline (`where_is_order` and the base-prompt blocks
           benefit with no note authoring). `@`-refs are for precise inlining at
           the decision point inside one playbook. Accept minor header/inline
@@ -150,10 +162,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           (`returnWindowDays` all-or-nothing; `returnShippingPayer`
           `customer|merchant|depends`, `refundMethod`
           `original|store_credit|customer_choice`, `refundProcessingTime`
-          degrade individually). Mirrors `decodeShippingProfile`.
-        - `shippingProfile` gained `lostPackageInvestigationDays` (optional,
+          degrade individually). Mirrors `decodeShippingFacts`.
+        - `shippingFacts` gained `lostPackageInvestigationDays` (optional,
           degrades individually — an existing profile without it still decodes).
-          Threaded through decode / `parseShippingProfileInput` / contract /
+          Threaded through decode / `parseShippingFactsInput` / contract /
           api-client / Knowledge base form.
         - Repo: `TenantSettings.returnsFacts` + `setReturnsFacts` (Tag + Test +
           Live JSONB `||` merge + `getSettings` decode).
@@ -203,14 +215,44 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         dangling warning (v1); a page-level banner summarizing all cards is a
         possible later enhancement. (The menu originally opened under the whole
         field, far from the caret; it is caret-anchored as of slice 5 below.)
-      - **Slice 4 REMAINS:**
-        - **Slice 4 (content):** add the `wrong_item` built-in scenario
-          (genuine gap — only `damaged_product` exists), and rewrite the
-          `delivery_issue` / `missing-package` / returns-related notes to
-          reference the new Facts (`@shipping.lost_after` compared to 17track's
-          `transitDays` — NOT a client-side day calc; `@returns.return_window`,
-          etc.). Merchant-editable built-in rule applies (customized notes
-          preserved; everyone else picks up the new default).
+      - **Slice 4 LANDED (2026-07-11) — every built-in note now points at the
+        Fact that owns its numbers.** `wrong_item` landed earlier; this closes
+        the notes rewrite. The defaults predated the Facts blocks, so they still
+        sent the agent to `knowledge.search` for values the merchant had already
+        stated — retrieval over prose to fetch a number the reply branches on.
+        - `where_is_order`: quotes `@shipping.processing_time` /
+          `@shipping.delivery_time` (a real expectation, not "soon"), and
+          re-classifies to `delivery_issue` once `transitDays` passes
+          `@shipping.delayed_after` instead of reassuring the customer.
+        - `delivery_issue`: judges lateness by `@shipping.delayed_after` rather
+          than searching for a delivery window. The search survives as the
+          FALLBACK when the merchant stated no threshold, and so does the safety
+          property that matters — with no window from either source the agent
+          "cannot confirm lateness" and must say so rather than assert the order
+          is on schedule (pinned by test).
+        - `refund_request`: adds `@returns.return_shipping` (who pays) and
+          `@returns.refund_method` (how it's paid out) next to the window and the
+          processing time — the four things a refund reply has to get right.
+        - `damaged_product`, `order_cancellation`, `shipping_address_update`,
+          `general_inquiry`: quote the windows/timings they were vague about.
+          `damaged_product` deliberately does NOT inherit
+          `@returns.return_shipping` / `@returns.return_window` as constraints —
+          those govern change-of-mind returns, and a broken item is our fault.
+        - **Deviation — no whole-block `@shipping` / `@returns` summaries in the
+          defaults.** The summary render joins its field fragments UNLABELED
+          ("1–2 business days; 7–12 days; Free over $50; …"), so the model cannot
+          tell processing from delivery from delayed-after. Field refs only.
+          Worth fixing the summary render to emit `label: value` pairs before
+          anyone leans on `@shipping` in a note — the `@`-menu still offers it.
+        - **Deviation — two catalog fallbacks were the wrong grammatical shape.**
+          `returns.return_shipping` rendered a clause ("the customer pays return
+          shipping") but fell back to a noun phrase ("our return shipping
+          policy"), so no sentence frame fit both: the fallback produced broken
+          prose for exactly the tenants it exists for (the unconfigured ones).
+          Same for `refund_method`. Shape-matched both and wrote the rule onto
+          `FactReference.fallback`: **a fallback must fit the same sentence frame
+          as its render.** New defaults are covered both ways — resolved-with-
+          Facts and degraded-to-fallback — by tests over every built-in note.
       - **Slice 5 LANDED (2026-07-11) — Facts get their own page, and a
         reference renders as a chip.**
         - **Settings nav: Knowledge base is now a SECTION with two children,
@@ -478,12 +520,12 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       lateness work left open: agents were told to derive a delivery window from
       whatever `knowledge.search` ranked highest in the merchant's pasted prose.
       Retrieval is a poor way to fetch a number a policy branches on.
-      - New `shippingProfile` block on `tenants.settings` (JSONB), edited on the
+      - New `shippingFacts` block on `tenants.settings` (JSONB), edited on the
         Knowledge base settings page: order processing time, delivery time,
         shipping cost + free-shipping threshold, customs/duties payer, and
         `delayedAfterDays` — the day count past which the agent opens a supplier
         check. Three fields are required; cost and customs are optional.
-      - **All-or-nothing decode.** `decodeShippingProfile` returns `null` unless
+      - **All-or-nothing decode.** `decodeShippingFacts` returns `null` unless
         all three required fields are valid. A half-written block must never hand
         an agent a window it can act on — `null` sends it back to
         `knowledge.search`, exactly as before this existed. An unrecognised
@@ -510,7 +552,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         branch; `knowledge.search` is the fallback source) so a reordering that
         preserves the rule doesn't fail it.
       - Follow-up (not done): the profile is write-only from the UI — there's no
-        "clear" action, though `setShippingProfile(tenantId, null)` supports it.
+        "clear" action, though `setShippingFacts(tenantId, null)` supports it.
       - Follow-up (not done): `deliveryTime` is free text (`"7–12 days"`) and only
         `delayedAfterDays` is machine-readable. The agent still reads the former
         as prose. If the stall rule ever needs a real number, parse it there
