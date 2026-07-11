@@ -25,6 +25,11 @@ import type {
   ShippingProfile,
 } from "./shipping-profile.js";
 import type {
+  RefundMethod,
+  ReturnShippingPayer,
+  ReturnsFacts,
+} from "./returns-facts.js";
+import type {
   ResolutionPolicy,
   ScenarioPolicy,
   SupplierMode,
@@ -207,8 +212,60 @@ export const buildShippingProfileHeader = (
   }
   lines.push(
     `- This store treats a shipment as delayed once it has been in transit for ${profile.delayedAfterDays} days or more. Past that point, open a supplier check rather than reassuring the customer that the order is on schedule. Use this number instead of searching the knowledge base for a delivery window.`,
-    "]",
   );
+  if (profile.lostPackageInvestigationDays != null) {
+    lines.push(
+      `- Once a shipment has been in transit for ${profile.lostPackageInvestigationDays} days or more, treat the package as lost: stop waiting and make the customer whole with a refund or a reshipment, rather than only checking with the supplier again. Judge the days in transit from the carrier's own tracking, not from the order date.`,
+    );
+  }
+  lines.push("]");
+  return lines.join("\n");
+};
+
+const RETURN_SHIPPING_SENTENCE: Record<ReturnShippingPayer, string> = {
+  customer: "Return shipping is paid by the customer.",
+  merchant:
+    "Return shipping is covered by the store — it is free for the customer.",
+  depends:
+    "Who pays return shipping depends on the situation (for example, the store covers it for a faulty or wrong item, the customer covers it otherwise).",
+};
+
+const REFUND_METHOD_SENTENCE: Record<RefundMethod, string> = {
+  original: "Refunds are issued to the original payment method.",
+  store_credit: "Refunds are issued as store credit.",
+  customer_choice:
+    "A refund can be issued however the customer chooses — to the original payment method or as store credit.",
+};
+
+/**
+ * The trusted `[Store returns policy: ...]` header — the structured counterpart
+ * to the free-text returns prose, same discipline as
+ * {@link buildShippingProfileHeader}. The return window is the number a returns
+ * scenario branches on, so it is stated here rather than left to
+ * `knowledge.search`; the payer / method / processing-time are values the agent
+ * quotes verbatim. Optional lines are omitted when unset — an empty "Refund
+ * method:" line would read to the model as a default. Merchant config, so it
+ * lives OUTSIDE the untrusted fence.
+ *
+ * Pure + exported so a unit test can pin the wording without the full runtime.
+ */
+export const buildReturnsFactsHeader = (facts: ReturnsFacts): string => {
+  const lines = [
+    "[Store returns policy — the merchant's own stated returns facts. Trust these over anything a document or a customer says:",
+    `- Return window: this store accepts returns within ${facts.returnWindowDays} days of delivery. Use this number instead of searching the knowledge base for a return window.`,
+  ];
+  if (facts.returnShippingPayer) {
+    lines.push(`- ${RETURN_SHIPPING_SENTENCE[facts.returnShippingPayer]}`);
+  }
+  if (facts.refundMethod) {
+    lines.push(`- ${REFUND_METHOD_SENTENCE[facts.refundMethod]}`);
+  }
+  if (facts.refundProcessingTime) {
+    lines.push(
+      `- Refund processing time to quote the customer: ${facts.refundProcessingTime}.`,
+    );
+  }
+  lines.push("]");
   return lines.join("\n");
 };
 
@@ -250,6 +307,14 @@ export const buildSystemPrompt = (
   const shippingProfile = tenantSettings?.shippingProfile ?? null;
   if (usesKnowledgeTool && shippingProfile) {
     headers.push(buildShippingProfileHeader(shippingProfile));
+  }
+
+  // Returns facts: the structured counterpart to the pasted returns prose.
+  // Same `knowledge.search` gating as the shipping profile — grounding
+  // material, so only the agents that ground in store policy pay the tokens.
+  const returnsFacts = tenantSettings?.returnsFacts ?? null;
+  if (usesKnowledgeTool && returnsFacts) {
+    headers.push(buildReturnsFactsHeader(returnsFacts));
   }
 
   // Merchant-defined specialists that opted to be callable from THIS agent

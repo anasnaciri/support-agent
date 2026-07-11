@@ -21,6 +21,7 @@ import {
   effectiveHandoffIds,
   hasUnverifiedOrderMismatch,
   inboundReplyCandidateIds,
+  buildReturnsFactsHeader,
   specialistsCallableFrom,
   TenantSettings,
   DEFAULT_RETENTION_DAYS,
@@ -31,6 +32,7 @@ import {
   type ResolutionPolicy,
   type ScenarioPolicy,
   type ShippingProfile,
+  type ReturnsFacts,
   type SupplierEscalationSheet,
 } from "../src/index.js";
 
@@ -205,6 +207,7 @@ const baseAgent = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
 const makeSettings = (
   sheet: SupplierEscalationSheet | null,
   shippingProfile: ShippingProfile | null = null,
+  returnsFacts: ReturnsFacts | null = null,
 ): TenantSettings =>
   new TenantSettings({
     notificationEmail: null,
@@ -214,6 +217,7 @@ const makeSettings = (
     supplierEscalationSheet: sheet,
     legalAcceptance: null,
     shippingProfile,
+    returnsFacts,
   });
 
 const fullProfile: ShippingProfile = {
@@ -223,6 +227,13 @@ const fullProfile: ShippingProfile = {
   customsDuties: "customer",
   delayedAfterDays: 14,
   lostPackageInvestigationDays: null,
+};
+
+const fullReturns: ReturnsFacts = {
+  returnWindowDays: 30,
+  returnShippingPayer: "customer",
+  refundMethod: "original",
+  refundProcessingTime: "5–7 business days after we receive the item",
 };
 
 describe("buildSystemPrompt", () => {
@@ -351,6 +362,77 @@ describe("buildSystemPrompt", () => {
     );
     expect(got).toContain("[Store shipping profile");
     expect(got.toLowerCase()).not.toContain("shipping cost");
+  });
+
+  it("states the lost-package threshold in the shipping header when set, omits it when null", () => {
+    const agent = baseAgent({ tools: ["knowledge.search"] });
+    const withLost = buildSystemPrompt(
+      agent,
+      makeSettings(null, { ...fullProfile, lostPackageInvestigationDays: 30 }),
+    );
+    // The merchant's "make the customer whole" threshold must be stated, not
+    // left to retrieval — and distinguishable from the delay threshold (14).
+    expect(withLost).toContain("30");
+    expect(withLost).toMatch(/lost[\s\S]{0,160}(refund|reship|whole)/i);
+
+    const withoutLost = buildSystemPrompt(
+      agent,
+      makeSettings(null, { ...fullProfile, lostPackageInvestigationDays: null }),
+    );
+    expect(withoutLost).not.toMatch(/lost/i);
+  });
+
+  // ---- Returns facts header ----
+
+  it("appends the returns-facts header only when the agent uses knowledge.search and one is configured", () => {
+    const grounded = baseAgent({ tools: ["knowledge.search"] });
+    const ungrounded = baseAgent({ tools: ["conversation.reply"] });
+    // No tool → no header even when configured.
+    expect(buildSystemPrompt(ungrounded, makeSettings(null, null, fullReturns))).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+    // Tool but no facts → no header.
+    expect(buildSystemPrompt(grounded, makeSettings(null, null, null))).toBe(
+      withPreamble("Base prompt for testing."),
+    );
+    // Both → header present with the merchant's return window.
+    const got = buildSystemPrompt(grounded, makeSettings(null, null, fullReturns));
+    expect(got).toContain("[Store returns");
+    expect(got).toContain("30");
+  });
+
+  it("buildReturnsFactsHeader states the window and quotes optional fields, omitting unset ones", () => {
+    const full = buildReturnsFactsHeader(fullReturns);
+    expect(full).toContain("30");
+    expect(full).toMatch(/return[\s\S]{0,40}(window|days)/i);
+    expect(full).toMatch(/return shipping[\s\S]{0,60}customer/i);
+    expect(full).toContain("5–7 business days after we receive the item");
+
+    // Bare window only: the optional lines are omitted, never printed empty.
+    const bare = buildReturnsFactsHeader({
+      returnWindowDays: 14,
+      returnShippingPayer: null,
+      refundMethod: null,
+      refundProcessingTime: null,
+    });
+    expect(bare).toContain("14");
+    expect(bare.toLowerCase()).not.toContain("return shipping");
+    expect(bare.toLowerCase()).not.toContain("refund method");
+    expect(bare.toLowerCase()).not.toContain("processing");
+  });
+
+  it("renders each returns enum as a merchant-facing sentence", () => {
+    const shipping = (payer: ReturnsFacts["returnShippingPayer"]) =>
+      buildReturnsFactsHeader({ ...fullReturns, returnShippingPayer: payer });
+    expect(shipping("customer")).toMatch(/return shipping[\s\S]{0,60}customer/i);
+    expect(shipping("merchant")).toMatch(/return shipping[\s\S]{0,60}(store|we|free)/i);
+    expect(shipping("depends")).toMatch(/return shipping[\s\S]{0,80}depends/i);
+
+    const method = (m: ReturnsFacts["refundMethod"]) =>
+      buildReturnsFactsHeader({ ...fullReturns, refundMethod: m });
+    expect(method("original")).toMatch(/refund[\s\S]{0,80}original/i);
+    expect(method("store_credit")).toMatch(/refund[\s\S]{0,80}store credit/i);
+    expect(method("customer_choice")).toMatch(/refund[\s\S]{0,80}(choose|choice)/i);
   });
 
   it("appends both the supplier and knowledge headers when applicable", () => {
