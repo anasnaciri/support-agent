@@ -28,6 +28,8 @@
  * longer "injected verbatim".
  */
 
+import { toolDisplayName } from "@support-agent/agent-core";
+
 import type { TenantSettings } from "./tenant-repository.js";
 import type { ReturnShippingPayer, RefundMethod } from "./returns-facts.js";
 import type { CustomsDutiesPayer } from "./shipping-facts.js";
@@ -307,6 +309,123 @@ export const FACT_NAMESPACES: ReadonlySet<string> = new Set(
 // `@returns` summary.
 const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
 
+// ============================================================
+// Action references — the `/` sigil
+// ============================================================
+//
+// A playbook note has to name the exact tool the agent should call: "Issue a
+// refund" cannot tell `refund.create` from `refund.recommend`, and "cancel and
+// refund" cannot tell `order.cancel` from `refund.create` — those distinctions
+// are load-bearing on the money path. But the merchant should never have to read
+// an engineering identifier.
+//
+// So an action is a REFERENCE, exactly like a Fact: the note stores `/refund.create`,
+// the editor renders it as a chip reading "Issue a refund" (the label comes from
+// agent-core's TOOL_DISPLAY_NAMES — one home for the merchant-facing name), and
+// this resolver renders it back to the bare tool id for the prompt. The agent's
+// text is therefore byte-for-byte what it was before chips existed.
+//
+// A distinct sigil (`/`, not `@`) keeps the two kinds apart for the merchant and
+// in the grammar: `@refund.create` resolves to nothing, and `/returns.return_window`
+// resolves to nothing. Unlike a Fact, an action has no tenant value and so can
+// never dangle — it resolves or it isn't an action ref at all.
+
+export const ACTION_REFERENCE_SIGIL = "/";
+
+/**
+ * The namespace action entries carry in the dashboard catalog view — how the
+ * editor tells an action from a Fact or a doc (mirrors
+ * {@link KNOWLEDGE_DOC_REFERENCE_NAMESPACE}). It is NOT part of the stored token:
+ * an action ref is `/refund.create`, never `/actions.refund_create`.
+ */
+export const ACTION_REFERENCE_NAMESPACE = "actions";
+
+/** One `/`-referenceable agent action. `id` is the tool id the model calls. */
+export interface ActionReference {
+  readonly id: string;
+  /** Merchant-facing name, from agent-core's TOOL_DISPLAY_NAMES. */
+  readonly label: string;
+}
+
+/**
+ * The tools a scenario playbook may name — the scenario-resolution agent's
+ * surface: its always-on baseline (reads, the customer channel, knowledge,
+ * context, the merchant heads-up) plus the remedy tools the scenario envelope
+ * gates. Tools no playbook can meaningfully direct (handoff, the raw supplier
+ * sheet, status writes) stay out so the `/` menu reads as a list of things the
+ * agent can DO for a customer.
+ */
+const ACTIONABLE_TOOLS: ReadonlyArray<string> = [
+  // Remedies — gated per-scenario by `enabledActions` / `supplierMode`.
+  "refund.create",
+  "refund.recommend",
+  "discount.create",
+  "order.cancel",
+  "order.update_shipping_address",
+  "supplier.escalate",
+  // Baseline — always available to the scenario agent.
+  "conversation.reply",
+  "conversation.ask_customer",
+  "knowledge.search",
+  "ticket.update_context",
+  "merchant.notify",
+  "tracking.lookup",
+  "shopify.get_order",
+  "shopify.find_customer_order",
+  "shopify.get_customer",
+  "shopify.get_product",
+  "shopify.get_store_info",
+  "shopify.search_products",
+  "shopify.list_pickup_locations",
+];
+
+/** The single source of truth for every `/`-referenceable action. */
+export const ACTION_REFERENCE_CATALOG: ReadonlyArray<ActionReference> =
+  ACTIONABLE_TOOLS.map((id) => ({ id, label: toolDisplayName(id) }));
+
+/** id → entry, for O(1) resolution and the dashboard `/` menu. */
+export const actionReferenceById: ReadonlyMap<string, ActionReference> = new Map(
+  ACTION_REFERENCE_CATALOG.map((e) => [e.id, e]),
+);
+
+// A tool id is always `ns.name`, both lowercase identifiers. Anchored to
+// start-of-text or a space/bracket so a URL path (`https://shop/refund.create`)
+// can never be mistaken for a ref; the leading char is captured, not consumed,
+// so it survives the replace. Resolution is catalog-gated on top.
+const ACTION_TOKEN = /(^|[\s(\[])\/([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)/gi;
+
+// The same tool id written BARE, i.e. how a note read before action refs
+// existed. The excluded lead chars are what keep the backfill from re-tokenizing
+// an existing `/ref`, claiming a Fact's `@ns.field`, or biting inside a URL,
+// an email, or a longer dotted identifier.
+const BARE_TOOL_ID = /(^|[^\w/@.])([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)/gi;
+
+/**
+ * Resolve `/` action refs to the bare tool ids the model calls. Only catalog
+ * ids resolve; every other `/…` (a path, a date, a typo) is left verbatim.
+ */
+const resolveActionReferences = (text: string): string =>
+  text.replace(ACTION_TOKEN, (match, lead: string, id: string) =>
+    actionReferenceById.has(id.toLowerCase()) ? `${lead}${id}` : match,
+  );
+
+/**
+ * Rewrite bare tool ids in a note into `/` action refs — the backfill for notes
+ * stored before action refs existed (merchants who saved the Scenarios page
+ * carry a frozen copy of the old default prose). Runs on the decode path in
+ * both directions, so a legacy row reads as chips immediately and converges to
+ * the tokenized form the next time it is saved; no migration, and idempotent.
+ *
+ * Safe by construction: `tokenize` then {@link resolveFactReferences} is the
+ * identity on the prose, so the agent's prompt does not change.
+ */
+export const tokenizeActionReferences = (text: string): string =>
+  text.replace(BARE_TOOL_ID, (match, lead: string, id: string) =>
+    actionReferenceById.has(id.toLowerCase())
+      ? `${lead}${ACTION_REFERENCE_SIGIL}${id}`
+      : match,
+  );
+
 export interface ResolvedReferences {
   readonly resolved: string;
   /** Catalog ids (or known-namespace typos) that did not resolve to a value. */
@@ -314,10 +433,11 @@ export interface ResolvedReferences {
 }
 
 /**
- * Resolve every catalog `@`-reference in `text` against the tenant's Facts,
- * returning the rewritten text and the list of dangling references (for the
- * non-blocking Scenarios-page warning). Pure — the caller decides where to
- * render it (the system prompt, the dashboard preview).
+ * Resolve every reference in `text`: catalog `@`-refs against the tenant's Facts
+ * and knowledge docs, and `/`-refs to the bare tool id the model calls. Returns
+ * the rewritten text and the list of dangling references (for the non-blocking
+ * Scenarios-page warning; actions never dangle). Pure — the caller decides where
+ * to render it (the system prompt, the dashboard preview).
  */
 export const resolveFactReferences = (
   text: string,
@@ -328,7 +448,10 @@ export const resolveFactReferences = (
   const docByRef = new Map(
     knowledgeDocs.map((doc) => [knowledgeDocReferenceId(doc).toLowerCase(), doc]),
   );
-  const resolved = text.replace(TOKEN, (match, ns: string, field?: string) => {
+  // Actions first, on the raw text: a Fact fragment can't contain a `/`-ref, so
+  // the passes are independent — this order just keeps each one's input simple.
+  const withActions = resolveActionReferences(text);
+  const resolved = withActions.replace(TOKEN, (match, ns: string, field?: string) => {
     const namespace = ns.toLowerCase();
     const id = field ? `${namespace}.${field.toLowerCase()}` : namespace;
     const doc = docByRef.get(id);

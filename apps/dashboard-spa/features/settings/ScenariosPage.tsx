@@ -1023,7 +1023,8 @@ function ScenarioCard({
 
         <Separator />
 
-        {/* Free-text playbook, with @-references to store facts. */}
+        {/* Free-text playbook: @-references to store facts and docs, /-references
+            to the actions the agent can take. */}
         <div className="space-y-1.5">
           <Label htmlFor={fieldName(formKey, "notes")}>Playbook notes</Label>
           <PlaybookNotesField

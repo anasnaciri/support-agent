@@ -46,6 +46,20 @@ const { MOCK_CATALOG } = vi.hoisted(() => ({
       label: "Knowledge doc",
       value: "International shipping policy",
     },
+    {
+      id: "refund.create",
+      namespace: "actions",
+      field: null,
+      label: "Issue a refund",
+      value: null,
+    },
+    {
+      id: "conversation.ask_customer",
+      namespace: "actions",
+      field: null,
+      label: "Ask the customer a question",
+      value: null,
+    },
   ],
 }));
 
@@ -66,6 +80,15 @@ const entry = (
   return { id, namespace: namespace!, field: field ?? null, label, value };
 };
 
+/** An action entry: the tool id, its merchant-facing name, and no value. */
+const action = (id: string, label: string): FactReferenceEntryView => ({
+  id,
+  namespace: "actions",
+  field: null,
+  label,
+  value: null,
+});
+
 const CATALOG: ReadonlyArray<FactReferenceEntryView> = [
   entry("returns.return_window", "Return window", "30 days"),
   entry(
@@ -79,6 +102,8 @@ const CATALOG: ReadonlyArray<FactReferenceEntryView> = [
     "Knowledge doc",
     "International shipping policy",
   ),
+  action("refund.create", "Issue a refund"),
+  action("conversation.ask_customer", "Ask the customer a question"),
 ];
 
 const byId = new Map(CATALOG.map((e) => [e.id, e]));
@@ -97,6 +122,7 @@ const chips = (editor: HTMLElement) =>
 describe("matchTokenAtCaret", () => {
   it("captures a token at the start of the text", () => {
     expect(matchTokenAtCaret("@ret", 4)).toEqual({
+      sigil: "@",
       query: "ret",
       tokenStart: 0,
     });
@@ -105,6 +131,7 @@ describe("matchTokenAtCaret", () => {
   it("captures a token after whitespace and reports the @ index", () => {
     const value = "Accept within @returns.ret";
     expect(matchTokenAtCaret(value, value.length)).toEqual({
+      sigil: "@",
       query: "returns.ret",
       tokenStart: 14,
     });
@@ -112,6 +139,7 @@ describe("matchTokenAtCaret", () => {
 
   it("fires on a bare @ so the full menu opens", () => {
     expect(matchTokenAtCaret("Reply and @", 11)).toEqual({
+      sigil: "@",
       query: "",
       tokenStart: 10,
     });
@@ -130,6 +158,7 @@ describe("matchTokenAtCaret", () => {
   it("keeps hyphenated doc ids in the in-progress token", () => {
     const value = "See @docs.123e4567-e89b";
     expect(matchTokenAtCaret(value, value.length)).toEqual({
+      sigil: "@",
       query: "docs.123e4567-e89b",
       tokenStart: 4,
     });
@@ -139,9 +168,33 @@ describe("matchTokenAtCaret", () => {
     const value = "@returns and more";
     // Caret sits right after "@returns".
     expect(matchTokenAtCaret(value, 8)).toEqual({
+      sigil: "@",
       query: "returns",
       tokenStart: 0,
     });
+  });
+
+  it("opens the action menu on a bare `/`", () => {
+    expect(matchTokenAtCaret("Then /", 6)).toEqual({
+      sigil: "/",
+      query: "",
+      tokenStart: 5,
+    });
+  });
+
+  it("captures an in-progress action token", () => {
+    const value = "Queue /refund.cr";
+    expect(matchTokenAtCaret(value, value.length)).toEqual({
+      sigil: "/",
+      query: "refund.cr",
+      tokenStart: 6,
+    });
+  });
+
+  it("does NOT fire inside a url path or a date", () => {
+    // The `/` is preceded by a word char — a path or "24/7", not a reference.
+    expect(matchTokenAtCaret("see https://shop.example/ref", 28)).toBeNull();
+    expect(matchTokenAtCaret("we reply 24/7", 13)).toBeNull();
   });
 });
 
@@ -171,6 +224,10 @@ describe("chipText", () => {
     expect(chipText(byId.get("shipping.delivery_time")!)).toBe(
       "Delivery time: not set",
     );
+  });
+
+  it("reads an action as just its name — a merchant never sees the tool id", () => {
+    expect(chipText(byId.get("refund.create")!)).toBe("Issue a refund");
   });
 });
 
@@ -209,6 +266,30 @@ describe("buildNotesFragment", () => {
       "Knowledge doc: International shipping policy",
     );
   });
+
+  it("renders a `/` action reference as a chip carrying the tool id", () => {
+    const editor = render("When it is due, queue /refund.create.");
+    const [chip] = chips(editor);
+    expect(chip?.getAttribute("data-fact-ref")).toBe("refund.create");
+    expect(chip?.getAttribute("data-ref-sigil")).toBe("/");
+    expect(chip?.textContent).toBe("Issue a refund");
+    // An action has no tenant value, so it can never be "not set".
+    expect(chip?.getAttribute("data-dangling")).toBeNull();
+  });
+
+  it("leaves a url path and a date as plain text", () => {
+    const text = "See https://shop.example/refund.create — we reply 24/7.";
+    const editor = render(text);
+    expect(chips(editor)).toHaveLength(0);
+    expect(editor.textContent).toBe(text);
+  });
+
+  it("never lets one sigil claim the other's reference", () => {
+    // `@refund.create` is not an action and `/returns.return_window` is not a
+    // fact — the sigil is what tells them apart, for the merchant and the agent.
+    const editor = render("@refund.create and /returns.return_window");
+    expect(chips(editor)).toHaveLength(0);
+  });
 });
 
 describe("serializeNotes", () => {
@@ -222,6 +303,11 @@ describe("serializeNotes", () => {
 
   it("round-trips text no chip claimed", () => {
     const text = "Mail help@store.com or check @shipping.nonsense.";
+    expect(serializeNotes(render(text))).toBe(text);
+  });
+
+  it("round-trips an action chip back to its `/` token", () => {
+    const text = "Ask with /conversation.ask_customer, then queue /refund.create.";
     expect(serializeNotes(render(text))).toBe(text);
   });
 
@@ -355,6 +441,28 @@ describe("the @-menu's keyboard navigation", () => {
     ].map((button) => button.dataset.referenceKind);
     expect(kinds).toContain("fact");
     expect(kinds).toContain("doc");
+    // Actions live under `/`, so they must not crowd the `@` menu.
+    expect(kinds).not.toContain("action");
+  });
+
+  it("offers only actions under `/`, named the way the merchant reads them", async () => {
+    // Two sigils, two catalogs. The merchant asking for a fact must not have to
+    // scroll past every action the agent can take, and vice versa.
+    const slash = await mountField("Then /");
+    caretToEnd(slash);
+    await press(slash, "keyup", "/");
+    const slashKinds = [
+      ...container!.querySelectorAll<HTMLButtonElement>("[data-reference-kind]"),
+    ].map((b) => b.dataset.referenceKind);
+    expect(slashKinds.length).toBeGreaterThan(0);
+    expect(new Set(slashKinds)).toEqual(new Set(["action"]));
+
+    // The `/` menu shows the merchant-facing name, never the tool id.
+    const labels = [
+      ...container!.querySelectorAll<HTMLElement>('[role="option"]'),
+    ].map((li) => li.textContent ?? "");
+    expect(labels.some((l) => l.includes("Issue a refund"))).toBe(true);
+    expect(labels.some((l) => l.includes("refund.create"))).toBe(false);
   });
 
   it("smoothly scrolls one option at a time inside the menu", async () => {

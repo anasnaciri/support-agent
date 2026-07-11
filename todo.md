@@ -1417,6 +1417,15 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       refund-review, and scenario-resolution flows exist.
 - [x] Resolution Policy stores per-scenario playbooks in tenant settings, with
       built-ins and merchant-authored custom scenarios.
+- [x] Playbook notes reference AGENT ACTIONS with a `/` sigil, the way they
+      already reference Facts and docs with `@` (2026-07-11). A note stores
+      `/refund.create`; the editor chips it as "Issue a refund" (label from
+      `TOOL_DISPLAY_NAMES`, the one merchant-facing name); `resolveFactReferences`
+      renders it back to the bare tool id, so the prompt is byte-identical to the
+      pre-chip prose. Two sigils = two menus: `@` for sources of truth (a value,
+      can dangle), `/` for actions (no value, never dangles). Legacy stored notes
+      are backfilled by `tokenizeActionReferences` on BOTH decode paths — no
+      migration; a row converges on its next save.
 - [x] Scenario-resolution agent runs alongside legacy specialists behind a
       tenant flag and can queue multiple gated actions before parking.
 - [x] Merchant notification fan-out supports email plus linked Telegram where
@@ -1939,6 +1948,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Policy, Agents, Models, And Cost
 
+- [ ] Warn when a playbook note `/`-references an action the scenario's
+      `enabledActions` does not grant: `applyScenarioEnvelope` strips that tool
+      from the schema and denies it, so the note is telling the model to do
+      something the hard gate blocks — today that mismatch is silent. Now cheap
+      to detect (the refs are structured, and `enabledActions` is in the same
+      form state), but deferred while the per-scenario action editor is hidden
+      behind `SHOW_PER_SCENARIO_ACTIONS` — a merchant can't yet create the
+      mismatch. Wire it up if that editor comes back.
 - [ ] New built-in scenarios don't reach tenants with a STORED resolution
       policy until their next scenarios-page save (`decodeResolutionPolicy`
       read path returns stored scenarios verbatim; only the write-path

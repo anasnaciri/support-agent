@@ -17,6 +17,7 @@ import {
   buildSystemPrompt,
   defaultRefundPolicy,
   defaultDiscountPolicy,
+  defaultResolutionPolicy,
   deliveryScopeFor,
   effectiveHandoffIds,
   hasUnverifiedOrderMismatch,
@@ -237,6 +238,27 @@ const fullReturns: ReturnsFacts = {
 };
 
 describe("buildSystemPrompt", () => {
+  it("resolves a playbook's action refs into the tool ids the model calls", () => {
+    // The end of the chain: a merchant sees a chip ("Issue a refund"), the note
+    // stores `/refund.create`, and the prompt the model reads carries the bare
+    // tool id — the same text it carried before action refs existed.
+    const scenario = defaultResolutionPolicy.scenarios.find(
+      (s) => s.key === "damaged_product",
+    )!;
+    const agent = applyScenarioEnvelope(
+      baseAgent({
+        tools: ["conversation.reply", "refund.create", "supplier.escalate"],
+      }),
+      scenario,
+    );
+    const prompt = buildSystemPrompt(agent, null);
+    expect(prompt).toContain("conversation.ask_customer");
+    expect(prompt).toContain("refund.create");
+    expect(prompt).not.toContain("/refund.create");
+    expect(prompt).not.toContain("/conversation.ask_customer");
+    expect(prompt).not.toContain("/knowledge.search");
+  });
+
   it("returns the bare prompt when the agent doesn't use supplier.add_sheet_row", () => {
     const agent = baseAgent({ tools: ["shopify.get_order", "conversation.reply"] });
     const settings = makeSettings({

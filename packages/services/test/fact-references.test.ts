@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { toolDisplayName } from "@support-agent/agent-core";
 import {
+  ACTION_REFERENCE_CATALOG,
+  actionReferenceById,
   FACT_REFERENCE_CATALOG,
   factReferenceById,
   resolveFactReferences,
+  tokenizeActionReferences,
 } from "../src/fact-references.js";
 import {
   TenantSettings,
@@ -158,5 +162,125 @@ describe("resolveFactReferences", () => {
     );
     expect(resolved).not.toContain("@returns.return_window");
     expect(dangling).toContain("returns.return_window");
+  });
+});
+
+describe("actionReferenceCatalog", () => {
+  it("is single-source: ids are unique, indexed, and labelled from TOOL_DISPLAY_NAMES", () => {
+    const ids = ACTION_REFERENCE_CATALOG.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const entry of ACTION_REFERENCE_CATALOG) {
+      expect(actionReferenceById.get(entry.id)).toBe(entry);
+      // The merchant-facing name has ONE home (agent-core) — the `/` menu is a
+      // view of it, never a second copy that can drift.
+      expect(entry.label).toBe(toolDisplayName(entry.id));
+      expect(entry.label).not.toBe(entry.id);
+    }
+  });
+
+  it("covers every tool the scenario playbooks can name", () => {
+    const ids = new Set(ACTION_REFERENCE_CATALOG.map((e) => e.id));
+    for (const tool of [
+      "refund.create",
+      "discount.create",
+      "order.cancel",
+      "order.update_shipping_address",
+      "supplier.escalate",
+      "conversation.ask_customer",
+      "knowledge.search",
+      "ticket.update_context",
+      "shopify.get_order",
+      "shopify.get_product",
+      "tracking.lookup",
+      "merchant.notify",
+    ]) {
+      expect(ids.has(tool)).toBe(true);
+    }
+  });
+});
+
+describe("resolveFactReferences — action refs (the `/` sigil)", () => {
+  it("resolves a `/` action ref to the bare tool id the model calls", () => {
+    const { resolved, dangling } = resolveFactReferences(
+      "Propose /order.cancel and tell the customer it is done.",
+      null,
+    );
+    expect(resolved).toBe(
+      "Propose order.cancel and tell the customer it is done.",
+    );
+    expect(dangling).toEqual([]);
+  });
+
+  it("never flags an action ref as dangling — an action has no tenant value", () => {
+    const { dangling } = resolveFactReferences(
+      "Use /conversation.ask_customer ONCE, then stop.",
+      null,
+    );
+    expect(dangling).toEqual([]);
+  });
+
+  it("leaves an unknown `/` token, a url path, and a date verbatim", () => {
+    const text =
+      "See https://shop.example/refund.create and /not.atool — we reply 24/7.";
+    expect(resolveFactReferences(text, null).resolved).toBe(text);
+  });
+
+  it("does not resolve an action id written with the fact sigil", () => {
+    // `@refund.create` is a mistake, not an action — the sigils are what tell
+    // a Fact from an action, and neither may claim the other's tokens.
+    const { resolved } = resolveFactReferences("@refund.create", null);
+    expect(resolved).toBe("@refund.create");
+  });
+
+  it("resolves facts and actions in the same note", () => {
+    const { resolved } = resolveFactReferences(
+      "Queue /refund.create, then say it takes @returns.refund_processing_time.",
+      withReturns,
+    );
+    expect(resolved).toBe(
+      "Queue refund.create, then say it takes 5–7 business days.",
+    );
+  });
+});
+
+describe("tokenizeActionReferences (the stored-note backfill)", () => {
+  it("rewrites a bare tool id into an action ref", () => {
+    expect(
+      tokenizeActionReferences("Queue refund.create for the damaged line."),
+    ).toBe("Queue /refund.create for the damaged line.");
+  });
+
+  it("keeps surrounding punctuation intact", () => {
+    expect(
+      tokenizeActionReferences(
+        "Record it with ticket.update_context (productMatch: match); then use refund.create.",
+      ),
+    ).toBe(
+      "Record it with /ticket.update_context (productMatch: match); then use /refund.create.",
+    );
+  });
+
+  it("is idempotent — a note already carrying refs is untouched", () => {
+    const tokenized = tokenizeActionReferences("Use /refund.create.");
+    expect(tokenized).toBe("Use /refund.create.");
+    expect(tokenizeActionReferences(tokenized)).toBe(tokenized);
+  });
+
+  it("leaves fact refs, unknown dotted words, urls, and emails alone", () => {
+    const text =
+      "Quote @returns.return_window, e.g. see https://shop.example/refund.create or mail a@b.io — not.atool applies.";
+    expect(tokenizeActionReferences(text)).toBe(text);
+  });
+
+  it("round-trips: tokenize then resolve is the identity on legacy note prose", () => {
+    // This is what makes the backfill safe — the agent's prompt is byte-for-byte
+    // what it was before the merchant-facing chips existed.
+    const legacy =
+      "Verify the carrier status first with tracking.lookup, escalate with supplier.escalate, and only then refund.create.";
+    const { resolved } = resolveFactReferences(
+      tokenizeActionReferences(legacy),
+      null,
+    );
+    expect(resolved).toBe(legacy);
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Database, FileText } from "lucide-react";
+import { AlertTriangle, Database, FileText, Zap } from "lucide-react";
 
 import type { FactReferenceEntryView } from "@support-agent/dashboard-contracts";
 
@@ -11,29 +11,64 @@ import { cn } from "@/lib/utils";
 type Ctx = { readonly workspaceId: string };
 type Catalog = ReadonlyMap<string, FactReferenceEntryView>;
 
+/** `@` references a source of truth (a fact, a doc); `/` references an action. */
+export type ReferenceSigil = "@" | "/";
+
+export type ReferenceKind = "fact" | "doc" | "action";
+
 export const referenceSourceKind = (
   entry: FactReferenceEntryView,
-): "fact" | "doc" => (entry.namespace === "docs" ? "doc" : "fact");
+): ReferenceKind =>
+  entry.namespace === "docs"
+    ? "doc"
+    : entry.namespace === "actions"
+      ? "action"
+      : "fact";
 
-// An in-progress `@token` immediately before the caret. Anchored to start-of-
-// text or whitespace so it never fires inside an email address (`user@…`).
-const TOKEN_AT_CARET = /(?:^|\s)@([a-z0-9_.-]*)$/i;
+const sigilFor = (entry: FactReferenceEntryView): ReferenceSigil =>
+  referenceSourceKind(entry) === "action" ? "/" : "@";
 
 /**
- * The in-progress `@`-token immediately before the caret, or null when there
- * isn't one (so the menu closes). `query` is the partial after `@`; `tokenStart`
- * is the index of the `@` itself, for replacing on select. Pure + exported for
- * unit testing — this is the bit that must not fire inside an email.
+ * The catalog entry a token names — but ONLY when the sigil agrees with the
+ * entry's kind. `@refund.create` is not an action and `/returns.return_window`
+ * is not a fact: the sigil is what tells a source of truth from an action, and
+ * neither may quietly claim the other's tokens.
+ */
+const entryForToken = (
+  catalog: Catalog,
+  sigil: ReferenceSigil,
+  id: string,
+): FactReferenceEntryView | null => {
+  const entry = catalog.get(id);
+  return entry && sigilFor(entry) === sigil ? entry : null;
+};
+
+// An in-progress `@token` / `/token` immediately before the caret. Anchored to
+// start-of-text or whitespace so it never fires inside an email address
+// (`user@…`), a url path (`shop.example/refund`), or a date (`24/7`).
+const TOKEN_AT_CARET = /(?:^|\s)([@/])([a-z0-9_.-]*)$/i;
+
+/**
+ * The in-progress token immediately before the caret, or null when there isn't
+ * one (so the menu closes). `sigil` says which menu opens; `query` is the partial
+ * after it; `tokenStart` is the index of the sigil itself, for replacing on
+ * select. Pure + exported for unit testing — this is the bit that must not fire
+ * inside an email or a url.
  */
 export const matchTokenAtCaret = (
   value: string,
   caret: number,
-): { readonly query: string; readonly tokenStart: number } | null => {
+): {
+  readonly sigil: ReferenceSigil;
+  readonly query: string;
+  readonly tokenStart: number;
+} | null => {
   const before = value.slice(0, caret);
   const m = TOKEN_AT_CARET.exec(before);
   if (!m) return null;
-  const query = m[1] ?? "";
-  return { query, tokenStart: caret - query.length - 1 };
+  const sigil = m[1] as ReferenceSigil;
+  const query = m[2] ?? "";
+  return { sigil, query, tokenStart: caret - query.length - 1 };
 };
 
 const MENU_WIDTH = 320;
@@ -73,20 +108,33 @@ export const scrollReferenceMenuToHighlight = (
 
 // ---- the note ↔ DOM mapping ----
 //
-// The note is STORED as `@id` tokens and only ever rendered as chips, so editing
-// a fact updates every note that references it. Two pure functions own that
-// mapping: `buildNotesFragment` (token text → chips) and `serializeNotes` (the
-// live editor → token text). They are inverses, and their round-trip is tested.
+// The note is STORED as `@id` / `/id` tokens and only ever rendered as chips, so
+// editing a fact updates every note that references it — and a tool id never has
+// to be shown to a merchant. Two pure functions own that mapping:
+// `buildNotesFragment` (token text → chips) and `serializeNotes` (the live editor
+// → token text). They are inverses, and their round-trip is tested.
 
 // Mirrors the resolver's grammar in packages/services/src/fact-references.ts:
-// `@ns` or `@ns.field`. Fact fields are lowercase identifiers; doc refs use
-// `@docs.<uuid>`, so the field side also accepts digits and hyphens. Anything
-// else — an email, an unknown id — is left as plain text and never becomes a chip.
-const TOKEN = /@([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
+// `@ns` / `@ns.field` for a fact or doc, `/ns.tool` for an action. Fact fields are
+// lowercase identifiers; doc refs use `@docs.<uuid>`, so the field side also
+// accepts digits and hyphens. Anything else — an email, a url path, an unknown
+// id — is left as plain text and never becomes a chip.
+const TOKEN = /([@/])([a-z][a-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?/gi;
 
-/** What a chip reads as: the fact's friendly name and this store's value. */
+// A `/` only opens a reference at a word boundary; mid-word it is a path or a
+// date. (`@` needs no such rule: an email's domain is never a catalog id.)
+const opensAction = (line: string, at: number): boolean =>
+  at === 0 || /[\s([]/.test(line[at - 1]!);
+
+/**
+ * What a chip reads as: a fact or doc shows its friendly name and this store's
+ * current value; an action shows only its name — an action has no per-tenant
+ * value, and the tool id behind it is not the merchant's vocabulary.
+ */
 export const chipText = (entry: FactReferenceEntryView): string =>
-  `${entry.label}: ${entry.value ?? "not set"}`;
+  referenceSourceKind(entry) === "action"
+    ? entry.label
+    : `${entry.label}: ${entry.value ?? "not set"}`;
 
 const CHIP_CLASS =
   "mx-0.5 inline-flex select-none items-center rounded-md px-1.5 py-0.5 align-baseline text-xs font-medium ring-1 " +
@@ -99,10 +147,14 @@ const CHIP_CLASS =
 const createChip = (entry: FactReferenceEntryView): HTMLSpanElement => {
   const chip = document.createElement("span");
   chip.setAttribute("data-fact-ref", entry.id);
+  chip.setAttribute("data-ref-sigil", sigilFor(entry));
   // Atomic: the caret can't land inside it, and backspace removes the whole ref.
   chip.setAttribute("contenteditable", "false");
   chip.className = CHIP_CLASS;
-  if (entry.value == null) chip.setAttribute("data-dangling", "true");
+  // Only a source of truth can dangle — an action has no value to be missing.
+  if (referenceSourceKind(entry) !== "action" && entry.value == null) {
+    chip.setAttribute("data-dangling", "true");
+  }
   chip.textContent = chipText(entry);
   return chip;
 };
@@ -117,10 +169,12 @@ export const buildNotesFragment = (
     if (lineIndex > 0) frag.appendChild(document.createElement("br"));
     let cursor = 0;
     for (const m of line.matchAll(TOKEN)) {
-      const id = (m[2] ? `${m[1]}.${m[2]}` : m[1]!).toLowerCase();
-      const entry = catalog.get(id);
-      if (!entry) continue; // an email or an unknown id — leave it as text
       const at = m.index;
+      const sigil = m[1] as ReferenceSigil;
+      if (sigil === "/" && !opensAction(line, at)) continue;
+      const id = (m[3] ? `${m[2]}.${m[3]}` : m[2]!).toLowerCase();
+      const entry = entryForToken(catalog, sigil, id);
+      if (!entry) continue; // an email, a url, an unknown id — leave it as text
       if (at > cursor) {
         frag.appendChild(document.createTextNode(line.slice(cursor, at)));
       }
@@ -154,7 +208,7 @@ export const serializeNotes = (root: HTMLElement): string => {
 
       const ref = el.getAttribute("data-fact-ref");
       if (ref) {
-        out.push(`@${ref}`);
+        out.push(`${el.getAttribute("data-ref-sigil") ?? "@"}${ref}`);
         continue;
       }
       if (el.tagName === "BR") {
@@ -192,15 +246,22 @@ const EDITOR_CLASS =
 
 /**
  * The scenario "Playbook notes" editor. The merchant writes prose; references
- * to store Facts and knowledge docs render inline as chips, so the note reads
- * close to the agent-visible instruction without the merchant having to hold
- * token spellings like `@returns.return_window` in their head.
+ * render inline as chips, so the note reads close to the agent-visible
+ * instruction without the merchant having to hold token spellings like
+ * `@returns.return_window` in their head. Two sigils, two kinds of reference:
  *
- * What is stored is still the plain `@id` token (see `serializeNotes`) — resolve
- * on render, never resolve-and-store, so editing a source updates every note
- * that references it. Chips, the `@` menu, and the dangling warning are all
- * driven by the same server catalog + resolver the agent runtime uses, so what
- * the merchant sees can't drift from the agent's prompt.
+ *   - `@` — a source of truth: a store Fact or a knowledge doc. The chip shows
+ *     this store's current value, and an unset one is flagged.
+ *   - `/` — an ACTION the agent can take. The chip shows only the merchant-facing
+ *     name ("Issue a refund"); the tool id it stores (`refund.create`) is what the
+ *     model needs to call the right tool, and is never shown here.
+ *
+ * What is stored is the plain token (see `serializeNotes`) — resolve on render,
+ * never resolve-and-store, so editing a source updates every note that references
+ * it, and renaming an action in one place renames it everywhere. Chips, both
+ * menus, and the dangling warning are driven by the same server catalog +
+ * resolver the agent runtime uses, so what the merchant sees can't drift from
+ * the agent's prompt.
  */
 export function PlaybookNotesField({
   name,
@@ -217,6 +278,7 @@ export function PlaybookNotesField({
 }) {
   const [value, setValue] = useState(defaultValue);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sigil, setSigil] = useState<ReferenceSigil>("@");
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
@@ -257,17 +319,19 @@ export function PlaybookNotesField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
+  // One editor, two menus: `@` offers the sources of truth, `/` the actions.
   const matches = useMemo(() => {
     if (!menuOpen) return [];
     const q = query.toLowerCase();
     return [...catalog.values()]
+      .filter((e) => sigilFor(e) === sigil)
       .filter(
         (e) =>
           e.id.toLowerCase().includes(q) ||
           e.label.toLowerCase().includes(q) ||
           (e.value?.toLowerCase().includes(q) ?? false),
       );
-  }, [menuOpen, query, catalog]);
+  }, [menuOpen, sigil, query, catalog]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -305,6 +369,7 @@ export function PlaybookNotesField({
       return;
     }
     setMenuOpen(true);
+    setSigil(token.sigil);
     setQuery(token.query);
     setHighlight(0);
 
@@ -454,7 +519,8 @@ export function PlaybookNotesField({
           >
             {matches.map((entry, i) => {
               const kind = referenceSourceKind(entry);
-              const Icon = kind === "doc" ? FileText : Database;
+              const Icon =
+                kind === "doc" ? FileText : kind === "action" ? Zap : Database;
               return (
                 <li
                   key={entry.id}
@@ -483,9 +549,13 @@ export function PlaybookNotesField({
                       />
                       <span className="truncate">{entry.label}</span>
                     </span>
-                    <span className="truncate font-mono text-xs text-muted-foreground">
-                      {entry.value ?? "not set"}
-                    </span>
+                    {/* An action has no value, and its tool id is not the
+                        merchant's vocabulary — the name is the whole row. */}
+                    {kind === "action" ? null : (
+                      <span className="truncate font-mono text-xs text-muted-foreground">
+                        {entry.value ?? "not set"}
+                      </span>
+                    )}
                   </button>
                 </li>
               );
@@ -499,7 +569,8 @@ export function PlaybookNotesField({
 
       <p id={`${id}-hint`} className="text-xs text-muted-foreground">
         Type <span className="font-mono">@</span> to insert a store fact or
-        knowledge doc. It stays in sync when you update the source.
+        knowledge doc, or <span className="font-mono">/</span> to reference an
+        action.
       </p>
 
       {dangling.length > 0 ? (

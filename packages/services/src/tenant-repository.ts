@@ -1,6 +1,7 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { TenantId } from "@support-agent/agent-core";
 
+import { tokenizeActionReferences } from "./fact-references.js";
 import type { BlockedSenders } from "./blocked-senders.js";
 import type { ShippingFacts } from "./shipping-facts.js";
 import type { ReturnsFacts } from "./returns-facts.js";
@@ -182,7 +183,12 @@ export interface ScenarioPolicy {
   /** Remedy tools this scenario may use + auto/ask each. Absent ⇒ denied. */
   readonly enabledActions: ReadonlyArray<ScenarioAction>;
   readonly supplierMode: SupplierMode;
-  /** Free-text playbook injected verbatim into the prompt (soft layer). */
+  /**
+   * Free-text playbook (the soft layer). Stored with `@` Fact/doc refs and `/`
+   * action refs; `resolveFactReferences` renders both into the prompt, and the
+   * dashboard renders them as chips — so a merchant never reads a tool id and a
+   * tool id never drifts from the note that names it.
+   */
   readonly notes?: string;
 }
 
@@ -217,7 +223,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "Give them a real expectation rather than 'soon': this store ships orders in " +
         "@shipping.processing_time and delivery then takes @shipping.delivery_time — quote those " +
         "when the order has not shipped yet or the carrier has no events for it. If the store has " +
-        "not stated those windows, call knowledge.search for the shipping policy rather than " +
+        "not stated those windows, call /knowledge.search for the shipping policy rather than " +
         "repeating a vague phrase back to the customer. If the carrier's transitDays has already " +
         "passed @shipping.delayed_after, this is no longer a status question: do NOT reassure the " +
         "customer the order is on schedule — treat it as a delivery problem and follow that " +
@@ -232,7 +238,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [{ tool: "refund.create", permission: "ask" }],
       supplierMode: "escalate_and_wait",
       notes:
-        "Verify the carrier status first with tracking.lookup. There is no fixed number of days " +
+        "Verify the carrier status first with /tracking.lookup. There is no fixed number of days " +
         "that counts as too long — this store treats a shipment as delayed once it has been in " +
         "transit for @shipping.delayed_after. transitDays past that is LATE. daysSinceLastScan " +
         "reaching it means the parcel has gone silent for as long as the store's whole delivery " +
@@ -240,7 +246,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "transit. Treat an exception status as a real delivery problem too. Compare the carrier's " +
         "transitDays against the threshold; do not count the days yourself. Never judge lateness " +
         "from the customer's wording, and never invent a window: if the store has not stated a " +
-        "threshold, call knowledge.search for the shipping policy's delivery window, and if that " +
+        "threshold, call /knowledge.search for the shipping policy's delivery window, and if that " +
         "documents none either — or either carrier number is null — you cannot confirm lateness, " +
         "so say so rather than asserting the order is on schedule. On a real delivery problem, " +
         "escalate to the supplier to reship AND always send the customer a short reassuring reply " +
@@ -262,25 +268,25 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       supplierMode: "escalate_and_wait",
       notes:
         "Damage claims need evidence. If the customer's message has NO photos of the damage, " +
-        "use conversation.ask_customer ONCE to ask for clear photos from a couple of angles plus " +
+        "use /conversation.ask_customer ONCE to ask for clear photos from a couple of angles plus " +
         "the outer packaging, then stop — the ticket waits for their reply. " +
-        "If photos ARE attached, look up the order, then call shopify.get_product for the damaged " +
+        "If photos ARE attached, look up the order, then call /shopify.get_product for the damaged " +
         "line item and compare the customer's photos against the product's reference images. Record " +
-        "your verdict with ticket.update_context (productMatch: match / mismatch / uncertain). " +
+        "your verdict with /ticket.update_context (productMatch: match / mismatch / uncertain). " +
         "If the photos do NOT match the ordered product (mismatch), or you genuinely can't tell " +
         "(uncertain), do NOT accuse or deny the customer — flag it for the store owner with " +
-        "merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
+        "/merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
         "is damaged, without committing to a refund amount yet. " +
         "When the damage is verified (productMatch = match), prefer a replacement via the supplier; " +
         "refund only if no replacement is possible. On a multi-item order, refund only the damaged " +
         "line item: use that lineItems entry's unitPrice amount (times the affected quantity when " +
-        "more than one unit is clearly damaged) as the partial refund amount for refund.create; " +
+        "more than one unit is clearly damaged) as the partial refund amount for /refund.create; " +
         "do not infer a line amount from the order total, and ask/flag a human if the damaged item " +
         "or unitPrice is ambiguous. Then tell the customer the refund takes " +
         "@returns.refund_processing_time to appear. A damaged item is our fault, not the " +
         "customer's: never make them pay to send it back, whatever the store's general " +
         "return-shipping rule says, and do not hold them to @returns.return_window — that window " +
-        "is for change-of-mind returns, not for goods that arrived broken. Use knowledge.search " +
+        "is for change-of-mind returns, not for goods that arrived broken. Use /knowledge.search " +
         "for anything the facts above don't cover (warranty terms, what to do with the damaged " +
         "item).",
     },
@@ -295,22 +301,22 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       supplierMode: "escalate_and_wait",
       notes:
         "Like a damage claim, the fix depends on seeing what arrived. If the message has NO photo of " +
-        "the item received, use conversation.ask_customer ONCE for a clear photo of what they got " +
+        "the item received, use /conversation.ask_customer ONCE for a clear photo of what they got " +
         "(and the packing slip if handy), then stop. If a photo IS present, look up the order and call " +
-        "shopify.get_product for the ordered line item to compare what was sent against what was " +
-        "ordered; record your verdict with ticket.update_context (productMatch: match / mismatch / " +
+        "/shopify.get_product for the ordered line item to compare what was sent against what was " +
+        "ordered; record your verdict with /ticket.update_context (productMatch: match / mismatch / " +
         "uncertain — here a mismatch SUPPORTS the customer, it means the photo really shows a different " +
         "product). If you genuinely can't tell (uncertain), do NOT accuse or deny — flag it for the " +
-        "store owner with merchant.notify and draft a softer reply asking them to confirm the order and " +
+        "store owner with /merchant.notify and draft a softer reply asking them to confirm the order and " +
         "what they received. When it is clearly the wrong item this is OUR error: we cover return " +
         "shipping, and the fix is to send the correct product — escalate to the supplier to ship the " +
         "right item and reassure the customer we are correcting it. Refund only if the correct item " +
         "can't be sent. On a multi-item order, refund only the wrong line item: use that lineItems " +
         "entry's unitPrice amount (times the affected quantity when more than one unit is clearly " +
-        "wrong) as the partial refund amount for refund.create; do not infer a line amount from the " +
+        "wrong) as the partial refund amount for /refund.create; do not infer a line amount from the " +
         "order total, and ask/flag a human if the affected item or unitPrice is ambiguous. Then tell " +
         "the customer the refund takes @returns.refund_processing_time to appear. Check terms " +
-        "against the store's policy with knowledge.search before quoting them.",
+        "against the store's policy with /knowledge.search before quoting them.",
     },
     {
       key: "refund_request",
@@ -335,9 +341,9 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "has multiple lineItems and the customer's complaint clearly names or matches one line item, " +
         "you may offer a partial refund for that one line item using that line's unitPrice amount " +
         "(times the affected quantity when they clearly identify more than one unit). When you queue " +
-        "the refund with refund.create, use that exact partial amount. Do not infer a line-item " +
+        "the refund with /refund.create, use that exact partial amount. Do not infer a line-item " +
         "amount from the order total, and do not offer a one line item partial refund when the " +
-        "affected item or unitPrice is ambiguous. Use knowledge.search for anything the facts above " +
+        "affected item or unitPrice is ambiguous. Use /knowledge.search for anything the facts above " +
         "don't cover (return address, non-returnable items, exchanges).",
     },
     {
@@ -350,11 +356,11 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
       enabledActions: [{ tool: "order.cancel", permission: "ask" }],
       supplierMode: "none",
       notes:
-        "Look up the order and check the store's cancellation policy with knowledge.search. " +
+        "Look up the order and check the store's cancellation policy with /knowledge.search. " +
         "An order is only cancellable while it is still in the warehouse, which is roughly " +
         "@shipping.processing_time from when it was placed — so act on this quickly. " +
         "If it has NOT shipped yet (fulfillment unfulfilled and not already cancelled), propose " +
-        "order.cancel to cancel and refund it, and tell the customer the cancellation is done and " +
+        "/order.cancel to cancel and refund it, and tell the customer the cancellation is done and " +
         "the refund takes @returns.refund_processing_time to appear. If it has ALREADY shipped " +
         "(fulfilled / in transit / delivered), do NOT cancel — tell the customer it has already " +
         "shipped and can no longer be cancelled, and that if they would like a refund they can " +
@@ -377,9 +383,9 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "warehouse, which is about @shipping.processing_time from when it was placed — so treat " +
         "this as urgent and do not sit on it. If it has NOT shipped yet (no fulfillments and not " +
         "cancelled): when the customer already gave the complete new address, update it with " +
-        "order.update_shipping_address and confirm the change; when they did not, ask them for the " +
+        "/order.update_shipping_address and confirm the change; when they did not, ask them for the " +
         "full new address (street, city, state/province, postal code, country) with " +
-        "conversation.ask_customer and update it once they reply — never guess or fill in missing " +
+        "/conversation.ask_customer and update it once they reply — never guess or fill in missing " +
         "parts yourself. If the order HAS already shipped, the address on the order can no longer " +
         "redirect the parcel — do not edit it; escalate to the supplier with the customer's new " +
         "address and wait for their answer before promising the customer anything.",
@@ -396,7 +402,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "Answer from the knowledge base and product catalog. The questions customers ask most " +
         "already have stated answers, so quote them instead of searching: orders ship in " +
         "@shipping.processing_time and arrive in @shipping.delivery_time, and returns are accepted " +
-        "within @returns.return_window of delivery. Use knowledge.search for anything those don't " +
+        "within @returns.return_window of delivery. Use /knowledge.search for anything those don't " +
         "cover (product details, store policies, contact info) and say you'll check rather than " +
         "inventing a number. Decline offers/scams and hand off anything out of scope to a human.",
     },
@@ -446,7 +452,13 @@ const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
   }
   const enabledActions = decodeScenarioActions(r["enabledActions"]);
   const recognition = r["recognition"];
-  const notes = r["notes"];
+  // Backfill: a note stored before action refs existed names its tools as bare
+  // ids. Tokenizing on read is what makes it render as chips without a
+  // migration; it resolves back to the same ids, so the prompt is unchanged.
+  const notes =
+    typeof r["notes"] === "string"
+      ? tokenizeActionReferences(r["notes"])
+      : r["notes"];
   // Default-true: only an explicit `false` disables (back-compat — scenarios
   // stored before this field, and the seeded built-ins, are enabled).
   const enabled = r["enabled"] !== false;
@@ -531,7 +543,12 @@ const extractScenarioRow = (raw: unknown): EditableScenarioFields | null => {
   const label = typeof r["label"] === "string" ? r["label"].trim() : "";
   const recognition =
     typeof r["recognition"] === "string" ? r["recognition"].trim() : "";
-  const notes = typeof r["notes"] === "string" ? r["notes"].trim() : "";
+  // Same backfill as the read decoder, so a legacy row converges the next time
+  // the merchant saves — and so a note pasted with bare tool ids still chips.
+  const notes =
+    typeof r["notes"] === "string"
+      ? tokenizeActionReferences(r["notes"].trim())
+      : "";
   return {
     key,
     label,

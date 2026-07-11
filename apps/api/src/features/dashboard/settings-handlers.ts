@@ -7,6 +7,8 @@ import {
   defaultBlockedSenders,
   decodeShippingFacts,
   decodeReturnsFacts,
+  ACTION_REFERENCE_CATALOG,
+  ACTION_REFERENCE_NAMESPACE,
   FACT_REFERENCE_CATALOG,
   KnowledgeBaseService,
   knowledgeDocReferenceId,
@@ -904,14 +906,17 @@ export const handleDashboardReturnsFactsSet = async (
   return sendJson(res, 200, { ok: true, returnsFacts: parsed.facts });
 };
 
-// ---- Playbook @ references (scenario-notes menu + live preview) ----
+// ---- Playbook references (scenario-notes menus + live preview) ----
 
-// GET /dashboard/fact-references — the catalog that drives the `@` menu in the
-// scenario-notes editor: code-defined store facts plus this tenant's knowledge
-// docs. Each entry carries THIS tenant's current value so the editor can render
-// a reference as a `label: value` chip (a null value is a fact the merchant
-// hasn't filled in yet). Fact ids, labels and value fragments come from
-// FACT_REFERENCE_CATALOG; docs use stable `docs.<document-id>` refs.
+// GET /dashboard/fact-references — the catalog behind BOTH menus in the
+// scenario-notes editor: the `@` menu (code-defined store facts + this tenant's
+// knowledge docs) and the `/` menu (the actions the agent can take). A fact/doc
+// entry carries THIS tenant's current value so the editor can render it as a
+// `label: value` chip (a null value is a fact the merchant hasn't filled in
+// yet). An action entry has no tenant value — its chip is just the merchant-
+// facing name — so the tool id never has to be shown to a merchant.
+// Fact ids/labels/fragments come from FACT_REFERENCE_CATALOG; docs use stable
+// `docs.<document-id>` refs; actions come from ACTION_REFERENCE_CATALOG.
 export const handleDashboardFactReferences = async (
   cfg: ApiConfig,
   layer: ApiLayer,
@@ -946,15 +951,25 @@ export const handleDashboardFactReferences = async (
     field: e.field,
     label: e.label,
     value: e.render(settings),
-  })).concat(
-    docs.map((doc) => ({
-      id: knowledgeDocReferenceId(doc),
-      namespace: "docs",
-      field: doc.id,
-      label: "Knowledge doc",
-      value: doc.title,
-    })),
-  );
+  }))
+    .concat(
+      docs.map((doc) => ({
+        id: knowledgeDocReferenceId(doc),
+        namespace: "docs",
+        field: doc.id,
+        label: "Knowledge doc",
+        value: doc.title,
+      })),
+    )
+    .concat(
+      ACTION_REFERENCE_CATALOG.map((a) => ({
+        id: a.id,
+        namespace: ACTION_REFERENCE_NAMESPACE,
+        field: null,
+        label: a.label,
+        value: null,
+      })),
+    );
   return sendJson(res, 200, { entries });
 };
 

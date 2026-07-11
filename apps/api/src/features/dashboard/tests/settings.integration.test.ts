@@ -497,6 +497,30 @@ describeIfDb("apps/api — /dashboard settings endpoints (integration)", () => {
     expect(ids.has("refunds.approval_threshold")).toBe(true);
   });
 
+  it("GET /dashboard/fact-references serves the `/` action menu, named for merchants", async () => {
+    if (!raw) return;
+    const res = await get("/dashboard/fact-references");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      readonly entries: ReadonlyArray<{
+        readonly id: string;
+        readonly namespace: string;
+        readonly field: string | null;
+        readonly label: string;
+        readonly value: string | null;
+      }>;
+    };
+    // The id is the tool the model calls; the label is all the merchant sees.
+    // An action has no tenant value, so it can never render as "not set".
+    expect(body.entries).toContainEqual({
+      id: "refund.create",
+      namespace: "actions",
+      field: null,
+      label: "Issue a refund",
+      value: null,
+    });
+  });
+
   it("GET /dashboard/fact-references includes knowledge docs as @-references", async () => {
     if (!raw) return;
     const created = await post("/dashboard/knowledge", {

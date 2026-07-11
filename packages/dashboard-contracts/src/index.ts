@@ -972,10 +972,15 @@ export interface ResolutionPolicyView {
 }
 
 /**
- * One `@`-referenceable source, as surfaced to the scenario-notes `@` menu.
- * Facts mirror the services `FactReference` catalog; knowledge docs are dynamic
- * `docs.<document-id>` entries. `field` is null for a whole-block `@namespace`
- * ref, and the document id for knowledge-doc refs.
+ * One referenceable source, as surfaced to the scenario-notes editor. The
+ * `namespace` says which menu it belongs to and how its chip reads:
+ *   - a store fact (`returns`, `shipping`, …) or a knowledge doc (`docs`) — the
+ *     `@` menu; `field` is null for a whole-block `@namespace` ref and the
+ *     document id for a doc ref
+ *   - an agent action (`actions`) — the `/` menu; `id` is the tool id the model
+ *     calls (`refund.create`), `label` is the ONLY thing a merchant is shown
+ *     ("Issue a refund"), and `field`/`value` are null: an action has no
+ *     per-tenant value, so it can never dangle
  */
 export interface FactReferenceEntryView {
   readonly id: string;
@@ -985,8 +990,8 @@ export interface FactReferenceEntryView {
   /**
    * This tenant's current value for the source, as the chip should display it:
    * a fact's mid-sentence value, or a knowledge doc's current title. Null when
-   * the backing fact isn't set, which is what the chip and the dangling-ref
-   * warning flag.
+   * the backing fact isn't set (which is what the chip and the dangling-ref
+   * warning flag), and always null for an action.
    */
   readonly value: string | null;
 }

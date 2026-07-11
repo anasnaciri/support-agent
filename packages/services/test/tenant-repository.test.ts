@@ -16,6 +16,7 @@ import {
   defaultResolutionPolicy,
   FACT_REFERENCE_CATALOG,
   resolveFactReferences,
+  tokenizeActionReferences,
   type BlockedSenders,
   type LegalAcceptance,
   type RefundPolicy,
@@ -379,6 +380,66 @@ describe("TenantRepositoryTest", () => {
       ),
     );
     expect(exit._tag).toBe("Failure");
+  });
+});
+
+describe("playbook action references", () => {
+  it("names every tool in the built-in notes as a `/` action ref, never as a bare id", () => {
+    // The merchant reads a chip ("Issue a refund"); the model reads the tool id.
+    // A bare id in a seeded note would leak the engineering name into the editor.
+    for (const scenario of defaultResolutionPolicy.scenarios) {
+      const notes = scenario.notes ?? "";
+      expect(tokenizeActionReferences(notes)).toBe(notes);
+    }
+  });
+
+  it("resolves the built-in notes back to the exact tool ids the agent calls", () => {
+    const damaged = defaultResolutionPolicy.scenarios.find(
+      (s) => s.key === "damaged_product",
+    )!;
+    const { resolved } = resolveFactReferences(damaged.notes ?? "", null);
+    expect(resolved).toContain("conversation.ask_customer");
+    expect(resolved).toContain("shopify.get_product");
+    expect(resolved).toContain("refund.create");
+    expect(resolved).not.toContain("/conversation.ask_customer");
+    expect(resolved).not.toContain("/refund.create");
+  });
+
+  it("backfills a legacy stored note on read", () => {
+    // Tenants who saved the Scenarios page before action refs existed carry a
+    // frozen copy of the old prose, with bare tool ids in it. The read decoder
+    // is the backfill: no migration, and it converges on the next save.
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "refund_request",
+          label: "Refund request",
+          builtin: true,
+          supplierMode: "none",
+          enabledActions: [],
+          notes: "When a refund is due, queue refund.create.",
+        },
+      ],
+    });
+    expect(p.scenarios[0]!.notes).toBe(
+      "When a refund is due, queue /refund.create.",
+    );
+  });
+
+  it("backfills a legacy stored note on save, so the row converges", () => {
+    const p = decodeResolutionPolicyUpdate({
+      scenarios: [
+        {
+          key: "",
+          label: "VIP complaint",
+          supplierMode: "none",
+          enabledActions: [],
+          notes: "Escalate with supplier.escalate first.",
+        },
+      ],
+    });
+    const custom = p.scenarios.find((s) => !s.builtin);
+    expect(custom!.notes).toBe("Escalate with /supplier.escalate first.");
   });
 });
 
