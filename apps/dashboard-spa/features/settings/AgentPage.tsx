@@ -296,7 +296,7 @@ function BuiltinAgentDetail({
                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                   {override}
                 </code>{" "}
-                isn&apos;t in the connected provider&apos;s catalog — probably
+                isn&apos;t in the connected provider&apos;s catalog, probably
                 because the provider was switched. Pick a new model below, or
                 reset to the agent default.
               </AlertDescription>
@@ -448,7 +448,7 @@ function BuiltinAgentDetail({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Add your own instructions for this agent — brand voice, policies,
+            Add your own instructions for this agent: brand voice, policies,
             tone. Your text is <strong>appended</strong> to the built-in prompt,
             so the agent keeps its tools, handoffs, and approval steps. Leave it
             empty to use the built-in prompt only.

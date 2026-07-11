@@ -190,8 +190,8 @@ export const TrackingPanel = ({
         {tracking.kind === "no_provider" ? (
           <p className="text-sm italic text-muted-foreground">
             {tracking.reason === "sync_pending"
-              ? "Live tracking is still syncing with the provider — open it on 17track for the latest status."
-              : "Live tracking isn't available for this carrier — open it on 17track for the latest status."}
+              ? "Live tracking is still syncing with the provider. Open it on 17track for the latest status."
+              : "Live tracking isn't available for this carrier. Open it on 17track for the latest status."}
           </p>
         ) : null}
       </CardContent>

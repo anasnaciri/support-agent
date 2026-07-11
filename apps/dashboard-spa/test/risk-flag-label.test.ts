@@ -20,7 +20,7 @@ describe("riskFlagLabel", () => {
 
   it("humanises the failed-reply-delivery flag", () => {
     expect(riskFlagLabel("reply_delivery_failed")).toBe(
-      "Reply didn't send — delivery failed",
+      "Reply didn't send: delivery failed",
     );
   });
 

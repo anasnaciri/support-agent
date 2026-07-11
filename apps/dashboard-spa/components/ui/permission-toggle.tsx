@@ -128,7 +128,7 @@ export const PermissionToggle = ({
       {isAuto ? (
         <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
           <AlertTriangle className="size-3.5" aria-hidden />
-          Runs automatically — no human approval.
+          Runs automatically, with no human approval.
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">

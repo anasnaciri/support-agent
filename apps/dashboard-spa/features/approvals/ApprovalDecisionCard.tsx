@@ -107,7 +107,7 @@ export function ApprovalDecisionCard({
               Approve
             </Button>
             <p className="text-xs text-muted-foreground">
-              What you approve here — including any edits you make above — is
+              What you approve here, including any edits you make above, is
               exactly what&apos;s sent to the customer.
             </p>
           </div>
@@ -122,7 +122,7 @@ export function ApprovalDecisionCard({
 
         <ConfirmButton
           title="Reject this approval?"
-          description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
+          description="No customer reply goes out, and the ticket escalates to human takeover. You'll handle it manually from there."
           confirmLabel="Reject & take over"
           pending={rejectM.isPending}
           onConfirm={() => rejectM.mutate()}
@@ -131,7 +131,7 @@ export function ApprovalDecisionCard({
         </ConfirmButton>
 
         <p className="text-sm text-muted-foreground">
-          Approving sends the reply — with any edits you made — to the customer
+          Approving sends the reply, with any edits you made, to the customer
           from your connected mailbox. Rejecting sends nothing and hands the ticket
           over to you.
         </p>

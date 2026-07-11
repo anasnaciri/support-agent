@@ -185,7 +185,7 @@ export function BlockedSendersPage() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {kind === "email"
-                  ? "Blocks this address only — other senders on the same domain still get through."
+                  ? "Blocks this address only. Other senders on the same domain still get through."
                   : kind === "domain"
                     ? "Blocks every address on this domain, including its subdomains."
                     : "An address blocks one sender; a domain blocks everyone on it."}

@@ -181,22 +181,22 @@ describe("friendlyConnectDetail", () => {
 
   it("maps DNS failures to a host-name hint", () => {
     expect(friendlyConnectDetail("getaddrinfo ENOTFOUND imap.exmaple.com")).toBe(
-      "We couldn't find that mail server — double-check the server address.",
+      "We couldn't find that mail server. Double-check the server address.",
     );
   });
 
   it("maps connection failures to a host/port hint", () => {
     expect(friendlyConnectDetail("connect ECONNREFUSED 1.2.3.4:993")).toBe(
-      "We couldn't reach the mail server — double-check the server address and port.",
+      "We couldn't reach the mail server. Double-check the server address and port.",
     );
     expect(friendlyConnectDetail("Socket timed out (ETIMEDOUT)")).toBe(
-      "We couldn't reach the mail server — double-check the server address and port.",
+      "We couldn't reach the mail server. Double-check the server address and port.",
     );
   });
 
   it("maps TLS failures to a security-setting hint", () => {
     expect(friendlyConnectDetail("unable to verify the first certificate")).toBe(
-      "Secure connection failed — try the other security setting for this server.",
+      "Secure connection failed. Try the other security setting for this server.",
     );
   });
 

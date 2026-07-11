@@ -44,14 +44,44 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       centre fade + scale both ways, and below `sm` the dialog rises 1.5rem from
       the bottom on entry and drops back down on exit.
 
-- [x] **Dashboard scenario and notification copy avoids em dashes**
-      (2026-07-11). Verified with
-      `pnpm test -- apps/dashboard-spa/test/user-facing-copy.test.ts apps/dashboard-spa/test/ticket-action-feedback.test.ts`,
-      `pnpm --filter @support-agent/dashboard-spa build`, and `pnpm build`.
-      Scenario page explanatory copy, the notification settings/linking copy,
-      and ticket action notification/toast feedback now avoid em dashes. Added a
-      dashboard SPA regression test that strips comments and checks the relevant
-      user-facing copy files.
+- [x] **Outbound merchant/supplier copy avoids LLM em dashes** (2026-07-11).
+      Verified with
+      `npx vitest run packages/providers/test/platform-mail-live.test.ts packages/providers/test/telegram-notification-live.test.ts packages/services/test/merchant-notification.test.ts`
+      and `pnpm build`. Two layers: seeded scenario notes and authored
+      notification copy no longer feed em dashes to the model, and the Telegram
+      + Resend send boundaries rewrite `—` to ` - ` so LLM-written bodies
+      (merchant notes, draft previews) can't smuggle them out. Dashboard SPA
+      scenario/notification copy was cleaned the same way.
+      **Deliberately untested:** there are NO tests about em dashes, neither
+      asserting their absence in authored copy nor pinning the send-boundary
+      rewrite. This is copy style, not behavior worth defending: such a test
+      fails the moment a human intentionally writes one, which is allowed. Do
+      not add em-dash tests or em-dash fixtures.
+
+- [x] **Em dashes removed from the prompts and the whole dashboard/portal UI**
+      (2026-07-11). Verified with `npx vitest run` (2666 pass), `pnpm build`, and
+      `pnpm --filter @support-agent/dashboard-spa build`. Three layers:
+      1. **Prompts (the root cause).** Cleaned the scenario-resolution agent's
+         `promptTemplate`, the runtime context headers in
+         `agent-runtime-helpers.ts`, `UNTRUSTED_PREAMBLE`, every tool
+         `description`, and the dashboard Rephrase prompt. A model mimics the
+         style of what it reads, so em dashes in the prompt were teaching it to
+         write them.
+      2. **A `WRITING_STYLE` block appended by `buildSystemPrompt`** (the one
+         choke point every agent's prompt passes through, custom agents
+         included). It forbids em dashes outright, which is the only protection
+         customer replies get: nothing rewrites them on the way out.
+      3. **UI prose**: all ~110 em-dash strings across the dashboard SPA and the
+         supplier portal pages, plus the Shopify post-connect page title and the
+         Shopify refund note.
+      Bare `"—"` used as an empty-value placeholder (`{value ?? "—"}`) is a
+      legitimate typographic dash and was deliberately left in six spots.
+      **Deliberately skipped:** the other agents' prompts (`missing-package`,
+      `damaged-product`, `general-inquiry`, `order-status`, `refund-review`,
+      `support-triage`, `order-resolution`, `custom-agent-scaffold`). Only the
+      scenario-resolution agent is in use; revisit if any of them is reinstated.
+      Also still dirty: `apps/admin` (operator-only) and the approval
+      magic-link pages in `apps/api/src/features/approvals/`.
 
 - [x] **Knowledge docs can be referenced with `@` in scenario notes**
       (2026-07-11). Verified with

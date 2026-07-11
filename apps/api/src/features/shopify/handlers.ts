@@ -743,7 +743,7 @@ export const handleInstalledPage = (req: FastifyRequest, res: FastifyReply): voi
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>support-agent — connected</title>
+  <title>support-agent: connected</title>
   <style>
     body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
     code { background: #f3f3f3; padding: 0.1em 0.3em; border-radius: 4px; }

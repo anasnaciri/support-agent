@@ -127,7 +127,7 @@ export function TicketLiveBoundary({ ticketId }: { readonly ticketId: string }) 
         // leaving only the amber dot. "Reload" here is a soft SPA retry —
         // refetch the ticket + events rather than a full page reload.
         <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground">
-          Updates paused —{" "}
+          Updates paused.{" "}
           <button
             type="button"
             onClick={() => {

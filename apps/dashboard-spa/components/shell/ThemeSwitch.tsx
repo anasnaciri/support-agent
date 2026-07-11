@@ -34,8 +34,8 @@ export function ThemeSwitch({ expanded = false }: { readonly expanded?: boolean 
     <div className="flex h-10 w-full items-center gap-3">
       <button
         type="button"
-        title={`Theme: ${themeLabel(preference)} — click to switch`}
-        aria-label={`Theme: ${themeLabel(preference)} — click to switch`}
+        title={`Theme: ${themeLabel(preference)}, click to switch`}
+        aria-label={`Theme: ${themeLabel(preference)}, click to switch`}
         onClick={() => setThemePreference(cycleTheme(preference))}
         className="flex size-10 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/55 transition-colors hover:bg-white/5 hover:text-sidebar-foreground"
       >

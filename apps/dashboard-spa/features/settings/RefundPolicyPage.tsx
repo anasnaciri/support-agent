@@ -153,7 +153,7 @@ function RefundPolicyForm({ policy }: { policy: RefundPolicyView }) {
               </span>
               <span className="text-xs text-muted-foreground">
                 Auto-run small refunds, pause mid-size ones for approval, block
-                large ones — by amount.
+                large ones, all by amount.
               </span>
             </span>
 
@@ -244,7 +244,7 @@ function RefundPolicyForm({ policy }: { policy: RefundPolicyView }) {
               Always deny
             </span>
             <span className="text-xs text-muted-foreground">
-              Block every refund. The agent never issues a refund — it drafts a
+              Block every refund. The agent never issues a refund; it drafts a
               reply instead, and you handle refunds yourself.
             </span>
           </span>
@@ -338,7 +338,7 @@ export function RefundPolicyPage() {
           Set amount limits for refunds. Refunds at or below the{" "}
           <strong>ask threshold</strong> run automatically. Refunds between the
           two thresholds pause for your approval. Refunds above the{" "}
-          <strong>deny threshold</strong> are blocked — the agent drafts a reply
+          <strong>deny threshold</strong> are blocked; the agent drafts a reply
           for you instead. Or skip the amounts entirely:{" "}
           <strong>always ask</strong> holds every refund for your approval, and{" "}
           <strong>always deny</strong> blocks them all.

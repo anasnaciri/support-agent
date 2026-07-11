@@ -17,13 +17,13 @@ export const riskFlagLabel = (flag: string): string => {
     return "Refund order belongs to a different customer";
   }
   if (flag === "order_customer_mismatch") {
-    return "Order belongs to a different customer — identity unverified";
+    return "Order belongs to a different customer: identity unverified";
   }
   if (flag === "tracking_destination_mismatch") {
     return "Tracking may belong to a different order";
   }
   if (flag === "reply_delivery_failed") {
-    return "Reply didn't send — delivery failed";
+    return "Reply didn't send: delivery failed";
   }
   if (flag === "supplier_unreachable") {
     return "Supplier could not be reached";

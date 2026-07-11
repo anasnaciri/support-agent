@@ -69,7 +69,7 @@ export const passwordGuidanceForFailure = (
   switch (discovered.passwordHint) {
     case "regular":
       return {
-        message: `We found the settings for ${provider} but sign-in failed. Use your normal mailbox password — not an app password — and double-check it.`,
+        message: `We found the settings for ${provider} but sign-in failed. Use your normal mailbox password, not an app password, and double-check it.`,
         link: null,
       };
     case "app_password_if_2fa":
@@ -142,13 +142,13 @@ export const friendlyConnectDetail = (
     return "The mail server rejected the username or password.";
   }
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|dns/i.test(detail)) {
-    return "We couldn't find that mail server — double-check the server address.";
+    return "We couldn't find that mail server. Double-check the server address.";
   }
   if (/ECONNREFUSED|ETIMEDOUT|ECONNRESET|EHOSTUNREACH|timed? ?out/i.test(detail)) {
-    return "We couldn't reach the mail server — double-check the server address and port.";
+    return "We couldn't reach the mail server. Double-check the server address and port.";
   }
   if (/certificate|TLS|SSL|handshake/i.test(detail)) {
-    return "Secure connection failed — try the other security setting for this server.";
+    return "Secure connection failed. Try the other security setting for this server.";
   }
   return null;
 };

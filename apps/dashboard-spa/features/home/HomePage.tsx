@@ -65,7 +65,7 @@ export function HomePage() {
       {
         param: "workspace_created",
         kind: "success",
-        message: `Workspace created — you're now in ${tenantName}`,
+        message: `Workspace created. You're now in ${tenantName}`,
         description:
           "Connect this workspace's store and mailbox from Settings → Integrations to start receiving tickets.",
         action: { label: "Open Integrations", href: "/settings/integrations" },
@@ -246,7 +246,7 @@ export function HomePage() {
         <StatTile
           label="In progress"
           value={inProgress}
-          hint="Tickets the agent is actively handling right now (new, triaging, in progress) — not tickets parked waiting for approval, a customer, or a supplier to be resolved."
+          hint="Tickets the agent is actively handling right now (new, triaging, in progress), not tickets parked waiting for approval, a customer, or a supplier to be resolved."
         />
         <StatTile
           label="Resolved (all-time)"

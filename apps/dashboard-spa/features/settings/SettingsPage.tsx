@@ -56,14 +56,14 @@ const TILES = [
     icon: Banknote,
     title: "Refund policy",
     description:
-      "Set refund limits — small refunds run automatically, mid-range ask you first, large ones are blocked.",
+      "Set refund limits: small refunds run automatically, mid-range ask you first, large ones are blocked.",
   },
   {
     href: "/settings/discount-policy",
     icon: TicketPercent,
     title: "Discount policy",
     description:
-      "Set limits for goodwill coupon codes — small ones auto-issue, larger ones ask you first or are blocked.",
+      "Set limits for goodwill coupon codes: small ones auto-issue, larger ones ask you first or are blocked.",
   },
   {
     href: "/settings/usage",
@@ -103,7 +103,7 @@ export function SettingsPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tune how your support agents work — what they may do on their own, your
+          Tune how your support agents work: what they may do on their own, your
           refund policy, and the accounts they connect to.
         </p>
       </div>

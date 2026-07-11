@@ -190,7 +190,7 @@ function ShippingFactsForm({
         </div>
         <div className={field}>
           <Label htmlFor="customsDuties">
-            Customs / import duties — who pays?
+            Customs / import duties: who pays?
           </Label>
           <NativeSelect
             id="customsDuties"
@@ -249,7 +249,7 @@ function ShippingFactsForm({
           />
           <p id="lost-hint" className={hint}>
             Days in transit. Past this point your agents stop waiting and make
-            the customer whole — a refund or reshipment. Optional; leave blank if
+            the customer whole: a refund or reshipment. Optional; leave blank if
             you handle this case by case.
           </p>
         </div>
@@ -356,7 +356,7 @@ function ReturnsFactsForm({
         </div>
         <div className={field}>
           <Label htmlFor="returnShippingPayer">
-            Return shipping — who pays?
+            Return shipping: who pays?
           </Label>
           <NativeSelect
             id="returnShippingPayer"
@@ -449,7 +449,7 @@ export function FactsPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Store facts</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          The numbers and choices your agents quote to customers and act on — how
+          The numbers and choices your agents quote to customers and act on: how
           long delivery takes, when an order counts as late, how long a customer
           has to return an item. Fill them in once here and reference them from a
           scenario playbook with <span className="font-mono">@</span>, so a

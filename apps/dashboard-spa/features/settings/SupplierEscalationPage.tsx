@@ -214,7 +214,7 @@ function SheetTargetForm({
 
         <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
           <p className="mb-2 font-medium text-foreground">
-            Columns are yours — the agent reads your header row
+            Columns are yours: the agent reads your header row
           </p>
           <p className="mb-2">
             You don&apos;t need a fixed layout. When the missing-package agent
@@ -225,23 +225,23 @@ function SheetTargetForm({
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              <strong>Ticket</strong> / Ticket ID / Ticket — the support ticket id
+              <strong>Ticket</strong> / Ticket ID / Ticket: the support ticket id
             </li>
             <li>
-              <strong>Email</strong> / Customer — the customer&apos;s email
+              <strong>Email</strong> / Customer: the customer&apos;s email
             </li>
             <li>
-              <strong>Order</strong> / Order # — the order name (e.g. #1001)
+              <strong>Order</strong> / Order #: the order name (e.g. #1001)
             </li>
             <li>
-              <strong>Tracking</strong> — the carrier tracking number
+              <strong>Tracking</strong>: the carrier tracking number
             </li>
             <li>
-              <strong>Delivered</strong> / Delivered At — the delivered-at
+              <strong>Delivered</strong> / Delivered At: the delivered-at
               timestamp
             </li>
             <li>
-              <strong>Date</strong> / Logged / Reported — when the row was logged
+              <strong>Date</strong> / Logged / Reported: when the row was logged
             </li>
           </ul>
           <p className="mt-2">

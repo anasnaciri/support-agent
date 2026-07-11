@@ -616,7 +616,7 @@ export function PlaybookNotesField({
             <span className="font-medium">{blockedActions.join(", ")}</span>{" "}
             {blockedActions.length > 1 ? "are" : "is"} turned off for this
             scenario, but the playbook still asks for{" "}
-            {blockedActions.length > 1 ? "them" : "it"} — your agent won&apos;t
+            {blockedActions.length > 1 ? "them" : "it"}, so your agent won&apos;t
             do {blockedActions.length > 1 ? "them" : "it"}. Turn{" "}
             {blockedActions.length > 1 ? "them" : "it"} on above, or take{" "}
             {blockedActions.length > 1 ? "them" : "it"} out of the playbook.

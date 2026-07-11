@@ -170,7 +170,7 @@ const ESCALATION_REASON_COPY: Readonly<Record<string, string>> = {
   llm_credential_missing: "The AI provider key is missing.",
   llm_credential_revoked: "The AI provider key was revoked.",
   llm_insufficient_credits:
-    "The AI provider account is out of credits — top up to continue.",
+    "The AI provider account is out of credits. Top up to continue.",
   workflow_retries_exhausted:
     "Processing kept failing and was stopped after several retries.",
   llm_context_too_large: "The conversation grew too large for the AI model.",
@@ -240,7 +240,7 @@ export const curatedTimelineEvent = (
     return {
       kind: "status",
       id: `audit-${entry.id}`,
-      title: "Needs you — the agent stopped here",
+      title: "Needs you: the agent stopped here",
       description: reason
         ? (ESCALATION_REASON_COPY[reason] ?? `${humanizeSlug(reason)}.`)
         : null,

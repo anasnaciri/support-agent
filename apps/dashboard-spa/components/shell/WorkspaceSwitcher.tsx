@@ -148,7 +148,7 @@ export function WorkspaceSwitcher({ variant = "rail", menuPlacement }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={`Workspace — ${active.name}`}
+        title={`Workspace: ${active.name}`}
         aria-label={`Switch workspace (current: ${active.name})`}
         aria-haspopup="menu"
         aria-expanded={open}

@@ -61,11 +61,11 @@ export function EscalateSupplierDialog({
             value={problem}
             onChange={(e) => setProblem(e.target.value)}
             rows={4}
-            placeholder="e.g. Order #1001 seems lost in transit — please check with the carrier or reship."
+            placeholder="e.g. Order #1001 seems lost in transit. Please check with the carrier or reship."
             autoFocus
           />
           <p className="text-pretty text-xs text-muted-foreground">
-            The supplier sees exactly this text — leave out the customer's
+            The supplier sees exactly this text. Leave out the customer's
             personal details.
           </p>
         </div>

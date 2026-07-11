@@ -371,7 +371,7 @@ export function TicketHeaderActions({
         <IconActionButton
           onClick={() => takeoverM.mutate()}
           pending={takeoverM.isPending}
-          title="Take over — handle this ticket manually"
+          title="Take over: handle this ticket manually"
         >
           <Hand aria-hidden />
         </IconActionButton>

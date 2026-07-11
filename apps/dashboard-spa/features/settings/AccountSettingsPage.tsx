@@ -24,7 +24,7 @@ const ERROR_COPY = {
   workspace_name_mismatch:
     "The workspace name you typed didn't match. Nothing was deleted.",
   last_workspace:
-    "This is your only workspace — deleting it would delete your whole account. Use “Delete account” below instead.",
+    "This is your only workspace: deleting it would delete your whole account. Use “Delete account” below instead.",
   workspace_delete_failed:
     "We couldn't delete the workspace. Please try again, or contact support if this keeps happening.",
   delete_failed:

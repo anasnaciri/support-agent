@@ -522,7 +522,7 @@ export function MembersPage() {
           <CardTitle>Team</CardTitle>
           <CardDescription>
             {members.length === 0
-              ? "No members yet — invite someone above."
+              ? "No members yet. Invite someone above."
               : "Change a member’s role or remove their access."}
           </CardDescription>
         </CardHeader>

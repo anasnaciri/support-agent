@@ -103,7 +103,7 @@ export function ApprovalDetailPage() {
         <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
           <Clock className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
           <p>
-            Drafted {staleness.ageLabel} ago — the order, policy, or conversation
+            Drafted {staleness.ageLabel} ago. The order, policy, or conversation
             may have changed since. Review before sending.
           </p>
         </div>

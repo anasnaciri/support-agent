@@ -7,7 +7,7 @@ export const dashboardRefundNote = (input: {
   readonly ticketId: string;
   readonly reason: string | null;
 }): string => {
-  const base = `Refund issued from dashboard — ticket ${input.ticketId}`;
+  const base = `Refund issued from dashboard, ticket ${input.ticketId}`;
   const reason = input.reason?.trim();
-  return reason ? `${base} — reason: ${reason}` : base;
+  return reason ? `${base}. Reason: ${reason}` : base;
 };

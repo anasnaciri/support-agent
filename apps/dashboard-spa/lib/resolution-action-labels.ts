@@ -22,15 +22,15 @@ const remedy = (tool: string, help: string): RemedyAction => ({
 export const REMEDY_ACTIONS: ReadonlyArray<RemedyAction> = [
   remedy(
     "refund.create",
-    "Refund the customer — still capped by your Refund policy.",
+    "Refund the customer, still capped by your Refund policy.",
   ),
   remedy(
     "discount.create",
-    "A single-use coupon locked to the customer — capped by your Discount policy.",
+    "A single-use coupon locked to the customer, capped by your Discount policy.",
   ),
   remedy(
     "order.cancel",
-    "Cancel an unshipped order and refund it — governed by your Refund policy.",
+    "Cancel an unshipped order and refund it, governed by your Refund policy.",
   ),
   remedy(
     "order.update_shipping_address",

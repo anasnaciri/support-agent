@@ -359,7 +359,7 @@ function SheetTargetForm({
 
         <div className="rounded-md border bg-muted/40 p-4 text-sm text-muted-foreground">
           <p className="mb-2 font-medium text-foreground">
-            Columns are yours — the agent reads your header row
+            Columns are yours: the agent reads your header row
           </p>
           <p className="mb-2">
             You don&apos;t need a fixed layout. When the missing-package agent
@@ -370,23 +370,23 @@ function SheetTargetForm({
           </p>
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              <strong>Ticket</strong> / Ticket ID / Ticket — the support ticket id
+              <strong>Ticket</strong> / Ticket ID / Ticket: the support ticket id
             </li>
             <li>
-              <strong>Email</strong> / Customer — the customer&apos;s email
+              <strong>Email</strong> / Customer: the customer&apos;s email
             </li>
             <li>
-              <strong>Order</strong> / Order # — the order name (e.g. #1001)
+              <strong>Order</strong> / Order #: the order name (e.g. #1001)
             </li>
             <li>
-              <strong>Tracking</strong> — the carrier tracking number
+              <strong>Tracking</strong>: the carrier tracking number
             </li>
             <li>
-              <strong>Delivered</strong> / Delivered At — the delivered-at
+              <strong>Delivered</strong> / Delivered At: the delivered-at
               timestamp
             </li>
             <li>
-              <strong>Date</strong> / Logged / Reported — when the row was logged
+              <strong>Date</strong> / Logged / Reported: when the row was logged
             </li>
           </ul>
           <p className="mt-2">
@@ -550,7 +550,7 @@ function ImapConnectForm() {
         <p className="mb-5 text-sm text-muted-foreground">
           Enter the address and its <strong>password</strong>; we detect the
           server settings automatically and verify the login before saving. Some
-          providers need an app password instead — we&apos;ll tell you if yours
+          providers need an app password instead. We&apos;ll tell you if yours
           does. The password is stored encrypted.
         </p>
 
@@ -571,7 +571,7 @@ function ImapConnectForm() {
           {state?.error === "missing_hosts" ? (
             <Alert variant="warning">
               <AlertDescription>
-                Enter both server addresses — incoming and outgoing — or clear
+                Enter both server addresses (incoming and outgoing) or clear
                 them both to let us detect them for you.
               </AlertDescription>
             </Alert>
@@ -582,7 +582,7 @@ function ImapConnectForm() {
                 Use the {OAUTH_LABEL[state.provider]} connector instead
               </AlertTitle>
               <AlertDescription>
-                This address is hosted by {OAUTH_LABEL[state.provider]} — connect
+                This address is hosted by {OAUTH_LABEL[state.provider]}. Connect
                 it with one click from{" "}
                 <Link
                   href="/settings/integrations"
@@ -600,7 +600,7 @@ function ImapConnectForm() {
               <AlertTitle>We couldn&apos;t detect your provider</AlertTitle>
               <AlertDescription>
                 Enter the server settings below. You&apos;ll find them in your
-                email provider&apos;s help pages — search for &quot;IMAP
+                email provider&apos;s help pages: search for &quot;IMAP
                 settings&quot;.
               </AlertDescription>
             </Alert>
@@ -634,7 +634,7 @@ function ImapConnectForm() {
               <AlertDescription>
                 This store is already connected to{" "}
                 <strong>{state.mailbox ?? "another mailbox"}</strong>. One IMAP
-                mailbox per store — disconnect it in{" "}
+                mailbox per store. Disconnect it in{" "}
                 <Link
                   href="/settings/integrations"
                   className="font-medium text-primary hover:underline"
@@ -701,7 +701,7 @@ function ImapConnectForm() {
             <p className="text-xs text-muted-foreground">
               Your mailbox password. Some providers (Fastmail, Zoho, Yahoo,
               iCloud…) need an app password created in their security settings
-              instead — we&apos;ll tell you if yours does.
+              instead. We&apos;ll tell you if yours does.
             </p>
           </div>
 
@@ -713,7 +713,7 @@ function ImapConnectForm() {
             <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium">
               Server settings{" "}
               <span className="font-normal text-muted-foreground">
-                (advanced — detected automatically)
+                (advanced, detected automatically)
               </span>
             </summary>
             <div className="space-y-4 border-t p-4">
@@ -1014,7 +1014,7 @@ export function IntegrationDetailPage() {
           {needsAttention ? (
             <Alert variant="warning">
               <AlertTriangle className="size-4" />
-              <AlertTitle>Needs attention — reconnect</AlertTitle>
+              <AlertTitle>Needs attention: reconnect</AlertTitle>
               <AlertDescription>
                 {connectorHealthReasonLabel(health?.reason)}
               </AlertDescription>
@@ -1091,7 +1091,7 @@ export function IntegrationDetailPage() {
                 <Button disabled>Connect {label}</Button>
                 <p className="text-xs text-muted-foreground">
                   {shopifyState === "awaiting_provisioning"
-                    ? "Awaiting setup — support is provisioning your Shopify app for this workspace. You can connect once it's ready."
+                    ? "Awaiting setup. Support is provisioning your Shopify app for this workspace. You can connect once it's ready."
                     : "Shopify connections aren't available yet. Please contact support."}
                 </p>
               </div>
@@ -1144,7 +1144,7 @@ export function IntegrationDetailPage() {
               <p className="pt-1 text-[0.6875rem] leading-snug text-muted-foreground">
                 Missing a capability? Click <strong>Reinstall</strong>{" "}
                 {provider === "shopify"
-                  ? "above — Shopify shows the merchant an “update permissions” prompt without losing the existing connection."
+                  ? "above. Shopify shows the merchant an “update permissions” prompt without losing the existing connection."
                   : "above to reconnect and grant the latest permissions."}
               </p>
             ) : null}

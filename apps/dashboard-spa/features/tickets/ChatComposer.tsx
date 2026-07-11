@@ -620,7 +620,7 @@ export function ChatComposer({
                   aria-label="Reject this draft and take over"
                   title="Reject this approval?"
                   confirmLabel="Reject & take over"
-                  description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
+                  description="No customer reply goes out, and the ticket escalates to human takeover. You'll handle it manually from there."
                   pending={rejectM.isPending}
                   onConfirm={() => rejectM.mutate()}
                 >

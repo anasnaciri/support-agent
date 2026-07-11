@@ -135,7 +135,7 @@ export function ApprovalCard({
           <div className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 p-3 text-sm">
             <Clock className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
             <p>
-              Drafted {staleness.ageLabel} ago — the order, policy, or
+              Drafted {staleness.ageLabel} ago. The order, policy, or
               conversation may have changed since. Review before sending.
             </p>
           </div>
@@ -300,7 +300,7 @@ export function ApprovalCard({
 
         <ConfirmButton
           title="Reject this approval?"
-          description="No customer reply goes out, and the ticket escalates to human takeover — you'll handle it manually from there."
+          description="No customer reply goes out, and the ticket escalates to human takeover. You'll handle it manually from there."
           confirmLabel="Reject & take over"
           pending={rejectM.isPending}
           onConfirm={() => rejectM.mutate()}

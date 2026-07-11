@@ -138,7 +138,7 @@ const ONBOARD_ERROR: Record<string, string> = {
   session_remint_failed:
     "Something went wrong finishing setup. Please try again.",
   workos_admin_not_configured:
-    "Onboarding isn't available right now — please contact support.",
+    "Onboarding isn't available right now. Please contact support.",
 };
 
 // Self-service onboarding for a signed-in user with no organization yet. Submits

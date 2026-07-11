@@ -72,7 +72,7 @@ export function SuppliersPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Suppliers</h1>
         <p className="pt-1 text-sm text-muted-foreground">
           Invite a warehouse or supplier contact. They get a sign-in link and a
-          portal showing only the tickets your agent escalates to them — the
+          portal showing only the tickets your agent escalates to them: the
           problem, order reference, ship-to, and tracking, never your customers&apos;
           details.
         </p>

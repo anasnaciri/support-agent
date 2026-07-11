@@ -372,7 +372,7 @@ export function IntegrationsPage() {
           connected account and what your agents can do with it.
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
-          Looking for your AI provider key? It lives on its own page —{" "}
+          Looking for your AI provider key? It lives on its own page:{" "}
           <Link
             href="/settings/llm"
             className="font-medium text-primary hover:underline"
@@ -463,7 +463,7 @@ export function IntegrationsPage() {
                     {needsAttention ? (
                       <Alert variant="warning">
                         <AlertTriangle className="size-4" />
-                        <AlertTitle>Needs attention — reconnect</AlertTitle>
+                        <AlertTitle>Needs attention: reconnect</AlertTitle>
                         <AlertDescription>
                           {connectorHealthReasonLabel(health?.reason)}
                         </AlertDescription>
@@ -497,7 +497,7 @@ export function IntegrationsPage() {
                           <Button disabled>Connect {label}</Button>
                           <p className="text-xs text-muted-foreground">
                             {shopifyState === "awaiting_provisioning"
-                              ? "Awaiting setup — support is provisioning your Shopify app for this workspace. You can connect once it's ready."
+                              ? "Awaiting setup. Support is provisioning your Shopify app for this workspace. You can connect once it's ready."
                               : "Shopify connections aren't available yet. Please contact support."}
                           </p>
                         </div>

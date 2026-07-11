@@ -42,5 +42,5 @@ export const PROVIDER_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Lets your agents read and add rows in your spreadsheets. Connects with your Google account.",
   outlook:
     "Receives customer emails and sends replies from this mailbox (Outlook / Microsoft 365). Connects with your Microsoft account.",
-  imap: "Any other mailbox — PrivateEmail, Zoho, Fastmail, cPanel, custom domains. Just the address + an app password; server settings are detected automatically.",
+  imap: "Any other mailbox: PrivateEmail, Zoho, Fastmail, cPanel, custom domains. Just the address + an app password; server settings are detected automatically.",
 };

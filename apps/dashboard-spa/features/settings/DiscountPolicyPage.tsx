@@ -202,7 +202,7 @@ const DiscountPolicyForm = ({ policy }: { policy: DiscountPolicyView }) => {
               </span>
               <span className="text-xs text-muted-foreground">
                 Auto-issue small coupons, pause mid-size ones for approval,
-                block large ones — by discount value.
+                block large ones, all by discount value.
               </span>
             </span>
 
@@ -333,7 +333,7 @@ const DiscountPolicyForm = ({ policy }: { policy: DiscountPolicyView }) => {
               Always deny
             </span>
             <span className="text-xs text-muted-foreground">
-              Block every coupon. The agent never issues one — it drafts a
+              Block every coupon. The agent never issues one; it drafts a
               reply instead, and you handle goodwill gestures yourself.
             </span>
           </span>
@@ -371,7 +371,7 @@ export function DiscountPolicyPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Limits for the goodwill coupon codes the agent can issue. Every coupon
           is <strong>single-use</strong>, <strong>locked to the customer</strong>{" "}
-          on the order, and not combinable with other discounts — you only
+          on the order, and not combinable with other discounts; you only
           control the value limits here. Coupons at or below the{" "}
           <strong>auto</strong> limit issue automatically; between the limits
           they pause for your approval; above the <strong>block</strong> limit
@@ -401,7 +401,7 @@ export function DiscountPolicyPage() {
             {policy.mode === "always_deny" ? (
               <p>
                 <strong className="text-foreground">Always deny is on.</strong>{" "}
-                The agent never issues a coupon — it drafts a reply instead. The
+                The agent never issues a coupon; it drafts a reply instead. The
                 limits are ignored until you switch back to{" "}
                 <em>Use thresholds</em>.
               </p>
@@ -421,12 +421,12 @@ export function DiscountPolicyPage() {
                 </li>
                 <li>
                   <strong className="text-foreground">Ask:</strong> between the
-                  auto and block limits — pauses for approval.
+                  auto and block limits; pauses for approval.
                 </li>
                 <li>
                   <strong className="text-foreground">Block:</strong> above{" "}
                   {policy.maxPercentage}% or {policy.currencyCode}{" "}
-                  {minorToMajor(policy.maxFixedAmountMinorUnits)} — falls back to
+                  {minorToMajor(policy.maxFixedAmountMinorUnits)}; falls back to
                   a drafted reply.
                 </li>
                 <li>

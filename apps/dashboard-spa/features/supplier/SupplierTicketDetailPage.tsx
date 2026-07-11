@@ -316,7 +316,7 @@ export function SupplierTicketDetailPage() {
         return;
       }
       toast.success(
-        "Thanks — your update was recorded and the ticket is being handled.",
+        "Thanks, your update was recorded and the ticket is being handled.",
       );
       void qc.invalidateQueries({
         queryKey: qk.supplierTicket(ctx.workspaceId, id),
@@ -457,7 +457,7 @@ export function SupplierTicketDetailPage() {
         <div className="mx-auto w-full max-w-3xl">
           {resolved ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              You&apos;ve responded to this ticket — the support team is handling
+              You&apos;ve responded to this ticket. The support team is handling
               it from here.
             </div>
           ) : (
@@ -474,7 +474,7 @@ export function SupplierTicketDetailPage() {
                   placeholder="What did you find / do? (e.g. reshipped via DHL, new ETA Friday)"
                 />
                 <p className="text-xs text-muted-foreground">
-                  The support team turns this into a customer reply — write it
+                  The support team turns this into a customer reply, so write it
                   for them, not the customer.
                 </p>
               </div>

@@ -87,9 +87,9 @@ function DocDetail({
       }
       const changed = (res.body as { changed?: boolean } | null)?.changed === true;
       if (changed) {
-        toast.success("Re-synced — the page content changed.");
+        toast.success("Re-synced: the page content changed.");
       } else {
-        toast.info("Re-synced — the page content was unchanged.");
+        toast.info("Re-synced: the page content was unchanged.");
       }
       invalidate();
     },
@@ -192,7 +192,7 @@ function DocDetail({
                 {doc.sourceUrl}
               </a>
               {doc.fetchedAt ? ` on ${doc.fetchedAt.slice(0, 10)}` : null}. The
-              agents read this snapshot — re-sync to pull the latest page.
+              agents read this snapshot, so re-sync to pull the latest page.
             </p>
             <Button
               type="button"

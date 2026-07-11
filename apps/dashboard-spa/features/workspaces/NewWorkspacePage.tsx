@@ -70,7 +70,7 @@ export function NewWorkspacePage() {
             sidebar.
           </p>
           <p className="text-sm text-muted-foreground">
-            You&apos;ll be switched into the new workspace — connect its store
+            You&apos;ll be switched into the new workspace. Connect its store
             and mailbox from{" "}
             <span className="font-medium text-foreground">
               Settings → Integrations

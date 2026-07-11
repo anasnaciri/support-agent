@@ -37,7 +37,7 @@ export const parseConnectError = (
 export const connectErrorMessage = (code: string): string => {
   switch (code.split(":")[0]) {
     case "access_denied":
-      return "The connection was cancelled on the provider's consent screen. Nothing was connected — click Connect to try again.";
+      return "The connection was cancelled on the provider's consent screen. Nothing was connected. Click Connect to try again.";
     case "exchange_failed":
       return "The provider accepted the connection but the token exchange failed. Please try connecting again.";
     case "state_mismatch":
@@ -45,11 +45,11 @@ export const connectErrorMessage = (code: string): string => {
       return "The connect link had expired or was already used. Start the connection again from this page.";
     case "not_provisioned":
     case "revoked":
-      return "This workspace doesn't have its own Shopify app yet. Support is setting it up — you can connect once it's ready.";
+      return "This workspace doesn't have its own Shopify app yet. Support is setting it up. You can connect once it's ready.";
     case "app_not_configured":
       return "Shopify connections aren't available yet. Please contact support.";
     default:
-      return "Something went wrong completing the connection. Nothing was connected — please try again.";
+      return "Something went wrong completing the connection. Nothing was connected. Please try again.";
   }
 };
 

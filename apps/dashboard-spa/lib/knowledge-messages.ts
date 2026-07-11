@@ -15,14 +15,14 @@ export const knowledgeErrorMessage = (code: string): string => {
     case "too_many_documents":
       return "You've reached the limit of 50 documents. Delete one to add another.";
     case "cannot_edit_url_content":
-      return "This document is a URL snapshot — edit it by re-syncing the page.";
+      return "This document is a URL snapshot. Edit it by re-syncing the page.";
     case "not_a_url_doc":
       return "Only URL documents can be re-synced.";
     case "fetch_failed":
       switch (reason) {
         case "blocked_host":
         case "blocked_scheme":
-          return "That URL can't be fetched — it must be a public http(s) page.";
+          return "That URL can't be fetched: it must be a public http(s) page.";
         case "too_large":
           return "That page is too large to import.";
         case "timeout":

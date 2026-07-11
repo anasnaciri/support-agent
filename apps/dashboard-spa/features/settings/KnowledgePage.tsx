@@ -228,7 +228,7 @@ export function KnowledgePage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Docs</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add your store policies — shipping, returns, refunds, FAQs — by pasting
+          Add your store policies (shipping, returns, refunds, FAQs) by pasting
           the text or linking a page. Your support agents read these when
           answering customers and deciding refunds, so they follow your policies
           instead of guessing. The numbers they act on live in{" "}

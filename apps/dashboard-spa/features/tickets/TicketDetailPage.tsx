@@ -388,7 +388,7 @@ export function TicketDetailPage() {
           toast.success("Order linked and ticket details updated.");
         } else if (result.orderResolved === false) {
           toast.warning(
-            "Saved — but we couldn't find that order in your store. It's recorded on the ticket as a reference.",
+            "Saved, but we couldn't find that order in your store. It's recorded on the ticket as a reference.",
           );
         } else {
           toast.success("Ticket details updated.");
@@ -422,7 +422,7 @@ export function TicketDetailPage() {
         toast.success("Shipping address updated on the order.");
       } else if (result.kind === "order_not_found") {
         toast.warning(
-          "No order is linked to this ticket yet — assign the order first.",
+          "No order is linked to this ticket yet. Assign the order first.",
         );
       } else if (result.kind === "nothing_to_update") {
         toast.info("Nothing to update.");
@@ -1118,7 +1118,7 @@ export function TicketDetailPage() {
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {item.delivered === false
-                                ? "Not delivered — no notification channel connected"
+                                ? "Not delivered: no notification channel connected"
                                 : "Sent to your notification channel"}{" "}
                               · {formatDateTime(item.occurredAt)}
                             </div>

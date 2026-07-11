@@ -99,7 +99,7 @@ export const trackingEditFeedback = (
       return {
         kind: "error",
         message:
-          "You've already responded to this ticket — the tracking number can no longer be changed from here.",
+          "You've already responded to this ticket. The tracking number can no longer be changed from here.",
       };
     case "order_not_found":
       return {

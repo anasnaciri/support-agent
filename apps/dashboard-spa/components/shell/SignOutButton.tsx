@@ -114,7 +114,7 @@ export function SignOutButton({
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
-        title={email ? `Sign out — ${email}` : "Sign out"}
+        title={email ? `Sign out (${email})` : "Sign out"}
         aria-label="Sign out"
         aria-haspopup="menu"
         aria-expanded={open}
