@@ -10,6 +10,7 @@ import {
   shopifyDiscountCreate,
   shopifyOrderCancel,
   shopifyUpdateShippingAddress,
+  shopifyUpdateTracking,
 } from "../src/index.js";
 
 // The dashboard's tenant-facing "Actions" card is driven entirely by this
@@ -74,6 +75,12 @@ describe("tenant-facing tool metadata", () => {
       displayName: "Update the shipping address",
       control: "permission-toggle",
     },
+    {
+      tool: shopifyUpdateTracking,
+      name: "order.update_tracking",
+      displayName: "Update the tracking number",
+      control: "permission-toggle",
+    },
   ];
 
   for (const e of expected) {
@@ -99,6 +106,7 @@ describe("tenant-facing tool metadata", () => {
         "discount.create",
         "order.cancel",
         "order.update_shipping_address",
+        "order.update_tracking",
       ].sort(),
     );
   });

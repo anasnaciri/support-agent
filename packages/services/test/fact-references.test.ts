@@ -185,6 +185,7 @@ describe("actionReferenceCatalog", () => {
       "discount.create",
       "order.cancel",
       "order.update_shipping_address",
+      "order.update_tracking",
       "supplier.escalate",
       "conversation.ask_customer",
       "knowledge.search",

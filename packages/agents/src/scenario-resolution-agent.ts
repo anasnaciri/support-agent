@@ -110,6 +110,12 @@ export const scenarioResolutionAgent: AgentConfig = {
     "discount.create",
     "order.cancel",
     "order.update_shipping_address",
+    // Supplier-tick sync: when a supplier's portal update reports a new
+    // tracking number (a reship, a re-label), the agent writes it onto the
+    // order's fulfillment instead of only mentioning it in the reply. `allow`
+    // by default — the supplier already holds an ungated manual edit of the
+    // same field in their portal.
+    "order.update_tracking",
     "supplier.escalate",
   ],
   permissionOverrides: {},

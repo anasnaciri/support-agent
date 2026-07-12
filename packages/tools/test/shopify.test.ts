@@ -6,12 +6,14 @@ import {
   CustomerId,
   OrderId,
   OrderCancelFailed,
+  FulfillmentUpdateFailed,
   RefundFailed,
   ShopifyAuthMissing,
   TenantId,
   ToolOutputInvalid,
   type ShopifyCustomer,
   type ShopifyError,
+  type ShopifyFulfillment,
   type ShopifyOrder,
   type ShopifyOrderCancellation,
   type ShopifyProduct,
@@ -35,6 +37,7 @@ import {
   shopifyRefundRecommend,
   shopifyOrderCancel,
   shopifyUpdateShippingAddress,
+  shopifyUpdateTracking,
   computeRefundRecommendation,
 } from "../src/index.js";
 import {
@@ -45,6 +48,7 @@ import {
   type CancelOrderInput,
   type CustomerRefundHistory,
   type RefundPolicy,
+  type UpdateFulfillmentTrackingInput,
   type UpdateOrderShippingAddressInput,
 } from "@support-agent/services";
 
@@ -1663,5 +1667,216 @@ describe("order.update_shipping_address tool", () => {
         address1: "500 New St",
       } as never),
     ).toBe("ship:gid://shopify/Order/71");
+  });
+});
+
+describe("order.update_tracking tool", () => {
+  // A supplier reshipped (or the carrier re-labelled the parcel) and reported
+  // a new tracking number; the agent syncs it onto the REAL fulfillment so the
+  // order record and the ticket's tracking card stop pointing at the dead
+  // number. Fulfillment picking mirrors the supplier portal's rule.
+  const fulfillment = (
+    id: string,
+    trackingNumber: string,
+    trackingCompany: string | null,
+  ): ShopifyFulfillment => ({
+    id,
+    status: "in_transit",
+    trackingCompany,
+    trackingNumbers: [trackingNumber],
+    trackingUrls: [],
+    estimatedDeliveryAt: null,
+    deliveredAt: null,
+    createdAt: new Date("2026-05-14T00:00:00.000Z"),
+    updatedAt: new Date("2026-05-15T00:00:00.000Z"),
+  });
+
+  const withFulfillments = (
+    id: string,
+    fulfillments: ReadonlyArray<ShopifyFulfillment>,
+  ): ShopifyOrder => ({ ...buildOrder(id), fulfillments });
+
+  const envWith = (
+    order: ShopifyOrder,
+    capture: { input?: UpdateFulfillmentTrackingInput },
+    fail?: ShopifyError,
+  ) =>
+    ShopifyServiceTest({
+      orders: new Map([[order.id, order]]),
+      updateFulfillmentTracking: (input) => {
+        if (fail) return Effect.fail(fail);
+        capture.input = input;
+        return Effect.succeed(
+          fulfillment(input.fulfillmentId, input.trackingNumber, input.trackingCompany),
+        );
+      },
+    });
+
+  const run = (
+    input: Record<string, unknown>,
+    env: ReturnType<typeof ShopifyServiceTest>,
+  ) =>
+    Effect.runPromiseExit(
+      Effect.provide(
+        shopifyUpdateTracking.execute(
+          input as never,
+          baseCtx("c-track-1"),
+        ) as Effect.Effect<unknown, unknown, never>,
+        env,
+      ),
+    );
+
+  const expectIssues = (exit: Exit.Exit<unknown, unknown>, issues: string[]) => {
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = (exit.cause as { error?: unknown }).error;
+      expect(err).toBeInstanceOf(ToolOutputInvalid);
+      if (err instanceof ToolOutputInvalid) {
+        expect(err.tool).toBe("order.update_tracking");
+        expect(err.issues).toEqual(issues);
+      }
+    }
+  };
+
+  it("replaces tracking on the fulfillment carrying the number being replaced", async () => {
+    const orderId = OrderId("gid://shopify/Order/81");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const order = withFulfillments(orderId, [
+      fulfillment("f-1", "1Z999", "UPS"),
+      fulfillment("f-2", "OLD-42", "DHL"),
+    ]);
+    const exit = await run(
+      {
+        orderId,
+        trackingNumber: "NEW-777",
+        trackingCompany: null,
+        currentTrackingNumber: "OLD-42",
+      },
+      envWith(order, capture),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input).toEqual({
+      fulfillmentId: "f-2",
+      trackingNumber: "NEW-777",
+      // No carrier named by the supplier → the fulfillment's current one is
+      // carried over so the write never silently drops the carrier.
+      trackingCompany: "DHL",
+      // Customer communication goes through the agent's reply, never a
+      // side-channel Shopify shipping-update email.
+      notifyCustomer: false,
+    });
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as Record<string, unknown>;
+    expect(result["orderId"]).toBe(orderId);
+    expect(result["fulfillmentId"]).toBe("f-2");
+    expect(result["trackingNumber"]).toBe("NEW-777");
+    expect(result["trackingCompany"]).toBe("DHL");
+  });
+
+  it("targets the only fulfillment when no current number is given", async () => {
+    const orderId = OrderId("gid://shopify/Order/82");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const order = withFulfillments(orderId, [fulfillment("f-1", "1Z999", "UPS")]);
+    const exit = await run(
+      { orderId, trackingNumber: "NEW-1", trackingCompany: null },
+      envWith(order, capture),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input?.fulfillmentId).toBe("f-1");
+    expect(capture.input?.trackingCompany).toBe("UPS");
+  });
+
+  it("an explicitly named carrier wins over the fulfillment's current one", async () => {
+    const orderId = OrderId("gid://shopify/Order/83");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const order = withFulfillments(orderId, [fulfillment("f-1", "1Z999", "UPS")]);
+    const exit = await run(
+      { orderId, trackingNumber: "NEW-2", trackingCompany: "DHL" },
+      envWith(order, capture),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(capture.input?.trackingCompany).toBe("DHL");
+  });
+
+  it("refuses an order with no fulfillments", async () => {
+    const orderId = OrderId("gid://shopify/Order/84");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const exit = await run(
+      { orderId, trackingNumber: "NEW-3", trackingCompany: null },
+      envWith(withFulfillments(orderId, []), capture),
+    );
+    expectIssues(exit, ["NoFulfillment"]);
+    expect(capture.input).toBeUndefined();
+  });
+
+  it("refuses to guess between several fulfillments when the current number matches none", async () => {
+    const orderId = OrderId("gid://shopify/Order/85");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const order = withFulfillments(orderId, [
+      fulfillment("f-1", "1Z999", "UPS"),
+      fulfillment("f-2", "OLD-42", "DHL"),
+    ]);
+    const exit = await run(
+      {
+        orderId,
+        trackingNumber: "NEW-4",
+        trackingCompany: null,
+        currentTrackingNumber: "UNRELATED-9",
+      },
+      envWith(order, capture),
+    );
+    expectIssues(exit, ["AmbiguousFulfillment"]);
+    expect(capture.input).toBeUndefined();
+  });
+
+  it("refuses a blank tracking number", async () => {
+    const orderId = OrderId("gid://shopify/Order/86");
+    const capture: { input?: UpdateFulfillmentTrackingInput } = {};
+    const order = withFulfillments(orderId, [fulfillment("f-1", "1Z999", "UPS")]);
+    const exit = await run(
+      { orderId, trackingNumber: "   ", trackingCompany: null },
+      envWith(order, capture),
+    );
+    expectIssues(exit, ["TrackingNumberRequired"]);
+    expect(capture.input).toBeUndefined();
+  });
+
+  it("surfaces Shopify's refusal as the error tag, never a fake success", async () => {
+    const orderId = OrderId("gid://shopify/Order/87");
+    const order = withFulfillments(orderId, [fulfillment("f-1", "1Z999", "UPS")]);
+    const exit = await run(
+      { orderId, trackingNumber: "NEW-5", trackingCompany: null },
+      envWith(
+        order,
+        {},
+        new FulfillmentUpdateFailed({
+          fulfillmentId: "f-1",
+          code: null,
+          message: "Access denied for fulfillmentTrackingInfoUpdate",
+        }),
+      ),
+    );
+    expectIssues(exit, ["FulfillmentUpdateFailed"]);
+  });
+
+  it("declares write risk, ALLOW default (the supplier already holds ungated authority over tracking), and the permission toggle", () => {
+    expect(shopifyUpdateTracking.name).toBe("order.update_tracking");
+    expect(shopifyUpdateTracking.risk).toBe("write");
+    expect(shopifyUpdateTracking.defaultPermission).toBe("allow");
+    expect(shopifyUpdateTracking.sideEffectClass).toBe("external_state");
+    expect(shopifyUpdateTracking.tenantControl).toBe("permission-toggle");
+    // Deliberately NO requiredConnectorScopes: fulfillmentTrackingInfoUpdate
+    // accepts ANY ONE of two fulfillment-order scopes, and the precheck is
+    // all-of — declaring both would deny stores that legitimately hold one.
+    expect(shopifyUpdateTracking.requiredConnectorScopes).toBeUndefined();
+  });
+
+  it("idempotencyKey is stable per order + new number", () => {
+    expect(
+      shopifyUpdateTracking.idempotencyKey!({
+        orderId: "gid://shopify/Order/81",
+        trackingNumber: "NEW-777",
+      } as never),
+    ).toBe("track:gid://shopify/Order/81:NEW-777");
   });
 });

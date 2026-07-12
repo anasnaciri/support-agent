@@ -208,6 +208,35 @@ describe("buildInitialMessages — untrusted-content framing", () => {
     expect(text).toContain("conversation.reply");
   });
 
+  it("supplier.updated tells the agent to sync a reported tracking number onto the order", () => {
+    // "reshipped #NEW-777" typed as a portal MESSAGE must reach the order the
+    // same way the portal's manual card edit does — via a real fulfillment
+    // write, not just prose in the customer reply.
+    const event: DomainEvent = {
+      type: "supplier.updated",
+      ticketId: TicketId("c-1"),
+      payload: {
+        supplierId: "sup-1",
+        note: "reshipped #NEW-777",
+        proposedResolution: null,
+      },
+    } as never;
+    const text = textOf(
+      buildInitialMessages(event, {
+        subject: "Where is my order?",
+        threadId: ThreadId("gmail:abc"),
+        context: { customerEmail: "cust@example.com" },
+      }),
+    );
+    expect(text).toContain("order.update_tracking");
+    expect(text).toContain("currentTrackingNumber");
+    // The sync instruction is runtime-authored steering — it must sit OUTSIDE
+    // the untrusted fence around the supplier's note.
+    const open = text.indexOf(UNTRUSTED_OPEN);
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("order.update_tracking")).toBeLessThan(open);
+  });
+
   it("lists supplier update attachments with trusted ids and fenced filenames", () => {
     const event: DomainEvent = {
       type: "supplier.updated",

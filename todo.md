@@ -17,6 +17,41 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Supplier-reported tracking numbers sync onto the order** (2026-07-12).
+      Verified with `npx vitest run packages apps/worker apps/api
+      apps/dashboard-spa` (all green) and `pnpm build`. A supplier typing
+      "reshipped #TRACK123" as a portal MESSAGE previously only re-engaged the
+      agent to draft a reply — the number could never reach the order because
+      no agent tool wrote tracking (only the portal card pencil's HTTP handler
+      did). Closed with a new `order.update_tracking` tool
+      (`packages/tools/src/shopify/update-tracking.ts`), a thin wrapper over
+      the SAME `ShopifyService.updateFulfillmentTracking` the portal uses,
+      with the portal's fulfillment-picking rule (the fulfillment carrying
+      `currentTrackingNumber` wins; no match → only a single-fulfillment order
+      is safe, `AmbiguousFulfillment` otherwise; carrier carried over when the
+      supplier named none; `notifyCustomer: false` always). The
+      `supplier.updated` branch of `buildInitialMessages` now steers the agent:
+      sync a supplier-reported new/corrected tracking number with the tool
+      BEFORE drafting the reply, passing the order's old number as
+      `currentTrackingNumber`, and only ever a number the supplier explicitly
+      stated. Registered in `ALL_TOOLS`, `TOOL_DISPLAY_NAMES` ("Update the
+      tracking number"), the scenario agent's tool list, the `/` action
+      catalog (`ACTIONABLE_TOOLS`), and `summarizeApprovalAction` (shows the
+      number).
+      - **`defaultPermission: "allow"`** — user decision (2026-07-12), unlike
+        every other order write: the number's authority is the supplier's own
+        statement, and the supplier already holds an UNGATED manual edit of the
+        same field in their portal. Tenants can flip it to Ask per-agent.
+      - **Deliberately NO `requiredConnectorScopes`:** the mutation accepts ANY
+        ONE of the two `SHOPIFY_FULFILLMENT_TRACKING_SCOPES`, and the precheck
+        is all-of. A store missing both scopes surfaces Shopify's refusal as
+        `FulfillmentUpdateFailed` (needs the same re-OAuth as the portal
+        tracking edit).
+      - **`SCENARIO_REMEDY_TOOLS` deliberately not extended** — the scenario
+        envelope is unwired (per-agent config governs); revisit if
+        `applyScenarioEnvelope` is ever resurfaced, else the tool rides as
+        baseline there.
+
 - [x] **Facts and Agent pages warn before leaving with unsaved changes**
       (2026-07-12). Verified with
       `pnpm test -- apps/dashboard-spa/test/settings-unsaved-changes.test.ts`,

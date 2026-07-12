@@ -792,6 +792,10 @@ export const buildInitialMessages = (
     parts.push(
       "(system event: supplier.updated)",
       "The supplier responded on this ticket. Draft a reply to the CUSTOMER that resolves their request, in your own words. Do NOT quote the supplier's note verbatim, and never reveal that the update came from a supplier or warehouse.",
+      // The sync instruction. A supplier typing "reshipped #NEW-777" as a
+      // portal MESSAGE must land on the order the same way their manual card
+      // edit does — via a real fulfillment write, not just prose in the reply.
+      "If the supplier's update reports a NEW or corrected tracking number (they reshipped, or the parcel was re-labelled), sync it onto the order BEFORE drafting the reply: look the order up if you haven't, then call order.update_tracking with the new number, the carrier if the supplier named one, and the order's old tracking number as currentTrackingNumber. Only pass a tracking number the supplier explicitly stated. Then share the new number with the customer in your reply.",
     );
     if (ticketSubject) {
       parts.push(`Subject: ${ticketSubject}`);

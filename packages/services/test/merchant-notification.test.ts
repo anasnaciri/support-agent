@@ -290,6 +290,19 @@ describe("summarizeApprovalAction", () => {
     expect(line).toBe("Update the shipping address");
   });
 
+  it("summarizes a tracking update with the new number", () => {
+    // A merchant approving (or auditing) a tracking sync must see the NUMBER
+    // being written, never the raw GID.
+    const line = summarizeApprovalAction("order.update_tracking", {
+      orderId: "gid://shopify/Order/123",
+      trackingNumber: "NEW-777",
+      trackingCompany: "DHL",
+    });
+    expect(line).toContain("Update the tracking number");
+    expect(line).toContain("NEW-777");
+    expect(line).not.toContain("gid://");
+  });
+
   it("falls back to the tool id for unknown tools", () => {
     const line = summarizeApprovalAction("some.future_tool", { x: 1 });
     expect(line).toContain("some.future_tool");

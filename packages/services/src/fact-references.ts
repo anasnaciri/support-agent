@@ -362,6 +362,7 @@ const ACTIONABLE_TOOLS: ReadonlyArray<string> = [
   "discount.create",
   "order.cancel",
   "order.update_shipping_address",
+  "order.update_tracking",
   "supplier.escalate",
   // Baseline — always available to the scenario agent.
   "conversation.reply",

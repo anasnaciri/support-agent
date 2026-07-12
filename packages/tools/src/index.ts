@@ -13,6 +13,7 @@ import { shopifyRefundRecommend } from "./shopify/recommend-refund.js";
 import { shopifyDiscountCreate } from "./shopify/discount.js";
 import { shopifyOrderCancel } from "./shopify/cancel-order.js";
 import { shopifyUpdateShippingAddress } from "./shopify/update-shipping-address.js";
+import { shopifyUpdateTracking } from "./shopify/update-tracking.js";
 import { agentHandoff } from "./agent/handoff.js";
 import { conversationFetchThread } from "./conversation/fetch-thread.js";
 import { conversationReply } from "./conversation/reply.js";
@@ -38,6 +39,7 @@ export * from "./shopify/recommend-refund.js";
 export * from "./shopify/discount.js";
 export * from "./shopify/cancel-order.js";
 export * from "./shopify/update-shipping-address.js";
+export * from "./shopify/update-tracking.js";
 export * from "./agent/handoff.js";
 export * from "./conversation/fetch-thread.js";
 export * from "./conversation/reply.js";
@@ -84,6 +86,7 @@ export const ALL_TOOLS: ReadonlyArray<AnyTool> = [
   shopifyDiscountCreate as AnyTool,
   shopifyOrderCancel as AnyTool,
   shopifyUpdateShippingAddress as AnyTool,
+  shopifyUpdateTracking as AnyTool,
   supplierReadSheetColumns as AnyTool,
   supplierAddSheetRow as AnyTool,
   supplierEscalate as AnyTool,

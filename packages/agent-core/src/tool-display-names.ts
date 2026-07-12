@@ -32,6 +32,7 @@ export const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   "merchant.notify": "Send you a heads-up",
   "order.cancel": "Cancel and refund the order",
   "order.update_shipping_address": "Update the shipping address",
+  "order.update_tracking": "Update the tracking number",
   "refund.create": "Issue a refund",
   "refund.recommend": "Recommend a refund",
   "shopify.find_customer_order": "Find a customer's order",

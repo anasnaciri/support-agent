@@ -344,6 +344,15 @@ export const summarizeApprovalAction = (
         .filter((v): v is string => v !== null && v.length > 0);
       return parts.length > 0 ? `${base}: ${parts.join(", ")}` : base;
     }
+    case "order.update_tracking": {
+      // Show the NUMBER being written — that's what the merchant would
+      // sanity-check against the supplier's message.
+      const number =
+        typeof input["trackingNumber"] === "string"
+          ? input["trackingNumber"]
+          : null;
+      return number ? `${base}: ${number}` : base;
+    }
     case "discount.create": {
       const value = typeof input["value"] === "string" ? input["value"] : null;
       if (value && input["valueType"] === "percentage") {

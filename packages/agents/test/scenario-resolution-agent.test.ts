@@ -41,6 +41,9 @@ describe("scenario-resolution-agent config", () => {
       "refund.create",
       "discount.create",
       "order.update_shipping_address",
+      // The supplier-tick sync: a supplier reporting "reshipped #TRACK" in
+      // their portal message must land on the order, not just in the reply.
+      "order.update_tracking",
       "supplier.escalate",
       "tracking.lookup",
     ]) {
