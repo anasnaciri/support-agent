@@ -118,6 +118,24 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
   return parsed;
 };
 
+/**
+ * Suppress an on-ticket stamp that no longer describes the order's shipment.
+ * The stamp is a snapshot of the agent's LAST `tracking.lookup`; when the
+ * order's fulfillment now tracks under a different number (a reship, a
+ * re-label, a Shopify-admin edit) the snapshot is superseded and rendering it
+ * would show the old number and its stale scans as this order's status.
+ * Conservative: only drops on a definite disagreement — a stamp without a
+ * number, or an order without tracking numbers, passes through unchanged.
+ */
+export const dropSupersededStamp = (
+  stamp: ParsedTracking | null,
+  orderTrackingNumbers: ReadonlyArray<string>,
+): ParsedTracking | null => {
+  if (!stamp?.trackingNumber) return stamp;
+  if (orderTrackingNumbers.length === 0) return stamp;
+  return orderTrackingNumbers.includes(stamp.trackingNumber) ? stamp : null;
+};
+
 export const TRACKING_STATUS_LABEL: Record<TrackingStatusValue, string> = {
   in_transit: "In transit",
   delivered: "Delivered",

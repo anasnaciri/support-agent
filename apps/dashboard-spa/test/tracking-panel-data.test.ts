@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   daysBetween,
+  dropSupersededStamp,
   parseLiveTracking,
   publicTrackingUrl,
   trackingStatusVariant,
@@ -109,6 +110,45 @@ describe("parseLiveTracking", () => {
     });
     expect(parsed?.kind).toBe("no_provider");
     expect(parsed?.reason).toBe("sync_pending");
+  });
+});
+
+// The on-ticket stamp is a snapshot of the agent's LAST tracking.lookup. When
+// the order's fulfillment now carries a different number (a reship, a
+// re-label, a Shopify-admin edit), the snapshot describes a superseded
+// shipment and must not be rendered as this order's tracking (prod ticket
+// 03649e6f: the card kept a reshipped parcel's old number + exception scan).
+describe("dropSupersededStamp", () => {
+  const stamp = parseLiveTracking({
+    kind: "live",
+    status: "exception",
+    carrier: "191997",
+    trackingNumber: "OLD123",
+  });
+
+  it("drops the stamp when the order tracks under a different number", () => {
+    expect(dropSupersededStamp(stamp, ["NEW456"])).toBeNull();
+  });
+
+  it("keeps the stamp when the order still carries its number", () => {
+    expect(dropSupersededStamp(stamp, ["NEW456", "OLD123"])).toBe(stamp);
+  });
+
+  it("keeps the stamp when the order has no tracking numbers (nothing to disagree with)", () => {
+    expect(dropSupersededStamp(stamp, [])).toBe(stamp);
+  });
+
+  it("keeps a stamp that names no number (cannot be compared)", () => {
+    const numberless = parseLiveTracking({
+      kind: "live",
+      status: "in_transit",
+      carrier: "lulu",
+    });
+    expect(dropSupersededStamp(numberless, ["NEW456"])).toBe(numberless);
+  });
+
+  it("passes null through", () => {
+    expect(dropSupersededStamp(null, ["NEW456"])).toBeNull();
   });
 });
 

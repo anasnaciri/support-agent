@@ -47,7 +47,10 @@ import {
   type ContextRow,
 } from "@/lib/ticket-context";
 import { approvalDisplayNote } from "@/lib/approval-note";
-import { parseLiveTracking } from "@/lib/tracking-panel-data";
+import {
+  dropSupersededStamp,
+  parseLiveTracking,
+} from "@/lib/tracking-panel-data";
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
@@ -526,13 +529,22 @@ export function TicketDetailPage() {
   const showContext = contextOpen && hasContextCard;
 
   // Prefer the fresh live lookup (rich: origin/destination, transit days, full
-  // checkpoint history); fall back to the on-ticket `liveTrackingStatus` stamp.
+  // checkpoint history); fall back to the on-ticket `liveTrackingStatus` stamp —
+  // but not one describing a number the order no longer tracks under (a reship
+  // or re-label superseded it; the live order's fulfillment is canonical).
   const liveTracking =
     trackingResult?.kind === "ok"
       ? parseLiveTracking(trackingResult.tracking)
       : null;
+  const orderTrackingNumbers = (order?.fulfillments ?? []).flatMap(
+    (f) => f.trackingNumbers,
+  );
   const tracking =
-    liveTracking ?? parseLiveTracking(context["liveTrackingStatus"]);
+    liveTracking ??
+    dropSupersededStamp(
+      parseLiveTracking(context["liveTrackingStatus"]),
+      orderTrackingNumbers,
+    );
 
   // The conversation's display name: the linked Shopify customer, else the
   // inbound sender's name from the thread, else the reply-to email.

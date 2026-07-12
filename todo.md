@@ -40,24 +40,40 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         fix narrow. Also unchanged: the prompt-vs-runtime gap where the agent
         ignored the directive's merchant.notify half; only the forced reply
         approval engaged. Needs a Fly deploy to reach prod.
-      - [ ] **Follow-up: Tracking card shows a superseded tracking number
-        after `order.update_tracking`** (observed on the same prod ticket,
-        2026-07-12 21:53). The Tracking card renders
+      - [x] **Follow-up (FIXED 2026-07-12): Tracking card showed a superseded
+        tracking number after `order.update_tracking`** (observed on the same
+        prod ticket, 2026-07-12 21:53). The card followed
         `context.liveTrackingStatus` — the snapshot of the agent's LAST
-        `tracking.lookup` — including its `trackingNumber`. When the supplier
-        reported a reship and the agent wrote the new number onto the Shopify
-        fulfillment via `order.update_tracking`, nothing invalidated that
-        snapshot: the tool doesn't touch `liveTrackingStatus`, the agent
-        (correctly) didn't re-run `tracking.lookup` on a number 17track hasn't
-        synced yet, and a resolved ticket never ticks again — so the card
-        shows the old number + its exception scan forever, contradicting the
-        Order card's live fulfillment read. Direction: `order.update_tracking`
-        (and the supplier-portal pencil edit) should clear/restamp
-        `liveTrackingStatus` when the number changes; and/or the ticket page
-        should cross-check `liveTrackingStatus.trackingNumber` against the
-        live order's fulfillment number and mark the Tracking card stale when
-        they differ (render the order's number, keep the snapshot only for
-        status history).
+        `tracking.lookup` — so a supplier reship synced onto the Shopify
+        fulfillment never reached it. Fixed in three layers, TDD, full suite
+        green (`npx vitest run packages apps/worker apps/api
+        apps/dashboard-spa`, 2675 passed) + SPA `tsc --noEmit`:
+        - **API endpoint priority inverted** — `handleDashboardTicketTracking`
+          previously looked up the STAMP's number and only fell back to the
+          order; now `pickTrackingSource`
+          (`apps/api/.../dashboard/ticket-tracking-source.ts`, unit-tested)
+          resolves the order first and follows its live fulfillment number
+          (stamp = fallback only). Because the fulfillment is re-read live on
+          every card load, this also picks up numbers edited directly in the
+          Shopify admin — there is NO webhook for fulfillment edits (only
+          APP_UNINSTALLED + compliance), the app's model is pull-on-read.
+          Same-number case keeps the stamp's 17track carrier code as the
+          lookup hint.
+        - **Runtime invalidation** — `stampTrackingLookup` (agent-runtime.ts)
+          now also handles `order.update_tracking`: a successful update whose
+          stored number differs from the snapshot's clears
+          `liveTrackingStatus` (facts header stops describing the superseded
+          shipment); a same-number re-store keeps it. Tests in
+          `tracking-lookup-runtime.test.ts`. (The supplier-portal pencil edit
+          already cleared it inside `recordSupplierTrackingUpdate` — verified,
+          untouched.)
+        - **SPA fallback cross-check** — `dropSupersededStamp`
+          (`lib/tracking-panel-data.ts`, unit-tested) suppresses the on-ticket
+          stamp fallback when the live order tracks under a different number,
+          so even the endpoint-unavailable path can't render the old number.
+        - NOT done (deliberate): no restamp-with-new-number on update — the
+          next `tracking.lookup` (or the card's live endpoint) re-stamps; a
+          synthetic stamp would claim a lookup that never happened.
       - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
         unclearable** (observed on the same prod ticket after 4 dashboard
         retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
