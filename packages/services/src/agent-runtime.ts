@@ -225,6 +225,32 @@ const AgentRuntimeLayer = Layer.effect(
       toolName: string,
       result: { readonly _tag: "Right" | "Left"; readonly right?: unknown },
     ) => {
+      // `order.update_tracking` replaces the number on the Shopify
+      // fulfillment — a liveTrackingStatus snapshot describing the OLD number
+      // (and its scans) is superseded and must not keep feeding the facts
+      // header and the dashboard Tracking card (prod ticket 03649e6f: the
+      // card showed a reshipped parcel's old exception forever). Clear it;
+      // the next tracking.lookup re-stamps for the new number. A re-store of
+      // the SAME number leaves the still-accurate snapshot alone.
+      if (toolName === "order.update_tracking") {
+        if (result._tag !== "Right") return Effect.succeed(null);
+        const stored =
+          result.right && typeof result.right === "object"
+            ? (result.right as Record<string, unknown>)["trackingNumber"]
+            : null;
+        const snapshot = ticket.context["liveTrackingStatus"];
+        const snapshotNumber =
+          snapshot && typeof snapshot === "object"
+            ? (snapshot as Record<string, unknown>)["trackingNumber"]
+            : null;
+        if (snapshot === undefined) return Effect.succeed(null);
+        if (typeof stored === "string" && stored === snapshotNumber) {
+          return Effect.succeed(null);
+        }
+        const { liveTrackingStatus: _superseded, ...withoutSnapshot } =
+          ticket.context;
+        return tickets.update(ticket.id, { context: withoutSnapshot });
+      }
       if (toolName !== "tracking.lookup") return Effect.succeed(null);
       const { liveTrackingStatus: _liveTrackingStatus, ...rest } =
         ticket.context;

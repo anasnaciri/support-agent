@@ -510,4 +510,254 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     expect(out.context["riskFlags"]).toContain("tracking_destination_mismatch");
     expect(out.status).toBe("human_takeover");
   });
+
+  // Regression: prod ticket 03649e6f (2026-07-12). A supplier reship synced
+  // via `order.update_tracking` replaced the fulfillment's number on Shopify,
+  // but the liveTrackingStatus snapshot (old number + its exception scan)
+  // stayed on the ticket forever — misleading both the dashboard Tracking
+  // card and every later agent tick's facts header.
+  it("clears a superseded liveTrackingStatus when order.update_tracking replaces the number", async () => {
+    const orderId = OrderId("gid://shopify/Order/7001");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7001",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/1"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "10.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [],
+      fulfillments: [
+        {
+          id: "gid://shopify/Fulfillment/1",
+          status: "in_transit",
+          trackingCompany: "USPS",
+          trackingNumbers: ["OLD123"],
+          trackingUrls: [],
+          estimatedDeliveryAt: null,
+          deliveredAt: null,
+          createdAt: new Date("2026-07-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "upd-1",
+        tool: "order.update_tracking",
+        input: {
+          orderId: "gid://shopify/Order/7001",
+          trackingNumber: "NEW456",
+          trackingCompany: null,
+          currentTrackingNumber: "OLD123",
+        },
+      },
+      { type: "final_message", text: "Tracking synced." },
+    ];
+    const updateAgent: AgentConfig = {
+      ...trackingAgent,
+      id: AgentId("update-tracking-agent"),
+      tools: ["order.update_tracking"],
+    };
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([updateAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      PlatformMailServiceTest({}),
+      TenantAgentOverridesServiceTest(),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TENANT, settingsFixture()]]),
+      }),
+      Layer.succeed(ApprovalLinkConfig, {
+        baseUrl: "https://api.test.example",
+        signingKey: "test-signing-key",
+        ttlMs: 60_000,
+      }),
+      liveTracking(null),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TENANT,
+            channel: "email",
+            currentAgentId: updateAgent.id,
+            subject: "Where is my order?",
+            context: {
+              scenarioKey: "delivery_issue",
+              liveTrackingStatus: {
+                kind: "live",
+                trackingNumber: "OLD123",
+                carrier: "191997",
+                status: "exception",
+              },
+            },
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Any update?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+    // The snapshot described the replaced number — it must not survive.
+    expect(out.context["liveTrackingStatus"]).toBeUndefined();
+    // Unrelated context is untouched.
+    expect(out.context["scenarioKey"]).toBe("delivery_issue");
+  });
+
+  it("keeps liveTrackingStatus when order.update_tracking re-stores the same number", async () => {
+    const orderId = OrderId("gid://shopify/Order/7002");
+    const fixtureOrder: ShopifyOrder = {
+      id: orderId,
+      name: "#7002",
+      confirmationNumber: null,
+      email: "cust@example.com",
+      customerId: CustomerId("gid://shopify/Customer/1"),
+      fulfillmentStatus: "in_transit",
+      financialStatus: "paid",
+      totalPrice: { amount: "10.00", currencyCode: "USD" },
+      shippingAddress: null,
+      lineItems: [],
+      fulfillments: [
+        {
+          id: "gid://shopify/Fulfillment/1",
+          status: "in_transit",
+          trackingCompany: "USPS",
+          trackingNumbers: ["SAME789"],
+          trackingUrls: [],
+          estimatedDeliveryAt: null,
+          deliveredAt: null,
+          createdAt: new Date("2026-07-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+    };
+    const script: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "upd-1",
+        tool: "order.update_tracking",
+        input: {
+          orderId: "gid://shopify/Order/7002",
+          trackingNumber: "SAME789",
+          trackingCompany: "USPS",
+          currentTrackingNumber: "SAME789",
+        },
+      },
+      { type: "final_message", text: "Tracking synced." },
+    ];
+    const updateAgent: AgentConfig = {
+      ...trackingAgent,
+      id: AgentId("update-tracking-agent-same"),
+      tools: ["order.update_tracking"],
+    };
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([updateAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      LLMServiceScripted(script),
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({ orders: new Map([[orderId, fixtureOrder]]) }),
+      ConversationServiceTest({}),
+      PlatformMailServiceTest({}),
+      TenantAgentOverridesServiceTest(),
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TENANT, settingsFixture()]]),
+      }),
+      Layer.succeed(ApprovalLinkConfig, {
+        baseUrl: "https://api.test.example",
+        signingKey: "test-signing-key",
+        ttlMs: 60_000,
+      }),
+      liveTracking(null),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TENANT,
+            channel: "email",
+            currentAgentId: updateAgent.id,
+            subject: "Where is my order?",
+            context: {
+              liveTrackingStatus: {
+                kind: "live",
+                trackingNumber: "SAME789",
+                carrier: "191997",
+                status: "in_transit",
+              },
+            },
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Re: Where is my order?",
+              bodyText: "Any update?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+          return yield* repo.getById(created.id);
+        }),
+        layer,
+      ),
+    );
+    // Same number re-stored → the snapshot still describes the live number.
+    expect(out.context["liveTrackingStatus"]).toMatchObject({
+      trackingNumber: "SAME789",
+    });
+  });
 });
