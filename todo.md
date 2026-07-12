@@ -40,6 +40,24 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         fix narrow. Also unchanged: the prompt-vs-runtime gap where the agent
         ignored the directive's merchant.notify half; only the forced reply
         approval engaged. Needs a Fly deploy to reach prod.
+      - [ ] **Follow-up: Tracking card shows a superseded tracking number
+        after `order.update_tracking`** (observed on the same prod ticket,
+        2026-07-12 21:53). The Tracking card renders
+        `context.liveTrackingStatus` — the snapshot of the agent's LAST
+        `tracking.lookup` — including its `trackingNumber`. When the supplier
+        reported a reship and the agent wrote the new number onto the Shopify
+        fulfillment via `order.update_tracking`, nothing invalidated that
+        snapshot: the tool doesn't touch `liveTrackingStatus`, the agent
+        (correctly) didn't re-run `tracking.lookup` on a number 17track hasn't
+        synced yet, and a resolved ticket never ticks again — so the card
+        shows the old number + its exception scan forever, contradicting the
+        Order card's live fulfillment read. Direction: `order.update_tracking`
+        (and the supplier-portal pencil edit) should clear/restamp
+        `liveTrackingStatus` when the number changes; and/or the ticket page
+        should cross-check `liveTrackingStatus.trackingNumber` against the
+        live order's fulfillment number and mark the Tracking card stale when
+        they differ (render the order's number, keep the snapshot only for
+        status history).
       - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
         unclearable** (observed on the same prod ticket after 4 dashboard
         retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
