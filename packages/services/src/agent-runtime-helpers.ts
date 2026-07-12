@@ -1176,16 +1176,51 @@ export const normalizeEmailForMatch = (value: unknown): string | null => {
 };
 
 /**
- * Trim, lowercase, and collapse internal whitespace on a country string for
- * comparison, or null if it isn't a usable string. Both sides we compare are
- * country *names* (Shopify's `shippingAddress.country` and 17track's
- * `recipient_address.country`), so a plain normalized-string equality is the
- * conservative test — see {@link trackingDestinationMismatchFlag}.
+ * Informal spellings both providers use that neither ISO expansion nor plain
+ * normalization reconciles. Keys and values are already normalized (trim /
+ * lowercase / collapsed whitespace); values match the CLDR English region
+ * name lowercased, the canonical form {@link normalizeCountryForMatch} emits.
+ */
+const COUNTRY_NAME_ALIASES: Readonly<Record<string, string>> = {
+  usa: "united states",
+  "u.s.": "united states",
+  "u.s.a.": "united states",
+  "united states of america": "united states",
+  uk: "united kingdom",
+  "great britain": "united kingdom",
+};
+
+/** Expands ISO 3166 alpha-2 codes to CLDR English region names ("US" → "United States"). */
+const REGION_DISPLAY_NAMES = new Intl.DisplayNames(["en"], {
+  type: "region",
+  fallback: "code",
+});
+
+/**
+ * Canonicalize a country string for comparison, or null if it isn't a usable
+ * string. Shopify's `shippingAddress.country` is an English country *name*
+ * ("United States") while 17track's `recipient_address.country` can be either
+ * a name or an ISO 3166 alpha-2 *code* ("US") — a raw string equality
+ * false-flagged the two as different orders (prod ticket 03649e6f,
+ * 2026-07-12), which suppressed a legitimate supplier escalation. So after
+ * trim / lowercase / whitespace-collapse, a two-letter token is expanded to
+ * its CLDR English region name and known informal aliases ("USA", "UK") are
+ * folded in; an unrecognized code stays verbatim (fallback: "code"), keeping
+ * the comparison conservative — see {@link trackingDestinationMismatchFlag}.
  */
 export const normalizeCountryForMatch = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase().replace(/\s+/g, " ");
-  return v === "" ? null : v;
+  if (v === "") return null;
+  const aliased = COUNTRY_NAME_ALIASES[v];
+  if (aliased !== undefined) return aliased;
+  if (/^[a-z]{2}$/.test(v)) {
+    const name = REGION_DISPLAY_NAMES.of(v.toUpperCase());
+    if (typeof name === "string" && name.toLowerCase() !== v) {
+      return name.trim().toLowerCase().replace(/\s+/g, " ");
+    }
+  }
+  return v;
 };
 
 /**

@@ -374,6 +374,43 @@ describe("trackingDestinationMismatchFlag", () => {
     expect(trackingDestinationMismatchFlag("Germany", "   ")).toBeNull();
     expect(trackingDestinationMismatchFlag(42, {})).toBeNull();
   });
+
+  // Regression: prod ticket 03649e6f (2026-07-12). 17track returned the ISO
+  // alpha-2 code while Shopify's order carries the country NAME; the raw
+  // string comparison false-flagged a mismatch, and the injected directive
+  // then suppressed a legitimate supplier escalation.
+  it("does not flag an ISO alpha-2 code against the same country's name", () => {
+    expect(trackingDestinationMismatchFlag("US", "United States")).toBeNull();
+    expect(trackingDestinationMismatchFlag("United States", "US")).toBeNull();
+    expect(trackingDestinationMismatchFlag("gb", "United Kingdom")).toBeNull();
+    expect(trackingDestinationMismatchFlag("DE", "Germany")).toBeNull();
+    expect(trackingDestinationMismatchFlag("US", "us")).toBeNull();
+  });
+
+  it("does not flag common informal aliases of the same country", () => {
+    expect(trackingDestinationMismatchFlag("USA", "United States")).toBeNull();
+    expect(trackingDestinationMismatchFlag("UK", "United Kingdom")).toBeNull();
+    expect(trackingDestinationMismatchFlag("Great Britain", "GB")).toBeNull();
+  });
+
+  it("still flags a real mismatch expressed as codes or mixed forms", () => {
+    expect(trackingDestinationMismatchFlag("DE", "United States")).toBe(
+      "tracking_destination_mismatch",
+    );
+    expect(trackingDestinationMismatchFlag("US", "Germany")).toBe(
+      "tracking_destination_mismatch",
+    );
+    expect(trackingDestinationMismatchFlag("DE", "FR")).toBe(
+      "tracking_destination_mismatch",
+    );
+  });
+
+  it("compares an unknown two-letter token verbatim instead of guessing", () => {
+    expect(trackingDestinationMismatchFlag("ZZ", "ZZ")).toBeNull();
+    expect(trackingDestinationMismatchFlag("ZZ", "United States")).toBe(
+      "tracking_destination_mismatch",
+    );
+  });
 });
 
 describe("hasTrackingDestinationMismatch", () => {
