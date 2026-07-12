@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Layer } from "effect";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleDb } from "./client.js";
 import { tickets, tenants } from "./schema.js";
 import type { OnboardingResult } from "@support-agent/dashboard-contracts";
@@ -472,6 +472,49 @@ export const createWorkspaceForOrg = async (
   });
   await ensureOwnerRole(db, id);
   return { workspaceId: id };
+};
+
+export interface RestampTicketLiveTrackingInput {
+  readonly tenantId: string;
+  readonly ticketId: string;
+  /** Serialized live lookup (JSON-safe, ISO dates) to store as the new stamp. */
+  readonly tracking: Record<string, unknown>;
+}
+
+/**
+ * Self-heal the ticket's `liveTrackingStatus` stamp when it describes a
+ * superseded tracking number. The Tracking card's live endpoint follows the
+ * order's Shopify fulfillment number; when the saved stamp disagrees (a
+ * reship, a re-label, a Shopify-admin edit — none of which push to the app),
+ * the endpoint calls this with the fresh lookup it just fetched so the saved
+ * value converges to the store's. The conditions live in SQL so the write is
+ * atomic: only a ticket that HAS a stamp naming a DIFFERENT number is
+ * touched — a concurrent runtime stamp is never clobbered and a page view
+ * never invents a stamp. `updated_at` is deliberately untouched: this is a
+ * metadata heal, not ticket activity, and must not re-sort the inbox.
+ * Returns whether a restamp happened.
+ */
+export const restampTicketLiveTracking = async (
+  db: DrizzleDb,
+  input: RestampTicketLiveTrackingInput,
+): Promise<boolean> => {
+  const newNumber = input.tracking["trackingNumber"];
+  if (typeof newNumber !== "string" || newNumber.length === 0) return false;
+  const rows = await db
+    .update(tickets)
+    .set({
+      context: sql`jsonb_set(${tickets.context}, '{liveTrackingStatus}', ${JSON.stringify(input.tracking)}::jsonb)`,
+    })
+    .where(
+      and(
+        eq(tickets.id, input.ticketId),
+        eq(tickets.tenantId, input.tenantId),
+        sql`${tickets.context}->'liveTrackingStatus' IS NOT NULL`,
+        sql`${tickets.context}->'liveTrackingStatus'->>'trackingNumber' IS DISTINCT FROM ${newNumber}`,
+      ),
+    )
+    .returning({ id: tickets.id });
+  return rows.length > 0;
 };
 
 /**

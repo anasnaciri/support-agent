@@ -53,6 +53,7 @@ import {
   escalateTicketToSupplier,
   getActiveReplyDeliveryForTicket,
   getMemberAccess,
+  restampTicketLiveTracking,
   parsePageNumber,
   parsePageSize,
   requeueReplyDeliveryNow,
@@ -479,7 +480,20 @@ export const handleDashboardTicketTracking = async (
           })
           .pipe(Effect.catchAll(() => Effect.succeed(null)));
         if (!tracking) return { kind: "unavailable" as const };
-        return { kind: "ok" as const, tracking: serializeTracking(tracking) };
+        const serialized = serializeTracking(tracking);
+        // Self-heal a saved stamp describing a superseded number with the
+        // fresh lookup for the canonical (fulfillment) number, so the DB
+        // converges to what Shopify says. Guarded in SQL (only an existing,
+        // disagreeing stamp is replaced); best-effort — a write failure never
+        // fails the read.
+        yield* Effect.promise(() =>
+          restampTicketLiveTracking(db, {
+            tenantId: auth.tenantId,
+            ticketId: id,
+            tracking: serialized as unknown as Record<string, unknown>,
+          }),
+        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        return { kind: "ok" as const, tracking: serialized };
       }),
       layer,
     ),

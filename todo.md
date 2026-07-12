@@ -71,9 +71,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           (`lib/tracking-panel-data.ts`, unit-tested) suppresses the on-ticket
           stamp fallback when the live order tracks under a different number,
           so even the endpoint-unavailable path can't render the old number.
-        - NOT done (deliberate): no restamp-with-new-number on update — the
-          next `tracking.lookup` (or the card's live endpoint) re-stamps; a
-          synthetic stamp would claim a lookup that never happened.
+        - **Endpoint self-heal (added same day, user request):** the tracking
+          endpoint now converges the SAVED stamp to Shopify's number instead
+          of just out-ranking it. After a successful live lookup,
+          `restampTicketLiveTracking` (packages/db `dashboard-writes.ts`,
+          integration-tested) replaces `context.liveTrackingStatus` with the
+          fresh serialized lookup — guarded in SQL: only a ticket that HAS a
+          stamp naming a DIFFERENT number is touched (never invents a stamp,
+          never clobbers a concurrent same-number runtime stamp, tenant-
+          scoped, `updated_at` untouched so the inbox doesn't re-sort on page
+          views). Best-effort: a write failure never fails the GET. Covers
+          Shopify-admin edits: the next time anyone opens the ticket, the DB
+          stamp is healed. Nothing is surfaced to the merchant (deliberate).
       - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
         unclearable** (observed on the same prod ticket after 4 dashboard
         retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
