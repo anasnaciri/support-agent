@@ -97,6 +97,7 @@ import {
   resolveCustomerForContext,
   resolveOrderForContext,
 } from "./shopify-panels.js";
+import { pickTrackingSource } from "./ticket-tracking-source.js";
 import {
   resolveCanonicalOrder,
   supplierOrderProjection,
@@ -436,8 +437,11 @@ const serializeTracking = (t: TrackingLookup): DashboardTracking => {
 
 // GET /dashboard/tickets/:id/tracking — fresh carrier status for the ticket's
 // shipment, fed to the ticket-detail Tracking card. The tracking number comes
-// from the agent's `liveTrackingStatus` stamp when present, else the order's
-// fulfillment; a live 17track lookup (TrackingService) returns the rich result.
+// from the order's live fulfillment when present, else the agent's
+// `liveTrackingStatus` stamp (`pickTrackingSource` — the fulfillment is the
+// canonical record and reflects reships/edits immediately; the stamp is a
+// snapshot of the last agent lookup and can describe a superseded number);
+// a live 17track lookup (TrackingService) returns the rich result.
 // Best-effort: no number → `no_tracking_number`, provider error → `unavailable`
 // (the card falls back to the on-ticket stamp).
 export const handleDashboardTicketTracking = async (
@@ -458,35 +462,21 @@ export const handleDashboardTicketTracking = async (
         );
         if (!ticketRow) return { kind: "not_found" as const };
         const context = (ticketRow.context ?? {}) as Record<string, unknown>;
-        const stamp =
-          typeof context["liveTrackingStatus"] === "object" &&
-          context["liveTrackingStatus"] !== null
-            ? (context["liveTrackingStatus"] as Record<string, unknown>)
-            : null;
-        let trackingNumber =
-          typeof stamp?.["trackingNumber"] === "string" &&
-          stamp["trackingNumber"]
-            ? (stamp["trackingNumber"] as string)
-            : null;
-        let carrier =
-          typeof stamp?.["carrier"] === "string" && stamp["carrier"]
-            ? (stamp["carrier"] as string)
-            : null;
-        if (!trackingNumber) {
-          const order = yield* resolveOrderForContext(
-            TenantId(auth.tenantId),
-            context,
-          );
-          const f =
-            order?.fulfillments.find((ff) => ff.trackingNumbers.length > 0) ??
-            null;
-          trackingNumber = f?.trackingNumbers[0] ?? null;
-          carrier = carrier ?? f?.trackingCompany ?? null;
-        }
-        if (!trackingNumber) return { kind: "no_tracking_number" as const };
+        const order = yield* resolveOrderForContext(
+          TenantId(auth.tenantId),
+          context,
+        );
+        const source = pickTrackingSource(
+          context,
+          order?.fulfillments ?? null,
+        );
+        if (!source) return { kind: "no_tracking_number" as const };
         const trackingSvc = yield* TrackingService;
         const tracking = yield* trackingSvc
-          .lookup(TenantId(auth.tenantId), { trackingNumber, carrier })
+          .lookup(TenantId(auth.tenantId), {
+            trackingNumber: source.trackingNumber,
+            carrier: source.carrier,
+          })
           .pipe(Effect.catchAll(() => Effect.succeed(null)));
         if (!tracking) return { kind: "unavailable" as const };
         return { kind: "ok" as const, tracking: serializeTracking(tracking) };
