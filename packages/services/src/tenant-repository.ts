@@ -274,7 +274,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "line item and compare the customer's photos against the product's reference images. Record " +
         "your verdict with /ticket.update_context (productMatch: match / mismatch / uncertain). " +
         "If the photos do NOT match the ordered product (mismatch), or you genuinely can't tell " +
-        "(uncertain), do NOT accuse or deny the customer — flag it for the store owner with " +
+        "(uncertain), do NOT accuse or deny the customer. Flag it for the store owner with " +
         "/merchant.notify and draft a softer reply that asks them to confirm the order and which item " +
         "is damaged, without committing to a refund amount yet. " +
         "When the damage is verified (productMatch = match), prefer a replacement via the supplier; " +
