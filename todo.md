@@ -2323,7 +2323,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 ## Working Agreement
 
 1. Read this file first at the start of every session.
-2. Read `master-plan.md` after this file for architectural context.
+2. Consult `master-plan.md` when architectural context is needed; it is not
+   required reading for every session.
 3. Keep this checklist focused on features, pending implementation work,
    architecture decisions, and invariants.
 4. Verify before ticking a checkbox.

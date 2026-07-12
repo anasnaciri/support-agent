@@ -5,7 +5,8 @@ You're working in `/Users/anasnaciri/personal/support-agent`, implementing the A
 ## Required reading, every session
 
 1. **`todo.md`** — running checklist of what's done, what's next, and the invariants that must hold. Read this **first**, before any other file.
-2. **`master-plan.md`** — full architecture (§§1–20). Source of truth for design decisions.
+
+Read `master-plan.md` when you need architectural context, but it is not required reading for every session.
 
 ## Required action, every session
 
