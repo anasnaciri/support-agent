@@ -40,6 +40,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         fix narrow. Also unchanged: the prompt-vs-runtime gap where the agent
         ignored the directive's merchant.notify half; only the forced reply
         approval engaged. Needs a Fly deploy to reach prod.
+      - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
+        unclearable** (observed on the same prod ticket after 4 dashboard
+        retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
+        the flag; nothing removes it — `restartFromTriage` clears only
+        `classification` (keeps `riskFlags` + the stale `liveTrackingStatus`,
+        so the agent doesn't even re-run `tracking.lookup`). Deliberate
+        "sticky, fail-toward-human" design for a REAL mismatch, but it means a
+        false-positive persists forever even after the comparison fix ships.
+        Since the flag is runtime-computed from trusted provider data, a fresh
+        `tracking.lookup` whose countries MATCH could safely clear it (or at
+        minimum, `restartFromTriage` should drop `liveTrackingStatus` so the
+        lookup re-runs). Until then, un-flagging a ticket takes manual context
+        surgery in the DB.
 
       Original diagnosis:
       17track returned `destinationCountry: "US"` (ISO 3166 alpha-2) while the
