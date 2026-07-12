@@ -27,6 +27,9 @@ export interface ModelComboboxProps {
   readonly disabled?: boolean;
   /** Optional placeholder when nothing is selected. */
   readonly placeholder?: string;
+  /** Fires on every pick — the selection lives in here, so a page that needs to
+   *  know it has an unsaved model change has no other way to see it. */
+  readonly onValueChange?: (id: string) => void;
 }
 
 interface Group {
@@ -72,6 +75,7 @@ export const ModelCombobox = ({
   defaultModel,
   disabled,
   placeholder,
+  onValueChange,
 }: ModelComboboxProps) => {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -125,6 +129,7 @@ export const ModelCombobox = ({
     setSelected(id);
     setOpen(false);
     setQuery("");
+    onValueChange?.(id);
   };
 
   return (

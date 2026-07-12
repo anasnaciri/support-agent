@@ -17,6 +17,22 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Facts and Agent pages warn before leaving with unsaved changes**
+      (2026-07-12). Verified with
+      `pnpm test -- apps/dashboard-spa/test/settings-unsaved-changes.test.ts`,
+      the full `apps/dashboard-spa` suite, `pnpm build`, and a stubbed-API
+      Playwright run over both pages: a clean page navigates freely; an edit in
+      either Facts form (they save separately) or in the Agent model picker /
+      system prompt blocks navigation; Stay keeps the edit; undoing an edit by
+      hand clears the warning. The dirty-flag registry from the Scenarios work is
+      now shared (`useDirtyFlags` / `useReportDirty` in `lib/unsaved-changes.ts`).
+      Two rules keep the warning honest: `trimmedFormValuesDirty` ignores padding
+      the save would strip, and `agentEditsDirty` treats re-picking the agent
+      default model as a reset (it clears the override) rather than an edit. The
+      Ask/Auto permission toggles save on the spot, so they are not tracked.
+      `ModelCombobox` gained an optional `onValueChange` — the selection lives
+      inside it, so a page has no other way to see an unsaved model pick.
+
 - [x] **Scenarios page warns before leaving with unsaved changes** (2026-07-11).
       Verified with `pnpm test -- apps/dashboard-spa/test/unsaved-changes.test.ts`,
       the full `apps/dashboard-spa` suite, `pnpm --filter

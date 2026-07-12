@@ -31,8 +31,40 @@ import { Link } from "@/components/ui/link";
 import { ModelCombobox } from "@/components/ui/model-combobox";
 import { PermissionToggle } from "@/components/ui/permission-toggle";
 import { SettingsBreadcrumb } from "@/components/settings-breadcrumb";
+import { UnsavedChangesPrompt } from "@/components/unsaved-changes-prompt";
 
 const SCENARIO_AGENT_ID = "scenario-resolution-agent";
+
+/**
+ * Whether the model picker or the prompt box holds an edit that hasn't been
+ * saved. The Ask/Auto permission toggles save on the spot, so they can't be
+ * unsaved and don't appear here.
+ *
+ * Both fields are compared the way the save normalizes them, so an edit that
+ * would store nothing new is not a change worth warning about: the prompt is
+ * trimmed on submit, and picking the agent default clears the model override
+ * rather than storing it.
+ */
+export const agentEditsDirty = ({
+  defaultModel,
+  savedPrompt,
+  promptText,
+  savedModel,
+  selectedModel,
+}: {
+  readonly defaultModel: string;
+  readonly savedPrompt: string | null;
+  readonly promptText: string;
+  readonly savedModel: string | null;
+  readonly selectedModel: string;
+}): boolean => {
+  const asStoredModel = (model: string | null): string =>
+    model == null || model === "" || model === defaultModel ? "" : model;
+  return (
+    promptText.trim() !== (savedPrompt ?? "").trim() ||
+    asStoredModel(selectedModel) !== asStoredModel(savedModel)
+  );
+};
 
 const modeVariant = (mode: string): "info" | "secondary" =>
   mode === "primary" ? "info" : "secondary";
@@ -111,6 +143,22 @@ function BuiltinAgentDetail({
   useEffect(() => {
     setPromptText(systemPromptOverride ?? "");
   }, [systemPromptOverride]);
+
+  // The picker owns its selection internally, so mirror it here: a model picked
+  // but not saved is an unsaved change, and it resyncs with the server the same
+  // way the prompt does.
+  const [selectedModel, setSelectedModel] = useState(override ?? "");
+  useEffect(() => {
+    setSelectedModel(override ?? "");
+  }, [override]);
+
+  const dirty = agentEditsDirty({
+    defaultModel: agent.model,
+    savedPrompt: systemPromptOverride,
+    promptText,
+    savedModel: override,
+    selectedModel,
+  });
 
   const invalidateAgents = () => {
     void qc.invalidateQueries({ queryKey: qk.agentOverrides(w) });
@@ -207,6 +255,11 @@ function BuiltinAgentDetail({
 
   return (
     <div className="space-y-6">
+      <UnsavedChangesPrompt
+        dirty={dirty}
+        description="Your agent changes haven't been saved yet. Leave this page and you'll lose them."
+      />
+
       <SettingsBreadcrumb current="Agent" />
 
       <div>
@@ -320,6 +373,7 @@ function BuiltinAgentDetail({
                   defaultModel={agent.model}
                   options={catalogModels}
                   disabled={catalogModels.length === 0}
+                  onValueChange={setSelectedModel}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
                   Models from {providerName}.

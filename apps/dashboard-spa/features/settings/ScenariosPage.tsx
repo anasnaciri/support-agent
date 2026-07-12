@@ -50,9 +50,9 @@ import {
 } from "@/lib/parse-resolution";
 import {
   formValuesDirty,
-  hasUnsavedChanges,
-  setDirtyFlag,
-  type DirtyFlags,
+  useDirtyFlags,
+  useReportDirty,
+  type ReportDirty,
 } from "@/lib/unsaved-changes";
 import { UnsavedChangesPrompt } from "@/components/unsaved-changes-prompt";
 import { Button } from "@/components/ui/button";
@@ -292,21 +292,6 @@ export const sidebarFactGroups = (
   })).filter((group) => group.facts.length > 0);
 
 type DashboardCtx = { readonly workspaceId: string };
-
-/** How a form on this page tells the page it has (or no longer has) edits to save. */
-type ReportDirty = (id: string, dirty: boolean) => void;
-
-/** Report `dirty` under `id` while mounted; report clean on the way out. */
-const useReportDirty = (
-  report: ReportDirty,
-  id: string,
-  dirty: boolean,
-): void => {
-  useEffect(() => {
-    report(id, dirty);
-  }, [report, id, dirty]);
-  useEffect(() => () => report(id, false), [report, id]);
-};
 
 const compactField = "grid gap-1.5";
 const compactHint = "text-xs text-muted-foreground";
@@ -1236,11 +1221,7 @@ export function ScenariosPage() {
 
   // The scenarios form and each facts card save separately; any one of them
   // holding unsaved edits should stop the merchant walking away from the page.
-  const [dirtyFlags, setDirtyFlags] = useState<DirtyFlags>({});
-  const reportDirty = useCallback<ReportDirty>(
-    (id, dirty) => setDirtyFlags((flags) => setDirtyFlag(flags, id, dirty)),
-    [],
-  );
+  const { dirty, reportDirty } = useDirtyFlags();
 
   const { data: policy, isLoading } = useQuery({
     queryKey: qk.resolutionPolicy(ctx.workspaceId),
@@ -1257,7 +1238,7 @@ export function ScenariosPage() {
   return (
     <div className="space-y-6">
       <UnsavedChangesPrompt
-        dirty={hasUnsavedChanges(dirtyFlags)}
+        dirty={dirty}
         description="Your scenario changes haven't been saved yet. Leave this page and you'll lose them."
       />
 

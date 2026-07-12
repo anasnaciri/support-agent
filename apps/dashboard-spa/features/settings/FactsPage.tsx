@@ -7,6 +7,13 @@ import { api } from "@/lib/api-client";
 import { qk } from "@/lib/query-keys";
 import { useWorkspaceCtx } from "@/lib/session-context";
 import { useRequirePermission } from "@/lib/require-permission";
+import {
+  trimmedFormValuesDirty,
+  useDirtyFlags,
+  useReportDirty,
+  type ReportDirty,
+} from "@/lib/unsaved-changes";
+import { UnsavedChangesPrompt } from "@/components/unsaved-changes-prompt";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,9 +57,11 @@ const invalidateFacts = (
 function ShippingFactsForm({
   profile,
   ctx,
+  reportDirty,
 }: {
   readonly profile: ShippingFactsView | null;
   readonly ctx: Ctx;
+  readonly reportDirty: ReportDirty;
 }) {
   const qc = useQueryClient();
   const [processingTime, setProcessingTime] = useState(
@@ -74,6 +83,21 @@ function ShippingFactsForm({
     );
   const [error, setError] = useState<string | null>(null);
 
+  const values = {
+    processingTime,
+    deliveryTime,
+    shippingCost,
+    customsDuties,
+    delayedAfterDays,
+    lostPackageInvestigationDays,
+  };
+  const [saved, setSaved] = useState(values);
+  useReportDirty(
+    reportDirty,
+    "facts:shipping",
+    trimmedFormValuesDirty(saved, values),
+  );
+
   const save = useMutation({
     mutationFn: (input: {
       readonly processingTime: string;
@@ -89,6 +113,7 @@ function ShippingFactsForm({
         return;
       }
       setError(null);
+      setSaved(values);
       toast.success("Shipping details saved.");
       invalidateFacts(qc, ctx.workspaceId);
     },
@@ -275,9 +300,11 @@ function ShippingFactsForm({
 function ReturnsFactsForm({
   facts,
   ctx,
+  reportDirty,
 }: {
   readonly facts: ReturnsFactsView | null;
   readonly ctx: Ctx;
+  readonly reportDirty: ReportDirty;
 }) {
   const qc = useQueryClient();
   const [returnWindowDays, setReturnWindowDays] = useState(
@@ -294,6 +321,19 @@ function ReturnsFactsForm({
   );
   const [error, setError] = useState<string | null>(null);
 
+  const values = {
+    returnWindowDays,
+    returnShippingPayer,
+    refundMethod,
+    refundProcessingTime,
+  };
+  const [saved, setSaved] = useState(values);
+  useReportDirty(
+    reportDirty,
+    "facts:returns",
+    trimmedFormValuesDirty(saved, values),
+  );
+
   const save = useMutation({
     mutationFn: (input: {
       readonly returnWindowDays: number;
@@ -307,6 +347,7 @@ function ReturnsFactsForm({
         return;
       }
       setError(null);
+      setSaved(values);
       toast.success("Returns details saved.");
       invalidateFacts(qc, ctx.workspaceId);
     },
@@ -434,6 +475,10 @@ export function FactsPage() {
   const allowed = useRequirePermission("knowledge.view");
   const ctx = useWorkspaceCtx();
 
+  // Shipping and returns save separately; either one holding unsaved edits
+  // should stop the merchant walking away from the page.
+  const { dirty, reportDirty } = useDirtyFlags();
+
   const settingsQuery = useQuery({
     queryKey: qk.settings(ctx.workspaceId),
     queryFn: () => api.settings(ctx),
@@ -444,6 +489,11 @@ export function FactsPage() {
 
   return (
     <div className="space-y-6">
+      <UnsavedChangesPrompt
+        dirty={dirty}
+        description="Your store facts haven't been saved yet. Leave this page and you'll lose them."
+      />
+
       <SettingsBreadcrumb current="Facts" />
 
       <div>
@@ -479,6 +529,7 @@ export function FactsPage() {
               key={settingsQuery.data?.shippingFacts ? "loaded" : "empty"}
               profile={settingsQuery.data?.shippingFacts ?? null}
               ctx={ctx}
+              reportDirty={reportDirty}
             />
           )}
         </CardContent>
@@ -505,6 +556,7 @@ export function FactsPage() {
               key={settingsQuery.data?.returnsFacts ? "loaded" : "empty"}
               facts={settingsQuery.data?.returnsFacts ?? null}
               ctx={ctx}
+              reportDirty={reportDirty}
             />
           )}
         </CardContent>
