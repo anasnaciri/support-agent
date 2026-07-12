@@ -207,13 +207,27 @@ const stringToStatus = (s: string | undefined): TrackingStatus => {
   if (!s) return "unknown";
   const lower = s.toLowerCase();
   if (lower.includes("delivered")) return "delivered";
+  // AvailableForPickup: arrived at a pickup point, waiting on the customer —
+  // not a carrier problem, so it mirrors numeric code 30 (in_transit) rather
+  // than "exception". Checked before "deliveryfailure" et al. on purpose.
+  if (lower.includes("availableforpickup") || lower.includes("pickup")) {
+    return "in_transit";
+  }
   if (lower.includes("intransit") || lower.includes("in_transit") || lower.includes("transit")) {
     return "in_transit";
   }
   if (lower.includes("pending") || lower.includes("notfound") || lower.includes("info_received")) {
     return "pending";
   }
-  if (lower.includes("exception") || lower.includes("undelivered") || lower.includes("expired")) {
+  // DeliveryFailure: a failed delivery attempt ("customer not available",
+  // refused, bad address). A real delivery problem the playbooks key on.
+  if (
+    lower.includes("exception") ||
+    lower.includes("undelivered") ||
+    lower.includes("expired") ||
+    lower.includes("deliveryfailure") ||
+    lower.includes("delivery_failure")
+  ) {
     return "exception";
   }
   return "unknown";

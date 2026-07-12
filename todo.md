@@ -17,6 +17,64 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **PROD BUG (FIXED 2026-07-12): tracking-destination gate false-positives
+      on ISO code vs country name and suppressed a supplier escalation** (found
+      2026-07-12, prod ticket `03649e6f-640d-44dc-b805-e770da635069`, tenant
+      `4f685543`). Both fixes landed TDD (red → green), verified with
+      `npx vitest run packages apps/worker apps/api` (2065 passed) +
+      `pnpm build`:
+      - `normalizeCountryForMatch` now expands ISO 3166 alpha-2 codes to CLDR
+        English region names via `Intl.DisplayNames(["en"], {type: "region",
+        fallback: "code"})` and folds informal aliases (USA / U.S. / U.S.A. /
+        united states of america / UK / Great Britain) before comparing; an
+        unrecognized two-letter token stays verbatim. Regression tests in
+        `packages/services/test/order-identity.test.ts` (`("US", "United
+        States")` → null, real mismatches still flag, "ZZ" verbatim).
+      - `stringToStatus` (seventeentrack-http.ts) maps `DeliveryFailure` →
+        `exception` and `AvailableForPickup` → `in_transit` (mirrors numeric
+        code 30 — waiting on the customer is not a carrier problem). Tests in
+        `packages/providers/test/seventeentrack-http.test.ts`.
+      - NOT fixed (noted, needs a decision): `numericToStatus` maps 35
+        (undelivered) → `in_transit` while the string mapper sends
+        "undelivered" → `exception` — inconsistent, but untouched to keep this
+        fix narrow. Also unchanged: the prompt-vs-runtime gap where the agent
+        ignored the directive's merchant.notify half; only the forced reply
+        approval engaged. Needs a Fly deploy to reach prod.
+
+      Original diagnosis:
+      17track returned `destinationCountry: "US"` (ISO 3166 alpha-2) while the
+      runtime had stamped `orderShipCountry: "United States"` (Shopify country
+      name). `trackingDestinationMismatchFlag` compares normalized *strings*
+      ("us" ≠ "united states") → false `tracking_destination_mismatch`. The
+      injected directive ("do NOT … escalate off it") then stopped the
+      scenario agent from calling `supplier.escalate` on a shipment with a
+      genuine carrier delivery exception (transitDays 27 vs the store's
+      20-day delayed threshold) — the exact playbook case the merchant
+      configured (`supplierMode: escalate_and_wait`, "On an exception,
+      escalate to the supplier"). The 2026-07-10 entry below predicted the
+      representation-mismatch risk but judged the failure mode as "parks a
+      healthy ticket for a human"; in reality the flag also *suppresses
+      legitimate escalation*, and the forced-approval backstop only reviews
+      the reply text, not the missing escalation (the operator approved the
+      reply and the ticket auto-resolved).
+      - Fix: normalize both sides to a canonical form before comparing —
+        e.g. expand 2-letter ISO codes with `Intl.DisplayNames(["en"],
+        {type: "region"})` (plus a small alias map for "USA", "UK", …) in
+        `normalizeCountryForMatch`; keep fail-open semantics. Regression test:
+        `("US", "United States")` → null.
+      - Secondary gap, same ticket: 17track `latest_status.status`
+        `"DeliveryFailure"` / `"AvailableForPickup"` fall through
+        `stringToStatus` to `"unknown"` (providers/seventeentrack-http.ts),
+        so the lookup carried `status: "unknown"` while the last scan text
+        literally said "Delivery exception". Map `deliveryfailure` →
+        `exception` (and decide a mapping for `availableforpickup`) so the
+        playbooks' "exception status" trigger fires from the structured field.
+      - Also observed: the agent violated the mismatch directive's other half
+        (it summarised the tracking as this order's and never called
+        `merchant.notify`) — the reply force-approval was the only backstop
+        that actually engaged. Prompt-vs-runtime gap to keep in mind when
+        fixing.
+
 - [x] **Supplier-reported tracking numbers sync onto the order** (2026-07-12).
       Verified with `npx vitest run packages apps/worker apps/api
       apps/dashboard-spa` (all green) and `pnpm build`. A supplier typing

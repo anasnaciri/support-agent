@@ -247,6 +247,55 @@ describe("seventeenTrackGetInfo", () => {
     expect(info?.status).toBe("in_transit");
   });
 
+  // Regression: prod ticket 03649e6f (2026-07-12). A failed delivery attempt
+  // ("Delivery exception, Customer not available or business closed") arrived
+  // as latest_status "DeliveryFailure" with no numeric track.e, fell through
+  // the string mapping, and surfaced to the agent as status "unknown" — so
+  // the playbooks' "exception status" trigger never fired.
+  const statusOnlyResponse = (status: string) =>
+    okJson({
+      code: 0,
+      data: {
+        accepted: [
+          {
+            number: "LULU1000731943",
+            carrier: 191997,
+            track_info: {
+              latest_status: { status },
+              latest_event: {
+                time_iso: "2026-07-11T03:18:00.000Z",
+                location: "HONOLULU, HI, US",
+                description:
+                  "Delivery exception, Customer not available or business closed",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+  it("maps latest_status 'DeliveryFailure' to 'exception'", async () => {
+    const fetchImpl = vi.fn(async () => statusOnlyResponse("DeliveryFailure"));
+    const info = await seventeenTrackGetInfo({
+      apiKey: "k1",
+      trackingNumber: "LULU1000731943",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(info?.status).toBe("exception");
+  });
+
+  it("maps latest_status 'AvailableForPickup' to 'in_transit' (mirrors numeric 30)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      statusOnlyResponse("AvailableForPickup"),
+    );
+    const info = await seventeenTrackGetInfo({
+      apiKey: "k1",
+      trackingNumber: "LULU1000731943",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(info?.status).toBe("in_transit");
+  });
+
   it("maps 401 to SeventeenTrackHttpError with kind auth_failed", async () => {
     const fetchImpl = vi.fn(async () => fail(401, "unauthorized"));
     await expect(
