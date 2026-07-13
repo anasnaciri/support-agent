@@ -17,6 +17,38 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **PROD BUG (FIXED 2026-07-13): same-run scenario reroute did not
+      refresh the active scenario playbook** (ticket
+      `115f43d5-429d-44bb-b338-3be53a0107be`, tenant `4f685543`). The scenario
+      agent initially selected `where_is_order`, then `tracking.lookup`
+      returned structured `status: "exception"` with a delivery-exception scan
+      and it correctly changed `context.scenarioKey` to `delivery_issue`.
+      Despite that scenario's explicit note ("On an exception, escalate to the
+      supplier to reship") and `supplierMode: escalate_and_wait`, it skipped
+      `supplier.escalate` and queued only a customer reply telling the customer
+      to contact the post office. Production audit confirms there was no
+      escalation attempt, denial, tool error, or escalation row. The supplier
+      tool was available (`ask` by default), the selected scenario permits it,
+      and the 20-turn loop stopped voluntarily at turn 5, ruling out policy and
+      turn-budget causes. Root design gap: `withScenario(...)` is applied only
+      at initial agent binding and handoff; a successful
+      `ticket.update_context` inside the tool loop refreshes ticket state but
+      does not reapply `applyScenarioSteering`, so the dedicated trusted
+      `[Scenario playbook]` for the newly selected scenario is never added in
+      that run. The entry menu did contain the delivery scenario's notes, so
+      the immediate event was also a model instruction-following miss. Fixed
+      TDD: the runtime now retains a clean, unsteered agent binding and
+      reapplies scenario steering at every model-call boundary. After a
+      successful `ticket.update_context`, it folds the validated `scenarioKey`
+      patch into the in-memory ticket, so the next turn replaces the old
+      dedicated playbook with the new one without stacking headers or losing
+      any customer message / assistant tool-call / tool-result history.
+      Supplier escalation remains judgment-based; no mandatory-action guard
+      was added. Regression coverage captures all three prompts across initial
+      selection and reroute, asserts old-playbook removal, and verifies the
+      message history continues growing. Verified with focused red -> green,
+      89 worker runtime/scenario tests, and `pnpm build`.
+
 - [x] **`supplierMode: none` now overrides contradictory scenario notes**
       (2026-07-13). The trusted playbook header explicitly states that the
       structured setting wins over free-text notes. More importantly, the

@@ -1657,7 +1657,12 @@ const AgentRuntimeLayer = Layer.effect(
           if ((entryBase.id as string) === SCENARIO_RESOLUTION_AGENT_ID) {
             entryBase = applyResolutionAgentEntry(entryBase, resolutionPolicy);
           }
-          let agent: AgentConfig = withScenario(entryBase, working.context);
+          // Keep the clean, unsteered binding separate from the active agent.
+          // A scenario can change inside the tool loop; rebuilding from this
+          // base replaces the old playbook instead of stacking contradictory
+          // scenario headers while preserving the accumulated messages.
+          let agentBase: AgentConfig = entryBase;
+          let agent: AgentConfig = withScenario(agentBase, working.context);
           // Some ticks re-enter the agent loop with no inbound customer message —
           // a resume (dashboard retry / restart-from-triage / hand-back), or a
           // supplier responding on a parked ticket. The agent starts blind, so
@@ -2037,10 +2042,8 @@ const AgentRuntimeLayer = Layer.effect(
                   });
                   return { agent, current, done: null };
                 }
-                const targetAgent = withScenario(
-                  applyOverride(resolvedTarget, overrideMap),
-                  current.context,
-                );
+                agentBase = applyOverride(resolvedTarget, overrideMap);
+                const targetAgent = withScenario(agentBase, current.context);
                 current = yield* tx.run(
                   Effect.gen(function* () {
                     const updated = yield* tickets.update(current.id, {
@@ -2674,6 +2677,9 @@ const AgentRuntimeLayer = Layer.effect(
           // it holds for every agent + path — not just this loop.
 
           for (let turn = 0; turn < agent.maxTurnsPerTick; turn++) {
+            // Rebind steering at the model boundary so every turn reflects the
+            // authoritative scenario selected by the preceding tool call.
+            agent = withScenario(agentBase, current.context);
             const schemas = yield* tools.schemasFor(agent.tools);
             // BYOK: surface missing/revoked per-tenant LLM credentials as
             // human_takeover instead of a generic Failed. Other LLM errors
@@ -2902,10 +2908,8 @@ const AgentRuntimeLayer = Layer.effect(
                 );
                 continue;
               }
-              const nextAgent = withScenario(
-                applyOverride(resolvedNext, overrideMap),
-                current.context,
-              );
+              agentBase = applyOverride(resolvedNext, overrideMap);
+              const nextAgent = withScenario(agentBase, current.context);
               current = yield* tx.run(
                 Effect.gen(function* () {
                   const updated = yield* tickets.update(current.id, {
@@ -2963,6 +2967,33 @@ const AgentRuntimeLayer = Layer.effect(
             current = toolStep.current;
             if (toolStep.done) {
               return toolStep.done;
+            }
+            // `scenarioKey` is provisional: ticket.update_context can select or
+            // reroute it inside this loop. Refresh the dedicated trusted
+            // playbook for the very next model turn. Rebuild from the clean
+            // binding so stale playbooks are replaced, not accumulated;
+            // `messages` remains untouched and retains all tool history.
+            if (
+              decision.type === "tool_call" &&
+              decision.tool === "ticket.update_context"
+            ) {
+              // The context tool's compact result does not echo the full
+              // context. Its validated input is the successful patch we just
+              // applied, so fold the selected scenario into the in-memory
+              // ticket immediately; the rest of the accumulated context and
+              // the complete message/tool history remain intact.
+              const selectedScenario = (
+                decision.input as { readonly scenarioKey?: unknown }
+              ).scenarioKey;
+              if (typeof selectedScenario === "string") {
+                current = {
+                  ...current,
+                  context: {
+                    ...current.context,
+                    scenarioKey: selectedScenario,
+                  },
+                };
+              }
             }
           }
 

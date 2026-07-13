@@ -33,6 +33,7 @@ import {
   TicketRepositoryTest,
   ConversationServiceTest,
   decideApprovalBundle,
+  LLMServiceFromFn,
   LLMServiceScripted,
   makeConversationServiceTest,
   MerchantNotificationService,
@@ -670,6 +671,134 @@ const driveTriage = (script: ReadonlyArray<LLMDecision>) =>
   );
 
 describe("resolution-agent-direct entry (every tenant, no flag)", () => {
+  it("refreshes the active playbook after scenarioKey changes without losing tool history", async () => {
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "where_is_order",
+            label: "Where is my order?",
+            recognition: "Customer asks for tracking status.",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "none",
+            notes: "Report the current carrier status.",
+          },
+          {
+            key: "delivery_issue",
+            label: "Delivery problem",
+            recognition: "Tracking shows an exception.",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "escalate_and_wait",
+            notes: "Use judgment about whether the supplier needs to act.",
+          },
+        ],
+      },
+    });
+    const requests: Array<{ system: string; messageCount: number }> = [];
+    const decisions: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "pick-status",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "where_is_order" },
+      },
+      {
+        type: "tool_call",
+        callId: "reroute-delivery",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "delivery_issue" },
+      },
+      { type: "final_message", text: "Re-evaluated the delivery problem." },
+    ];
+    const captureLlm = LLMServiceFromFn((req, { callIndex }) =>
+      Effect.sync(() => {
+        requests.push({ system: req.system, messageCount: req.messages.length });
+        const decision = decisions[callIndex];
+        if (!decision) throw new Error(`Unexpected LLM call ${callIndex}`);
+        return decision;
+      }),
+    );
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, scenarioResolutionAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      captureLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+      }),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId(TENANT),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Where is order #1013?",
+            mailbox: "support@store.test",
+          });
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Where is order #1013?",
+              bodyText: "Where is my order?",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+        }),
+        layer,
+      ),
+    );
+
+    expect(requests).toHaveLength(3);
+    expect(
+      requests.map((request) => request.system.includes("[Scenario playbook")),
+    ).toEqual([false, true, true]);
+    expect(requests[1]?.system).toContain(
+      '[Scenario playbook for "Where is my order?":',
+    );
+    expect(requests[2]?.system).toContain(
+      '[Scenario playbook for "Delivery problem":',
+    );
+    expect(requests[2]?.system).not.toContain(
+      '[Scenario playbook for "Where is my order?":',
+    );
+    expect(requests[2]!.messageCount).toBeGreaterThan(requests[1]!.messageCount);
+  });
+
   it("denies supplier escalation after selecting a supplier-disabled scenario in the same run", async () => {
     const settings = new TenantSettings({
       notificationEmail: null,
