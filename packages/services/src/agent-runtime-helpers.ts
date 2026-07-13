@@ -1620,6 +1620,10 @@ export const SCENARIO_REMEDY_TOOLS: ReadonlySet<string> = new Set([
 
 const SUPPLIER_ESCALATE_TOOL = "supplier.escalate";
 
+/** Tools whose availability or permission is selected by Scenario Action Policy. */
+export const isScenarioControlledTool = (toolName: string): boolean =>
+  SCENARIO_REMEDY_TOOLS.has(toolName) || toolName === SUPPLIER_ESCALATE_TOOL;
+
 const supplierGuidanceLine = (mode: SupplierMode): string => {
   switch (mode) {
     case "escalate_and_wait":
@@ -1713,21 +1717,22 @@ export const applyScenarioEnvelope = (
 };
 
 /**
- * Apply a scenario to an autonomous agent as STEERING ONLY — inject the playbook
- * header (label + notes + supplier guidance) and leave `tools` /
- * `permissionOverrides` untouched (2026-06-28). This is what the runtime wires
- * in now: tools/permissions are configured once on the agent (per-agent config),
- * not per scenario. The richer `applyScenarioEnvelope` above (which also clamps
- * the tool set per `enabledActions`) is retained + tested for the resurface
- * path, but no longer called by the runtime. Pure + exported for unit testing.
+ * Resolve and apply the Scenario Action Policy selected by ticket context.
+ * Callers always pass a clean agent binding so changing scenarioKey replaces
+ * the prior envelope instead of stacking tool filters, permissions, or prompt
+ * headers. No valid selection preserves the agent's inherited configuration.
  */
-export const applyScenarioSteering = (
+export const applySelectedScenarioPolicy = (
   agent: AgentConfig,
-  scenario: ScenarioPolicy,
-): AgentConfig => ({
-  ...agent,
-  promptTemplate: `${agent.promptTemplate}\n\n${buildScenarioPlaybookHeader(scenario)}`,
-});
+  policy: ResolutionPolicy,
+  context: Readonly<Record<string, unknown>>,
+): AgentConfig => {
+  if (!agent.autonomousLoop) return agent;
+  const key = context["scenarioKey"];
+  if (typeof key !== "string") return agent;
+  const scenario = policy.scenarios.find((candidate) => candidate.key === key);
+  return scenario ? applyScenarioEnvelope(agent, scenario) : agent;
+};
 
 /** The id of the autonomous resolution agent triage routes to (slice 6). */
 export const SCENARIO_RESOLUTION_AGENT_ID = "scenario-resolution-agent";
@@ -1787,14 +1792,10 @@ export const applyTriageScenarioRouting = (
  * the matching scenario ITSELF as its first step — replacing the brittle
  * triage→handoff classification that intermittently silently-resolved tickets.
  *
- * Unlike `applyScenarioEnvelope`, this does NOT touch `tools` or
- * `permissionOverrides`: tools/permissions are configured ONCE on the agent now
- * (per-agent config + the /settings/agents permission toggle). The scenario
- * contributes STEERING only — recognition (to pick) plus each scenario's notes
- * and supplier guidance (to act). Per-scenario tool clamping
- * (`ScenarioPolicy.enabledActions`) is intentionally retained in the model but
- * not applied here; see todo "RESURFACE LATER: fine-grained per-scenario tool
- * control".
+ * This entry menu does not yet select one scenario, so it leaves tools and
+ * permissions inherited. Once ticket context carries a scenarioKey, the runtime
+ * applies that scenario's full action policy through
+ * `applySelectedScenarioPolicy` at the next model boundary.
  *
  * No enabled scenarios → no-op (the agent runs on its base prompt, whose "fits
  * NONE of these scenarios" rule then parks the ticket for a human rather than

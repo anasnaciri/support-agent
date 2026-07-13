@@ -8,6 +8,7 @@ import {
   UserId,
   type AgentConfig,
   type LLMDecision,
+  type TicketId,
 } from "@support-agent/agent-core";
 import { ALL_TOOLS } from "@support-agent/tools";
 import {
@@ -540,16 +541,13 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
     expect(out.fetched.status).toBe("waiting_for_approval");
   });
 
-  it("keeps a remedy available even when the scenario didn't list it (tools on the agent, not clamped per scenario)", async () => {
+  it("denies a remedy the selected scenario did not enable", async () => {
     const policy: ResolutionPolicy = {
       scenarios: [
         {
           key: SCENARIO_KEY,
           label: "Delivery problem",
           builtin: true,
-          // 2026-06-28: enabledActions is no longer applied at runtime — tools
-          // are configured once on the agent. Per-scenario clamping is retained
-          // (applyScenarioEnvelope) + tested but unwired.
           enabledActions: [],
           supplierMode: "none",
           notes: "Handle the delivery problem.",
@@ -561,12 +559,9 @@ describe("scenario envelope (slice 5) — runtime clamps the live agent", () => 
       { type: "final_message", text: "Queued a refund for the order." },
     ]);
 
-    // No per-scenario clamp: refund.create is governed by the agent + refund
-    // policy (ask), so it QUEUES instead of being denied — the ticket parks for
-    // bundle approval rather than escalating to a human.
-    expect(out.pending.map((a) => a.tool)).toEqual(["refund.create"]);
-    expect(out.result.type).toBe("PausedWaitingForApproval");
-    expect(out.fetched.status).toBe("waiting_for_approval");
+    expect(out.pending).toHaveLength(0);
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+    expect(out.fetched.status).toBe("human_takeover");
   });
 });
 
@@ -621,6 +616,7 @@ const driveWithSettings = (
         const runtime = yield* AgentRuntime;
         const repo = yield* TicketRepository;
         const approvals = yield* ApprovalService;
+        const audit = yield* AuditLogService;
 
         const created = yield* repo.create({
           tenantId: TenantId(TENANT),
@@ -648,7 +644,8 @@ const driveWithSettings = (
 
         const fetched = yield* repo.getById(created.id);
         const pending = yield* approvals.listPending(TenantId(TENANT));
-        return { result, fetched, pending };
+        const entries = yield* audit.forTicket(created.id);
+        return { result, fetched, pending, entries };
       }),
       layer,
     ),
@@ -686,7 +683,7 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Where is my order?",
             recognition: "Customer asks for tracking status.",
             builtin: true,
-            enabledActions: [],
+            enabledActions: [{ tool: "refund.create", permission: "allow" }],
             supplierMode: "none",
             notes: "Report the current carrier status.",
           },
@@ -695,14 +692,18 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
             label: "Delivery problem",
             recognition: "Tracking shows an exception.",
             builtin: true,
-            enabledActions: [],
+            enabledActions: [{ tool: "discount.create", permission: "ask" }],
             supplierMode: "escalate_and_wait",
             notes: "Use judgment about whether the supplier needs to act.",
           },
         ],
       },
     });
-    const requests: Array<{ system: string; messageCount: number }> = [];
+    const requests: Array<{
+      system: string;
+      messageCount: number;
+      toolNames: ReadonlyArray<string>;
+    }> = [];
     const decisions: ReadonlyArray<LLMDecision> = [
       {
         type: "tool_call",
@@ -720,7 +721,11 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
     ];
     const captureLlm = LLMServiceFromFn((req, { callIndex }) =>
       Effect.sync(() => {
-        requests.push({ system: req.system, messageCount: req.messages.length });
+        requests.push({
+          system: req.system,
+          messageCount: req.messages.length,
+          toolNames: req.tools.map((tool) => tool.name),
+        });
         const decision = decisions[callIndex];
         if (!decision) throw new Error(`Unexpected LLM call ${callIndex}`);
         return decision;
@@ -796,7 +801,250 @@ describe("resolution-agent-direct entry (every tenant, no flag)", () => {
     expect(requests[2]?.system).not.toContain(
       '[Scenario playbook for "Where is my order?":',
     );
+    expect(requests[1]?.toolNames).toContain("refund.create");
+    expect(requests[1]?.toolNames).not.toContain("discount.create");
+    expect(requests[2]?.toolNames).toContain("discount.create");
+    expect(requests[2]?.toolNames).not.toContain("refund.create");
     expect(requests[2]!.messageCount).toBeGreaterThan(requests[1]!.messageCount);
+  });
+
+  it("rechecks the selected scenario before executing a stale model tool call", async () => {
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "refund_request",
+            label: "Refund request",
+            builtin: true,
+            enabledActions: [{ tool: "refund.create", permission: "allow" }],
+            supplierMode: "none",
+            notes: "Issue the appropriate refund.",
+          },
+          {
+            key: "where_is_order",
+            label: "Where is my order?",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "none",
+            notes: "Report tracking status without issuing a refund.",
+          },
+        ],
+      },
+    });
+    let repoForLlm: typeof TicketRepository.Service | null = null;
+    let ticketIdForLlm: TicketId | null = null;
+    let refundObservation: unknown = null;
+    const decisions: ReadonlyArray<LLMDecision> = [
+      {
+        type: "tool_call",
+        callId: "pick-refund",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "refund_request" },
+      },
+      refundCall,
+      { type: "final_message", text: "Stopped the stale refund." },
+    ];
+    const mutatingLlm = LLMServiceFromFn((req, { callIndex }) => {
+      const decision = decisions[callIndex];
+      if (!decision) return Effect.dieMessage(`Unexpected LLM call ${callIndex}`);
+      if (callIndex === 1) {
+        if (!repoForLlm || !ticketIdForLlm) {
+          return Effect.dieMessage("Ticket repository was not captured");
+        }
+        // Simulate a concurrent reroute after the request was built under the
+        // refund scenario but before its returned tool call is executed.
+        return repoForLlm
+          .update(ticketIdForLlm, {
+            context: { scenarioKey: "where_is_order" } as never,
+          })
+          .pipe(Effect.orDie, Effect.as(decision));
+      }
+      if (callIndex === 2) {
+        refundObservation = req.messages.find(
+          (message) =>
+            message.role === "tool" && message.toolCallId === refundCall.callId,
+        )?.content;
+      }
+      return Effect.succeed(decision);
+    });
+    const env = Layer.mergeAll(
+      TicketRepositoryTest,
+      AuditLogServiceTest,
+      ApprovalServiceTest,
+      AgentResolverTest([supportTriage, scenarioResolutionAgent]),
+      ToolRegistryWith(ALL_TOOLS),
+      PermissionServiceDefault,
+      mutatingLlm,
+      TransactionRunnerPassthrough,
+      ShopifyServiceTest({}),
+      ConversationServiceTest({}),
+      approvalLinkLayer,
+      platformMailNoop,
+      tenantOverridesEmpty,
+      TenantRepositoryTest({
+        settingsByTenant: new Map([[TenantId(TENANT), settings]]),
+      }),
+    );
+    const layer = Layer.merge(
+      AgentRuntimeDefault.pipe(
+        Layer.provide(Layer.merge(env, TicketAttachmentStoreTest())),
+      ),
+      env,
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const created = yield* repo.create({
+            tenantId: TenantId(TENANT),
+            channel: "email",
+            currentAgentId: supportTriage.id,
+            subject: "Refund please",
+            mailbox: "support@store.test",
+          });
+          repoForLlm = repo;
+          ticketIdForLlm = created.id;
+          yield* runtime.handleEvent({
+            type: "customer.replied",
+            ticketId: created.id,
+            payload: {
+              threadId: "thread-x" as never,
+              messageId: "msg-1",
+              from: { name: null, email: "cust@example.com" },
+              to: [],
+              subject: "Refund please",
+              bodyText: "Please refund my order.",
+              bodyHtml: null,
+              receivedAt: new Date(),
+              attachments: [],
+            },
+          });
+        }),
+        layer,
+      ),
+    );
+
+    expect(refundObservation).toEqual({ error: "denied_by_policy" });
+  });
+
+  it("changes a remedy from ask to allow after a same-run reroute", async () => {
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "review_refund",
+            label: "Review refund",
+            builtin: false,
+            enabledActions: [{ tool: "refund.create", permission: "ask" }],
+            supplierMode: "none",
+            notes: "Ask before refunding.",
+          },
+          {
+            key: "trusted_refund",
+            label: "Trusted refund",
+            builtin: false,
+            enabledActions: [{ tool: "refund.create", permission: "allow" }],
+            supplierMode: "none",
+            notes: "Refund automatically.",
+          },
+        ],
+      },
+    });
+
+    const out = await driveWithSettings(settings, [
+      {
+        type: "tool_call",
+        callId: "pick-review",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "review_refund" },
+      },
+      {
+        type: "tool_call",
+        callId: "reroute-trusted",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "trusted_refund" },
+      },
+      refundCall,
+      { type: "final_message", text: "Issued the trusted refund." },
+    ]);
+
+    expect(out.pending).toHaveLength(0);
+    expect(
+      out.entries.some(
+        (entry) =>
+          entry.action === "tool.invoked" &&
+          entry.details["tool"] === "refund.create" &&
+          entry.details["ok"] === true,
+      ),
+    ).toBe(true);
+    expect(out.result.type).toBe("HumanTakeoverRequired");
+  });
+
+  it("changes a remedy from allow to ask after a same-run reroute", async () => {
+    const settings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "trusted_refund",
+            label: "Trusted refund",
+            builtin: false,
+            enabledActions: [{ tool: "refund.create", permission: "allow" }],
+            supplierMode: "none",
+            notes: "Refund automatically.",
+          },
+          {
+            key: "review_refund",
+            label: "Review refund",
+            builtin: false,
+            enabledActions: [{ tool: "refund.create", permission: "ask" }],
+            supplierMode: "none",
+            notes: "Ask before refunding.",
+          },
+        ],
+      },
+    });
+
+    const out = await driveWithSettings(settings, [
+      {
+        type: "tool_call",
+        callId: "pick-trusted",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "trusted_refund" },
+      },
+      {
+        type: "tool_call",
+        callId: "reroute-review",
+        tool: "ticket.update_context",
+        input: { scenarioKey: "review_refund" },
+      },
+      refundCall,
+      { type: "final_message", text: "Queued the reviewed refund." },
+    ]);
+
+    expect(out.pending.map((approval) => approval.tool)).toEqual([
+      "refund.create",
+    ]);
+    expect(out.result.type).toBe("PausedWaitingForApproval");
   });
 
   it("denies supplier escalation after selecting a supplier-disabled scenario in the same run", async () => {
@@ -1132,12 +1380,13 @@ const partialLayer = (
   convo: ReturnType<typeof makeConversationServiceTest>,
   extra: ReadonlyArray<Layer.Layer<never, never, never>> = [],
   settings: TenantSettings = defaultTenantSettings,
+  agent: AgentConfig = loopAgent(),
 ) => {
   const env = Layer.mergeAll(
     TicketRepositoryTest,
     AuditLogServiceTest,
     ApprovalServiceTest,
-    AgentResolverTest([loopAgent()]),
+    AgentResolverTest([agent]),
     ToolRegistryWith(ALL_TOOLS),
     PermissionServiceDefault,
     LLMServiceScripted([]),
@@ -1250,6 +1499,78 @@ describe("per-action approval — no ticket with pending actions resolves", () =
     expect(out.result).toEqual({
       type: "HumanTakeoverRequired",
       reason: "scenario_supplier_disabled",
+    });
+    expect(out.final.status).toBe("human_takeover");
+  });
+
+  it("does not execute an approved remedy after the ticket moves to a scenario that disables it", async () => {
+    const convo = makeConversationServiceTest({});
+    const refundDisabledSettings = new TenantSettings({
+      notificationEmail: null,
+      refundPolicy: defaultRefundPolicy,
+      discountPolicy: defaultDiscountPolicy,
+      retentionDays: 730,
+      supplierEscalationSheet: null,
+      legalAcceptance: null,
+      resolutionPolicy: {
+        scenarios: [
+          {
+            key: "where_is_order",
+            label: "Where is my order?",
+            builtin: true,
+            enabledActions: [],
+            supplierMode: "none",
+            notes: "Report tracking status without issuing a refund.",
+          },
+        ],
+      },
+    });
+    const refundAgent = loopAgent({
+      tools: [...loopAgent().tools, "refund.create"],
+    });
+
+    const out = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const repo = yield* TicketRepository;
+          const approvals = yield* ApprovalService;
+          const created = yield* seedParkedTicket(repo);
+          yield* repo.update(created.id, {
+            context: { scenarioKey: "where_is_order" } as never,
+          });
+          const approval = yield* approvals.create({
+            tenantId: TenantId(TENANT),
+            ticketId: created.id,
+            agentId: AGENT_ID,
+            tool: "refund.create",
+            proposedInput: refundCall.input,
+            reasoning: "queued before the scenario changed",
+            riskLevel: "high",
+            expiresAt: EXPIRES,
+          });
+          yield* approvals.approve({
+            id: approval.id,
+            decidedBy: MGR,
+            tenantId: TenantId(TENANT),
+          });
+
+          const result = yield* runtime.handleEvent({
+            type: "approval.approved",
+            approvalId: approval.id as never,
+            ticketId: created.id,
+            managerId: MGR,
+          });
+          const final = yield* repo.getById(created.id);
+          return { result, final };
+        }),
+        partialLayer(convo, [], refundDisabledSettings, refundAgent),
+      ),
+    );
+
+    expect(out.result).toEqual({
+      type: "HumanTakeoverRequired",
+      reason: "approval_denied_by_policy",
     });
     expect(out.final.status).toBe("human_takeover");
   });

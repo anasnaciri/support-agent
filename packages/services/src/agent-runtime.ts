@@ -104,7 +104,8 @@ import {
   deriveTickLockKey,
   refundCustomerMismatchFlag,
   readRiskFlags,
-  applyScenarioSteering,
+  applySelectedScenarioPolicy,
+  isScenarioControlledTool,
   applyResolutionAgentEntry,
   SCENARIO_RESOLUTION_AGENT_ID,
   hasUnverifiedOrderMismatch,
@@ -667,14 +668,16 @@ const AgentRuntimeLayer = Layer.effect(
                 reason: "approval_input_invalid",
               } as const;
             }
+            const approvalResolutionPolicy =
+              (
+                yield* tenantRepo
+                  .getSettings(working.tenantId)
+                  .pipe(Effect.catchAll(() => Effect.succeed(null)))
+              )?.resolutionPolicy ?? defaultResolutionPolicy;
             if (
               toolToRun.name === "supplier.escalate" &&
               supplierDisabledForSelectedScenario(
-                (
-                  yield* tenantRepo
-                    .getSettings(working.tenantId)
-                    .pipe(Effect.catchAll(() => Effect.succeed(null)))
-                )?.resolutionPolicy ?? defaultResolutionPolicy,
+                approvalResolutionPolicy,
                 working.context,
               )
             ) {
@@ -706,9 +709,14 @@ const AgentRuntimeLayer = Layer.effect(
               yield* resolver.tryResolve(working.tenantId, approval.agentId),
             );
             if (Option.isSome(resumeAgent)) {
+              const effectiveResumeAgent = applySelectedScenarioPolicy(
+                applyOverride(resumeAgent.value, resumeOverrides),
+                approvalResolutionPolicy,
+                working.context,
+              );
               const recheck = yield* perms.check({
                 tenantId: working.tenantId,
-                agent: applyOverride(resumeAgent.value, resumeOverrides),
+                agent: effectiveResumeAgent,
                 tool: toolToRun,
                 payload: decodedInput.right,
                 ticketId: working.id,
@@ -1584,21 +1592,8 @@ const AgentRuntimeLayer = Layer.effect(
           const withScenario = (
             a: AgentConfig,
             ctx: typeof working.context,
-          ): AgentConfig => {
-            if (!a.autonomousLoop) return a;
-            const key =
-              typeof ctx["scenarioKey"] === "string"
-                ? (ctx["scenarioKey"] as string)
-                : null;
-            if (!key) return a;
-            const scenario = resolutionPolicy.scenarios.find(
-              (s) => s.key === key,
-            );
-            // Steering only — tools/permissions are configured once on the agent
-            // now, not clamped per scenario (2026-06-28). `applyScenarioEnvelope`
-            // (the clamping variant) is retained + tested for the resurface path.
-            return scenario ? applyScenarioSteering(a, scenario) : a;
-          };
+          ): AgentConfig =>
+            applySelectedScenarioPolicy(a, resolutionPolicy, ctx);
           // Resolution-agent-direct: inbound tickets bound to the primary
           // (support-triage) run the scenario-resolution-agent DIRECTLY — it
           // picks the matching scenario itself (sets `scenarioKey`) and resolves
@@ -2109,10 +2104,11 @@ const AgentRuntimeLayer = Layer.effect(
               }
               const callInput = decodedCall.right;
 
-              if (tool.name === "supplier.escalate") {
-                // `ticket.update_context` may have selected the scenario earlier
-                // in THIS tool loop. Refresh before enforcing the structured
-                // supplier setting so stale in-memory context cannot bypass it.
+              if (isScenarioControlledTool(tool.name)) {
+                // The scenario may have changed after this model request was
+                // built (same-run update or a concurrent write). Re-read both
+                // sources of truth and rebuild from the clean agent binding so
+                // a stale schema can never authorize a stale tool call.
                 current = yield* tickets
                   .getById(current.id)
                   .pipe(Effect.catchAll(() => Effect.succeed(current)));
@@ -2122,7 +2118,13 @@ const AgentRuntimeLayer = Layer.effect(
                       .getSettings(current.tenantId)
                       .pipe(Effect.catchAll(() => Effect.succeed(null)))
                   )?.resolutionPolicy ?? resolutionPolicy;
+                agent = applySelectedScenarioPolicy(
+                  agentBase,
+                  currentResolutionPolicy,
+                  current.context,
+                );
                 if (
+                  tool.name === "supplier.escalate" &&
                   supplierDisabledForSelectedScenario(
                     currentResolutionPolicy,
                     current.context,

@@ -11,7 +11,6 @@ import {
   applyOverride,
   applyResolutionAgentEntry,
   applyScenarioEnvelope,
-  applyScenarioSteering,
   applyTriageScenarioRouting,
   buildScenarioPlaybookHeader,
   buildSystemPrompt,
@@ -891,29 +890,6 @@ describe("applyScenarioEnvelope", () => {
     expect(out.permissionOverrides["order.update_shipping_address"]).toBe(
       "ask",
     );
-  });
-});
-
-// Tools-once-on-the-agent (2026-06-28): the wired scenario application now
-// injects ONLY the steering header — it no longer clamps tools/permissions.
-// (The clamping `applyScenarioEnvelope` above is retained + tested but unwired,
-// for the resurface path.)
-describe("applyScenarioSteering", () => {
-  it("injects the playbook header (label + notes + supplier guidance)", () => {
-    const out = applyScenarioSteering(scenarioAgent(), scenario());
-    expect(out.promptTemplate).toContain("Scenario playbook");
-    expect(out.promptTemplate).toContain("Delivery problem");
-    expect(out.promptTemplate).toContain("Check tracking before offering anything.");
-    expect(out.promptTemplate).toContain("WAIT");
-  });
-
-  it("does NOT clamp tools or permissions (agent config governs)", () => {
-    const agent = scenarioAgent();
-    const out = applyScenarioSteering(agent, scenario());
-    // refund.create / discount.create / order.cancel etc. all preserved, even
-    // though the scenario's enabledActions only lists refund.create.
-    expect(out.tools).toEqual(agent.tools);
-    expect(out.permissionOverrides).toEqual(agent.permissionOverrides);
   });
 });
 
