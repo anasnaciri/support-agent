@@ -5,6 +5,7 @@ export * from "./approval-tokens.js";
 export * from "./ticket-repository.js";
 export * from "./ticket-lifecycle-writer.js";
 export * from "./tenant-repository.js";
+export * from "./superseded-builtin-notes.js";
 export * from "./blocked-senders.js";
 export * from "./shipping-facts.js";
 export * from "./returns-facts.js";

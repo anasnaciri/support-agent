@@ -2,6 +2,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { TenantId } from "@support-agent/agent-core";
 
 import { tokenizeActionReferences } from "./fact-references.js";
+import { SUPERSEDED_BUILTIN_NOTES } from "./superseded-builtin-notes.js";
 import type { BlockedSenders } from "./blocked-senders.js";
 import type { ShippingFacts } from "./shipping-facts.js";
 import type { ReturnsFacts } from "./returns-facts.js";
@@ -481,10 +482,79 @@ const decodeScenario = (raw: unknown): ScenarioPolicy | null => {
 };
 
 /**
+ * A stored built-in note that byte-matches a default this repo EVER shipped is
+ * a stale copy, not merchant prose — upgrade it to the current default so
+ * improved playbooks reach tenants without a scenarios-page re-save. Anything
+ * else is merchant-authored and is never touched (the same rule migration 0048
+ * used to rewrite supplier-era notes). Both sides of the comparison are
+ * tokenized: the registry entries by construction, the stored note by
+ * `decodeScenario`. An absent stored note is a deliberate clear — respected.
+ */
+const upgradedBuiltinNote = (
+  key: string,
+  stored: string | undefined,
+  current: string | undefined,
+): string | undefined => {
+  if (stored === undefined) return undefined;
+  return SUPERSEDED_BUILTIN_NOTES[key]?.includes(stored.trim())
+    ? current
+    : stored;
+};
+
+/**
+ * Merge-on-read: reconcile a stored policy against the seeded defaults the way
+ * the write normalizer does, so a stored snapshot is never frozen in time:
+ *   - built-ins the snapshot is missing are seeded (a NEW built-in reaches
+ *     every tenant on its next read, not their next save);
+ *   - stored built-ins keep their editable fields (enabled / enabledActions /
+ *     fulfillmentOperatorMode / notes) but their immutable fields
+ *     (key/label/recognition/builtin) are forced from the defaults;
+ *   - a stored note that is a stale copy of a shipped default is upgraded
+ *     (see `upgradedBuiltinNote`); merchant prose is preserved;
+ *   - custom scenarios pass through verbatim, after the built-ins (the write
+ *     path's emission order).
+ * Nothing is written back — the stored row converges on the next save, which
+ * persists the merged view the dashboard loaded.
+ */
+const mergeBuiltinDefaultsOnRead = (
+  stored: ReadonlyArray<ScenarioPolicy>,
+): ResolutionPolicy => {
+  const storedByKey = new Map(stored.map((s) => [s.key, s] as const));
+  const builtinKeys = new Set(
+    defaultResolutionPolicy.scenarios.map((s) => s.key),
+  );
+  const out: ScenarioPolicy[] = [];
+  for (const def of defaultResolutionPolicy.scenarios) {
+    const s = storedByKey.get(def.key);
+    if (!s) {
+      out.push(def);
+      continue;
+    }
+    const notes = upgradedBuiltinNote(def.key, s.notes, def.notes);
+    out.push({
+      key: def.key,
+      label: def.label,
+      builtin: true,
+      enabled: s.enabled !== false,
+      enabledActions: s.enabledActions,
+      fulfillmentOperatorMode: s.fulfillmentOperatorMode,
+      ...(def.recognition ? { recognition: def.recognition } : {}),
+      ...(notes ? { notes } : {}),
+    });
+  }
+  for (const s of stored) {
+    if (!builtinKeys.has(s.key)) out.push(s);
+  }
+  return { scenarios: out };
+};
+
+/**
  * Decode the persisted JSONB `resolutionPolicy` block. Returns the seeded
  * built-ins when the value is missing, malformed, or contains no valid
  * scenario (defends against hand-edited rows). Individual invalid scenarios /
- * actions are dropped; a wholly-empty result falls back to the defaults.
+ * actions are dropped. A valid stored policy is then reconciled against the
+ * seeded defaults (`mergeBuiltinDefaultsOnRead`), so new built-ins and
+ * improved default notes reach stored snapshots on read.
  */
 export const decodeResolutionPolicy = (raw: unknown): ResolutionPolicy => {
   if (!raw || typeof raw !== "object") return defaultResolutionPolicy;
@@ -493,7 +563,9 @@ export const decodeResolutionPolicy = (raw: unknown): ResolutionPolicy => {
   const scenarios = r["scenarios"]
     .map(decodeScenario)
     .filter((s): s is ScenarioPolicy => s !== null);
-  return scenarios.length > 0 ? { scenarios } : defaultResolutionPolicy;
+  return scenarios.length > 0
+    ? mergeBuiltinDefaultsOnRead(scenarios)
+    : defaultResolutionPolicy;
 };
 
 /**

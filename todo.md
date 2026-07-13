@@ -2506,28 +2506,25 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ### Policy, Agents, Models, And Cost
 
-- [ ] New built-in scenarios don't reach tenants with a STORED resolution
-      policy until their next scenarios-page save (`decodeResolutionPolicy`
-      read path returns stored scenarios verbatim; only the write-path
-      normalizer re-seeds built-ins). Affected `shipping_address_update`
-      (2026-07-08) exactly as it did `order_cancellation`. Consider merging
-      missing built-ins on read.
-- [ ] Same stored-policy gap applies to CHANGED built-in defaults: the
-      2026-07-08 `delivery_issue` reassure-reply note (`39ab74e`) needs a
-      policy re-save (or the merge-on-read above) to reach existing tenants —
-      for live tenants, edit /settings/resolution-policy directly. (The
-      `where_is_order` fulfillmentOperatorMode flip from `39ab74e` was superseded by the
-      general re-classification rule `d8b1ddc` and reverted.) The 2026-07-11
-      partial-refund note updates for `refund_request`, `damaged_product`, and
-      `wrong_item` have the same stored-policy caveat. So do the 2026-07-13
-      contradiction fixes to the `order_cancellation`, `shipping_address_update`,
-      `where_is_order`, and `general_inquiry` notes (the base-prompt and
-      shipping-facts-header halves of that change ship in code and need no
-      re-save), and the 2026-07-13 `delivery_issue` doctrine-collapse edit
-      (STALLED→STUCK, scans rationale, destination-matched window). NOTE: a
-      tenant with a stored policy whose `delivery_issue` note was CUSTOMIZED to
-      drop the doctrine now gets it from nowhere — the base prompt no longer
-      restates it.
+- [x] Stored-policy staleness CLOSED by merge-on-read (2026-07-13).
+      `decodeResolutionPolicy` now reconciles a stored policy against the
+      seeded defaults on every read: missing built-ins are seeded (new
+      built-ins reach every tenant at their next read, not their next save);
+      stored built-ins keep editable fields but immutable fields are forced
+      from defaults; a stored note that byte-matches ANY default this repo
+      ever shipped (`SUPERSEDED_BUILTIN_NOTES`, mined from the full git
+      history, pre-0048 versions passed through that migration's rewrite,
+      tokenization-insensitive) is upgraded to the current default — merchant
+      prose is never touched (same rule migration 0048 used); customs pass
+      through verbatim after the built-ins. Nothing is written back; a row
+      converges on its next save. This retroactively delivers the 2026-07-08
+      `delivery_issue` reassure note, the 2026-07-11 partial-refund notes, and
+      all 2026-07-13 note fixes to stored snapshots. MAINTENANCE INVARIANT:
+      whenever a built-in default note changes, append the superseded version
+      to `packages/services/src/superseded-builtin-notes.ts`. Residual edge: a
+      tenant who CUSTOMIZED `delivery_issue`'s note to drop the late/stuck
+      doctrine gets it from nowhere (base prompt no longer restates it) — by
+      design, their prose is theirs.
 - [x] The shipping-facts header's lost-package line prescribed remedies ("a
       refund or a reshipment, rather than only checking with the fulfillment
       operator again") — same base-prompt-dictating-scenario smell as the

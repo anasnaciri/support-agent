@@ -15,6 +15,7 @@ import {
   defaultDiscountPolicy,
   defaultResolutionPolicy,
   FACT_REFERENCE_CATALOG,
+  SUPERSEDED_BUILTIN_NOTES,
   resolveFactReferences,
   tokenizeActionReferences,
   type BlockedSenders,
@@ -421,7 +422,7 @@ describe("playbook action references", () => {
         },
       ],
     });
-    expect(p.scenarios[0]!.notes).toBe(
+    expect(p.scenarios.find((s) => s.key === "refund_request")!.notes).toBe(
       "When a refund is due, queue /refund.create.",
     );
   });
@@ -473,16 +474,15 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
       ],
     };
     const p = decodeResolutionPolicy(raw);
-    expect(p.scenarios).toHaveLength(1);
-    expect(p.scenarios[0]!.key).toBe("vip_complaint");
-    expect(p.scenarios[0]!.enabledActions[0]).toEqual({
+    const custom = p.scenarios.find((s) => s.key === "vip_complaint")!;
+    expect(custom.enabledActions[0]).toEqual({
       tool: "refund.create",
       permission: "ask",
     });
-    expect(p.scenarios[0]!.fulfillmentOperatorMode).toBe("none");
-    expect(p.scenarios[0]!.notes).toBe("Be extra gracious.");
+    expect(custom.fulfillmentOperatorMode).toBe("none");
+    expect(custom.notes).toBe("Be extra gracious.");
     // No `enabled` in the raw → defaults to enabled (back-compat).
-    expect(p.scenarios[0]!.enabled).toBe(true);
+    expect(custom.enabled).toBe(true);
   });
 
   it("respects an explicit enabled:false and defaults absent enabled to true", () => {
@@ -548,10 +548,132 @@ describe("decodeResolutionPolicy (defaults-on-read)", () => {
       ],
     };
     const p = decodeResolutionPolicy(raw);
-    expect(p.scenarios).toHaveLength(1);
-    expect(p.scenarios[0]!.enabledActions).toEqual([
+    const mix = p.scenarios.find((s) => s.key === "mix")!;
+    expect(mix.enabledActions).toEqual([
       { tool: "refund.create", permission: "ask" },
     ]);
+  });
+
+  it("seeds built-ins missing from a stored policy, in seeded order, before customs", () => {
+    // A stored snapshot predating a built-in (or holding only customs) picks
+    // the new built-ins up on READ — no scenarios-page re-save needed.
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "custom_vip",
+          label: "VIP",
+          builtin: false,
+          enabledActions: [],
+          fulfillmentOperatorMode: "none",
+        },
+      ],
+    });
+    const builtinKeys = defaultResolutionPolicy.scenarios.map((s) => s.key);
+    expect(p.scenarios.map((s) => s.key)).toEqual([...builtinKeys, "custom_vip"]);
+    // A seeded built-in arrives with its full default (envelope + notes).
+    expect(p.scenarios.find((s) => s.key === "delivery_issue")).toEqual(
+      defaultResolutionPolicy.scenarios.find((s) => s.key === "delivery_issue"),
+    );
+  });
+
+  it("keeps a stored built-in's editable fields but forces its immutable ones", () => {
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "delivery_issue",
+          label: "Hand-edited label",
+          recognition: "Hand-edited recognition",
+          builtin: false, // lie — forced back to true
+          enabled: false,
+          enabledActions: [{ tool: "refund.create", permission: "allow" }],
+          fulfillmentOperatorMode: "notify_and_proceed",
+          notes: "Always refund immediately.",
+        },
+      ],
+    });
+    const di = p.scenarios.find((s) => s.key === "delivery_issue")!;
+    const def = defaultResolutionPolicy.scenarios.find(
+      (s) => s.key === "delivery_issue",
+    )!;
+    expect(di.label).toBe(def.label);
+    expect(di.recognition).toBe(def.recognition);
+    expect(di.builtin).toBe(true);
+    expect(di.enabled).toBe(false);
+    expect(di.enabledActions).toEqual([
+      { tool: "refund.create", permission: "allow" },
+    ]);
+    expect(di.fulfillmentOperatorMode).toBe("notify_and_proceed");
+    // Merchant prose is NEVER upgraded.
+    expect(di.notes).toBe("Always refund immediately.");
+  });
+
+  it("upgrades a stored built-in note that is a stale copy of a shipped default", () => {
+    const staleCancellation = SUPERSEDED_BUILTIN_NOTES["order_cancellation"]!.find(
+      (n) => n.includes("cancellation is done"),
+    )!;
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "order_cancellation",
+          label: "Cancel my order",
+          builtin: true,
+          enabled: false,
+          enabledActions: [{ tool: "order.cancel", permission: "ask" }],
+          fulfillmentOperatorMode: "none",
+          notes: staleCancellation,
+        },
+      ],
+    });
+    const oc = p.scenarios.find((s) => s.key === "order_cancellation")!;
+    expect(oc.notes).toBe(
+      defaultResolutionPolicy.scenarios.find(
+        (s) => s.key === "order_cancellation",
+      )!.notes,
+    );
+    // The upgrade touches ONLY the note; editable fields stay stored.
+    expect(oc.enabled).toBe(false);
+  });
+
+  it("upgrades a pre-action-refs stored copy too (tokenization-insensitive match)", () => {
+    // A note stored before `/` refs existed carries bare tool ids; the read
+    // decoder tokenizes it, so it must still match the superseded registry.
+    const staleTokenized = SUPERSEDED_BUILTIN_NOTES["general_inquiry"]!.find((n) =>
+      n.includes("hand off"),
+    )!;
+    const staleBareIds = staleTokenized.replaceAll("/knowledge.search", "knowledge.search");
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "general_inquiry",
+          label: "General question",
+          builtin: true,
+          enabledActions: [],
+          fulfillmentOperatorMode: "none",
+          notes: staleBareIds,
+        },
+      ],
+    });
+    expect(p.scenarios.find((s) => s.key === "general_inquiry")!.notes).toBe(
+      defaultResolutionPolicy.scenarios.find((s) => s.key === "general_inquiry")!
+        .notes,
+    );
+  });
+
+  it("respects a deliberately cleared built-in note", () => {
+    const p = decodeResolutionPolicy({
+      scenarios: [
+        {
+          key: "general_inquiry",
+          label: "General question",
+          builtin: true,
+          enabledActions: [],
+          fulfillmentOperatorMode: "none",
+        },
+      ],
+    });
+    expect(
+      p.scenarios.find((s) => s.key === "general_inquiry")!.notes,
+    ).toBeUndefined();
   });
 });
 
