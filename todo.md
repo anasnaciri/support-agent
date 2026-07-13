@@ -211,6 +211,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
         `merchant.notify`) — the reply force-approval was the only backstop
         that actually engaged. Prompt-vs-runtime gap to keep in mind when
         fixing.
+      - [x] **Tracking-destination directive now permits verification-only
+        supplier escalation** (2026-07-13). The trusted runtime prompt still
+        explains the destination-country mismatch and that the tracking may
+        belong to a different order, but no longer suppresses every supplier
+        contact. It forbids claims or escalation based on the suspect delivery
+        state, requires `merchant.notify`, and—when supplier escalation is
+        enabled—directs `supplier.escalate` to ask the supplier to verify the
+        order's tracking number without repeating claims from scans/status.
 
 - [x] **Supplier-reported tracking numbers sync onto the order** (2026-07-12).
       Verified with `npx vitest run packages apps/worker apps/api

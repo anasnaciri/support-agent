@@ -519,5 +519,8 @@ describe("trackingDestinationDirective", () => {
     });
     expect(d.toLowerCase()).toContain("different order");
     expect(d.toLowerCase()).toContain("merchant.notify");
+    expect(d).toContain("supplier.escalate");
+    expect(d).toContain("when supplier escalation is enabled");
+    expect(d).toContain("do not include claims derived from its scans or status");
   });
 });
