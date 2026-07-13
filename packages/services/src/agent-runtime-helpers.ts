@@ -193,7 +193,7 @@ const CUSTOMS_DUTIES_SENTENCE: Record<CustomsDutiesPayer, string> = {
  *
  * Two of these lines are load-bearing. `deliveryTime` is the window an agent
  * measures `transitDays` against, and `delayedAfterDays` is the exact threshold
- * past which a shipment earns a fulfillment operator check — so they're stated here rather
+ * past which a shipment counts as a delivery problem — so they're stated here rather
  * than left to `knowledge.search`, which ranks prose and can miss. The optional
  * lines are simply omitted when unset; an empty "Shipping cost:" line would read
  * to the model as "free" or invite it to guess.
@@ -215,7 +215,7 @@ export const buildShippingFactsHeader = (
     lines.push(`- ${CUSTOMS_DUTIES_SENTENCE[profile.customsDuties]}`);
   }
   lines.push(
-    `- This store treats a shipment as delayed once it has been in transit for ${profile.delayedAfterDays} days or more. Past that point, open a fulfillment operator check rather than reassuring the customer that the order is on schedule. Use this number instead of searching the knowledge base for a delivery window.`,
+    `- This store treats a shipment as delayed once it has been in transit for ${profile.delayedAfterDays} days or more. Past that point, do not reassure the customer that the order is on schedule; treat it as the delivery problem the matching scenario's playbook covers. Use this number instead of searching the knowledge base for a delivery window.`,
   );
   if (profile.lostPackageInvestigationDays != null) {
     lines.push(

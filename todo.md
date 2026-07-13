@@ -1951,6 +1951,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       migration; a row converges on its next save.
 - [x] Scenario-resolution agent runs alongside legacy specialists behind a
       tenant flag and can queue multiple gated actions before parking.
+- [x] Base prompt / default-scenario contradictions resolved (2026-07-13):
+      `order_cancellation` and `shipping_address_update` notes phrase their
+      gated remedies conditionally ("being processed", never "done" /
+      "confirm the change" — they're queued under `ask`); `where_is_order`'s
+      flip note now also triggers on a silent parcel (`daysSinceLastScan`) and
+      unverifiable tracking, not just `transitDays` lateness, while keeping
+      `fulfillmentOperatorMode: none` (steer to the delivery-problem scenario,
+      don't escalate from a status question); `general_inquiry` says
+      `/merchant.notify` + stop instead of "hand off" (the agent has no handoff
+      tool). Principle adopted: the BASE PROMPT and injected generic headers
+      state general rules only and never prescribe a scenario's remedy — the
+      late/stuck rule and the shipping-facts header's delayed-after line now
+      defer to "the matching scenario's playbook" instead of ordering a
+      fulfillment operator check (a tool `where_is_order`'s envelope strips).
 - [x] Merchant notification fan-out supports email plus linked Telegram where
       configured.
 - [x] Custom merchant agents can be authored and assigned.
@@ -2505,7 +2519,20 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `where_is_order` fulfillmentOperatorMode flip from `39ab74e` was superseded by the
       general re-classification rule `d8b1ddc` and reverted.) The 2026-07-11
       partial-refund note updates for `refund_request`, `damaged_product`, and
-      `wrong_item` have the same stored-policy caveat.
+      `wrong_item` have the same stored-policy caveat. So do the 2026-07-13
+      contradiction fixes to the `order_cancellation`, `shipping_address_update`,
+      `where_is_order`, and `general_inquiry` notes (the base-prompt and
+      shipping-facts-header halves of that change ship in code and need no
+      re-save).
+- [ ] The shipping-facts header's lost-package line still prescribes remedies
+      ("a refund or a reshipment, rather than only checking with the
+      fulfillment operator again") — same base-prompt-dictating-scenario smell
+      fixed for the delayed-after line on 2026-07-13; defer it to the playbook.
+- [ ] The late/stuck doctrine is duplicated between the base prompt (JUDGING
+      LATE OR STUCK) and the `delivery_issue` note, nearly sentence for
+      sentence, with drifting vocabulary (STUCK vs STALLED). Both are in
+      context when the scenario is active; consider collapsing to one home so
+      they can't diverge.
 - [ ] If `fulfillment_operator.escalate` is ever set to `auto`, the tool description
       ("must NOT send a customer reply" after escalated:true) suppresses the
       reassuring holding reply — reword the description before flipping any

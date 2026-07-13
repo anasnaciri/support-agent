@@ -377,7 +377,11 @@ describe("buildSystemPrompt", () => {
     expect(got).toContain("Free over $50, otherwise $4.95");
     // The number the agent acts on must be stated, not left to retrieval.
     expect(got).toContain("14");
-    expect(got).toMatch(/delayed[\s\S]{0,120}fulfillment operator/i);
+    // The header states the fact and the guardrail (never reassure past the
+    // threshold) but leaves the remedy to the active scenario's playbook — it
+    // must not prescribe a tool the envelope may have stripped.
+    expect(got).toMatch(/delayed[\s\S]{0,250}scenario/i);
+    expect(got).not.toMatch(/delayed[\s\S]{0,250}fulfillment operator check/i);
   });
 
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {

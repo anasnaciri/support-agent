@@ -89,6 +89,18 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toMatch(/null[\s\S]{0,300}(not evidence|cannot confirm)/);
   });
 
+  it("keeps the late/stuck remedy scenario-agnostic: follow the playbook, re-stamp when it doesn't fit", () => {
+    const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
+    // The base prompt teaches general rules only; the remedy for a late/stuck
+    // shipment is the scenario's call. It must defer to the active playbook and
+    // point at re-stamping scenarioKey when that playbook doesn't cover it —
+    // never unconditionally order a tool the envelope may have stripped
+    // (where_is_order runs without fulfillment_operator.escalate).
+    expect(p).toMatch(/late or stuck[\s\S]{0,600}playbook/);
+    expect(p).toMatch(/late or stuck[\s\S]{0,600}scenariokey/);
+    expect(p).not.toMatch(/late or stuck[\s\S]{0,300}open a fulfillment operator check/);
+  });
+
   it("compares the tracking destination country against the order's shipping country", () => {
     const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
     // A `destinationCountry` that disagrees with the order's shippingAddress

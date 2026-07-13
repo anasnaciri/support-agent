@@ -225,9 +225,10 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "when the order has not shipped yet or the carrier has no events for it. If the store has " +
         "not stated those windows, call /knowledge.search for the shipping policy rather than " +
         "repeating a vague phrase back to the customer. If the carrier's transitDays has already " +
-        "passed @shipping.delayed_after, this is no longer a status question: do NOT reassure the " +
-        "customer the order is on schedule. Treat it as a delivery problem and follow that " +
-        "playbook instead.",
+        "passed @shipping.delayed_after, or daysSinceLastScan has (a parcel silent that long is " +
+        "stalled, not merely slow), or the tracking cannot be verified as this order's, this is " +
+        "no longer a status question: do NOT reassure the customer the order is on schedule. " +
+        "Treat it as a delivery problem and follow that playbook instead.",
     },
     {
       key: "delivery_issue",
@@ -360,8 +361,8 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "An order is only cancellable while it is still in the warehouse, which is roughly " +
         "@shipping.processing_time from when it was placed, so act on this quickly. " +
         "If it has NOT shipped yet (fulfillment unfulfilled and not already cancelled), propose " +
-        "/order.cancel to cancel and refund it, and tell the customer the cancellation is done and " +
-        "the refund takes @returns.refund_processing_time to appear. If it has ALREADY shipped " +
+        "/order.cancel to cancel and refund it, and tell the customer the cancellation is being " +
+        "processed and the refund takes @returns.refund_processing_time to appear. If it has ALREADY shipped " +
         "(fulfilled / in transit / delivered), do NOT cancel. Tell the customer it has already " +
         "shipped and can no longer be cancelled, and that if they would like a refund they can " +
         "return the order to us within @returns.return_window of delivery and we will refund it " +
@@ -383,7 +384,7 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "warehouse, which is about @shipping.processing_time from when it was placed, so treat " +
         "this as urgent and do not sit on it. If it has NOT shipped yet (no fulfillments and not " +
         "cancelled): when the customer already gave the complete new address, update it with " +
-        "/order.update_shipping_address and confirm the change; when they did not, ask them for the " +
+        "/order.update_shipping_address and tell them the change is being processed; when they did not, ask them for the " +
         "full new address (street, city, state/province, postal code, country) with " +
         "/conversation.ask_customer and update it once they reply. Never guess or fill in missing " +
         "parts yourself. If the order HAS already shipped, the address on the order can no longer " +
@@ -404,7 +405,8 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "@shipping.processing_time and arrive in @shipping.delivery_time, and returns are accepted " +
         "within @returns.return_window of delivery. Use /knowledge.search for anything those don't " +
         "cover (product details, store policies, contact info) and say you'll check rather than " +
-        "inventing a number. Decline offers/scams and hand off anything out of scope to a human.",
+        "inventing a number. Decline offers/scams. For anything out of scope, flag it with " +
+        "/merchant.notify and stop without replying so a human can take over.",
     },
   ],
 };

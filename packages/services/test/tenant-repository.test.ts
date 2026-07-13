@@ -640,6 +640,26 @@ describe("built-in scenario notes reference store facts", () => {
     expect(notes).toContain("@shipping.delivery_time");
   });
 
+  it("where_is_order flips to the delivery-problem playbook on silent or unverifiable tracking, not just lateness", () => {
+    // The scenario runs with fulfillment_operator.escalate stripped
+    // (fulfillmentOperatorMode: none), so the flip note is the only route to a
+    // real remedy. It must cover all three triggers the base prompt teaches:
+    // late (transitDays), stuck (daysSinceLastScan gone silent), unverifiable.
+    const notes = byKey("where_is_order").notes ?? "";
+    expect(notes).toContain("transitDays");
+    expect(notes).toContain("daysSinceLastScan");
+    expect(notes.toLowerCase()).toContain("delivery problem");
+    expect(notes.toLowerCase()).toMatch(/cannot be verified|can't be verified/);
+  });
+
+  it("general_inquiry escalates out-of-scope tickets via merchant.notify, not an imaginary handoff", () => {
+    // The resolution agent has handoffs: [] and no agent.handoff tool — a note
+    // telling it to "hand off" names a mechanism it doesn't have.
+    const notes = byKey("general_inquiry").notes ?? "";
+    expect(notes).toContain("/merchant.notify");
+    expect(notes.toLowerCase()).not.toContain("hand off");
+  });
+
   it("keeps the literal where-is-my-order wording mapped to the where_is_order scenario", () => {
     const scenario = byKey("where_is_order");
     expect(scenario.label).toBe("Where is my order?");
@@ -794,6 +814,15 @@ describe("order_cancellation built-in scenario", () => {
     ]);
   });
 
+  it("phrases the gated cancellation conditionally, never as already done", () => {
+    // order.cancel defaults to `ask`, so it is QUEUED, and the base prompt's
+    // hard rule forbids claiming a queued action already happened. "Being
+    // processed" stays true under both `ask` and `allow`.
+    const notes = (cancel!.notes ?? "").toLowerCase();
+    expect(notes).toContain("being processed");
+    expect(notes).not.toContain("cancellation is done");
+  });
+
   it("survives the write-path normalizer as a forced built-in", () => {
     // A merchant can't delete it or strip its remedy by omission; the write
     // decoder re-seeds every built-in.
@@ -825,6 +854,14 @@ describe("shipping_address_update built-in scenario", () => {
     const notes = (ship!.notes ?? "").toLowerCase();
     expect(notes).toContain("ask");
     expect(notes).toContain("fulfillment operator");
+  });
+
+  it("phrases the gated address edit conditionally, never as already changed", () => {
+    // order.update_shipping_address defaults to `ask` — queued, not executed —
+    // so the note must not tell the agent to "confirm the change".
+    const notes = (ship!.notes ?? "").toLowerCase();
+    expect(notes).toContain("being processed");
+    expect(notes).not.toContain("confirm the change");
   });
 
   it("survives the write-path normalizer as a forced built-in", () => {
