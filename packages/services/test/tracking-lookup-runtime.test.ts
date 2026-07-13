@@ -635,6 +635,9 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     );
     // The snapshot described the replaced number — it must not survive.
     expect(out.context["liveTrackingStatus"]).toBeUndefined();
+    expect(out.context["trackingFulfillmentId"]).toBe(
+      "gid://shopify/Fulfillment/1",
+    );
     // Unrelated context is untouched.
     expect(out.context["scenarioKey"]).toBe("delivery_issue");
   });

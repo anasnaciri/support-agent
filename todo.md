@@ -96,7 +96,7 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           views). Best-effort: a write failure never fails the GET. Covers
           Shopify-admin edits: the next time anyone opens the ticket, the DB
           stamp is healed. Nothing is surfaced to the merchant (deliberate).
-        - [ ] **Review follow-up: multi-fulfillment tracking source can heal to
+        - [x] **Review follow-up (FIXED 2026-07-13): multi-fulfillment tracking source can heal to
           the wrong shipment.** `order.update_tracking` and the supplier portal
           correctly pick the fulfillment carrying the old tracking number, but
           the dashboard tracking endpoint later follows the FIRST fulfillment
@@ -111,7 +111,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           projection persists it; `pickTrackingSource` is explicitly tested to
           choose the first tracked fulfillment. A wrong choice affects the live
           card and can then persist the wrong shipment into the ticket stamp.
-          Fix this before allowing any path to create missing stamps.
+          Fixed TDD by persisting the exact Shopify fulfillment id as
+          `context.trackingFulfillmentId` after both `order.update_tracking`
+          and supplier-portal edits. The dashboard source picker now prefers
+          that bound fulfillment; legacy tickets first associate by the
+          stamped number, then fall back to the first tracked fulfillment. A
+          missing bound fulfillment returns no tracking instead of guessing
+          another shipment. No migration is needed because ticket context is
+          schemaless and the legacy association path remains supported.
         - [ ] **Review follow-up: app-owned tracking writes clear the DB stamp
           but do not recreate it.** `order.update_tracking` drops
           `liveTrackingStatus`; the supplier portal pencil does the same. The
@@ -127,19 +134,18 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           page-view side effects and is unsafe until fulfillment identity is
           solved. Defer unless the product explicitly requires an always-present
           stamp (low gain today).
-        - [ ] **Review follow-up: same-number metadata and tracking removal are
-          not treated as supersession.** Same tracking number with corrected
-          carrier/company keeps the old stamp and carrier hint on the agent
-          path; if Shopify admin removes all tracking numbers, the helpers fail
-          open and the SPA/API can still fall back to the old stamp. Decide
-          whether these should clear or restamp. **Validated 2026-07-13: split
-          these cases.** Removal is a real medium/high correctness issue: all
+        - [x] **Review follow-up (FIXED 2026-07-13): tracking removal was not
+          treated as supersession.** Removal was a real medium/high correctness
+          issue: all
           three guards deliberately keep/fall back to the old stamp when the
           resolved order has zero tracking numbers, so a merchant removing an
           invalid number can still see that shipment presented as current.
-          Treat a successfully resolved, numberless order as authoritative "no
-          tracking" (while retaining fail-open only when order resolution
-          fails). Same-number carrier metadata is low priority: the endpoint
+          The API picker, SPA fallback, and runtime order-read healer now treat
+          a successfully resolved, numberless order as authoritative "no
+          tracking", while retaining the stamp only when order resolution
+          fails. Covered by focused API, SPA, helper, and runtime tests.
+        - [ ] **Deferred: same-number carrier metadata changes keep the prior
+          stamp/carrier hint.** This remains low priority: the endpoint
           deliberately prefers the stamp's provider carrier code because it
           previously produced a successful lookup; only Shopify-admin metadata
           edits bypass the app-owned paths that already clear the stamp. Revisit

@@ -239,18 +239,33 @@ const AgentRuntimeLayer = Layer.effect(
           result.right && typeof result.right === "object"
             ? (result.right as Record<string, unknown>)["trackingNumber"]
             : null;
+        const fulfillmentId =
+          result.right && typeof result.right === "object"
+            ? (result.right as Record<string, unknown>)["fulfillmentId"]
+            : null;
         const snapshot = ticket.context["liveTrackingStatus"];
         const snapshotNumber =
           snapshot && typeof snapshot === "object"
             ? (snapshot as Record<string, unknown>)["trackingNumber"]
             : null;
-        if (snapshot === undefined) return Effect.succeed(null);
-        if (typeof stored === "string" && stored === snapshotNumber) {
+        const nextContext = { ...ticket.context };
+        if (typeof fulfillmentId === "string" && fulfillmentId.length > 0) {
+          nextContext["trackingFulfillmentId"] = fulfillmentId;
+        }
+        if (
+          snapshot !== undefined &&
+          !(typeof stored === "string" && stored === snapshotNumber)
+        ) {
+          delete nextContext["liveTrackingStatus"];
+        }
+        if (
+          nextContext["trackingFulfillmentId"] ===
+            ticket.context["trackingFulfillmentId"] &&
+          nextContext["liveTrackingStatus"] === snapshot
+        ) {
           return Effect.succeed(null);
         }
-        const { liveTrackingStatus: _superseded, ...withoutSnapshot } =
-          ticket.context;
-        return tickets.update(ticket.id, { context: withoutSnapshot });
+        return tickets.update(ticket.id, { context: nextContext });
       }
       if (toolName !== "tracking.lookup") return Effect.succeed(null);
       const { liveTrackingStatus: _liveTrackingStatus, ...rest } =

@@ -13,15 +13,16 @@ const stampContext = (trackingNumber: string, carrier: string | null) => ({
 });
 
 const fulfillment = (
+  id: string,
   trackingNumbers: ReadonlyArray<string>,
   trackingCompany: string | null = "USPS",
-) => ({ trackingNumbers, trackingCompany });
+) => ({ id, trackingNumbers, trackingCompany });
 
 describe("pickTrackingSource", () => {
   it("follows the order's fulfillment number over a stale stamp", () => {
     expect(
       pickTrackingSource(stampContext("OLD123", "191997"), [
-        fulfillment(["NEW456"]),
+        fulfillment("f1", ["NEW456"]),
       ]),
     ).toEqual({ trackingNumber: "NEW456", carrier: "USPS" });
   });
@@ -31,20 +32,26 @@ describe("pickTrackingSource", () => {
     // successful lookup — better than re-deriving from the company name.
     expect(
       pickTrackingSource(stampContext("SAME789", "191997"), [
-        fulfillment(["SAME789"]),
+        fulfillment("f1", ["SAME789"]),
       ]),
     ).toEqual({ trackingNumber: "SAME789", carrier: "191997" });
   });
 
   it("uses the first fulfillment that carries a tracking number", () => {
     expect(
-      pickTrackingSource({}, [fulfillment([]), fulfillment(["ABC1"], "DHL")]),
+      pickTrackingSource({}, [
+        fulfillment("f1", []),
+        fulfillment("f2", ["ABC1"], "DHL"),
+      ]),
     ).toEqual({ trackingNumber: "ABC1", carrier: "DHL" });
   });
 
-  it("falls back to the stamp when the order has no fulfillment tracking", () => {
-    expect(pickTrackingSource(stampContext("OLD123", "191997"), [fulfillment([])]))
-      .toEqual({ trackingNumber: "OLD123", carrier: "191997" });
+  it("does not resurrect the stamp when the resolved order has no tracking", () => {
+    expect(
+      pickTrackingSource(stampContext("OLD123", "191997"), [
+        fulfillment("f1", []),
+      ]),
+    ).toBeNull();
   });
 
   it("falls back to the stamp when the order could not be resolved", () => {
@@ -56,15 +63,45 @@ describe("pickTrackingSource", () => {
 
   it("returns null when neither side has a number", () => {
     expect(pickTrackingSource({}, null)).toBeNull();
-    expect(pickTrackingSource({}, [fulfillment([])])).toBeNull();
+    expect(pickTrackingSource({}, [fulfillment("f1", [])])).toBeNull();
     expect(pickTrackingSource({ liveTrackingStatus: { kind: "live" } }, null)).toBeNull();
   });
 
   it("tolerates a malformed stamp", () => {
     expect(
       pickTrackingSource({ liveTrackingStatus: "garbage" }, [
-        fulfillment(["NEW456"], null),
+        fulfillment("f1", ["NEW456"], null),
       ]),
     ).toEqual({ trackingNumber: "NEW456", carrier: null });
+  });
+
+  it("prefers the ticket-bound fulfillment on a multi-fulfillment order", () => {
+    expect(
+      pickTrackingSource(
+        { trackingFulfillmentId: "fulfillment-b" },
+        [
+          fulfillment("fulfillment-a", ["A1"], "UPS"),
+          fulfillment("fulfillment-b", ["NEW-B"], "DHL"),
+        ],
+      ),
+    ).toEqual({ trackingNumber: "NEW-B", carrier: "DHL" });
+  });
+
+  it("uses the stamped number to associate an existing multi-fulfillment ticket", () => {
+    expect(
+      pickTrackingSource(stampContext("B1", "dhl-code"), [
+        fulfillment("fulfillment-a", ["A1"], "UPS"),
+        fulfillment("fulfillment-b", ["B1"], "DHL"),
+      ]),
+    ).toEqual({ trackingNumber: "B1", carrier: "dhl-code" });
+  });
+
+  it("does not guess another shipment when the bound fulfillment disappeared", () => {
+    expect(
+      pickTrackingSource(
+        { trackingFulfillmentId: "removed-fulfillment" },
+        [fulfillment("fulfillment-a", ["A1"], "UPS")],
+      ),
+    ).toBeNull();
   });
 });

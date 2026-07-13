@@ -124,15 +124,16 @@ export const parseLiveTracking = (value: unknown): ParsedTracking | null => {
  * order's fulfillment now tracks under a different number (a reship, a
  * re-label, a Shopify-admin edit) the snapshot is superseded and rendering it
  * would show the old number and its stale scans as this order's status.
- * Conservative: only drops on a definite disagreement — a stamp without a
- * number, or an order without tracking numbers, passes through unchanged.
+ * A resolved order is canonical even when all tracking was removed. When the
+ * order could not be resolved, the stamp remains as a fail-open fallback.
  */
 export const dropSupersededStamp = (
   stamp: ParsedTracking | null,
   orderTrackingNumbers: ReadonlyArray<string>,
+  orderResolved = orderTrackingNumbers.length > 0,
 ): ParsedTracking | null => {
   if (!stamp?.trackingNumber) return stamp;
-  if (orderTrackingNumbers.length === 0) return stamp;
+  if (!orderResolved) return stamp;
   return orderTrackingNumbers.includes(stamp.trackingNumber) ? stamp : null;
 };
 

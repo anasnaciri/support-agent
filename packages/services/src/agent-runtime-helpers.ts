@@ -1256,8 +1256,9 @@ export const trackingDestinationMismatchFlag = (
  * pencil edit, AND a merchant editing the fulfillment directly in the Shopify
  * admin (which sends no webhook). A superseded snapshot must be dropped so
  * the facts header stops describing the old shipment even in a run that never
- * calls `tracking.lookup`. Conservative fail-open: no snapshot, a numberless
- * snapshot, or an order without tracking numbers is never a disagreement.
+ * calls `tracking.lookup`. A successfully resolved order with no tracking
+ * numbers authoritatively supersedes the snapshot; malformed order output
+ * still fails open.
  * Pure + exported so the decision is unit-tested without the runtime.
  */
 export const trackingSnapshotSupersededByOrder = (
@@ -1274,6 +1275,7 @@ export const trackingSnapshotSupersededByOrder = (
   }
   const fulfillments = resolvedOrder["fulfillments"];
   if (!Array.isArray(fulfillments)) return false;
+  let sawTrackingProjection = false;
   const numbers = fulfillments.flatMap((f): ReadonlyArray<string> => {
     if (!f || typeof f !== "object") return [];
     const tracking = (f as Record<string, unknown>)["tracking"];
@@ -1281,11 +1283,12 @@ export const trackingSnapshotSupersededByOrder = (
       tracking && typeof tracking === "object" && !Array.isArray(tracking)
         ? (tracking as Record<string, unknown>)["numbers"]
         : null;
+    if (Array.isArray(nums)) sawTrackingProjection = true;
     return Array.isArray(nums)
       ? nums.filter((n): n is string => typeof n === "string" && n.length > 0)
       : [];
   });
-  if (numbers.length === 0) return false;
+  if (fulfillments.length > 0 && !sawTrackingProjection) return false;
   return !numbers.includes(snapshotNumber);
 };
 

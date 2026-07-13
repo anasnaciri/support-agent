@@ -134,8 +134,12 @@ describe("dropSupersededStamp", () => {
     expect(dropSupersededStamp(stamp, ["NEW456", "OLD123"])).toBe(stamp);
   });
 
-  it("keeps the stamp when the order has no tracking numbers (nothing to disagree with)", () => {
-    expect(dropSupersededStamp(stamp, [])).toBe(stamp);
+  it("drops the stamp when the resolved order has no tracking numbers", () => {
+    expect(dropSupersededStamp(stamp, [], true)).toBeNull();
+  });
+
+  it("keeps the stamp when the order could not be resolved", () => {
+    expect(dropSupersededStamp(stamp, [], false)).toBe(stamp);
   });
 
   it("keeps a stamp that names no number (cannot be compared)", () => {

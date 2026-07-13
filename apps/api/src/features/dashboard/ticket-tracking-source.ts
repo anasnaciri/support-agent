@@ -13,6 +13,7 @@
 
 /** The projection of a Shopify fulfillment the picking logic needs. */
 export interface TrackingSourceFulfillment {
+  readonly id: string;
   readonly trackingNumbers: ReadonlyArray<string>;
   readonly trackingCompany: string | null;
 }
@@ -41,18 +42,38 @@ const stampOf = (
 
 /**
  * Pick the number (+ carrier hint for the 17track lookup) the Tracking card
- * follows: the order's first fulfillment carrying a tracking number, else the
- * on-ticket stamp, else null. When the stamp describes the SAME number the
- * fulfillment carries, its carrier wins the hint — it's the 17track carrier
- * code that already produced a successful lookup, sharper than re-deriving
- * from the fulfillment's company name.
+ * follows. A ticket-bound fulfillment wins; for legacy tickets, a fulfillment
+ * carrying the stamped number wins; only then do we use the first tracked
+ * fulfillment. The stamp itself is a fallback only when the order could not be
+ * resolved. When the stamp describes the selected number, its provider carrier
+ * code wins over re-deriving one from the fulfillment's company name.
  */
 export const pickTrackingSource = (
   context: Record<string, unknown>,
   fulfillments: ReadonlyArray<TrackingSourceFulfillment> | null,
 ): TrackingSource | null => {
   const stamp = stampOf(context);
+  const boundFulfillmentId = str(context["trackingFulfillmentId"]);
+  if (fulfillments !== null && boundFulfillmentId) {
+    const bound = fulfillments.find((ff) => ff.id === boundFulfillmentId);
+    if (!bound) return null;
+    const trackingNumber = bound.trackingNumbers.find((n) => n.length > 0);
+    if (!trackingNumber) return null;
+    return {
+      trackingNumber,
+      carrier:
+        stamp.trackingNumber === trackingNumber && stamp.carrier
+          ? stamp.carrier
+          : bound.trackingCompany,
+    };
+  }
+  const stampMatched = stamp.trackingNumber
+    ? fulfillments?.find((ff) =>
+        ff.trackingNumbers.includes(stamp.trackingNumber as string),
+      )
+    : null;
   const f =
+    stampMatched ??
     fulfillments?.find((ff) => ff.trackingNumbers.some((n) => n.length > 0)) ??
     null;
   const fulfillmentNumber = f?.trackingNumbers.find((n) => n.length > 0) ?? null;
@@ -65,7 +86,7 @@ export const pickTrackingSource = (
           : (f?.trackingCompany ?? null),
     };
   }
-  if (stamp.trackingNumber) {
+  if (fulfillments === null && stamp.trackingNumber) {
     return { trackingNumber: stamp.trackingNumber, carrier: stamp.carrier };
   }
   return null;

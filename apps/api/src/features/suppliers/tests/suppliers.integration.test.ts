@@ -828,6 +828,9 @@ describeIfDb("apps/api — supplier portal (integration)", () => {
     const context = ticketRow?.context as Record<string, unknown>;
     // The stale lookup cache is gone; unrelated context keys survive.
     expect(context["liveTrackingStatus"]).toBeUndefined();
+    expect(context["trackingFulfillmentId"]).toBe(
+      "gid://shopify/Fulfillment/1",
+    );
     expect(context["customerEmail"]).toBe("cust@example.com");
 
     const audits = await raw.db

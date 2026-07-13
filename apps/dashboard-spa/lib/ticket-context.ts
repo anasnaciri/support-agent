@@ -107,6 +107,7 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "photoSignals",
   "riskFlags",
   "liveTrackingStatus",
+  "trackingFulfillmentId",
   "notes",
   "supplierUpdate",
 ]);

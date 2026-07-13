@@ -768,13 +768,14 @@ export const recordSupplierTrackingUpdate = async (
     const ticketRow = ticketRows[0];
     if (ticketRow) {
       const context = { ...(ticketRow.context as Record<string, unknown>) };
+      context["trackingFulfillmentId"] = input.fulfillmentId;
       if ("liveTrackingStatus" in context) {
         delete context["liveTrackingStatus"];
-        await tx
-          .update(tickets)
-          .set({ context, updatedAt: new Date() })
-          .where(eq(tickets.id, ticketId));
       }
+      await tx
+        .update(tickets)
+        .set({ context, updatedAt: new Date() })
+        .where(eq(tickets.id, ticketId));
     }
 
     await tx.insert(auditLog).values({

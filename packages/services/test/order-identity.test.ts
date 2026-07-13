@@ -455,16 +455,22 @@ describe("trackingSnapshotSupersededByOrder", () => {
     ).toBe(false);
   });
 
-  it("fails open when the order carries no tracking numbers", () => {
+  it("treats a resolved order with no tracking numbers as superseding the stamp", () => {
     expect(
       trackingSnapshotSupersededByOrder(stamped("OLD123"), orderWith([])),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       trackingSnapshotSupersededByOrder(stamped("OLD123"), orderWith()),
+    ).toBe(true);
+    expect(
+      trackingSnapshotSupersededByOrder(stamped("OLD123"), {
+        id: "gid://shopify/Order/1",
+      }),
     ).toBe(false);
     expect(
       trackingSnapshotSupersededByOrder(stamped("OLD123"), {
         id: "gid://shopify/Order/1",
+        fulfillments: [{ id: "malformed" }],
       }),
     ).toBe(false);
   });

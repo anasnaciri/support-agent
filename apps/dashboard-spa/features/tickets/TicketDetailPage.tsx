@@ -544,6 +544,7 @@ export function TicketDetailPage() {
     dropSupersededStamp(
       parseLiveTracking(context["liveTrackingStatus"]),
       orderTrackingNumbers,
+      order !== null,
     );
 
   // The conversation's display name: the linked Shopify customer, else the
