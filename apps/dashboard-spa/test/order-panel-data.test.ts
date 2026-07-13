@@ -5,6 +5,7 @@ import type { ShopifyFulfillment } from "@support-agent/agent-core";
 import {
   fulfillmentDay,
   latestFulfillment,
+  orderIsCancelled,
 } from "../lib/order-panel-data";
 
 // The dashboard reads orders through apps/api over JSON (Path B). JSON has no
@@ -60,5 +61,27 @@ describe("fulfillmentDay", () => {
 
   it("formats a real Date to yyyy-mm-dd", () => {
     expect(fulfillmentDay(new Date("2026-06-15T23:10:00.000Z"))).toBe("2026-06-15");
+  });
+});
+
+// The Order card must not offer "Cancel order" for an order that is already
+// cancelled — the server rejects it (`already_cancelled`), so showing the
+// button is a dead end. `cancelledAt` rides the same JSON wire as the
+// fulfillment dates, so it arrives as an ISO string, not a Date.
+describe("orderIsCancelled", () => {
+  it("false when cancelledAt is null", () => {
+    expect(orderIsCancelled({ cancelledAt: null })).toBe(false);
+  });
+
+  it("true for an ISO string cancelledAt (JSON wire)", () => {
+    expect(orderIsCancelled({ cancelledAt: "2026-07-08T14:01:35.000Z" })).toBe(
+      true,
+    );
+  });
+
+  it("true for a real Date cancelledAt", () => {
+    expect(
+      orderIsCancelled({ cancelledAt: new Date("2026-07-08T14:01:35.000Z") }),
+    ).toBe(true);
   });
 });

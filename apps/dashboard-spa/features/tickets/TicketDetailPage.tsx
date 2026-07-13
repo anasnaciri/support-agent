@@ -54,6 +54,7 @@ import {
 import { shouldShowRetrySendAction } from "@/lib/retry-send-visibility";
 import { composerKey } from "@/lib/composer-key";
 import { isTicketProcessing } from "@/lib/ticket-processing";
+import { orderIsCancelled } from "@/lib/order-panel-data";
 import { Link } from "@/components/ui/link";
 import { AnimateHeight } from "@/components/ui/animate-height";
 import { Badge } from "@/components/ui/badge";
@@ -1011,11 +1012,13 @@ export function TicketDetailPage() {
                     orderName={order.name}
                     size="sm"
                   />
-                  <CancelOrderDialog
-                    workspaceId={ctx.workspaceId}
-                    ticketId={id}
-                    orderName={order.name}
-                  />
+                  {orderIsCancelled(order) ? null : (
+                    <CancelOrderDialog
+                      workspaceId={ctx.workspaceId}
+                      ticketId={id}
+                      orderName={order.name}
+                    />
+                  )}
                   <CardEditPopover
                     ticketId={id}
                     onSubmit={submitShippingAddress}

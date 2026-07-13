@@ -25,3 +25,11 @@ export const latestFulfillment = (
 export const fulfillmentDay = (
   date: Date | string | null,
 ): string | null => (date === null ? null : asDate(date).toISOString().slice(0, 10));
+
+/** Whether the order is already cancelled. The Order card uses this to hide
+ *  "Cancel order" — the server rejects a second cancel (`already_cancelled`),
+ *  so offering the button is a dead end. `cancelledAt` arrives as an ISO
+ *  string over the JSON wire, a real Date in domain code. */
+export const orderIsCancelled = (order: {
+  cancelledAt: Date | string | null;
+}): boolean => order.cancelledAt !== null;
