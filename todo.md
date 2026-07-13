@@ -28,6 +28,10 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       `master-plan.md`. This was a documentation/domain pass only; the current
       `supplier.escalate`, default-supplier lookup, supplier tables, and
       `waiting_for_supplier` runtime remain unchanged until TDD migrations.
+      Naming decision (2026-07-13): use **Fulfillment Operator** in the domain,
+      code, and agent instructions; use **Fulfillment partner** as the friendlier
+      merchant-facing label. Do not use "shipping provider" (ambiguous with the
+      carrier) or "warehouse" (too narrow).
       Verified with targeted source greps and `pnpm build`.
       - [ ] **Capture fulfillment routing evidence.** Extend the provider-neutral
         order model and Shopify Live query with fulfillment-order identity,
