@@ -2212,7 +2212,12 @@ describe("ShopifyServiceLive — cancelOrder", () => {
     expect(body.variables["orderId"]).toBe(orderGid);
     // Domain "customer" → Shopify's OrderCancelReason "CUSTOMER".
     expect(body.variables["reason"]).toBe("CUSTOMER");
-    expect(body.variables["refund"]).toBe(true);
+    // Domain refund:true → refundMethod.originalPaymentMethodsRefund (the
+    // `refund: Boolean` argument is deprecated as of Admin API 2026-04).
+    expect(body.variables["refundMethod"]).toEqual({
+      originalPaymentMethodsRefund: true,
+    });
+    expect(body.variables["refund"]).toBeUndefined();
     expect(body.variables["restock"]).toBe(true);
     expect(body.variables["notifyCustomer"]).toBe(false);
     expect(body.variables["staffNote"]).toBe("Customer changed their mind");

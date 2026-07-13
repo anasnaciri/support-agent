@@ -875,14 +875,18 @@ const REFUND_CREATE_MUTATION = `
 // `orderCancel` is async: Shopify queues the cancellation (and the optional
 // refund + restock) and returns a `job` rather than the mutated order. The
 // `reason` is a required `OrderCancelReason!` enum (CUSTOMER / DECLINED /
-// FRAUD / INVENTORY / OTHER / STAFF); `refund`/`restock` are required
-// booleans. Errors come back on `orderCancelUserErrors`, not the generic
-// `userErrors` field. Gated by `write_orders`, same as `refundCreate`.
+// FRAUD / INVENTORY / OTHER / STAFF); `restock` is a required boolean. The
+// `refund: Boolean` argument is deprecated (2026-04) in favour of
+// `refundMethod: OrderCancelRefundMethodInput`, whose only alternative is a
+// store-credit refund — the domain's `refund` boolean maps to
+// `originalPaymentMethodsRefund`. Errors come back on
+// `orderCancelUserErrors`, not the generic `userErrors` field. Gated by
+// `write_orders`, same as `refundCreate`.
 const ORDER_CANCEL_MUTATION = `
   mutation OrderCancel(
     $orderId: ID!
     $reason: OrderCancelReason!
-    $refund: Boolean!
+    $refundMethod: OrderCancelRefundMethodInput
     $restock: Boolean!
     $notifyCustomer: Boolean
     $staffNote: String
@@ -890,7 +894,7 @@ const ORDER_CANCEL_MUTATION = `
     orderCancel(
       orderId: $orderId
       reason: $reason
-      refund: $refund
+      refundMethod: $refundMethod
       restock: $restock
       notifyCustomer: $notifyCustomer
       staffNote: $staffNote
@@ -1863,7 +1867,7 @@ export const ShopifyServiceLive = Layer.effect(
                 // the union is mapped generically so a future caller can pass
                 // FRAUD / INVENTORY / etc.
                 reason: input.reason.toUpperCase(),
-                refund: input.refund,
+                refundMethod: { originalPaymentMethodsRefund: input.refund },
                 restock: input.restock,
                 notifyCustomer: input.notifyCustomer,
                 staffNote: input.staffNote,
