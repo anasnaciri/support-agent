@@ -5137,6 +5137,9 @@ describe("AgentRuntime — e2e ticket.created → resolved", () => {
       shipCity: "Berlin",
       shipCountry: "DE",
     });
+    expect(captured?.["requestAttachmentIds"]).toEqual([
+      expect.any(String),
+    ]);
 
     const tools = out.entries
       .filter((e) => e.action === "tool.invoked")

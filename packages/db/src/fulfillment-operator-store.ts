@@ -6,6 +6,7 @@ import {
   approvals,
   auditLog,
   ticketAttachments,
+  ticketFulfillmentOperatorEscalationAttachments,
   ticketStateTransitions,
   ticketFulfillmentOperatorEscalations,
   tickets,
@@ -298,6 +299,8 @@ export interface FulfillmentOperatorEscalationAttachment {
 export interface FulfillmentOperatorEscalationDetail extends FulfillmentOperatorEscalationListItem {
   readonly note: string | null;
   readonly proposedResolution: string | null;
+  /** Customer images forwarded with the original support request. */
+  readonly requestAttachments: ReadonlyArray<FulfillmentOperatorEscalationAttachment>;
   /** Files the fulfillmentOperator sent with their update, oldest first. */
   readonly attachments: ReadonlyArray<FulfillmentOperatorEscalationAttachment>;
 }
@@ -311,6 +314,7 @@ export interface InsertEscalationInput {
   readonly shipCity: string | null;
   readonly shipCountry: string | null;
   readonly trackingNumber: string | null;
+  readonly requestAttachmentIds?: ReadonlyArray<string>;
 }
 
 export const insertEscalation = async (
@@ -318,16 +322,41 @@ export const insertEscalation = async (
   input: InsertEscalationInput,
 ): Promise<{ readonly id: string }> => {
   const id = randomUUID();
-  await db.insert(ticketFulfillmentOperatorEscalations).values({
-    id,
-    tenantId: input.tenantId,
-    ticketId: input.ticketId,
-    fulfillmentOperatorId: input.fulfillmentOperatorId,
-    problem: input.problem,
-    orderRef: input.orderRef,
-    shipCity: input.shipCity,
-    shipCountry: input.shipCountry,
-    trackingNumber: input.trackingNumber,
+  await db.transaction(async (tx) => {
+    await tx.insert(ticketFulfillmentOperatorEscalations).values({
+      id,
+      tenantId: input.tenantId,
+      ticketId: input.ticketId,
+      fulfillmentOperatorId: input.fulfillmentOperatorId,
+      problem: input.problem,
+      orderRef: input.orderRef,
+      shipCity: input.shipCity,
+      shipCountry: input.shipCountry,
+      trackingNumber: input.trackingNumber,
+    });
+    const requestedIds = [...new Set(input.requestAttachmentIds ?? [])];
+    if (requestedIds.length === 0) return;
+    const eligible = await tx
+      .select({ id: ticketAttachments.id })
+      .from(ticketAttachments)
+      .where(
+        and(
+          eq(ticketAttachments.tenantId, input.tenantId),
+          eq(ticketAttachments.ticketId, input.ticketId),
+          eq(ticketAttachments.source, "inbound"),
+          sql`lower(${ticketAttachments.contentType}) LIKE 'image/%'`,
+          inArray(ticketAttachments.id, requestedIds),
+        ),
+      );
+    if (eligible.length > 0) {
+      await tx.insert(ticketFulfillmentOperatorEscalationAttachments).values(
+        eligible.map((attachment) => ({
+          tenantId: input.tenantId,
+          escalationId: id,
+          attachmentId: attachment.id,
+        })),
+      );
+    }
   });
   return { id };
 };
@@ -424,6 +453,25 @@ export const getEscalationForFulfillmentOperator = async (
     .limit(1);
   const r = rows[0];
   if (!r) return null;
+  const requestAttachments = await db
+    .select({
+      id: ticketAttachments.id,
+      filename: ticketAttachments.filename,
+      contentType: ticketAttachments.contentType,
+      sizeBytes: ticketAttachments.sizeBytes,
+    })
+    .from(ticketFulfillmentOperatorEscalationAttachments)
+    .innerJoin(
+      ticketAttachments,
+      eq(
+        ticketAttachments.id,
+        ticketFulfillmentOperatorEscalationAttachments.attachmentId,
+      ),
+    )
+    .where(
+      eq(ticketFulfillmentOperatorEscalationAttachments.escalationId, r.id),
+    )
+    .orderBy(ticketFulfillmentOperatorEscalationAttachments.createdAt);
   // The files the fulfillmentOperator uploaded against this escalation. Bound by
   // escalation_id, so a sibling escalation on the same ticket never leaks in.
   const attachments = await db
@@ -448,8 +496,60 @@ export const getEscalationForFulfillmentOperator = async (
     note: r.note,
     proposedResolution: r.proposedResolution,
     createdAt: r.createdAt.toISOString(),
+    requestAttachments,
     attachments,
   };
+};
+
+/** Resolve one file only when it belongs to this operator's escalation. */
+export const getEscalationAttachmentForFulfillmentOperator = async (
+  db: DrizzleDb,
+  fulfillmentOperatorId: string,
+  escalationId: string,
+  attachmentId: string,
+): Promise<{
+  readonly storageKey: string;
+  readonly filename: string;
+  readonly contentType: string;
+} | null> => {
+  const rows = await db
+    .select({
+      storageKey: ticketAttachments.storageKey,
+      filename: ticketAttachments.filename,
+      contentType: ticketAttachments.contentType,
+    })
+    .from(ticketFulfillmentOperatorEscalations)
+    .innerJoin(
+      ticketAttachments,
+      and(
+        eq(
+          ticketAttachments.ticketId,
+          ticketFulfillmentOperatorEscalations.ticketId,
+        ),
+        eq(
+          ticketAttachments.tenantId,
+          ticketFulfillmentOperatorEscalations.tenantId,
+        ),
+      ),
+    )
+    .where(
+      and(
+        eq(ticketFulfillmentOperatorEscalations.id, escalationId),
+        eq(
+          ticketFulfillmentOperatorEscalations.fulfillmentOperatorId,
+          fulfillmentOperatorId,
+        ),
+        eq(ticketAttachments.id, attachmentId),
+        sql`exists (
+          select 1
+          from ${ticketFulfillmentOperatorEscalationAttachments} forwarded
+          where forwarded.escalation_id = ${escalationId}
+            and forwarded.attachment_id = ${attachmentId}
+        )`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 };
 
 // ---------------------------------------------------------------------------

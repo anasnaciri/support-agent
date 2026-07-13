@@ -8,6 +8,7 @@ import {
   bindFulfillmentOperatorUserAllTenants,
   ticketStateTransitions,
   ticketFulfillmentOperatorEscalations,
+  ticketAttachments,
   tickets,
   createInvitation,
   createFulfillmentOperator,
@@ -15,6 +16,7 @@ import {
   getDefaultFulfillmentOperator,
   listRoles,
   getEscalationForFulfillmentOperator,
+  getEscalationAttachmentForFulfillmentOperator,
   getFulfillmentOperatorByEmail,
   getFulfillmentOperatorForUser,
   hasOpenEscalationForTicket,
@@ -281,6 +283,106 @@ describeIfDb("fulfillment-operator-store", () => {
     expect(detail?.note).toBeNull();
     // Another fulfillmentOperator cannot read it (row-level scoping, not 403-via-app).
     expect(await getEscalationForFulfillmentOperator(db, fulfillmentOperatorB, escId)).toBeNull();
+  });
+
+  it("forwards only inbound customer images onto the escalation request", async () => {
+    const tenantId = await seedTenant();
+    const fulfillmentOperatorId = (
+      await createFulfillmentOperator(db, tenantId, {
+        name: "Damage claims",
+        email: "damage@operator.test",
+      })
+    ).id;
+    const ticketId = await seedTicket(tenantId, "waiting_for_fulfillment_operator");
+    const openingPhoto = randomUUID();
+    const laterPhoto = randomUUID();
+    const customerPdf = randomUUID();
+    const merchantImage = randomUUID();
+    await db.insert(ticketAttachments).values([
+      {
+        id: openingPhoto,
+        tenantId,
+        ticketId,
+        source: "inbound",
+        filename: "damaged-item.jpg",
+        contentType: "image/jpeg",
+        sizeBytes: 100,
+        storageKey: `${tenantId}/opening-photo`,
+      },
+      {
+        id: laterPhoto,
+        tenantId,
+        ticketId,
+        source: "inbound",
+        filename: "damaged-packaging.png",
+        contentType: "IMAGE/PNG",
+        sizeBytes: 200,
+        storageKey: `${tenantId}/later-photo`,
+      },
+      {
+        id: customerPdf,
+        tenantId,
+        ticketId,
+        source: "inbound",
+        filename: "receipt.pdf",
+        contentType: "application/pdf",
+        sizeBytes: 300,
+        storageKey: `${tenantId}/customer-pdf`,
+      },
+      {
+        id: merchantImage,
+        tenantId,
+        ticketId,
+        source: "merchant",
+        filename: "internal.jpg",
+        contentType: "image/jpeg",
+        sizeBytes: 400,
+        storageKey: `${tenantId}/merchant-image`,
+      },
+    ]);
+
+    const { id } = await insertEscalation(db, {
+      tenantId,
+      ticketId,
+      fulfillmentOperatorId,
+      problem: "Please inspect the damage and arrange a replacement",
+      orderRef: "#damage-1",
+      shipCity: null,
+      shipCountry: null,
+      trackingNumber: null,
+      requestAttachmentIds: [
+        openingPhoto,
+        laterPhoto,
+        customerPdf,
+        merchantImage,
+      ],
+    });
+
+    const detail = await getEscalationForFulfillmentOperator(
+      db,
+      fulfillmentOperatorId,
+      id,
+    );
+    expect(
+      detail?.requestAttachments.map((attachment) => attachment.id).sort(),
+    ).toEqual([openingPhoto, laterPhoto].sort());
+    expect(detail?.attachments).toEqual([]);
+    expect(
+      await getEscalationAttachmentForFulfillmentOperator(
+        db,
+        fulfillmentOperatorId,
+        id,
+        openingPhoto,
+      ),
+    ).toMatchObject({ filename: "damaged-item.jpg" });
+    expect(
+      await getEscalationAttachmentForFulfillmentOperator(
+        db,
+        fulfillmentOperatorId,
+        id,
+        customerPdf,
+      ),
+    ).toBeNull();
   });
 
   it("recordFulfillmentOperatorUpdate writes note + resolves the escalation + flips the ticket in ONE tx", async () => {

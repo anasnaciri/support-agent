@@ -1200,6 +1200,43 @@ export type TicketFulfillmentOperatorEscalationRow =
 export type TicketFulfillmentOperatorEscalationInsert =
   typeof ticketFulfillmentOperatorEscalations.$inferInsert;
 
+/**
+ * Customer images forwarded with a fulfillment request. This is a join table,
+ * not a column on `ticket_attachments`: one inbound image may support more than
+ * one escalation and must remain bound to its original conversation message.
+ */
+export const ticketFulfillmentOperatorEscalationAttachments = pgTable(
+  "ticket_fulfillment_operator_escalation_attachments",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    escalationId: uuid("escalation_id")
+      .notNull()
+      .references(() => ticketFulfillmentOperatorEscalations.id, {
+        onDelete: "cascade",
+      }),
+    attachmentId: uuid("attachment_id")
+      .notNull()
+      .references(() => ticketAttachments.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: "fulfillment_operator_escalation_attachments_pk",
+      columns: [t.escalationId, t.attachmentId],
+    }),
+    index("fulfillment_operator_escalation_attachments_attachment_idx").on(
+      t.attachmentId,
+    ),
+    index("fulfillment_operator_escalation_attachments_tenant_idx").on(
+      t.tenantId,
+    ),
+  ],
+);
+
 // The durable outbox for customer-reply DELIVERY (the SMTP/Gmail/Graph send),
 // distinct from the fulfillment-operator-notification outbox above. When a
 // `conversation.reply` / `conversation.ask_customer` send FAILS — in the agent

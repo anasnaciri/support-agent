@@ -17,6 +17,29 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Scenario-resolution escalations forward the triggering customer's
+      images to the Fulfillment Operator** (2026-07-13). When
+      `fulfillment_operator.escalate` is proposed, the runtime replaces any
+      model-supplied attachment selection with the stored inbound image ids
+      bound to the exact customer message that triggered the run. Those ids
+      persist through an approval delay, and the DB re-validates tenant,
+      ticket, inbound source, and image content type before atomically linking
+      them to the new escalation. This deliberately does not sweep older images
+      from the ticket or backfill pre-existing escalations. Migration
+      `0049_forward_customer_images_to_fulfillment_operator` adds the
+      many-to-many evidence link so one customer image can support multiple
+      requests without moving it off its conversation message. The fulfillment
+      partner portal renders linked raster images on the support-request bubble;
+      preview URLs are operator/escalation scoped, expire after 5 minutes, and
+      refresh every 4 minutes while the page remains open. SVG/unsupported
+      images stay download-only, and fulfillment-partner response files retain
+      their prior filename-only behavior. Verified red -> green with the
+      damaged-product runtime flow, tool forwarding, portal transcript and
+      safe-inline tests; 116 focused tests and 27 local-Postgres DB/API
+      integration tests passed, migration 0049 applied through Drizzle, the
+      full suite passed 2,745 tests with 470 environment-gated tests skipped,
+      and `pnpm build` is green.
+
 - [x] **Generalized the planned logistics-escalation model beyond one default
       fulfillment operator** (2026-07-13). The canonical target is now the fulfillment- or
       shipment-scoped `Resolution Owner`, resolved through a `Fulfillment Route`

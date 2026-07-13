@@ -11,6 +11,9 @@ const Input = Schema.Struct({
   shipCity: Schema.optional(Schema.NullOr(Schema.String)),
   shipCountry: Schema.optional(Schema.NullOr(Schema.String)),
   trackingNumber: Schema.optional(Schema.NullOr(Schema.String)),
+  // Runtime-managed: the model's value is replaced with ids from the current
+  // inbound customer message before permission gating or execution.
+  requestAttachmentIds: Schema.optional(Schema.Array(Schema.String)),
 });
 
 // `escalated: true` → a fulfillment operator was found and the ticket is now parked for them.
@@ -56,6 +59,7 @@ export const fulfillmentOperatorEscalate = defineTool({
           shipCity: input.shipCity ?? null,
           shipCountry: input.shipCountry ?? null,
           trackingNumber: input.trackingNumber ?? null,
+          requestAttachmentIds: input.requestAttachmentIds ?? [],
         })
         .pipe(
           Effect.mapError(

@@ -4,6 +4,7 @@ import { makeFulfillmentOperatorRoutes } from "../../auth/fulfillment-operator-r
 import { makeDashboardRoutes } from "../../auth/dashboard-routes.js";
 import {
   handleFulfillmentOperatorAttachmentUpload,
+  handleFulfillmentOperatorAttachmentUrl,
   handleFulfillmentOperatorTicket,
   handleFulfillmentOperatorTickets,
   handleFulfillmentOperatorInvite,
@@ -40,6 +41,12 @@ export const registerFulfillmentOperatorRoutes = (
     "/dashboard/fulfillment-operator/tickets",
     "Open escalations for the logged-in fulfillment partner",
     handleFulfillmentOperatorTickets,
+    "fulfillment_operator.tickets.view",
+  );
+  fulfillmentOperatorGet(
+    "/dashboard/fulfillment-operator/tickets/:id/attachments/:attachmentId/url",
+    "A short-lived preview URL for an escalation attachment",
+    handleFulfillmentOperatorAttachmentUrl,
     "fulfillment_operator.tickets.view",
   );
   fulfillmentOperatorGet(

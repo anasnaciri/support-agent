@@ -2102,7 +2102,56 @@ const AgentRuntimeLayer = Layer.effect(
                 });
                 return { agent, current, done: null };
               }
-              const callInput = decodedCall.right;
+              let callInput: unknown = decodedCall.right;
+
+              // Customer evidence forwarding is runtime-owned, not a model
+              // choice. Bind only images on the inbound message that triggered
+              // this run; the exact ids then persist in an approval input, so a
+              // delayed approval forwards the same evidence rather than every
+              // historical image on the ticket.
+              if (tool.name === "fulfillment_operator.escalate") {
+                const messageId =
+                  event.type === "message.received" ||
+                  event.type === "customer.replied"
+                    ? event.payload.messageId
+                    : null;
+                const requestAttachmentIds = messageId
+                  ? yield* Effect.gen(function* () {
+                      const bindings = yield* attachmentStore
+                        .listMessageBindingsForTicket(
+                          current.tenantId,
+                          current.id,
+                        )
+                        .pipe(Effect.catchAll(() => Effect.succeed([])));
+                      const ids = bindings
+                        .filter(
+                          (binding) =>
+                            binding.messageId === messageId &&
+                            binding.contentType
+                              .toLowerCase()
+                              .startsWith("image/"),
+                        )
+                        .map((binding) => binding.id);
+                      if (ids.length === 0) return [];
+                      const rows = yield* attachmentStore
+                        .getByIds(current.tenantId, current.id, ids)
+                        .pipe(Effect.catchAll(() => Effect.succeed([])));
+                      return rows
+                        .filter(
+                          (row) =>
+                            row.source === "inbound" &&
+                            row.contentType.toLowerCase().startsWith("image/"),
+                        )
+                        .map((row) => row.id);
+                    })
+                  : ((callInput as { requestAttachmentIds?: unknown })
+                      .requestAttachmentIds as ReadonlyArray<string> | undefined) ??
+                    [];
+                callInput = {
+                  ...(callInput as Record<string, unknown>),
+                  requestAttachmentIds,
+                };
+              }
 
               if (isScenarioControlledTool(tool.name)) {
                 // The scenario may have changed after this model request was

@@ -344,6 +344,13 @@
       "when": 1783959200000,
       "tag": "0048_fulfillment_operator_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1783959300000,
+      "tag": "0049_forward_customer_images_to_fulfillment_operator",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ import {
   ensureActingOwnerInOpenMode,
   ensureFulfillmentOperatorRole,
   getEscalationForFulfillmentOperator,
+  getEscalationAttachmentForFulfillmentOperator,
   getMemberAccess,
   getFulfillmentOperatorByEmail,
   getFulfillmentOperatorForUser,
@@ -49,6 +50,9 @@ import { resolveInvitationId } from "../../auth/invite-send.js";
 import { acquireApprovalBoss } from "../../platform/pgboss.js";
 
 const WORKFLOW_QUEUE = "workflow.events";
+const ATTACHMENT_URL_TTL_SECONDS = 300;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /**
  * Publish a `fulfillment_operator.updated` event onto the workflow queue so the worker
@@ -117,6 +121,68 @@ export const handleFulfillmentOperatorTicket = async (
   });
   if (!detail) return sendJson(res, 404, { error: "not_found" });
   return sendJson(res, 200, detail);
+};
+
+// GET /dashboard/fulfillment-operator/tickets/:id/attachments/:attachmentId/url
+// mints a short-lived preview URL only for a customer image forwarded onto
+// this escalation.
+export const handleFulfillmentOperatorAttachmentUrl = async (
+  cfg: ApiConfig,
+  layer: ApiLayer,
+  req: FastifyRequest,
+  res: FastifyReply,
+): Promise<FastifyReply> => {
+  const auth = await authenticateFulfillmentOperator(cfg, layer, req);
+  if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+  if (!auth.userId) return sendJson(res, 401, { error: "missing_user" });
+  const userId = auth.userId;
+  const { id, attachmentId } = req.params as {
+    id: string;
+    attachmentId: string;
+  };
+  if (!UUID_RE.test(id) || !UUID_RE.test(attachmentId)) {
+    return sendJson(res, 404, { error: "not_found" });
+  }
+  const row = await runWithDb(layer, async (db) => {
+    const operator = await getFulfillmentOperatorForUser(
+      db,
+      auth.tenantId,
+      userId,
+    );
+    if (!operator) return null;
+    return getEscalationAttachmentForFulfillmentOperator(
+      db,
+      operator.id,
+      id,
+      attachmentId,
+    );
+  });
+  if (!row) return sendJson(res, 404, { error: "not_found" });
+  const outcome = await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const blob = yield* BlobStorage;
+        return yield* blob.presignGetUrl(
+          row.storageKey,
+          ATTACHMENT_URL_TTL_SECONDS,
+        );
+      }).pipe(Effect.either),
+      layer,
+    ),
+  );
+  if (outcome._tag === "Left") {
+    req.log.error(
+      { err: String(outcome.left) },
+      "fulfillment operator attachment url presign failed",
+    );
+    return sendJson(res, 502, { error: "presign_failed" });
+  }
+  return sendJson(res, 200, {
+    url: outcome.right,
+    expiresInSeconds: ATTACHMENT_URL_TTL_SECONDS,
+    filename: row.filename,
+    contentType: row.contentType,
+  });
 };
 
 // POST /dashboard/fulfillment-operator/tickets/:id/update — the closed loop. Record the

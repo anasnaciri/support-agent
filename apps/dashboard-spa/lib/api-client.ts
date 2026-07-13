@@ -394,6 +394,8 @@ export interface FulfillmentOperatorEscalationDetailView
   extends FulfillmentOperatorEscalationListItemView {
   readonly note: string | null;
   readonly proposedResolution: string | null;
+  /** Customer images forwarded with the support team's request. */
+  readonly requestAttachments: ReadonlyArray<FulfillmentOperatorEscalationAttachmentView>;
   /** Files the fulfillment partner sent with their update. */
   readonly attachments: ReadonlyArray<FulfillmentOperatorEscalationAttachmentView>;
 }
@@ -1535,6 +1537,26 @@ export const api = {
     }
     return body as FulfillmentOperatorEscalationDetailView;
   },
+
+  fulfillmentOperatorAttachmentUrl: (
+    ctx: CallCtx,
+    escalationId: string,
+    attachmentId: string,
+  ): Promise<{
+    readonly url: string;
+    readonly expiresInSeconds: number;
+    readonly filename: string;
+    readonly contentType: string;
+  }> =>
+    okBody(
+      `/fulfillment-operator/tickets/${encodeURIComponent(escalationId)}/attachments/${encodeURIComponent(attachmentId)}/url`,
+      ctx,
+    ) as Promise<{
+      readonly url: string;
+      readonly expiresInSeconds: number;
+      readonly filename: string;
+      readonly contentType: string;
+    }>,
 
   fulfillmentOperatorUpdate: (
     ctx: CallCtx,

@@ -19,6 +19,7 @@ import { useRequirePermission } from "@/lib/require-permission";
 import { formatAttachmentSize } from "@/lib/ticket-timeline";
 import { cn } from "@/lib/utils";
 import {
+  canInlineFulfillmentOperatorAttachment,
   fulfillmentOperatorChatMessages,
   trackingEditFeedback,
   type FulfillmentOperatorChatMessage,
@@ -188,7 +189,102 @@ const TrackingField = ({
   );
 };
 
-const Bubble = ({ message }: { readonly message: FulfillmentOperatorChatMessage }) => {
+const BubbleAttachment = ({
+  attachment,
+  escalationId,
+  workspaceId,
+  outbound,
+}: {
+  readonly attachment: FulfillmentOperatorChatMessage["attachments"][number];
+  readonly escalationId: string;
+  readonly workspaceId: string;
+  readonly outbound: boolean;
+}) => {
+  const preview = useQuery({
+    queryKey: [
+      "fulfillment-operator-attachment-url",
+      workspaceId,
+      escalationId,
+      attachment.id,
+    ],
+    queryFn: () =>
+      api.fulfillmentOperatorAttachmentUrl(
+        { workspaceId },
+        escalationId,
+        attachment.id,
+      ),
+    enabled: !outbound,
+    staleTime: 4 * 60 * 1000,
+    refetchInterval: 4 * 60 * 1000,
+  });
+  if (outbound) {
+    return (
+      <li className="flex items-center gap-1.5 text-[0.8125rem] text-primary-foreground/85">
+        <Paperclip className="size-3 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{attachment.filename}</span>
+        <span className="shrink-0 text-primary-foreground/65">
+          {formatAttachmentSize(attachment.sizeBytes)}
+        </span>
+      </li>
+    );
+  }
+  const image = canInlineFulfillmentOperatorAttachment(
+    attachment.contentType,
+  );
+  return (
+    <li>
+      {image && preview.data ? (
+        <a
+          href={preview.data.url}
+          target="_blank"
+          rel="noreferrer"
+          className="block overflow-hidden rounded-lg border border-current/15"
+          title={`Open ${attachment.filename}`}
+        >
+          <img
+            src={preview.data.url}
+            alt={attachment.filename}
+            loading="lazy"
+            decoding="async"
+            className="max-h-56 w-full object-cover"
+          />
+          <span className="flex items-center gap-1.5 px-2 py-1.5 text-[0.75rem]">
+            <Paperclip className="size-3 shrink-0" aria-hidden />
+            <span className="min-w-0 truncate">{attachment.filename}</span>
+          </span>
+        </a>
+      ) : (
+        <a
+          href={preview.data?.url}
+          target={preview.data ? "_blank" : undefined}
+          rel={preview.data ? "noreferrer" : undefined}
+          aria-disabled={!preview.data}
+          className={cn(
+            "flex items-center gap-1.5 text-[0.8125rem]",
+            outbound ? "text-primary-foreground/85" : "text-foreground/80",
+            preview.data ? "hover:underline" : "pointer-events-none",
+          )}
+        >
+          <Paperclip className="size-3 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">{attachment.filename}</span>
+          <span className="shrink-0 opacity-70">
+            {formatAttachmentSize(attachment.sizeBytes)}
+          </span>
+        </a>
+      )}
+    </li>
+  );
+};
+
+const Bubble = ({
+  message,
+  escalationId,
+  workspaceId,
+}: {
+  readonly message: FulfillmentOperatorChatMessage;
+  readonly escalationId: string;
+  readonly workspaceId: string;
+}) => {
   const outbound = message.direction === "outbound";
   return (
     <div
@@ -228,18 +324,20 @@ const Bubble = ({ message }: { readonly message: FulfillmentOperatorChatMessage 
           </p>
         ) : null}
         {message.attachments.length > 0 ? (
-          <ul className="mt-2 space-y-1 border-t border-primary-foreground/25 pt-2">
+          <ul
+            className={cn(
+              "mt-2 space-y-2 border-t pt-2",
+              outbound ? "border-primary-foreground/25" : "border-border",
+            )}
+          >
             {message.attachments.map((a) => (
-              <li
+              <BubbleAttachment
                 key={a.id}
-                className="flex items-center gap-1.5 text-[0.8125rem] text-primary-foreground/85"
-              >
-                <Paperclip className="size-3 shrink-0" aria-hidden />
-                <span className="min-w-0 truncate">{a.filename}</span>
-                <span className="shrink-0 text-primary-foreground/65">
-                  {formatAttachmentSize(a.sizeBytes)}
-                </span>
-              </li>
+                attachment={a}
+                escalationId={escalationId}
+                workspaceId={workspaceId}
+                outbound={outbound}
+              />
             ))}
           </ul>
         ) : null}
@@ -407,7 +505,12 @@ export function FulfillmentOperatorTicketDetailPage() {
         <div className="thin-scrollbar h-full min-w-0 flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
             {messages.map((m) => (
-              <Bubble key={m.id} message={m} />
+              <Bubble
+                key={m.id}
+                message={m}
+                escalationId={detail.id}
+                workspaceId={ctx.workspaceId}
+              />
             ))}
           </div>
         </div>

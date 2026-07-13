@@ -5,6 +5,7 @@ import {
   approvals,
   auditLog,
   ticketAttachments,
+  ticketFulfillmentOperatorEscalationAttachments,
   ticketFulfillmentOperatorEscalations,
   tickets,
   createInvitation,
@@ -372,6 +373,60 @@ describeIfDb("apps/api — fulfillment partner portal (integration)", () => {
       attachment: { id: string; source: string; filename: string };
     };
     expect(uploaded.attachment.source).toBe("fulfillment_operator");
+
+    // Seed a customer image through the same blob-backed upload path, then
+    // model the runtime's forwarding link. This lets the HTTP test exercise
+    // real presigning without reaching into the server's in-memory blob layer.
+    const customerUpload = await fetch(
+      `${baseUrl}/dashboard/fulfillment-operator/tickets/${escId}/attachments?filename=customer-damage.png`,
+      {
+        method: "POST",
+        headers: {
+          ...headers(fulfillmentOperatorUuid, "wh@acme.com", tenantId),
+          "content-type": "image/png",
+        },
+        body: png,
+      },
+    );
+    const customerFile = (await customerUpload.json()) as {
+      attachment: { id: string };
+    };
+    await raw.db
+      .update(ticketAttachments)
+      .set({ source: "inbound", escalationId: null })
+      .where(eq(ticketAttachments.id, customerFile.attachment.id));
+    await raw.db.insert(ticketFulfillmentOperatorEscalationAttachments).values({
+      tenantId,
+      escalationId: escId,
+      attachmentId: customerFile.attachment.id,
+    });
+
+    const preview = await get(
+      `/dashboard/fulfillment-operator/tickets/${escId}/attachments/${customerFile.attachment.id}/url`,
+      fulfillmentOperatorUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({
+      expiresInSeconds: 300,
+      filename: "customer-damage.png",
+      contentType: "image/png",
+    });
+    const foreignPreview = await get(
+      `/dashboard/fulfillment-operator/tickets/${escId}/attachments/${customerFile.attachment.id}/url`,
+      strangerUuid,
+      "stranger@acme.com",
+      tenantId,
+    );
+    expect(foreignPreview.status).toBe(404);
+    const unforwardedPreview = await get(
+      `/dashboard/fulfillment-operator/tickets/${escId}/attachments/${uploaded.attachment.id}/url`,
+      fulfillmentOperatorUuid,
+      "wh@acme.com",
+      tenantId,
+    );
+    expect(unforwardedPreview.status).toBe(404);
 
     // A merchant-side upload on the same ticket is NOT referencable by the
     // fulfillmentOperator's update (source scoping) — the whole update is rejected.

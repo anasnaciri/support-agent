@@ -44,6 +44,7 @@ export const FulfillmentOperatorEscalationServiceLive = Layer.effect(
                 shipCity: input.shipCity,
                 shipCountry: input.shipCountry,
                 trackingNumber: input.trackingNumber,
+                requestAttachmentIds: input.requestAttachmentIds,
               }),
             catch: (cause) => new FulfillmentOperatorEscalationWriteFailed({ cause }),
           });

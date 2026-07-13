@@ -31,6 +31,8 @@ export interface EscalateInput {
   readonly shipCity: string | null;
   readonly shipCountry: string | null;
   readonly trackingNumber: string | null;
+  /** Runtime-selected images from the customer message being resolved. */
+  readonly requestAttachmentIds: ReadonlyArray<string>;
 }
 
 /**

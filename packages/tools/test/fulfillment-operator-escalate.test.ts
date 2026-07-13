@@ -45,6 +45,7 @@ describe("fulfillment_operator.escalate tool", () => {
             shipCity: "Berlin",
             shipCountry: "DE",
             trackingNumber: "TRK1",
+            requestAttachmentIds: ["attachment-1"],
           } as never,
           baseCtx("c-1"),
         ) as Effect.Effect<unknown, unknown, never>,
@@ -65,6 +66,7 @@ describe("fulfillment_operator.escalate tool", () => {
       shipCity: "Berlin",
       shipCountry: "DE",
       trackingNumber: "TRK1",
+      requestAttachmentIds: ["attachment-1"],
     });
   });
 

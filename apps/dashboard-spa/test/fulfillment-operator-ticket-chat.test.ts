@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canInlineFulfillmentOperatorAttachment,
   fulfillmentOperatorChatMessages,
   fulfillmentOperatorEscalationIdFromPathname,
   trackingEditFeedback,
@@ -18,6 +19,7 @@ const detail = {
   createdAt: "2026-06-28T09:15:00.000Z",
   note: null,
   proposedResolution: null,
+  requestAttachments: [],
   attachments: [],
 } as const;
 
@@ -104,6 +106,20 @@ describe("fulfillmentOperatorChatMessages", () => {
     expect(messages[0]?.attachments).toEqual([]);
   });
 
+  it("carries customer images forwarded with the escalation on the inbound request", () => {
+    const damagePhoto = {
+      id: "att-customer-1",
+      filename: "damaged-box.jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 4096,
+    } as const;
+    const messages = fulfillmentOperatorChatMessages({
+      ...detail,
+      requestAttachments: [damagePhoto],
+    });
+    expect(messages[0]?.attachments).toEqual([damagePhoto]);
+  });
+
   it("shows no files on a resolved escalation the fulfillment partner sent none for", () => {
     const messages = fulfillmentOperatorChatMessages({ ...detail, status: "resolved" });
     expect(messages[1]?.attachments).toEqual([]);
@@ -115,6 +131,16 @@ describe("fulfillmentOperatorChatMessages", () => {
     const messages = fulfillmentOperatorChatMessages({ ...detail, attachments: [label] });
     expect(messages).toHaveLength(1);
     expect(messages[0]?.attachments).toEqual([]);
+  });
+});
+
+describe("canInlineFulfillmentOperatorAttachment", () => {
+  it("inlines safe raster images but not active or non-browser image formats", () => {
+    expect(canInlineFulfillmentOperatorAttachment("image/jpeg")).toBe(true);
+    expect(canInlineFulfillmentOperatorAttachment("IMAGE/PNG; charset=binary")).toBe(true);
+    expect(canInlineFulfillmentOperatorAttachment("image/svg+xml")).toBe(false);
+    expect(canInlineFulfillmentOperatorAttachment("image/heic")).toBe(false);
+    expect(canInlineFulfillmentOperatorAttachment("application/pdf")).toBe(false);
   });
 });
 

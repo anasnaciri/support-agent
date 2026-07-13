@@ -8,6 +8,19 @@ import type {
   FulfillmentOperatorEscalationDetailView,
 } from "@/lib/api-client";
 
+const INLINE_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+/** SVG and browser-unsupported formats stay download-only, never inline. */
+export const canInlineFulfillmentOperatorAttachment = (
+  contentType: string,
+): boolean =>
+  INLINE_IMAGE_TYPES.has(contentType.split(";")[0]!.trim().toLowerCase());
+
 /**
  * The escalation id for a `/fulfillment-operator/tickets/<id>` detail route, or null for the
  * bare list and every other route. Doubles as the "render the fulfillment partner chat
@@ -29,7 +42,7 @@ export interface FulfillmentOperatorChatMessage {
   readonly body: string;
   /** The fulfillmentOperator's suggested resolution — outbound messages only. */
   readonly resolution: string | null;
-  /** Files sent with this message — the fulfillment partner's own update only. */
+  /** Files sent with this message. */
   readonly attachments: ReadonlyArray<FulfillmentOperatorEscalationAttachmentView>;
 }
 
@@ -37,7 +50,8 @@ export interface FulfillmentOperatorChatMessage {
  * The escalation as a chat transcript: the support team's "what's needed"
  * request as the inbound message, and — once the fulfillment partner has responded
  * (status resolved) — their posted update as the outbound reply, carrying the
- * files they sent. A note on an unresolved escalation is never shown: the
+ * files they sent. Customer evidence forwarded with the escalation stays on
+ * the inbound request. A note on an unresolved escalation is never shown: the
  * update only exists once posting it flipped the status. Files follow the same
  * rule, so an upload staged against an abandoned draft never reads as an answer.
  */
@@ -51,7 +65,7 @@ export const fulfillmentOperatorChatMessages = (
     sentAt: detail.createdAt,
     body: detail.problem,
     resolution: null,
-    attachments: [],
+    attachments: detail.requestAttachments,
   };
   if (detail.status !== "resolved") return [request];
   return [
