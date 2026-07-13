@@ -180,7 +180,7 @@ export function TicketsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {r.category ? humanizeSlug(r.category) : "—"}
+                    {r.scenarioKey ? humanizeSlug(r.scenarioKey) : "—"}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {r.currentAgentId}

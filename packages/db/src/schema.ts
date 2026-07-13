@@ -120,6 +120,10 @@ export const tickets = pgTable(
     // The conversation router uses it to route legacy (un-namespaced) thread
     // ids instead of guessing the tenant's "most recent active connector".
     provider: text("provider"),
+    // Deprecated compatibility column. Migration 0047 backfills its value to
+    // context.scenarioKey; current code neither reads nor writes it. Keep it
+    // for one expand/contract deploy because Fly runs migrations before old
+    // API machines are replaced, and those binaries still select `category`.
     category: text("category"),
     status: text("status").notNull(),
     currentAgentId: text("current_agent_id").notNull(),

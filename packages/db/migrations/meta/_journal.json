@@ -330,6 +330,13 @@
       "when": 1783959000000,
       "tag": "0046_shipping_facts_rename",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1783959100000,
+      "tag": "0047_scenario_key_source_of_truth",
+      "breakpoints": true
     }
   ]
 }

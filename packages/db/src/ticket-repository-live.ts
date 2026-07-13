@@ -54,7 +54,6 @@ const rowToTicket = (r: TicketRow): Ticket => ({
   channel: r.channel as TicketChannel,
   threadId: r.threadId ? makeThreadId(r.threadId) : null,
   mailbox: r.mailbox,
-  category: r.category,
   status: r.status as TicketStatus,
   currentAgentId: makeAgentId(r.currentAgentId),
   priority: r.priority as TicketPriority,
@@ -103,7 +102,6 @@ export const TicketRepositoryLive = Layer.effect(
               // D2: stamp the owning conversation connector — explicit input
               // first, else derived from a namespaced threadId.
               provider: resolveTicketProvider(input),
-              category: input.category ?? null,
               status: input.status ?? "new",
               currentAgentId: input.currentAgentId,
               priority: input.priority ?? "normal",
@@ -267,7 +265,6 @@ export const TicketRepositoryLive = Layer.effect(
         if (patch.orderId !== undefined) dbPatch["shopifyOrderId"] = patch.orderId;
         if (patch.threadId !== undefined) dbPatch["threadId"] = patch.threadId;
         if (patch.mailbox !== undefined) dbPatch["mailbox"] = patch.mailbox;
-        if (patch.category !== undefined) dbPatch["category"] = patch.category;
         if (patch.currentAgentId !== undefined)
           dbPatch["currentAgentId"] = patch.currentAgentId;
         if (patch.priority !== undefined) dbPatch["priority"] = patch.priority;

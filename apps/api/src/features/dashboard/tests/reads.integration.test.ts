@@ -81,7 +81,7 @@ describeIfDb("apps/api — GET /dashboard/today (integration)", () => {
       mkTicket(randomUUID(), tenantId, "resolved", { resolvedAt: now }),
       mkTicket(randomUUID(), tenantId, "human_takeover", {
         subject: "Where is my order?",
-        category: "where_is_order",
+        context: { scenarioKey: "where_is_order" },
       }),
       mkTicket(approvalTicketId, tenantId, "waiting_for_approval"),
       mkTicket(randomUUID(), tenantId, "in_progress"),
@@ -190,6 +190,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
         channel: "email",
         status: "waiting_for_approval",
         currentAgentId: "missing-package-agent",
+        context: { scenarioKey: "delivery_issue" },
       },
       {
         id: approvalOnlyTicketId,
@@ -249,6 +250,7 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
       approval: true,
       supplier: true,
     });
+    expect(byId.get(bothTicketId)?.scenarioKey).toBe("delivery_issue");
     expect(byId.get(approvalOnlyTicketId)?.waitingOn).toEqual({
       approval: true,
       supplier: false,
@@ -257,11 +259,21 @@ describeIfDb("apps/api — dashboard reads waitingOn (integration)", () => {
       approval: false,
       supplier: false,
     });
+
+    const scenarioSearch = await ticketsList(
+      raw.db,
+      tenantId,
+      { q: "delivery_issue" },
+      1,
+      50,
+    );
+    expect(scenarioSearch.rows.map((row) => row.id)).toEqual([bothTicketId]);
   });
 
   it("ticketDetail derives waitingOn (both waits held at once)", async () => {
     if (!raw) return;
     const detail = await ticketDetail(raw.db, tenantId, bothTicketId);
     expect(detail?.ticket.waitingOn).toEqual({ approval: true, supplier: true });
+    expect(detail?.ticket.scenarioKey).toBe("delivery_issue");
   });
 });

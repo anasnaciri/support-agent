@@ -74,7 +74,7 @@ export interface TodayPendingApproval {
 export interface TodayTakeoverTicket {
   readonly id: string;
   readonly subject: string | null;
-  readonly category: string | null;
+  readonly scenarioKey: string | null;
   readonly updatedAt: string;
 }
 
@@ -109,7 +109,7 @@ export interface TicketListRow {
   readonly id: string;
   readonly subject: string | null;
   readonly status: string;
-  readonly category: string | null;
+  readonly scenarioKey: string | null;
   readonly currentAgentId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -151,7 +151,7 @@ export interface TicketDetailTicket {
   readonly id: string;
   readonly subject: string | null;
   readonly status: string;
-  readonly category: string | null;
+  readonly scenarioKey: string | null;
   readonly currentAgentId: string;
   readonly priority: string;
   readonly summary: string | null;

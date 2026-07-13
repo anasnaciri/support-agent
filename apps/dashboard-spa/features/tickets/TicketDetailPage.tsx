@@ -797,8 +797,8 @@ export function TicketDetailPage() {
               ))}
               <span>·</span>
               <span>
-                {ticketRow.category
-                  ? humanizeSlug(ticketRow.category)
+                {ticketRow.scenarioKey
+                  ? humanizeSlug(ticketRow.scenarioKey)
                   : "Uncategorized"}
               </span>
               {customerEmail && customerEmail !== customerName ? (

@@ -186,15 +186,9 @@ export const ticketUpdateContext = defineTool({
       if (input.liveTrackingStatus !== undefined)
         patch["liveTrackingStatus"] = input.liveTrackingStatus;
 
-      // The dashboard's category chip and the tickets-list search filter read
-      // the `category` column, not the context blob — mirror the
-      // classification there so triage output is visible outside the agent.
       const updated = yield* repo
         .update(ctx.ticketId, {
           context: patch,
-          ...(input.classification !== undefined
-            ? { category: input.classification }
-            : {}),
         })
         .pipe(
           Effect.mapError(

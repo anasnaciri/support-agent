@@ -290,7 +290,7 @@ export const todaySummary = async (
       .select({
         id: tickets.id,
         subject: tickets.subject,
-        category: tickets.category,
+        scenarioKey: sql<string | null>`${tickets.context}->>'scenarioKey'`,
         updatedAt: tickets.updatedAt,
       })
       .from(tickets)
@@ -331,7 +331,7 @@ export const todaySummary = async (
     takeoverTickets: takeover.map((c) => ({
       id: c.id,
       subject: c.subject,
-      category: c.category,
+      scenarioKey: c.scenarioKey,
       updatedAt: c.updatedAt.toISOString(),
     })),
   };
@@ -360,7 +360,7 @@ export const ticketsList = async (
       or(
         ilike(tickets.subject, term),
         ilike(tickets.summary, term),
-        ilike(tickets.category, term),
+        ilike(sql`${tickets.context}->>'scenarioKey'`, term),
         // Customer identity, stamped on the ticket context.
         ilike(sql`${tickets.context}->>'customerEmail'`, term),
         ilike(sql`${tickets.context}->>'customerName'`, term),
@@ -395,7 +395,7 @@ export const ticketsList = async (
       id: tickets.id,
       subject: tickets.subject,
       status: tickets.status,
-      category: tickets.category,
+      scenarioKey: sql<string | null>`${tickets.context}->>'scenarioKey'`,
       currentAgentId: tickets.currentAgentId,
       priority: tickets.priority,
       // The order the ticket is about, from the SAME single source of truth the
@@ -463,7 +463,7 @@ export const ticketsList = async (
       id: r.id,
       subject: r.subject,
       status: r.status,
-      category: r.category,
+      scenarioKey: r.scenarioKey,
       currentAgentId: r.currentAgentId,
       priority: r.priority,
       orderRef: r.orderRef,
@@ -563,13 +563,14 @@ export const ticketDetail = async (
     approval: approvalDetails.some((a) => a.status === "pending"),
     supplier: await hasOpenEscalationForTicket(db, tenantId, ticketId),
   };
+  const scenarioKey = (row.context as Record<string, unknown>)["scenarioKey"];
 
   return {
     ticket: {
       id: row.id,
       subject: row.subject,
       status: row.status,
-      category: row.category,
+      scenarioKey: typeof scenarioKey === "string" ? scenarioKey : null,
       currentAgentId: row.currentAgentId,
       priority: row.priority,
       summary: row.summary,

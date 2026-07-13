@@ -351,6 +351,7 @@ const build = (tenantId: string, s: Scenario): BuiltRows => {
     notes: s.summary,
     customerEmail: s.customerEmail,
     classification: s.category,
+    scenarioKey: s.category,
     // Mock orders aren't real Shopify orders, so there's no resolvable GID to
     // put in the canonical `identifiedOrderId`. Seed the customer-quoted ref
     // instead (the untrusted hint), which the dashboard still surfaces.
@@ -368,7 +369,6 @@ const build = (tenantId: string, s: Scenario): BuiltRows => {
     shopifyOrderId: s.shopifyOrderId,
     channel: "email",
     threadId,
-    category: s.category,
     status,
     currentAgentId: s.agent,
     priority: s.priority ?? "normal",

@@ -167,7 +167,7 @@ export default async function TicketsPage({ searchParams }: SearchParams) {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {r.category ? humanizeSlug(r.category) : "—"}
+                    {r.scenarioKey ? humanizeSlug(r.scenarioKey) : "—"}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {r.currentAgentId}

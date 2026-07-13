@@ -360,7 +360,7 @@ describe("ticket.update_context tool", () => {
     expect(result.context).not.toHaveProperty("carrier");
   });
 
-  it("also sets the ticket `category` column when classification is provided", async () => {
+  it("stores classification only in ticket context", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -379,11 +379,10 @@ describe("ticket.update_context tool", () => {
         toolEnv,
       ),
     );
-    expect(result.category).toBe("refund_request");
     expect(result.context["classification"]).toBe("refund_request");
   });
 
-  it("leaves `category` untouched when classification is absent", async () => {
+  it("leaves classification untouched when it is absent", async () => {
     const result = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
@@ -392,7 +391,7 @@ describe("ticket.update_context tool", () => {
             tenantId: TenantId("t1"),
             channel: "email",
             currentAgentId: AgentId("support-triage"),
-            category: "where_is_order",
+            context: { classification: "where_is_order" },
           });
           yield* ticketUpdateContext.execute(
             { notes: "follow-up from customer" },
@@ -403,7 +402,7 @@ describe("ticket.update_context tool", () => {
         toolEnv,
       ),
     );
-    expect(result.category).toBe("where_is_order");
+    expect(result.context["classification"]).toBe("where_is_order");
   });
 
   it("returns ToolOutputInvalid when the ticket does not exist", async () => {

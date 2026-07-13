@@ -191,7 +191,6 @@ export interface Ticket {
   readonly threadId: ThreadId | null;
   /** Connected conversation mailbox that owns `threadId`. */
   readonly mailbox: string | null;
-  readonly category: string | null;
   readonly status: TicketStatus;
   readonly currentAgentId: AgentId;
   readonly priority: TicketPriority;

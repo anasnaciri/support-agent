@@ -90,7 +90,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     await raw.db.insert(tickets).values([
       mkTicket(ticketA, tenantId, "resolved", {
         subject: "Ticket A",
-        category: "where_is_order",
+        context: { scenarioKey: "where_is_order" },
         resolvedAt: new Date(),
       }),
       mkTicket(ticketB, tenantId, "waiting_for_approval", {
@@ -194,7 +194,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
     expect(body.rows.map((r) => r.id)).not.toContain(ticketX);
   });
 
-  it("GET /dashboard/tickets?q= — case-insensitive search over subject, summary, category", async () => {
+  it("GET /dashboard/tickets?q= — case-insensitive search over subject, summary, scenario", async () => {
     if (!raw) return;
     const ids = async (path: string) =>
       (
@@ -203,7 +203,7 @@ describeIfDb("apps/api — /dashboard read endpoints (integration)", () => {
         }
       ).rows.map((r) => r.id);
 
-    // category match
+    // scenario match
     expect(await ids("/dashboard/tickets?q=where_is_order")).toEqual([ticketA]);
     // subject match, case-insensitive ("Ticket B")
     expect(await ids("/dashboard/tickets?q=ticket+b")).toEqual([ticketB]);

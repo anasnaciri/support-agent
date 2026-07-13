@@ -135,13 +135,15 @@ describe("TicketRepository (Test layer)", () => {
           currentAgentId: AgentId("support-triage"),
         });
         const updated = yield* repo.update(created.id, {
-          category: "where_is_order",
-          context: { classification: "order_status_inquiry" },
+          context: {
+            scenarioKey: "where_is_order",
+            classification: "order_status_inquiry",
+          },
         });
         return { created, updated };
       }),
     );
-    expect(result.updated.category).toBe("where_is_order");
+    expect(result.updated.context["scenarioKey"]).toBe("where_is_order");
     expect(result.updated.context["classification"]).toBe(
       "order_status_inquiry",
     );

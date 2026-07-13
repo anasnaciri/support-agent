@@ -196,7 +196,7 @@ export default async function TodayPage({ searchParams }: TodaySearchParams) {
                       {ticketSubjectLabel(c.subject)}
                     </Link>
                     <div className="mt-0.5 text-xs text-muted-foreground">
-                      {c.category ?? "uncategorized"}
+                      {c.scenarioKey ?? "uncategorized"}
                     </div>
                   </div>
                   <div className="ml-4 shrink-0 text-xs text-muted-foreground">

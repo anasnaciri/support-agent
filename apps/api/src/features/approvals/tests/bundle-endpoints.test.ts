@@ -41,7 +41,6 @@ const makeTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
   channel: "email",
   threadId: null,
   mailbox: null,
-  category: null,
   status: "waiting_for_approval",
   currentAgentId: AgentId("scenario-resolution"),
   priority: "normal",

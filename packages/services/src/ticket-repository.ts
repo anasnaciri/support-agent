@@ -79,7 +79,6 @@ export interface CreateTicketInput {
    * explicitly when the inbound edge knows the provider (always preferred).
    */
   readonly provider?: ConversationProviderId | null;
-  readonly category?: string | null;
   readonly priority?: TicketPriority;
   readonly status?: TicketStatus;
   readonly subject?: string | null;
@@ -114,7 +113,6 @@ export type UpdatableTicketFields = Partial<
     | "orderId"
     | "threadId"
     | "mailbox"
-    | "category"
     | "currentAgentId"
     | "priority"
     | "subject"
@@ -231,7 +229,6 @@ const buildTicket = (input: CreateTicketInput, now: Date): Ticket => ({
   channel: input.channel,
   threadId: input.threadId ?? null,
   mailbox: input.mailbox ?? null,
-  category: input.category ?? null,
   status: input.status ?? "new",
   currentAgentId: input.currentAgentId,
   priority: input.priority ?? "normal",

@@ -898,7 +898,7 @@ export default async function TicketDetailPage({ params, searchParams }: Params)
               ))}
               <span>·</span>
               <span>
-                {ticketRow.category ? humanizeSlug(ticketRow.category) : "Uncategorized"}
+                {ticketRow.scenarioKey ? humanizeSlug(ticketRow.scenarioKey) : "Uncategorized"}
               </span>
               {customerEmail && customerEmail !== customerName ? (
                 <>
