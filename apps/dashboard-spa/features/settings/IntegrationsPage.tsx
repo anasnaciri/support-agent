@@ -23,6 +23,7 @@ import {
 import {
   SUPPORTED_PROVIDERS,
   PROVIDER_LABELS,
+  isBetaProvider,
   type SupportedProvider,
 } from "@/lib/integration-providers";
 import type { ResolvedToast } from "@/lib/toast-feedback";
@@ -449,6 +450,15 @@ export function IntegrationsPage() {
                       <CardTitle className="flex items-center gap-2 text-base">
                         <ProviderIcon />
                         {label}
+                        {isBetaProvider(p) ? (
+                          <Badge
+                            variant="info"
+                            icon={false}
+                            className="px-2 py-0 font-medium"
+                          >
+                            Beta
+                          </Badge>
+                        ) : null}
                       </CardTitle>
                       {needsAttention ? (
                         <Badge variant="destructive">Needs attention</Badge>

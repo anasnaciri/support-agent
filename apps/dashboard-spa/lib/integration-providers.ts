@@ -20,6 +20,11 @@ export const SUPPORTED_PROVIDERS = [
 
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
+export const isBetaProvider = (provider: SupportedProvider): boolean =>
+  provider === "google_sheets" ||
+  provider === "outlook" ||
+  provider === "imap";
+
 export const isSupportedProvider = (
   value: string,
 ): value is SupportedProvider =>

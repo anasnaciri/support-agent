@@ -30,6 +30,7 @@ import {
 import {
   PROVIDER_LABELS,
   PROVIDER_DESCRIPTIONS,
+  isBetaProvider,
   isSupportedProvider,
   type SupportedProvider,
 } from "@/lib/integration-providers";
@@ -960,6 +961,15 @@ export function IntegrationDetailPage() {
         <h1 className="flex items-center gap-2 text-3xl font-semibold tracking-tight">
           <ProviderIcon />
           {label}
+          {isBetaProvider(provider) ? (
+            <Badge
+              variant="info"
+              icon={false}
+              className="px-2 py-0 font-medium"
+            >
+              Beta
+            </Badge>
+          ) : null}
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {needsAttention ? (

@@ -17,6 +17,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Google Sheets, Outlook, and IMAP / SMTP integrations are marked Beta**
+      (2026-07-13). Their cards on the Integrations overview and headings on
+      the corresponding Manage pages now carry the same compact informational
+      badge, driven by one shared provider rule. Shopify and Gmail remain
+      unbadged. Per user request, no test was added; verified with the dashboard
+      SPA production build (including strict TypeScript), `pnpm build`, and a
+      targeted source grep.
+
 - [x] **Restored and refreshed the existing per-scenario action envelope at
       runtime** (2026-07-13). The
       Scenarios UI and `ResolutionPolicy.enabledActions` again describe the
