@@ -67,6 +67,36 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       runtime distinction separately from scenario-permission refresh; do not
       accidentally treat supplierMode as an allow/ask setting.
 
+- [x] **Dashboard scenario label read stale `tickets.category` after a
+      same-run reroute** (confirmed 2026-07-13 on prod ticket
+      `115f43d5-429d-44bb-b338-3be53a0107be`). The live row has
+      `category = where_is_order`, `context.classification = where_is_order`,
+      and `context.scenarioKey = delivery_issue`. The scenario agent therefore
+      DID reroute, but both dashboard ticket surfaces render `category` and do
+      not expose `scenarioKey`. `ticket.update_context` mirrors
+      `classification` into `category`, while a scenario-only reroute updates
+      neither, creating two competing labels. Fixed as a full source-of-truth
+      migration: `context.scenarioKey` is now the only persisted scenario
+      identity; migration 0047 backfills it from the legacy column only when a
+      canonical key is absent. The Ticket domain
+      and repository no longer accept or return category, and
+      `ticket.update_context` no longer mirrors classification into a second
+      field. Dashboard contracts now expose `scenarioKey`; Today, inbox,
+      detail, search, both dashboard clients, and mock seeds all consume it.
+      TDD regression reproduces the prod split and proves list/detail render
+      `delivery_issue`; search coverage proves the canonical key is queried.
+      Focused DB integration (5 passed), repository/tool tests (29 passed), and
+      `pnpm build` are green. A broad run passed 3,132 tests; its remaining
+      failures were pre-existing local-DB fixture collisions from an earlier
+      interrupted run, not this migration.
+      - [ ] **Contract migration:** after this release has replaced every old
+        API/worker machine, drop the deprecated `tickets.category` column in a
+        later migration and remove its compatibility declaration from
+        `schema.ts`. It is intentionally retained for one expand/contract
+        deploy because Fly runs release migrations before rolling old binaries,
+        which still select that column. Current code neither reads nor writes
+        it, so `context.scenarioKey` is already the sole logical source.
+
 - [x] **PROD BUG (FIXED 2026-07-13): same-run scenario reroute did not
       refresh the active scenario playbook** (ticket
       `115f43d5-429d-44bb-b338-3be53a0107be`, tenant `4f685543`). The scenario
