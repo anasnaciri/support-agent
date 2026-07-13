@@ -164,19 +164,19 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           edits bypass the app-owned paths that already clear the stamp. Revisit
           only with a reproduced carrier-routing failure or an explicit metadata
           synchronization requirement.
-      - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
-        unclearable** (observed on the same prod ticket after 4 dashboard
-        retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
-        the flag; nothing removes it — `restartFromTriage` clears only
-        `classification` (keeps `riskFlags` + the stale `liveTrackingStatus`,
-        so the agent doesn't even re-run `tracking.lookup`). Deliberate
-        "sticky, fail-toward-human" design for a REAL mismatch, but it means a
-        false-positive persists forever even after the comparison fix ships.
-        Since the flag is runtime-computed from trusted provider data, a fresh
-        `tracking.lookup` whose countries MATCH could safely clear it (or at
-        minimum, `restartFromTriage` should drop `liveTrackingStatus` so the
-        lookup re-runs). Until then, un-flagging a ticket takes manual context
-        surgery in the DB.
+      - [x] **Stale `tracking_destination_mismatch` flags clear after a proven
+        match** (fixed 2026-07-13). A successful `tracking.lookup` whose current
+        destination and the order's shipping country are both known and match
+        now removes only this risk flag, preserving unrelated flags. Failed
+        or no-provider lookups replace it with `tracking_lookup_failed`, while
+        live results lacking comparable destination data replace it with
+        `tracking_destination_unavailable`; these are distinct cases and do not
+        inject the mismatch directive. Every lookup replaces only the previous
+        tracking-outcome flag and preserves unrelated flags. This lets a
+        supplier-corrected tracking number remove the injected warning without
+        mislabeling an unavailable lookup as a mismatch. The directive was also
+        shortened without dropping its reason, different-order warning,
+        `merchant.notify`, or verification-only `supplier.escalate` guidance.
 
       Original diagnosis:
       17track returned `destinationCountry: "US"` (ISO 3166 alpha-2) while the

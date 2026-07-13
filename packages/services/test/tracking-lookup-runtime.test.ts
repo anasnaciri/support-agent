@@ -336,6 +336,7 @@ describe("AgentRuntime tracking.lookup side effects", () => {
             currentAgentId: trackingAgent.id,
             subject: "Where is my order?",
             context: {
+              riskFlags: ["tracking_destination_mismatch", "another_risk"],
               liveTrackingStatus: {
                 kind: "live",
                 trackingNumber: "OLD123",
@@ -366,6 +367,10 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     );
 
     expect(out.context["liveTrackingStatus"]).toBeUndefined();
+    expect(out.context["riskFlags"]).toEqual([
+      "another_risk",
+      "tracking_lookup_failed",
+    ]);
   });
 
   it("stamps tracking_destination_mismatch and parks when the carrier destination differs from the order's ship country", async () => {
@@ -391,12 +396,39 @@ describe("AgentRuntime tracking.lookup side effects", () => {
     expect(out.status).toBe("resolved");
   });
 
+  it("clears a prior destination mismatch after the current tracking destination matches", async () => {
+    const out = await runTerminalTrackingTick(
+      {
+        orderShipCountry: "United States",
+        riskFlags: ["tracking_destination_mismatch", "another_risk"],
+      },
+      "US",
+    );
+    expect(out.context["riskFlags"]).toEqual(["another_risk"]);
+    expect(out.status).toBe("resolved");
+  });
+
   it("does not flag when the order's ship country is unknown (fail open)", async () => {
     const out = await runTerminalTrackingTick({}, "Germany");
     const flags = Array.isArray(out.context["riskFlags"])
       ? (out.context["riskFlags"] as unknown[])
       : [];
     expect(flags).not.toContain("tracking_destination_mismatch");
+    expect(out.status).toBe("resolved");
+  });
+
+  it("replaces a prior mismatch when destination data is unavailable", async () => {
+    const out = await runTerminalTrackingTick(
+      {
+        orderShipCountry: "Germany",
+        riskFlags: ["tracking_destination_mismatch", "another_risk"],
+      },
+      null,
+    );
+    expect(out.context["riskFlags"]).toEqual([
+      "another_risk",
+      "tracking_destination_unavailable",
+    ]);
     expect(out.status).toBe("resolved");
   });
 

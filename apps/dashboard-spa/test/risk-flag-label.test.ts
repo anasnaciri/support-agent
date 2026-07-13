@@ -35,6 +35,18 @@ describe("riskFlagLabel", () => {
       "Tracking may belong to a different order",
     );
   });
+
+  it("distinguishes unavailable tracking destinations from mismatches", () => {
+    expect(riskFlagLabel("tracking_destination_unavailable")).toBe(
+      "Tracking destination could not be verified",
+    );
+  });
+
+  it("humanises a failed live-tracking lookup", () => {
+    expect(riskFlagLabel("tracking_lookup_failed")).toBe(
+      "Live tracking lookup failed",
+    );
+  });
 });
 
 describe("buildRiskFlagBadges", () => {

@@ -482,7 +482,7 @@ export const trackingDestinationDirective = (
       )
     : [];
   if (!flags.includes("tracking_destination_mismatch")) return "";
-  return `[Tracking may not match this order: the carrier's destination country for the tracking number differs from the country the order ships to, so the tracking status you looked up may belong to a DIFFERENT order. Do not treat this tracking status as belonging to the order or escalate based on its delivery state. Call merchant.notify so a human re-checks the fulfillment's tracking number and, when supplier escalation is enabled, call supplier.escalate to ask the supplier to verify the order's tracking number. Clearly state that the tracking could not be matched; do not include claims derived from its scans or status.]`;
+  return `[Tracking destination differs from the order's shipping country, so this tracking may belong to a different order. Do not attribute its status to this order, escalate based on its delivery state, or repeat claims from its scans or status. Call merchant.notify and, when supplier escalation is enabled, call supplier.escalate to verify the order's tracking number, clearly stating that the tracking could not be matched.]`;
 };
 
 /**

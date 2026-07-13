@@ -109,7 +109,7 @@ import {
   SCENARIO_RESOLUTION_AGENT_ID,
   hasUnverifiedOrderMismatch,
   hasTrackingDestinationMismatch,
-  trackingDestinationMismatchFlag,
+  normalizeCountryForMatch,
   trackingSnapshotSupersededByOrder,
   orderContextRef,
   orderCustomerMismatchFlag,
@@ -145,6 +145,11 @@ export class AgentRuntime extends Context.Tag("AgentRuntime")<
  * detection and the order-scoped reconcile that runs once the order is known.
  */
 const DUPLICATE_PHOTO_FLAG_PREFIX = "duplicate_photo_seen_in_ticket_";
+const TRACKING_OUTCOME_RISK_FLAGS = new Set([
+  "tracking_destination_mismatch",
+  "tracking_destination_unavailable",
+  "tracking_lookup_failed",
+]);
 
 const supplierDisabledForSelectedScenario = (
   policy: ResolutionPolicy,
@@ -285,25 +290,45 @@ const AgentRuntimeLayer = Layer.effect(
       // Tracking-destination guard: when the carrier's recipient country for
       // this lookup disagrees with the order's shipping country
       // (`orderShipCountry`, stamped from a prior get_order), the tracking
-      // number probably belongs to a DIFFERENT order. Raise a sticky risk flag
-      // (deduped) so any customer reply is force-gated and a bare final_message
-      // parks for a human — the runtime backstop for the destination check, the
-      // sibling of the order/customer identity gate. Fail-open (null flag)
-      // leaves the ticket untouched.
-      const destFlag =
+      // number probably belongs to a DIFFERENT order. Persist exactly one
+      // tracking outcome: confirmed mismatch, unavailable comparison data, or
+      // failed/no-provider lookup. Each fresh lookup replaces the prior tracking
+      // outcome while preserving unrelated flags. Only a confirmed mismatch
+      // force-gates replies/final messages; the other outcomes have their own
+      // dashboard labels and follow the agent's unavailable-tracking guidance.
+      const lookupResult =
         result._tag === "Right" &&
         result.right &&
         typeof result.right === "object"
-          ? trackingDestinationMismatchFlag(
-              (result.right as Record<string, unknown>)["destinationCountry"],
-              rest["orderShipCountry"],
-            )
+          ? (result.right as Record<string, unknown>)
           : null;
+      const destination = normalizeCountryForMatch(
+        lookupResult?.["destinationCountry"],
+      );
+      const orderCountry = normalizeCountryForMatch(rest["orderShipCountry"]);
+      const trackingOutcomeFlag =
+        result._tag === "Left" || lookupResult?.["kind"] === "no_provider"
+          ? "tracking_lookup_failed"
+          : lookupResult?.["kind"] === "live" &&
+              (destination === null || orderCountry === null)
+            ? "tracking_destination_unavailable"
+            : destination !== null &&
+                orderCountry !== null &&
+                destination !== orderCountry
+              ? "tracking_destination_mismatch"
+              : null;
       const existingFlags = readRiskFlags(rest);
+      const flagsWithoutPriorTrackingOutcome = existingFlags.filter(
+        (flag) => !TRACKING_OUTCOME_RISK_FLAGS.has(flag),
+      );
+      const nextFlags = trackingOutcomeFlag
+        ? [...flagsWithoutPriorTrackingOutcome, trackingOutcomeFlag]
+        : flagsWithoutPriorTrackingOutcome;
       const flagPatch =
-        destFlag && !existingFlags.includes(destFlag)
-          ? { riskFlags: [...existingFlags, destFlag] }
-          : {};
+        nextFlags.length === existingFlags.length &&
+        nextFlags.every((flag, index) => flag === existingFlags[index])
+          ? {}
+          : { riskFlags: nextFlags };
       return tickets.update(ticket.id, {
         context: {
           ...rest,

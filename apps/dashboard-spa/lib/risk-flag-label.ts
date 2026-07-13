@@ -22,6 +22,12 @@ export const riskFlagLabel = (flag: string): string => {
   if (flag === "tracking_destination_mismatch") {
     return "Tracking may belong to a different order";
   }
+  if (flag === "tracking_destination_unavailable") {
+    return "Tracking destination could not be verified";
+  }
+  if (flag === "tracking_lookup_failed") {
+    return "Live tracking lookup failed";
+  }
   if (flag === "reply_delivery_failed") {
     return "Reply didn't send: delivery failed";
   }
