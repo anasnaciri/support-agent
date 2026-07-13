@@ -1358,6 +1358,72 @@ At boot, the core scans configured plugin packages (npm modules, with naming con
 
 Plugins are sandboxed per tenant: a tenant only sees tools and agents from plugins they have installed. The dashboard's Integrations page shows: available plugins (catalog), installed plugins (with config form), and plugin health.
 
+### Fulfillment-operation connectors and routing
+
+"Supplier" is not the generic logistics boundary. A supplier provides goods;
+the party that can fix a delivery problem for a particular shipment may instead
+be the merchant's warehouse, a dropshipper, a 3PL, a print-on-demand partner, a
+marketplace fulfillment network, or the carrier. One order may contain several
+fulfillments with different responsible parties.
+
+The runtime therefore resolves logistics work in this order:
+
+1. Identify the affected order lines, fulfillment, shipment, or return. Never
+   route an order-wide complaint to the first fulfillment when the order is
+   split.
+2. Resolve its **Fulfillment Route** from provider evidence (for Shopify, the
+   fulfillment order's assigned location/service), then explicit merchant
+   mappings such as SKU/vendor/location. An absent or ambiguous route falls
+   back to the merchant; it never silently selects a default supplier.
+3. Determine the current **Resolution Owner**. Before dispatch this is usually
+   the Fulfillment Operator; in transit it may be the carrier or the operator
+   that owns the carrier contract; for a marketplace-managed order it may be
+   the marketplace. Reverse logistics may use a different owner from outbound
+   fulfillment.
+4. Select a configured **Logistics Connection** and verify that it advertises
+   the requested capability. API, operational email, and the constrained
+   partner portal are delivery variants behind the same operation, not separate
+   prompts.
+5. Execute an action-specific typed tool. Examples include requesting an
+   investigation, requesting a reship, cancelling an unstarted fulfillment,
+   updating an eligible destination, retrieving proof of delivery, and creating
+   a return. A connector exposes only supported actions; unsupported actions
+   route to a merchant/human handoff.
+
+Scenario policy remains about whether external logistics help is allowed and
+whether the customer flow waits or proceeds. It does not name the target. The
+provider-neutral service Tags live in `packages/services`; Live connectors live
+in `packages/providers` or plugins. Every action still passes through
+`PermissionService`, typed validation, idempotency, audit, and the ticket state
+machine. Email-only operators must use a merchant-owned operational mailbox
+connection with durable send/reply correlation; Resend remains platform/system
+mail only.
+
+Important fulfillment patterns:
+
+| Pattern | Likely operator / control path |
+| --- | --- |
+| Merchant warehouse or in-house delivery | Merchant operations connection or human handoff |
+| Dropship supplier | Supplier API, operational email, or partner portal |
+| 3PL / WMS / fulfillment app | Direct API when available; otherwise operational email |
+| Marketplace fulfillment network | Marketplace API and marketplace-specific support policy |
+| Print-on-demand / made-to-order partner | Production/fulfillment connector; may require remake rather than reship |
+| Parcel carrier / last mile | Tracking plus claim/intercept API when the merchant is entitled to use it |
+| Store pickup, local delivery, freight, or white glove | Location/provider-specific route, not the parcel default |
+| Reverse-logistics provider | Return-scoped route independent of outbound fulfillment |
+| Digital delivery | No logistics route; use the digital-delivery owner |
+
+Amazon must be modeled as more than one route. Amazon-marketplace FBA (`AFN`)
+has Amazon handling fulfillment, customer service, and returns; the platform
+mainly observes Amazon order/report state and follows marketplace policy.
+Amazon Multi-Channel Fulfillment for an off-Amazon order makes Amazon a 3PL:
+SP-API Fulfillment Outbound capabilities include status/tracking, proof of
+delivery, eligible update/cancel operations, and returns. A replacement is a
+new fulfillment action subject to merchant policy, not a generic "email the
+supplier" escalation. Amazon seller-fulfilled (`MFN`) orders remain routed to
+the seller's actual Fulfillment Operator, even if the seller separately enrolls
+in Customer Service by Amazon.
+
 ### Example: Google Sheets supplier escalation plugin
 
 ```ts

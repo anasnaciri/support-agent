@@ -17,6 +17,47 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 ## Current Focus
 
+- [x] **Generalized the planned logistics-escalation model beyond one default
+      supplier** (2026-07-13). The canonical target is now the fulfillment- or
+      shipment-scoped `Resolution Owner`, resolved through a `Fulfillment Route`
+      and a capability-bearing `Logistics Connection`; supplier, 3PL, Amazon
+      MCF/FBA, carrier, merchant warehouse, POD, local delivery, and reverse
+      logistics are distinct roles/routes. A scenario controls whether outside
+      logistics help is allowed and whether to wait, but must not choose the
+      target. Added glossary terms, ADR 0001, and the connector/routing design to
+      `master-plan.md`. This was a documentation/domain pass only; the current
+      `supplier.escalate`, default-supplier lookup, supplier tables, and
+      `waiting_for_supplier` runtime remain unchanged until TDD migrations.
+      Verified with targeted source greps and `pnpm build`.
+      - [ ] **Capture fulfillment routing evidence.** Extend the provider-neutral
+        order model and Shopify Live query with fulfillment-order identity,
+        assigned location/service, and line-item membership. Preserve the
+        ticket's affected fulfillment/shipment identity; never route a split
+        order from the first fulfillment.
+      - [ ] **Introduce provider-neutral logistics storage/services.** Model
+        operators, routes, connections, advertised capabilities, and external
+        resolution requests. Expand/contract migrate existing supplier bindings
+        and escalation rows; keep portal authorization binding-based.
+      - [ ] **Replace target-specific escalation with action-specific logistics
+        tools.** Start with investigation and reship requests, route at execution
+        time from fresh fulfillment evidence, consult `PermissionService`, and
+        fall back to the merchant when the route is missing, ambiguous, or lacks
+        the capability. Keep supplier-mode enforcement as a compatibility wall
+        until scenario policy is generalized.
+      - [ ] **Add connection variants.** Reuse the constrained supplier portal
+        as the first partner-portal connector; add merchant-owned operational
+        mailbox send/reply correlation for email-only operators; then ship one
+        API-backed 3PL connector as the plugin proof.
+      - [ ] **Add Amazon routes separately.** Amazon MCF uses SP-API Fulfillment
+        Outbound capabilities for off-Amazon orders; Amazon-marketplace AFN/FBA
+        follows Amazon-owned service/returns policy and report state; MFN routes
+        to the seller's actual operator even when Customer Service by Amazon is
+        enabled. Never treat all three as one `fba` boolean.
+      - [ ] **Generalize wait/audit/dashboard language through a tested
+        expand/contract migration.** External requests may wait on a supplier,
+        3PL, marketplace, carrier, or merchant ops. Do not flag-day rename
+        `waiting_for_supplier` or regress concurrent approval + external waits.
+
 - [x] **Google Sheets, Outlook, and IMAP / SMTP integrations are marked Beta**
       (2026-07-13). Their cards on the Integrations overview and headings on
       the corresponding Manage pages now carry the same compact informational
@@ -2171,7 +2212,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       escalation. `escalation-projection.ts` + handler wiring in apps/api.
 - [ ] Add merchant-facing supplier list and pending invitation management if the
       invite-only settings surface is insufficient.
-- [ ] Add per-vendor supplier routing instead of one default supplier.
+- [ ] Replace one-default-supplier routing with the fulfillment-scoped logistics
+      routing plan in Current Focus / ADR 0001 (includes per-vendor mappings).
 - [ ] Revisit `supplierMode` semantics in autonomous loop so wait vs
       notify-and-proceed is enforced after gated supplier actions.
 - [ ] Keep supplier access binding-based; never fall back to org membership for
@@ -2439,7 +2481,8 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
 
 - [ ] `definePlugin` SDK in `packages/plugins/sdk` plus loader.
 - [ ] Slack plugin richer than approval-only interactions.
-- [ ] ShipStation or supplier-specific plugin as first proof.
+- [ ] ShipStation or another API-backed logistics connector as the first proof
+      of the provider-neutral fulfillment-routing contract.
 - [ ] Plugin settings UI in dashboard.
 
 ---
