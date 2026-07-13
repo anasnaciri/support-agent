@@ -668,13 +668,20 @@ describe("built-in scenario notes reference store facts", () => {
     );
   });
 
-  it("delivery_issue judges lateness by the stated delayed-after threshold", () => {
+  it("delivery_issue is the ONE home of the late/stuck doctrine", () => {
+    // The base prompt only teaches how to read the counters; the semantics
+    // (what counts as LATE, what counts as STUCK, the threshold and its
+    // fallback) live here so the two texts can't drift apart.
     const notes = byKey("delivery_issue").notes ?? "";
     expect(notes).toContain("@shipping.delayed_after");
     expect(notes).toContain("@shipping.lost_after");
-    // The elapsed number comes from 17track's transitDays, never a hand count.
+    // The elapsed numbers come from 17track's counters, never a hand count.
     expect(notes).toContain("transitDays");
+    expect(notes).toContain("daysSinceLastScan");
     expect(notes.toLowerCase()).toContain("do not count the days yourself");
+    // Same vocabulary as the base prompt: STUCK, not STALLED.
+    expect(notes).toContain("STUCK");
+    expect(notes).not.toContain("STALLED");
     // The safety property the Facts must not erode: with no stated window the
     // agent may not assert the order is on schedule.
     expect(notes.toLowerCase()).toContain("cannot confirm lateness");

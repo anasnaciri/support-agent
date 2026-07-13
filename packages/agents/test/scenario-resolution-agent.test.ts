@@ -74,16 +74,14 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toContain("do not tell the customer it is simply shipped");
   });
 
-  it("reads the tracking time scalars and anchors them in the store's policy", () => {
+  it("reads the tracking time scalars and defers the threshold to the playbook", () => {
     const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
-    // Judge late/stuck from the carrier's own relative counters rather than
-    // doing date arithmetic or trusting the customer's wording.
+    // The base prompt teaches how to READ the carrier's counters (no date
+    // arithmetic, no trusting the customer's wording)…
     expect(p).toContain("transitdays");
     expect(p).toContain("dayssincelastscan");
-    // No invented day count — the merchant's documented delivery window is the
-    // only threshold, fetched via knowledge.search.
-    expect(p).toContain("delivery window");
-    expect(p).toContain("knowledge.search");
+    // …but never a threshold of its own: the store's number lives in the
+    // delivery_issue playbook / shipping-facts header.
     expect(p).not.toMatch(/\b(7|14|30)\s*(\+|or more)?\s*days\b/);
     // Absence of a number is not evidence the parcel is fine.
     expect(p).toMatch(/null[\s\S]{0,300}(not evidence|cannot confirm)/);
@@ -112,15 +110,14 @@ describe("scenario-resolution-agent config", () => {
     expect(p).toMatch(/destinationcountry[\s\S]{0,400}(differ|does not match|mismatch|different)/);
   });
 
-  it("prefers the store shipping facts's stated delay threshold over searching for a window", () => {
+  it("does not duplicate the late/stuck doctrine that lives in the delivery_issue playbook", () => {
     const p = scenarioResolutionAgent.promptTemplate.toLowerCase();
-    // The runtime injects `[Store shipping facts: ...]` when the merchant has
-    // configured one. It carries an exact day count, so the agent must not go
-    // hunting through knowledge.search for a window that contradicts it.
+    // The doctrine (LATE/STUCK semantics, the threshold, its precedence) has
+    // ONE home: the delivery_issue note (+ the shipping-facts header, which
+    // states its own precedence). The base prompt only points at them, so the
+    // two texts can't drift apart again.
     expect(p).toContain("store shipping facts");
-    expect(p).toMatch(/shipping facts[\s\S]{0,400}knowledge\.search/);
-    // Still no invented constant — the number comes from the merchant either
-    // way, via the header when set or the policy documents when not.
+    expect(p).not.toContain("gone silent for as long as");
     expect(p).not.toMatch(/\b(7|14|30)\s*(\+|or more)?\s*days\b/);
   });
 

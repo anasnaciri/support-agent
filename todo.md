@@ -2523,16 +2523,26 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
       contradiction fixes to the `order_cancellation`, `shipping_address_update`,
       `where_is_order`, and `general_inquiry` notes (the base-prompt and
       shipping-facts-header halves of that change ship in code and need no
-      re-save).
+      re-save), and the 2026-07-13 `delivery_issue` doctrine-collapse edit
+      (STALLED→STUCK, scans rationale, destination-matched window). NOTE: a
+      tenant with a stored policy whose `delivery_issue` note was CUSTOMIZED to
+      drop the doctrine now gets it from nowhere — the base prompt no longer
+      restates it.
 - [ ] The shipping-facts header's lost-package line still prescribes remedies
       ("a refund or a reshipment, rather than only checking with the
       fulfillment operator again") — same base-prompt-dictating-scenario smell
       fixed for the delayed-after line on 2026-07-13; defer it to the playbook.
-- [ ] The late/stuck doctrine is duplicated between the base prompt (JUDGING
-      LATE OR STUCK) and the `delivery_issue` note, nearly sentence for
-      sentence, with drifting vocabulary (STUCK vs STALLED). Both are in
-      context when the scenario is active; consider collapsing to one home so
-      they can't diverge.
+- [x] The late/stuck doctrine had two homes — the base prompt (JUDGING LATE OR
+      STUCK) and the `delivery_issue` note, nearly sentence for sentence with
+      drifting vocabulary (STUCK vs STALLED). Collapsed 2026-07-13: the
+      `delivery_issue` note is the ONE home of the semantics (LATE/STUCK
+      definitions, threshold + fallback, destination-matched window, "a moving
+      parcel scans and a stalled one does not", now saying STUCK); the base
+      prompt keeps only the general reading rules (what the counters are, no
+      date arithmetic, no invented threshold, null ≠ fine, defer the remedy to
+      the playbook / re-stamp `scenarioKey`); the shipping-facts header states
+      its own precedence ("use this number instead of searching"). The
+      `delivery_issue` note edit has the stored-policy caveat below.
 - [ ] If `fulfillment_operator.escalate` is ever set to `auto`, the tool description
       ("must NOT send a customer reply" after escalated:true) suppresses the
       reassuring holding reply — reword the description before flipping any

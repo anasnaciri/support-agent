@@ -243,11 +243,13 @@ export const defaultResolutionPolicy: ResolutionPolicy = {
         "that counts as too long. This store treats a shipment as delayed once it has been in " +
         "transit for @shipping.delayed_after. transitDays past that is LATE. daysSinceLastScan " +
         "reaching it means the parcel has gone silent for as long as the store's whole delivery " +
-        "window. It is STALLED, a real delivery problem even while the status still reads in " +
-        "transit. Treat an exception status as a real delivery problem too. Compare the carrier's " +
+        "window. It is STUCK, a real delivery problem even while the status still reads in " +
+        "transit: a moving parcel scans and a stalled one does not. Treat an exception status as " +
+        "a real delivery problem too. Compare the carrier's " +
         "transitDays against the threshold; do not count the days yourself. Never judge lateness " +
         "from the customer's wording, and never invent a window: if the store has not stated a " +
-        "threshold, call /knowledge.search for the shipping policy's delivery window, and if that " +
+        "threshold, call /knowledge.search for the shipping policy's delivery window (the one " +
+        "matching this order's destination when several are given), and if that " +
         "documents none either, or either carrier number is null, you cannot confirm lateness, " +
         "so say so rather than asserting the order is on schedule. On a real delivery problem, " +
         "escalate to the fulfillment operator to reship AND always send the customer a short reassuring reply " +

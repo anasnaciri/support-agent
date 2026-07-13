@@ -382,6 +382,9 @@ describe("buildSystemPrompt", () => {
     // must not prescribe a tool the envelope may have stripped.
     expect(got).toMatch(/delayed[\s\S]{0,250}scenario/i);
     expect(got).not.toMatch(/delayed[\s\S]{0,250}fulfillment operator check/i);
+    // The header itself carries the precedence rule (its number beats a
+    // knowledge-base search) — the base prompt no longer restates it.
+    expect(got).toMatch(/instead of searching the knowledge base/i);
   });
 
   it("renders each customs payer as a merchant-facing sentence, and omits it when unset", () => {
