@@ -104,7 +104,14 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           a ticket/escalation about fulfillment B can update B in Shopify while
           the card/self-heal reads fulfillment A and may restamp the ticket to
           A. Need a stable fulfillment identity or ticket-scoped tracking source
-          before restamping.
+          before restamping. **Validated 2026-07-13: real, high-impact correctness
+          issue behind a narrower multi-fulfillment trigger.** The Shopify order
+          model already exposes fulfillment ids and `order.update_tracking`
+          returns the selected id, but neither ticket context nor the escalation
+          projection persists it; `pickTrackingSource` is explicitly tested to
+          choose the first tracked fulfillment. A wrong choice affects the live
+          card and can then persist the wrong shipment into the ticket stamp.
+          Fix this before allowing any path to create missing stamps.
         - [ ] **Review follow-up: app-owned tracking writes clear the DB stamp
           but do not recreate it.** `order.update_tracking` drops
           `liveTrackingStatus`; the supplier portal pencil does the same. The
@@ -112,13 +119,32 @@ Do not use this file for rollout logs, git bookkeeping, or incident transcripts.
           absent, so after these successful writes the DB stamp stays absent
           unless a later agent run calls `tracking.lookup`. Decide whether the
           invariant is "no stale stamp" or "stamp synced to Shopify", and change
-          the write/restamp path accordingly.
+          the write/restamp path accordingly. **Validated 2026-07-13: not a
+          correctness bug under the current cache/snapshot semantics.** The live
+          dashboard endpoint still reads Shopify and shows fresh carrier data;
+          absence merely leaves the agent facts header without cached tracking
+          until its next lookup. Creating a stamp on a dashboard read would add
+          page-view side effects and is unsafe until fulfillment identity is
+          solved. Defer unless the product explicitly requires an always-present
+          stamp (low gain today).
         - [ ] **Review follow-up: same-number metadata and tracking removal are
           not treated as supersession.** Same tracking number with corrected
           carrier/company keeps the old stamp and carrier hint on the agent
           path; if Shopify admin removes all tracking numbers, the helpers fail
           open and the SPA/API can still fall back to the old stamp. Decide
-          whether these should clear or restamp.
+          whether these should clear or restamp. **Validated 2026-07-13: split
+          these cases.** Removal is a real medium/high correctness issue: all
+          three guards deliberately keep/fall back to the old stamp when the
+          resolved order has zero tracking numbers, so a merchant removing an
+          invalid number can still see that shipment presented as current.
+          Treat a successfully resolved, numberless order as authoritative "no
+          tracking" (while retaining fail-open only when order resolution
+          fails). Same-number carrier metadata is low priority: the endpoint
+          deliberately prefers the stamp's provider carrier code because it
+          previously produced a successful lookup; only Shopify-admin metadata
+          edits bypass the app-owned paths that already clear the stamp. Revisit
+          only with a reproduced carrier-routing failure or an explicit metadata
+          synchronization requirement.
       - [ ] **Follow-up: a stale `tracking_destination_mismatch` flag is
         unclearable** (observed on the same prod ticket after 4 dashboard
         retries, 2026-07-12 21:10–21:17). `stampTrackingLookup` only APPENDS
